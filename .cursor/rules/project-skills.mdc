@@ -1,0 +1,18 @@
+---
+description: 项目 Agent 技能索引与自动触发指引
+alwaysApply: true
+---
+
+# 项目技能（自动加载）
+
+技能源目录：`.agent/skills/`（经 `.cursor/skills/` 符号链接供 Cursor 发现）。
+
+**规则**：用户任务匹配下表场景时，**必须先读取对应 `SKILL.md` 再执行**（可用 `@技能名` 显式触发）。
+
+| 技能 | 触发场景 |
+|------|----------|
+| `scholar-search` | 文献搜索、下载 PDF、BibTeX、`references.bib` 核实、文献调研 |
+| `mygit` | git commit/push、智能提交、`mygit.sh` |
+| `makeskill` | 新建/规范项目技能 |
+
+维护链接：`bash scripts/link_cursor_skills.sh`（增删技能后重新运行并重启 Cursor）
