@@ -127,8 +127,16 @@ def load_env_file(path: str) -> dict[str, str]:
     return config
 
 
-def load_config(workspace: str) -> dict[str, str]:
-    config = load_env_file(os.path.join(workspace, ".env.mygit"))
+def load_config(workspace: str, script_dir: str) -> dict[str, str]:
+    global_env = os.path.join(script_dir, "..", ".env.mygit")
+    local_env = os.path.join(workspace, ".env.mygit")
+    
+    config = {}
+    if os.path.exists(global_env):
+        config.update(load_env_file(global_env))
+    if os.path.exists(local_env):
+        config.update(load_env_file(local_env))
+        
     for extra in (".env", ".env.local"):
         extra_path = os.path.join(workspace, extra)
         if os.path.exists(extra_path):
@@ -644,17 +652,18 @@ def push_to_remote(proxy_url: str | None, github_token: str | None) -> None:
 
 
 def main() -> None:
-    print("🚀 AI Git 提交工具启动 (p3-microservice)")
-
-    workspace = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    if len(sys.argv) >= 3:
+        workspace = os.path.abspath(sys.argv[1])
+        script_dir = os.path.abspath(sys.argv[2])
+    else:
+        workspace = os.getcwd()
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        
     os.chdir(workspace)
+    project_name = os.path.basename(workspace)
+    print(f"🚀 AI Git 提交工具启动 ({project_name})")
 
-    if not os.path.exists(".env.mygit"):
-        print("❌ 错误: 找不到配置文件 .env.mygit")
-        print("请执行: cp .agent/skills/mygit/resources/env.mygit.template .env.mygit")
-        sys.exit(1)
-
-    config = load_config(workspace)
+    config = load_config(workspace, script_dir)
     api_key = config.get("DASHSCOPE_API_KEY", "").strip()
     base_url = config.get("DASHSCOPE_BASE_URL", "").rstrip("/")
     model = config.get("DASHSCOPE_MODEL", "").strip()
@@ -743,7 +752,7 @@ def main() -> None:
             payload = {
                 "model": model,
                 "messages": [
-                    {"role": "system", "content": P3_SYSTEM_PROMPT},
+                    {"role": "system", "content": P3_SYSTEM_PROMPT.replace("p3-microservice", project_name)},
                     {
                         "role": "user",
                         "content": (
