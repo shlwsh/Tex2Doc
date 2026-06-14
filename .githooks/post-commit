@@ -1,0 +1,18 @@
+#!/bin/sh
+# 自动推送：post-commit 时把当前分支推送到 origin。
+# 失败仅警告，不影响 commit 本身。
+set -e
+
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+if [ -z "$BRANCH" ] || [ "$BRANCH" = "HEAD" ]; then
+    exit 0
+fi
+
+# 若没有上游则首次推送
+if ! git rev-parse --abbrev-ref "$BRANCH@{u}" >/dev/null 2>&1; then
+    echo "[post-commit] 首次推送，设置 upstream origin/$BRANCH"
+    git push --set-upstream origin "$BRANCH" || echo "[post-commit] 推送失败（commit 已保留）"
+else
+    echo "[post-commit] 自动推送 origin/$BRANCH"
+    git push origin "$BRANCH" || echo "[post-commit] 推送失败（commit 已保留）"
+fi
