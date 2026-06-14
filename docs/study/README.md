@@ -1,0 +1,104 @@
+# Tex2Doc 项目说明文档（Study 索引）
+
+> **项目代号**：Doc-engine / Tex2Doc
+> **当前版本**：V1.3（基于 Sprint 0 + M1–M2 + M3 + M5 + M7 累积成果）
+> **文档目标**：为新加入项目的工程师 / 架构师 / 维护者提供**自下而上**的完整学习入口
+
+本目录汇总了 Tex2Doc 项目的所有学习材料。建议按以下顺序阅读：
+
+---
+
+## 阅读路径
+
+| 阶段 | 章节 | 目标 |
+|------|------|------|
+| ① 概览 | [01-overview/01-features.md](./01-overview/01-features.md) | 5 分钟了解 Tex2Doc 是什么、能做什么 |
+| ① 概览 | [01-overview/02-quick-tour.md](./01-overview/02-quick-tour.md) | 10 分钟跑通最小演示链路 |
+| ② 技术栈 | [02-tech-stack/01-rust-stack.md](./02-tech-stack/01-rust-stack.md) | 核心 Rust 工具链与依赖矩阵 |
+| ② 技术栈 | [02-tech-stack/02-flutter-dart-stack.md](./02-tech-stack/02-flutter-dart-stack.md) | Flutter / Dart / FFI 工具链 |
+| ② 技术栈 | [02-tech-stack/03-web-extension-stack.md](./02-tech-stack/03-web-extension-stack.md) | Chrome MV3 / Node.js 端到端栈 |
+| ③ 工程目录 | [03-project-structure/01-top-level.md](./03-project-structure/01-top-level.md) | 仓库根目录结构总览 |
+| ③ 工程目录 | [03-project-structure/02-rust-crates.md](./03-project-structure/02-rust-crates.md) | `crates/` 内 9 个 crate 详尽说明 |
+| ③ 工程目录 | [03-project-structure/03-flutter-app.md](./03-project-structure/03-flutter-app.md) | `flutter_app/` 多端工程目录 |
+| ③ 工程目录 | [03-project-structure/04-extension-scripts-tests.md](./03-project-structure/04-extension-scripts-tests.md) | 扩展、脚本、测试、夹具目录 |
+| ④ 架构 | [04-architecture/01-end-to-end-pipeline.md](./04-architecture/01-end-to-end-pipeline.md) | 端到端数据流：LaTeX → DOCX |
+| ④ 架构 | [04-architecture/02-layered-architecture.md](./04-architecture/02-layered-architecture.md) | 分层与依赖关系 |
+| ④ 架构 | [04-architecture/03-frontend-bridges.md](./04-architecture/03-frontend-bridges.md) | 三种前端如何对接 Rust 核心 |
+| ⑤ 关键技术 | [05-key-tech/01-include-topology.md](./05-key-tech/01-include-topology.md) | 多文件 LaTeX 拓扑与拼接 |
+| ⑤ 关键技术 | [05-key-tech/02-lexer-and-cst.md](./05-key-tech/02-lexer-and-cst.md) | Logos 词法 + Rowan 语法树 |
+| ⑤ 关键技术 | [05-key-tech/03-semantic-lowering.md](./05-key-tech/03-semantic-lowering.md) | CST → 语义 AST 降级 |
+| ⑤ 关键技术 | [05-key-tech/04-docx-serialization.md](./05-key-tech/04-docx-serialization.md) | 语义 AST → OOXML 序列化 |
+| ⑤ 关键技术 | [05-key-tech/05-math-pipeline.md](./05-key-tech/05-math-pipeline.md) | LaTeX 公式 → OMML 数学 |
+| ⑤ 关键技术 | [05-key-tech/06-vfs-and-fonts.md](./05-key-tech/06-vfs-and-fonts.md) | VFS 抽象与字体探测 |
+| ⑥ 使用说明 | [06-user-guide/01-cli-and-script.md](./06-user-guide/01-cli-and-script.md) | 命令行 / 脚本使用 |
+| ⑥ 使用说明 | [06-user-guide/02-pwa-web.md](./06-user-guide/02-pwa-web.md) | Flutter Web PWA 使用 |
+| ⑥ 使用说明 | [06-user-guide/03-desktop.md](./06-user-guide/03-desktop.md) | Flutter Desktop 桌面端使用 |
+| ⑥ 使用说明 | [06-user-guide/04-chrome-extension.md](./06-user-guide/04-chrome-extension.md) | Chrome 扩展使用 |
+| ⑥ 使用说明 | [06-user-guide/05-http-server.md](./06-user-guide/05-http-server.md) | HTTP 服务端使用 |
+| ⑦ 部署手册 | [07-deployment/01-rust-build.md](./07-deployment/01-rust-build.md) | Rust 核心构建 |
+| ⑦ 部署手册 | [07-deployment/02-flutter-build.md](./07-deployment/02-flutter-build.md) | Flutter 多端构建 |
+| ⑦ 部署手册 | [07-deployment/03-wasm-publish.md](./07-deployment/03-wasm-publish.md) | WASM 包发布 |
+| ⑦ 部署手册 | [07-deployment/04-server-deploy.md](./07-deployment/04-server-deploy.md) | 服务端部署 |
+| ⑦ 部署手册 | [07-deployment/05-extension-pack.md](./07-deployment/05-extension-pack.md) | Chrome 扩展打包 |
+| ⑦ 部署手册 | [07-deployment/06-ci-and-hooks.md](./07-deployment/06-ci-and-hooks.md) | CI 与 Git 钩子 |
+
+---
+
+## 文档总览
+
+### 第一章 · 项目概览（[01-overview/](./01-overview/））
+* **产品定位**：LaTeX → DOCX 纯 Rust 核心 + Flutter 全平台转换工具
+* **目标用户**：需要把 LaTeX 论文、报告、模板高保真转换为 Word 文档的学术/工程作者
+* **关键差异化**：零重型 TeX 依赖、本地化离线运行、多端覆盖（桌面/Web/扩展/CLI/服务端）
+
+### 第二章 · 技术栈（[02-tech-stack/](./02-tech-stack/））
+* Rust 1.82+ 稳定工具链 + Cargo Workspace
+* Flutter 3.12+ / Dart 3 + FFI 桥接
+* Chrome MV3 Service Worker + Content Script
+* Node.js + Playwright 端到端测试栈
+* Node.js + fflate 验证脚本
+
+### 第三章 · 工程目录（[03-project-structure/](./03-project-structure/））
+* 仓库根：工作区配置、CI、钩子、夹具
+* `crates/`：9 个核心 crate（`core` / `utils` / `semantic-ast` / `latex-reader` / `mathml` / `docx-writer` / `bib` / `wasm` / `native` / `server`）
+* `flutter_app/`：多端 Dart 工程（Web/Windows/macOS/Linux）
+* `extension/`：Chrome MV3 扩展（popup + background + content）
+* `tests/`、`examples/`、`scripts/`、`docs/`、`flutter_app/wasm/`、`flutter_app/windows/`
+
+### 第四章 · 技术架构（[04-architecture/](./04-architecture/））
+* 五段流水线：Include 拓扑 → Logos 词法 → Rowan 语法树 → 语义降级 → OOXML 序列化
+* 三种前端集成模式：WASM（Web）、FFI（Desktop）、HTTP（Server）
+* 跨平台复用：唯一核心 crate `doc-core`，三套绑定
+
+### 第五章 · 关键技术（[05-key-tech/](./05-key-tech/））
+* 深入解析每个 crate 的设计原理、数据结构、关键算法
+* 适合需要修改核心逻辑、二次开发、性能调优的工程师
+
+### 第六章 · 使用说明（[06-user-guide/](./06-user-guide/））
+* 五种使用方式：CLI/PWA/Desktop/Extension/Server
+* 每种方式含：环境要求、构建步骤、典型操作流程
+
+### 第七章 · 部署手册（[07-deployment/](./07-deployment/））
+* Rust 核心、Flutter 多端、WASM 产物、HTTP 服务、扩展包的完整构建/打包/发布
+* CI 三平台矩阵（Ubuntu / Windows / macOS）
+* Git 钩子与提交工作流
+
+---
+
+## 配套原始文档
+
+`docs/` 目录下另有以下已存在的工程文档，建议交叉参考：
+
+* `Doc-engine_LaTeX-to-DOCX_技术方案_v2.0_20260614.md` — 项目技术方案（V1 总览）
+* `Doc-engine_LaTeX-to-DOCX_任务清单_v2.0_20260614.md` — 任务清单与里程碑
+* `Doc-engine_后期开发进展报告_v1.1~v1.3_20260614.md` — 后期开发报告
+* `Doc-engine_任务清单完成度补丁_v1.0_v1.3_20260614.md` — 任务完成度补丁
+* `Doc-engine_V1.3_计划与实施归档_20260614.md` — V1.3 计划与归档
+
+---
+
+## 贡献约定
+
+* 提交代码：使用 `scripts/commit_push.ps1`，自动 add / commit / push
+* 文档变更：与代码同步更新到本目录
+* 提问反馈：使用本仓库的 issue / PR 流程
