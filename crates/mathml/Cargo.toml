@@ -1,0 +1,13 @@
+[package]
+name = "doc-mathml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine 公式管道：LaTeX → MathML → OMML"
+
+[dependencies]
+doc-semantic-ast = { workspace = true }
+quick-xml = { workspace = true }
+thiserror = { workspace = true }
