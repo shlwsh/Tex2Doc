@@ -1,0 +1,29 @@
+\documentclass{article}
+\usepackage{amsmath}
+\title{Nested Lists}
+\begin{document}
+
+\section{Nested}
+
+Outer paragraph.
+
+\begin{itemize}
+\item First level item 1
+  \begin{itemize}
+  \item Second level item A
+  \item Second level item B
+  \end{itemize}
+\item First level item 2
+  \begin{enumerate}
+  \item Numbered A
+  \item Numbered B
+  \end{enumerate}
+\end{itemize}
+
+Cross-reference: see Section~\ref{sec:intro}.
+
+\begin{equation}
+A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix}
+\end{equation}
+
+\end{document}
