@@ -34,8 +34,8 @@ pub fn pack_with_template(
     let mut styles_xml = write_styles();
 
     // 解析模板并合并
-    let template_styles: Option<TemplateStyles> = template_bytes
-        .and_then(|b| parse_template(b).ok());
+    let template_styles: Option<TemplateStyles> =
+        template_bytes.and_then(|b| parse_template(b).ok());
     if let Some(ts) = &template_styles {
         merge_styles(&mut styles_xml, ts);
     }
@@ -62,7 +62,8 @@ fn write_zip(
 ) -> Result<(), DocxWriteError> {
     zip.start_file(name, opts)
         .map_err(|e| DocxWriteError(e.to_string()))?;
-    zip.write_all(content).map_err(|e| DocxWriteError(e.to_string()))?;
+    zip.write_all(content)
+        .map_err(|e| DocxWriteError(e.to_string()))?;
     Ok(())
 }
 

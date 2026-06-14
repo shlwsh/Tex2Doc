@@ -118,7 +118,14 @@ mod tests {
     #[test]
     fn graphics_path_simple() {
         let paths = parse_graphics_path("{a/}{b/}{c}").unwrap();
-        assert_eq!(paths, vec![PathBuf::from("a/"), PathBuf::from("b/"), PathBuf::from("c/")]);
+        assert_eq!(
+            paths,
+            vec![
+                PathBuf::from("a/"),
+                PathBuf::from("b/"),
+                PathBuf::from("c/")
+            ]
+        );
     }
 
     #[test]

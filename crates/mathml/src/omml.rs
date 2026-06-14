@@ -26,7 +26,8 @@ pub fn to_omml(expr: &MathExpr) -> Vec<u8> {
 fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
     match e {
         MathExpr::Number(s) => {
-            w.write_event(Event::Start(BytesStart::new("m:num"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:num")))
+                .unwrap();
             write_run_text(w, s);
             w.write_event(Event::End(BytesEnd::new("m:num"))).unwrap();
         }
@@ -35,61 +36,77 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         }
         MathExpr::Op(c) => {
             let s = c.to_string();
-            w.write_event(Event::Start(BytesStart::new("m:begChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:begChr")))
+                .unwrap();
             write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:begChr"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:begChr")))
+                .unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:endChr")))
+                .unwrap();
             write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:endChr")))
+                .unwrap();
         }
         MathExpr::Space => {}
         MathExpr::Sub { base, sub } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSub"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSub")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
             write_expr(w, base);
             w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:sub"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sub")))
+                .unwrap();
             write_expr(w, sub);
             w.write_event(Event::End(BytesEnd::new("m:sub"))).unwrap();
             w.write_event(Event::End(BytesEnd::new("m:sSub"))).unwrap();
         }
         MathExpr::Sup { base, sup } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSup")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
             write_expr(w, base);
             w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:sup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sup")))
+                .unwrap();
             write_expr(w, sup);
             w.write_event(Event::End(BytesEnd::new("m:sup"))).unwrap();
             w.write_event(Event::End(BytesEnd::new("m:sSup"))).unwrap();
         }
         MathExpr::SubSup { base, sub, sup } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSubSup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSubSup")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
             write_expr(w, base);
             w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:sub"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sub")))
+                .unwrap();
             write_expr(w, sub);
             w.write_event(Event::End(BytesEnd::new("m:sub"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:sup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sup")))
+                .unwrap();
             write_expr(w, sup);
             w.write_event(Event::End(BytesEnd::new("m:sup"))).unwrap();
-            w.write_event(Event::End(BytesEnd::new("m:sSubSup"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:sSubSup")))
+                .unwrap();
         }
         MathExpr::Frac { num, den } => {
             w.write_event(Event::Start(BytesStart::new("m:f"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:num"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:num")))
+                .unwrap();
             write_expr(w, num);
             w.write_event(Event::End(BytesEnd::new("m:num"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:den"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:den")))
+                .unwrap();
             write_expr(w, den);
             w.write_event(Event::End(BytesEnd::new("m:den"))).unwrap();
             w.write_event(Event::End(BytesEnd::new("m:f"))).unwrap();
         }
         MathExpr::Sqrt { body, index } => {
             if let Some(idx) = index {
-                w.write_event(Event::Start(BytesStart::new("m:rad"))).unwrap();
-                w.write_event(Event::Start(BytesStart::new("m:deg"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:rad")))
+                    .unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:deg")))
+                    .unwrap();
                 write_expr(w, idx);
                 w.write_event(Event::End(BytesEnd::new("m:deg"))).unwrap();
                 w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
@@ -97,9 +114,12 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
                 w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
                 w.write_event(Event::End(BytesEnd::new("m:rad"))).unwrap();
             } else {
-                w.write_event(Event::Start(BytesStart::new("m:rad"))).unwrap();
-                w.write_event(Event::Start(BytesStart::new("m:degHide"))).unwrap();
-                w.write_event(Event::End(BytesEnd::new("m:degHide"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:rad")))
+                    .unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:degHide")))
+                    .unwrap();
+                w.write_event(Event::End(BytesEnd::new("m:degHide")))
+                    .unwrap();
                 w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
                 write_expr(w, body);
                 w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
@@ -108,20 +128,26 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         }
         MathExpr::Fenced { open, body, close } => {
             w.write_event(Event::Start(BytesStart::new("m:d"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:begChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:begChr")))
+                .unwrap();
             write_run_text(w, open);
-            w.write_event(Event::End(BytesEnd::new("m:begChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:begChr")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
             write_expr(w, body);
             w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:endChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:endChr")))
+                .unwrap();
             write_run_text(w, close);
-            w.write_event(Event::End(BytesEnd::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:endChr")))
+                .unwrap();
             w.write_event(Event::End(BytesEnd::new("m:d"))).unwrap();
         }
         MathExpr::Function { name, arg } => {
-            w.write_event(Event::Start(BytesStart::new("m:func"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:fName"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:func")))
+                .unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:fName")))
+                .unwrap();
             write_run_text(w, name);
             w.write_event(Event::End(BytesEnd::new("m:fName"))).unwrap();
             w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
@@ -132,10 +158,10 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         MathExpr::Matrix { rows } => {
             w.write_event(Event::Start(BytesStart::new("m:m"))).unwrap();
             for row in rows {
-                w.write_event(Event::Start(BytesStart::new("m:mr"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:mr")))
+                    .unwrap();
                 for cell in row {
-                    w.write_event(Event::Start(BytesStart::new("m:e")))
-                        .unwrap();
+                    w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
                     write_expr(w, cell);
                     w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
                 }
@@ -194,7 +220,9 @@ mod tests {
 
     #[test]
     fn omml_matrix() {
-        let s = to_omml(&parse_latex_math(r"\begin{matrix} a & b \\ c & d \end{matrix}"));
+        let s = to_omml(&parse_latex_math(
+            r"\begin{matrix} a & b \\ c & d \end{matrix}",
+        ));
         let s = String::from_utf8_lossy(&s);
         assert!(s.contains("<m:m>"));
         assert!(s.contains("<m:mr>"));

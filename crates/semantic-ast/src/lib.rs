@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 pub mod span;
 pub mod visit;
 
-pub use span::{Span, SourceId};
+pub use span::{SourceId, Span};
 
 /// 文档元数据。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

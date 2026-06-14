@@ -19,7 +19,9 @@ use crate::parser::Parse;
 
 /// 降级入口。
 pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Document {
-    let text = joined.map(|j| j.text.clone()).unwrap_or_else(|| parse.source.clone());
+    let text = joined
+        .map(|j| j.text.clone())
+        .unwrap_or_else(|| parse.source.clone());
     let mut doc = Document::new();
     let mut buffer = String::new();
     let mut buffer_start = 0u32;
@@ -55,10 +57,7 @@ pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Docume
         }
 
         // 取一行
-        let nl = text[pos..]
-            .find('\n')
-            .map(|n| pos + n + 1)
-            .unwrap_or(len);
+        let nl = text[pos..].find('\n').map(|n| pos + n + 1).unwrap_or(len);
         let line = &text[pos..nl];
         let stripped = strip_inline(line);
         let trimmed = stripped.trim();
@@ -79,12 +78,7 @@ pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Docume
     doc
 }
 
-fn flush_paragraph(
-    doc: &mut Document,
-    buffer: &mut String,
-    start: &mut u32,
-    span: Span,
-) {
+fn flush_paragraph(doc: &mut Document, buffer: &mut String, start: &mut u32, span: Span) {
     if buffer.trim().is_empty() {
         buffer.clear();
         return;
@@ -220,13 +214,11 @@ fn lower_environment(name: &str, body: &str, span: Span) -> Block {
         "description" => lower_list(body, false, span),
         "tabular" | "tabular*" | "array" => lower_table(body, span),
         "figure" | "figure*" | "table" | "table*" => lower_captioned_env(name, body, span),
-        "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => {
-            Block::Equation {
-                latex: body.trim().to_string(),
-                is_block: true,
-                span,
-            }
-        }
+        "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => Block::Equation {
+            latex: body.trim().to_string(),
+            is_block: true,
+            span,
+        },
         "document" => {
             // 直接递归降级 body
             let mut sub = Document::new();
@@ -402,7 +394,8 @@ fn extract_includegraphics_and_caption(body: &str) -> (Option<String>, Option<St
     } else {
         None
     };
-    let caption: Option<String> = find_command_with_brace(body, "caption").map(|args| args.to_string());
+    let caption: Option<String> =
+        find_command_with_brace(body, "caption").map(|args| args.to_string());
     (img, caption)
 }
 
@@ -598,7 +591,9 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
-            Block::List { is_ordered, items, .. } => {
+            Block::List {
+                is_ordered, items, ..
+            } => {
                 assert!(!is_ordered);
                 assert_eq!(items.len(), 2);
             }
@@ -652,7 +647,9 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
-            Block::Equation { latex, is_block, .. } => {
+            Block::Equation {
+                latex, is_block, ..
+            } => {
                 assert!(is_block);
                 assert!(latex.contains("mc^2"));
             }

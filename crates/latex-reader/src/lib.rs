@@ -9,9 +9,9 @@ pub mod lower;
 pub mod parser;
 
 pub use green::GreenNode;
+pub use green::SyntaxKind;
+pub use green::SyntaxNode;
 pub use include::IncludeGraph;
 pub use lower::lower_to_document;
-pub use green::SyntaxKind;
-pub use parser::Parse;
 pub use parser::parse as parse_tex;
-pub use green::SyntaxNode;
+pub use parser::Parse;

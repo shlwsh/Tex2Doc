@@ -152,8 +152,7 @@ pub fn merge_styles(target_xml: &mut Vec<u8>, template: &TemplateStyles) {
     }
     let closing = "</w:styles>";
     let closing_pos = target_str.rfind(closing).unwrap_or(target_str.len());
-    let mut new_xml =
-        String::with_capacity(target_str.len() + append.len() + closing.len() + 1);
+    let mut new_xml = String::with_capacity(target_str.len() + append.len() + closing.len() + 1);
     new_xml.push_str(&target_str[..closing_pos]);
     new_xml.push_str(&append);
     new_xml.push_str(&target_str[closing_pos..]);
@@ -183,17 +182,24 @@ mod tests {
         let ts = parse_styles_xml(xml);
         assert!(ts.by_id.contains_key("Heading1"));
         assert!(ts.by_id.contains_key("BodyText"));
-        assert_eq!(ts.name_to_id.get("Normal").map(|s| s.as_str()), Some("BodyText"));
+        assert_eq!(
+            ts.name_to_id.get("Normal").map(|s| s.as_str()),
+            Some("BodyText")
+        );
     }
 
     #[test]
     fn merge_adds_missing() {
         let mut target = br#"<?xml version="1.0"?><w:styles><w:style w:type="paragraph" w:styleId="BodyText"/></w:styles>"#.to_vec();
         let mut ts = TemplateStyles::default();
-        ts.by_id
-            .insert("Heading1".into(), r#"<w:style w:type="paragraph" w:styleId="Heading1"></w:style>"#.into());
-        ts.by_id
-            .insert("BodyText".into(), r#"<w:style w:type="paragraph" w:styleId="BodyText"></w:style>"#.into());
+        ts.by_id.insert(
+            "Heading1".into(),
+            r#"<w:style w:type="paragraph" w:styleId="Heading1"></w:style>"#.into(),
+        );
+        ts.by_id.insert(
+            "BodyText".into(),
+            r#"<w:style w:type="paragraph" w:styleId="BodyText"></w:style>"#.into(),
+        );
         merge_styles(&mut target, &ts);
         let s = String::from_utf8_lossy(&target);
         // Heading1 缺失，已补

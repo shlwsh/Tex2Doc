@@ -161,7 +161,14 @@ impl<'a> Parser<'a> {
                 out.push(MathExpr::Op(c as char));
                 continue;
             }
-            if c == b'+' || c == b'-' || c == b'*' || c == b'/' || c == b'=' || c == b'<' || c == b'>' {
+            if c == b'+'
+                || c == b'-'
+                || c == b'*'
+                || c == b'/'
+                || c == b'='
+                || c == b'<'
+                || c == b'>'
+            {
                 self.i += 1;
                 out.push(MathExpr::Op(c as char));
                 continue;
@@ -227,11 +234,11 @@ impl<'a> Parser<'a> {
         //          \alpha ... \omega
         let cmds = [
             "frac", "sqrt", "left", "right", "text", "sin", "cos", "tan", "log", "ln", "exp",
-            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota",
-            "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi", "chi",
-            "psi", "omega", "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi",
-            "Psi", "Omega", "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx",
-            "infty", "sum", "int", "prod",
+            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
+            "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi", "chi", "psi", "omega",
+            "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi", "Psi", "Omega",
+            "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "infty", "sum",
+            "int", "prod",
         ];
         for &cmd in &cmds {
             if self.starts_with(&format!("\\{cmd}")) {
@@ -476,7 +483,12 @@ mod tests {
     #[test]
     fn parses_sqrt_with_index() {
         let e = parse_latex_math(r"\sqrt[3]{x}");
-        if let MathExpr::Sqrt { index: Some(_), body, .. } = e {
+        if let MathExpr::Sqrt {
+            index: Some(_),
+            body,
+            ..
+        } = e
+        {
             assert!(matches!(*body, MathExpr::Ident(_)));
         } else {
             panic!("expected Sqrt with index");

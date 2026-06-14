@@ -22,10 +22,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod expr;
 pub mod latex;
 pub mod mathml;
 pub mod omml;
-pub mod expr;
 
 pub use expr::MathExpr;
 pub use latex::parse_latex_math;

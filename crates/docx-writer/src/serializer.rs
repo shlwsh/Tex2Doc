@@ -40,7 +40,8 @@ pub fn serialize_document(doc: &Document) -> Vec<u8> {
         "http://schemas.openxmlformats.org/officeDocument/2006/math",
     ));
     w.write_event(Event::Start(root)).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:body"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:body")))
+        .unwrap();
 
     for block in &doc.blocks {
         match block {
@@ -80,7 +81,9 @@ pub fn serialize_document(doc: &Document) -> Vec<u8> {
                 };
                 write_paragraph(&mut w, &para);
             }
-            Block::List { is_ordered, items, .. } => {
+            Block::List {
+                is_ordered, items, ..
+            } => {
                 let style = if *is_ordered {
                     STYLE_LIST_NUMBER
                 } else {
@@ -109,7 +112,14 @@ pub fn serialize_document(doc: &Document) -> Vec<u8> {
             }
             Block::Figure { path, caption, .. } => {
                 let runs = vec![Run {
-                    text: format!("[图片：{}]", if path.is_empty() { "（未提供）" } else { path }),
+                    text: format!(
+                        "[图片：{}]",
+                        if path.is_empty() {
+                            "（未提供）"
+                        } else {
+                            path
+                        }
+                    ),
                     style_id: None,
                     bold: false,
                     italic: true,
@@ -132,7 +142,9 @@ pub fn serialize_document(doc: &Document) -> Vec<u8> {
                     write_paragraph(&mut w, &cap_para);
                 }
             }
-            Block::Equation { latex, is_block, .. } => {
+            Block::Equation {
+                latex, is_block, ..
+            } => {
                 write_equation(&mut w, latex, *is_block);
             }
             Block::Bibliography { entries } => {
@@ -181,10 +193,12 @@ pub fn serialize_document(doc: &Document) -> Vec<u8> {
     pg_sz.push_attribute(("w:w", "12240"));
     pg_sz.push_attribute(("w:h", "15840"));
     w.write_event(Event::Empty(pg_sz)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:sectPr"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:sectPr")))
+        .unwrap();
 
     w.write_event(Event::End(BytesEnd::new("w:body"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:document"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:document")))
+        .unwrap();
     w.into_inner()
 }
 
@@ -244,19 +258,29 @@ fn summarize(blocks: &[Block]) -> String {
     out.trim().to_string()
 }
 
-fn write_table(w: &mut Writer<Vec<u8>>, rows: &[doc_semantic_ast::TableRow], caption: Option<&str>) {
+fn write_table(
+    w: &mut Writer<Vec<u8>>,
+    rows: &[doc_semantic_ast::TableRow],
+    caption: Option<&str>,
+) {
     let mut tbl = BytesStart::new("w:tbl");
-    tbl.push_attribute(("xmlns:w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main"));
+    tbl.push_attribute((
+        "xmlns:w",
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    ));
     w.write_event(Event::Start(tbl.clone())).unwrap();
 
-    w.write_event(Event::Start(BytesStart::new("w:tblPr"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tblW"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tblPr")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tblW")))
+        .unwrap();
     let mut w_attr = BytesStart::new("w:w");
     w_attr.push_attribute(("w:w", "0"));
     w_attr.push_attribute(("w:type", "auto"));
     w.write_event(Event::Empty(w_attr)).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:tblW"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tblBorders"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tblBorders")))
+        .unwrap();
     for side in ["top", "left", "bottom", "right", "insideH", "insideV"] {
         let name = format!("w:{side}");
         let mut b = BytesStart::new(name.as_str());
@@ -265,23 +289,28 @@ fn write_table(w: &mut Writer<Vec<u8>>, rows: &[doc_semantic_ast::TableRow], cap
         b.push_attribute(("w:color", "auto"));
         w.write_event(Event::Empty(b)).unwrap();
     }
-    w.write_event(Event::End(BytesEnd::new("w:tblBorders"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:tblBorders")))
+        .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:tblPr"))).unwrap();
 
     let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
-    w.write_event(Event::Start(BytesStart::new("w:tblGrid"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tblGrid")))
+        .unwrap();
     for _ in 0..ncols {
         let mut gc = BytesStart::new("w:gridCol");
         gc.push_attribute(("w:w", "2000"));
         w.write_event(Event::Empty(gc)).unwrap();
     }
-    w.write_event(Event::End(BytesEnd::new("w:tblGrid"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:tblGrid")))
+        .unwrap();
 
     for (i, row) in rows.iter().enumerate() {
         let is_header = i == 0;
-        w.write_event(Event::Start(BytesStart::new("w:tr"))).unwrap();
+        w.write_event(Event::Start(BytesStart::new("w:tr")))
+            .unwrap();
         for cell in &row.cells {
-            w.write_event(Event::Start(BytesStart::new("w:tc"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("w:tc")))
+                .unwrap();
             let p = Paragraph {
                 style_id: if is_header {
                     Some(STYLE_TABLE_HEADER.to_string())
