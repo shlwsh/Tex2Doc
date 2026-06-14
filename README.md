@@ -52,6 +52,25 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all -- --check
 ```
 
+## Git 工作流
+
+提交代码统一走 `scripts/commit_push.ps1`（自动 add → commit → push）：
+
+```powershell
+.\scripts\commit_push.ps1 -Message "fix: 修复 xxx"
+.\scripts\commit_push.ps1 -Message "feat: 新增 xxx" -Scope latex-reader   # 自动加 scope
+```
+
+仓库已配置 `post-commit` hook（`.githooks/post-commit`），任何 `git commit`（包括 Cursor / VSCode 提交）都会自动 push。
+
+新 clone 后初始化 hook：
+```powershell
+.\scripts\install_commit_push_hook.ps1
+```
+或等效命令：`git config core.hooksPath .githooks`
+
+卸载：`.\scripts\install_commit_push_hook.ps1 -Uninstall`
+
 ## 许可证
 
 MIT OR Apache-2.0
