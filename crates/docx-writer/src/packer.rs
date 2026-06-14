@@ -1,15 +1,11 @@
 //! `.docx` 打包
 //!
-//! 写出最小可工作的 OOXML 包：
-//! - `[Content_Types].xml`
-//! - `_rels/.rels`
-//! - `word/_rels/document.xml.rels`
-//! - `word/document.xml`
-//! - `word/styles.xml`
+//! 写出最小可工作的 OOXML 包（含可选模板继承和图片嵌入）。
 
 use std::io::Write;
 
 use doc_semantic_ast::Document;
+use doc_utils::ImageAssets;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
@@ -17,20 +13,26 @@ use crate::serializer::serialize_document;
 use crate::styles::write_styles;
 use crate::template::{merge_styles, parse_template, TemplateStyles};
 
-/// 序列化 + 打包（无模板）。
+/// 序列化 + 打包（无模板、无图片）。
 pub fn pack(doc: &Document) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_template(doc, None)
+    pack_with_assets(doc, None, None)
 }
 
-/// 序列化 + 打包 + 模板样式合并。
-///
-/// `template_bytes` 是 `reference.docx` 完整字节流；从中提取 `word/styles.xml`，
-/// 把模板中**未在默认样式表出现**的样式补到 `styles.xml` 末尾。
+/// 序列化 + 打包 + 模板样式合并（无图片）。
 pub fn pack_with_template(
     doc: &Document,
     template_bytes: Option<&[u8]>,
 ) -> Result<Vec<u8>, DocxWriteError> {
-    let document_xml = serialize_document(doc);
+    pack_with_assets(doc, template_bytes, None)
+}
+
+/// 序列化 + 打包 + 模板样式合并 + 图片嵌入。
+pub fn pack_with_assets(
+    doc: &Document,
+    template_bytes: Option<&[u8]>,
+    image_assets: Option<&ImageAssets>,
+) -> Result<Vec<u8>, DocxWriteError> {
+    let document_xml = serialize_document(doc, image_assets);
     let mut styles_xml = write_styles();
 
     // 解析模板并合并
@@ -75,6 +77,9 @@ const CONTENT_TYPES: &[u8] = br#"<?xml version="1.0" encoding="UTF-8" standalone
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  <Default Extension="png" ContentType="image/png"/>
+  <Default Extension="jpg" ContentType="image/jpeg"/>
+  <Default Extension="jpeg" ContentType="image/jpeg"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
 </Types>
@@ -103,6 +108,7 @@ mod tests {
         doc.push(Block::Heading {
             level: 1,
             text: "Title".into(),
+            number: None,
             span: Span::default(),
         });
         doc.push(Block::Paragraph {
@@ -114,7 +120,6 @@ mod tests {
             span: Span::default(),
         });
         let bytes = pack(&doc).unwrap();
-        // docx 是 ZIP；magic = 0x04034b50（PK\x03\x04）
         assert_eq!(&bytes[..4], b"PK\x03\x04");
         assert!(bytes.len() > 100);
     }

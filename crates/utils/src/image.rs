@@ -6,6 +6,7 @@
 //! - 重采样：V1 不做（占位接口），仅做格式归一化与字节透传 + 重新编码（保证路径与 zip 兼容）。
 
 use std::io::Cursor;
+use std::collections::HashMap;
 
 use image::ImageFormat;
 
@@ -76,6 +77,46 @@ pub fn renormalize(bytes: &[u8]) -> DocResult<(SupportedFormat, Vec<u8>)> {
     img.write_to(&mut Cursor::new(&mut out), fmt)
         .map_err(|e| DocError::ImageDecode(e.to_string()))?;
     Ok((meta.format, out))
+}
+
+/// 内存图片资产集合（路径 → 原始字节），由 VFS 填充后传入 docx-writer。
+///
+/// 键为 VFS 中的规范路径（如 `figs/a.png`），不含 `word/media/` 前缀。
+#[derive(Debug, Default, Clone)]
+pub struct ImageAssets {
+    inner: HashMap<String, Vec<u8>>,
+}
+
+impl ImageAssets {
+    /// 创建空资产集合。
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// 插入一组图片（由 VFS 扫描调用方批量填充）。
+    pub fn insert(&mut self, path: String, bytes: Vec<u8>) {
+        self.inner.insert(path, bytes);
+    }
+
+    /// 按路径查找图片字节；命中时返回 `Some(&[u8])`。
+    pub fn get(&self, path: &str) -> Option<&[u8]> {
+        self.inner.get(path).map(Vec::as_slice)
+    }
+
+    /// 返回所有已注册图片的（路径，字节）迭代器。
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &[u8])> {
+        self.inner.iter().map(|(k, v)| (k.as_str(), v.as_slice()))
+    }
+
+    /// 返回图片数量。
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// 是否为空。
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
 }
 
 #[cfg(test)]

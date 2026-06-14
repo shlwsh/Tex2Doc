@@ -46,6 +46,9 @@ pub enum Block {
     Heading {
         level: u8,
         text: String,
+        /// Auto-generated number prefix (e.g., "1", "1.1", "1.1.1").
+        /// When None, no auto-numbering is used.
+        number: Option<String>,
         span: Span,
     },
     Paragraph {
@@ -60,12 +63,16 @@ pub enum Block {
     Table {
         rows: Vec<TableRow>,
         caption: Option<String>,
+        /// Auto-generated table number (e.g., "表 1").
+        number: Option<String>,
         span: Span,
     },
     Figure {
         path: String,
         caption: Option<String>,
         scale: f32,
+        /// Auto-generated figure number (e.g., "图 1").
+        number: Option<String>,
         span: Span,
     },
     Equation {
@@ -95,6 +102,8 @@ pub struct TableCell {
     pub runs: Vec<TextRun>,
     pub colspan: u32,
     pub rowspan: u32,
+    /// Background color as hex string (e.g., "#FF0000") or None
+    pub bg_color: Option<String>,
 }
 
 /// 文本运行（带样式）。
@@ -149,6 +158,7 @@ mod tests {
         doc.push(Block::Heading {
             level: 1,
             text: "Intro".into(),
+            number: None,
             span: Span::new(0, 6, SourceId(0)),
         });
         let json = serde_json::to_string(&doc).unwrap();

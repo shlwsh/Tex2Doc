@@ -3,5 +3,5 @@ source: crates/latex-reader/tests/insta_snapshots.rs
 assertion_line: 23
 expression: format_doc(&doc)
 ---
-[0] Heading { level: 1, text: "Intro", span: Span { start: 0, end: 0, source: SourceId(0) } }
+[0] Heading { level: 1, text: "Intro", number: Some("1"), span: Span { start: 0, end: 0, source: SourceId(0) } }
 [1] Paragraph { runs: [TextRun { text: "This is a paragraph.\n\n\\textbf{Bold} here.", style: Plain, span: Span { start: 17, end: 60, source: SourceId(0) } }], span: Span { start: 0, end: 0, source: SourceId(0) } }
