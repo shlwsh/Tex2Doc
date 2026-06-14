@@ -1,0 +1,10 @@
+{
+  "name": "Flutter Web 学习示例",
+  "short_name": "Flutter Demo",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#0175C2",
+  "theme_color": "#0175C2",
+  "description": "一个用于学习 Flutter Web 开发的示例项目",
+  "orientation": "portrait-primary"
+}
