@@ -1,0 +1,12 @@
+[package]
+name = "doc-bib"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine BibLaTeX 解析（M3 详细实现）"
+
+[dependencies]
+doc-semantic-ast = { workspace = true }
+serde = { workspace = true }

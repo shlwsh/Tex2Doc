@@ -1,0 +1,17 @@
+[package]
+name        = "doc-utils"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish      = false
+description  = "Doc-engine 工具库：VFS、路径、图片、字体映射"
+
+[dependencies]
+thiserror = { workspace = true }
+serde     = { workspace = true }
+image     = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3.10"
+proptest = { workspace = true }
