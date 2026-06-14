@@ -1,0 +1,12 @@
+[package]
+name = "doc-semantic-ast"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine 核心语义块模型（长期资产）"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
