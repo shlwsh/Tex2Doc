@@ -1,0 +1,19 @@
+[package]
+name = "doc-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine 统一 FFI/WASM 门面"
+
+[dependencies]
+doc-utils        = { workspace = true }
+doc-semantic-ast = { workspace = true }
+doc-latex-reader = { workspace = true }
+doc-docx-writer  = { workspace = true }
+doc-bib          = { workspace = true }
+
+thiserror = { workspace = true }
+serde     = { workspace = true }
+serde_json = { workspace = true }
