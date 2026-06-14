@@ -1,0 +1,6 @@
+---
+source: crates/latex-reader/tests/insta_snapshots.rs
+assertion_line: 31
+expression: format_doc(&doc)
+---
+[0] List { is_ordered: false, items: [[Paragraph { runs: [TextRun { text: "A B C", style: Plain, span: Span { start: 0, end: 6, source: SourceId(0) } }], span: Span { start: 0, end: 0, source: SourceId(0) } }]], span: Span { start: 0, end: 0, source: SourceId(0) } }

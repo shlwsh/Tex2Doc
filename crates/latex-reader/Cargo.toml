@@ -1,0 +1,22 @@
+[package]
+name = "doc-latex-reader"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine LaTeX 解析器：Logos + Rowan 双阶段 + include 拓扑"
+
+[dependencies]
+doc-utils        = { workspace = true }
+doc-semantic-ast = { workspace = true }
+
+logos = { workspace = true }
+rowan = { workspace = true }
+thiserror = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+insta = { workspace = true }
+proptest = { workspace = true }
+
