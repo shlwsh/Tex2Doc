@@ -1,0 +1,18 @@
+[package]
+name = "doc-docx-writer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Doc-engine OOXML 序列化与 ZIP 打包"
+
+[dependencies]
+doc-utils        = { workspace = true }
+doc-semantic-ast = { workspace = true }
+doc-mathml       = { workspace = true }
+
+quick-xml = { workspace = true }
+zip       = { workspace = true }
+thiserror = { workspace = true }
+serde     = { workspace = true }
