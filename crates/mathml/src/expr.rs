@@ -43,14 +43,9 @@ pub enum MathExpr {
         close: String,
     },
     /// 函数应用 `\sin` `\cos` ...
-    Function {
-        name: String,
-        arg: Box<MathExpr>,
-    },
+    Function { name: String, arg: Box<MathExpr> },
     /// 行内矩阵
-    Matrix {
-        rows: Vec<Vec<MathExpr>>,
-    },
+    Matrix { rows: Vec<Vec<MathExpr>> },
     /// 错误降级：原文
     Raw(String),
     /// 序列

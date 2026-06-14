@@ -27,7 +27,9 @@ impl SupportedFormat {
             ImageFormat::Png => Self::Png,
             ImageFormat::Jpeg => Self::Jpeg,
             other => {
-                return Err(DocError::Unsupported(format!("图片格式 {other:?} 在 V1 不支持")));
+                return Err(DocError::Unsupported(format!(
+                    "图片格式 {other:?} 在 V1 不支持"
+                )));
             }
         })
     }
@@ -68,8 +70,7 @@ pub fn read_meta(bytes: &[u8]) -> DocResult<ImageMeta> {
 /// 将图片以原格式重新编码（保证 ZIP 内的 `word/media/*` 字节合法）。
 pub fn renormalize(bytes: &[u8]) -> DocResult<(SupportedFormat, Vec<u8>)> {
     let meta = read_meta(bytes)?;
-    let img = image::load_from_memory(bytes)
-        .map_err(|e| DocError::ImageDecode(e.to_string()))?;
+    let img = image::load_from_memory(bytes).map_err(|e| DocError::ImageDecode(e.to_string()))?;
     let mut out = Vec::new();
     let fmt = meta.format.to_image_format();
     img.write_to(&mut Cursor::new(&mut out), fmt)
@@ -85,14 +86,18 @@ mod tests {
     fn dummy_png() -> Vec<u8> {
         let img: RgbImage = ImageBuffer::from_pixel(2, 2, Rgb([255, 0, 0]));
         let mut out = Vec::new();
-        img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png).unwrap();
+        img.write_to(&mut Cursor::new(&mut out), ImageFormat::Png)
+            .unwrap();
         out
     }
 
     #[test]
     fn probe_png() {
         let bytes = dummy_png();
-        assert_eq!(SupportedFormat::probe(&bytes).unwrap(), SupportedFormat::Png);
+        assert_eq!(
+            SupportedFormat::probe(&bytes).unwrap(),
+            SupportedFormat::Png
+        );
     }
 
     #[test]

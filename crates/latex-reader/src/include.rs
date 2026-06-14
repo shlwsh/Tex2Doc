@@ -65,8 +65,9 @@ impl IncludeGraph {
 
         while let Some(file) = queue.pop_front() {
             let body = vfs.read(&file)?.to_vec();
-            let text = std::str::from_utf8(&body)
-                .map_err(|e| DocError::InvalidPath(format!("非 UTF-8 源文件 {}: {e}", file.display())))?;
+            let text = std::str::from_utf8(&body).map_err(|e| {
+                DocError::InvalidPath(format!("非 UTF-8 源文件 {}: {e}", file.display()))
+            })?;
             let mut resolver = PathResolver::new();
             resolver.base_dir = file.parent().map(Path::to_path_buf);
             resolver.graphics_paths = g.graphics_paths.clone();
@@ -175,7 +176,10 @@ impl IncludeGraph {
             text.push('\n');
             map.push(id);
         }
-        Ok(JoinedStream { text, source_map: map })
+        Ok(JoinedStream {
+            text,
+            source_map: map,
+        })
     }
 }
 

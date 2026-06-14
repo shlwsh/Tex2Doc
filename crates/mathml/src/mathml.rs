@@ -47,44 +47,51 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
                 .unwrap();
         }
         MathExpr::Sub { base, sub } => {
-            w.write_event(Event::Start(BytesStart::new("msub"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("msub")))
+                .unwrap();
             write_expr(w, base);
             write_expr(w, sub);
             w.write_event(Event::End(BytesEnd::new("msub"))).unwrap();
         }
         MathExpr::Sup { base, sup } => {
-            w.write_event(Event::Start(BytesStart::new("msup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("msup")))
+                .unwrap();
             write_expr(w, base);
             write_expr(w, sup);
             w.write_event(Event::End(BytesEnd::new("msup"))).unwrap();
         }
         MathExpr::SubSup { base, sub, sup } => {
-            w.write_event(Event::Start(BytesStart::new("msubsup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("msubsup")))
+                .unwrap();
             write_expr(w, base);
             write_expr(w, sub);
             write_expr(w, sup);
             w.write_event(Event::End(BytesEnd::new("msubsup"))).unwrap();
         }
         MathExpr::Frac { num, den } => {
-            w.write_event(Event::Start(BytesStart::new("mfrac"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("mfrac")))
+                .unwrap();
             write_expr(w, num);
             write_expr(w, den);
             w.write_event(Event::End(BytesEnd::new("mfrac"))).unwrap();
         }
         MathExpr::Sqrt { body, index } => {
             if let Some(idx) = index {
-                w.write_event(Event::Start(BytesStart::new("mroot"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("mroot")))
+                    .unwrap();
                 write_expr(w, body);
                 write_expr(w, idx);
                 w.write_event(Event::End(BytesEnd::new("mroot"))).unwrap();
             } else {
-                w.write_event(Event::Start(BytesStart::new("msqrt"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("msqrt")))
+                    .unwrap();
                 write_expr(w, body);
                 w.write_event(Event::End(BytesEnd::new("msqrt"))).unwrap();
             }
         }
         MathExpr::Fenced { open, body, close } => {
-            w.write_event(Event::Start(BytesStart::new("mrow"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("mrow")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("mo"))).unwrap();
             w.write_event(Event::Text(quick_xml::events::BytesText::new(open)))
                 .unwrap();
@@ -97,7 +104,8 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             w.write_event(Event::End(BytesEnd::new("mrow"))).unwrap();
         }
         MathExpr::Function { name, arg } => {
-            w.write_event(Event::Start(BytesStart::new("mrow"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("mrow")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("mi"))).unwrap();
             w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
                 .unwrap();
@@ -115,12 +123,12 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             w.write_event(Event::End(BytesEnd::new("mrow"))).unwrap();
         }
         MathExpr::Matrix { rows } => {
-            w.write_event(Event::Start(BytesStart::new("mtable"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("mtable")))
+                .unwrap();
             for row in rows {
                 w.write_event(Event::Start(BytesStart::new("mtr"))).unwrap();
                 for cell in row {
-                    w.write_event(Event::Start(BytesStart::new("mtd")))
-                        .unwrap();
+                    w.write_event(Event::Start(BytesStart::new("mtd"))).unwrap();
                     write_expr(w, cell);
                     w.write_event(Event::End(BytesEnd::new("mtd"))).unwrap();
                 }
@@ -133,7 +141,8 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             if seq.len() == 1 {
                 write_expr(w, &seq[0]);
             } else {
-                w.write_event(Event::Start(BytesStart::new("mrow"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("mrow")))
+                    .unwrap();
                 for e in seq {
                     write_expr(w, e);
                 }
@@ -141,7 +150,8 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             }
         }
         MathExpr::Raw(s) => {
-            w.write_event(Event::Start(BytesStart::new("mtext"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("mtext")))
+                .unwrap();
             w.write_event(Event::Text(quick_xml::events::BytesText::new(s)))
                 .unwrap();
             w.write_event(Event::End(BytesEnd::new("mtext"))).unwrap();
@@ -173,7 +183,9 @@ mod tests {
 
     #[test]
     fn mathml_matrix() {
-        let s = to_mathml(&parse_latex_math(r"\begin{matrix} a & b \\ c & d \end{matrix}"));
+        let s = to_mathml(&parse_latex_math(
+            r"\begin{matrix} a & b \\ c & d \end{matrix}",
+        ));
         let s = String::from_utf8_lossy(&s);
         assert!(s.contains("<mtable"));
         assert!(s.contains("<mtr"));

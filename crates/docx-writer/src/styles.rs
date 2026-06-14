@@ -22,7 +22,10 @@ pub fn write_styles() -> Vec<u8> {
         .unwrap();
 
     let mut styles = BytesStart::new("w:styles");
-    styles.push_attribute(("xmlns:w", "http://schemas.openxmlformats.org/wordprocessingml/2006/main"));
+    styles.push_attribute((
+        "xmlns:w",
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    ));
     w.write_event(Event::Start(styles)).unwrap();
 
     write_default(&mut w, STYLE_TITLE, "Title", "Calibri", 32, true);
@@ -30,12 +33,34 @@ pub fn write_styles() -> Vec<u8> {
     write_default(&mut w, STYLE_HEADING2, "heading 2", "Calibri", 24, true);
     write_default(&mut w, STYLE_HEADING3, "heading 3", "Calibri", 22, true);
     write_default(&mut w, STYLE_BODY, "Normal", "Calibri", 22, false);
-    write_default(&mut w, STYLE_LIST_BULLET, "List Bullet", "Calibri", 22, false);
-    write_default(&mut w, STYLE_LIST_NUMBER, "List Number", "Calibri", 22, false);
+    write_default(
+        &mut w,
+        STYLE_LIST_BULLET,
+        "List Bullet",
+        "Calibri",
+        22,
+        false,
+    );
+    write_default(
+        &mut w,
+        STYLE_LIST_NUMBER,
+        "List Number",
+        "Calibri",
+        22,
+        false,
+    );
     write_default(&mut w, STYLE_CAPTION, "Caption", "Calibri", 20, false);
-    write_default(&mut w, STYLE_TABLE_HEADER, "TableHeader", "Calibri", 22, true);
+    write_default(
+        &mut w,
+        STYLE_TABLE_HEADER,
+        "TableHeader",
+        "Calibri",
+        22,
+        true,
+    );
 
-    w.write_event(Event::End(BytesEnd::new("w:styles"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:styles")))
+        .unwrap();
     w.into_inner()
 }
 
@@ -52,8 +77,10 @@ fn write_default(
     s.push_attribute(("w:styleId", id));
     w.write_event(Event::Start(s.clone())).unwrap();
 
-    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
-    w.write_event(Event::Text(quick_xml::events::BytesText::new(name))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:name")))
+        .unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
+        .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
 
     let mut rpr = BytesStart::new("w:rPr");
@@ -62,11 +89,13 @@ fn write_default(
     rfonts.push_attribute(("w:hAnsi", font));
     w.write_event(Event::Start(rpr.clone())).unwrap();
     w.write_event(Event::Start(rfonts)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:rFonts"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rFonts")))
+        .unwrap();
     if bold {
         w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
     }
-    w.write_event(Event::Empty(BytesStart::new("w:szCs"))).unwrap();
+    w.write_event(Event::Empty(BytesStart::new("w:szCs")))
+        .unwrap();
     let mut sz = BytesStart::new("w:sz");
     sz.push_attribute(("w:val", size_half_pt.to_string().as_str()));
     w.write_event(Event::Empty(sz)).unwrap();
