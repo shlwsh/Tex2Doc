@@ -1,0 +1,7 @@
+# 项目级 clippy 严格策略
+avoid-breaking-exported-api = false
+disallowed-methods = []
+disallowed-types = []
+doc-valid-idents = ["Arxiv", "GitHub", "LaTeX", "OOXML", "Word", "MacOS", "Windows", "Linux", "BibLaTeX", "CTeX", "TikZ", "Beamer", "MathML", "OMML", "VFS", "PWA", "WASM", "FFI", "CLI", "API", "URL", "HTTP", "JSON", "XML", "DOI", "ISBN", "ISSN", "UTF-8", "I18N", "L10N"]
+too-many-arguments-threshold = 8
+type-complexity-threshold = 250

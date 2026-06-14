@@ -1,0 +1,34 @@
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+
+# Flutter / Dart
+**/build/
+**/.dart_tool/
+**/flutter_*.png
+**/linked_*.ds
+**/unlinked.ds
+**/unlinked_spec.ds
+flutter_app/.flutter-plugins
+flutter_app/.flutter-plugins-dependencies
+flutter_app/pubspec.lock
+
+# Node / Web
+**/node_modules/
+**/dist/
+**/wasm/pkg/
+**/.cache/
+
+# 编辑器 / 系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# 测试产物
+**/tests/output/
+**/tests/snapshots/*-new*
+**/tests/snapshots/*-pending-snap
+*.docx
+!crates/docx-writer/tests/fixtures/*.docx
