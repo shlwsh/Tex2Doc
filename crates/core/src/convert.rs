@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use doc_latex_reader::{lower_to_document, parse_tex, IncludeGraph};
 use doc_semantic_ast::Document;
-use doc_utils::VirtualFs;
+use doc_utils::{ImageAssets, VirtualFs};
 
 use crate::error::CoreError;
 use crate::options::ConvertOptions;
@@ -24,10 +24,11 @@ use crate::result::{ConvertResult, ProgressEvent, ProgressPhase};
 pub fn convert_sync(
     main_tex: &str,
     source: &str,
-    _options: &ConvertOptions,
+    options: &ConvertOptions,
 ) -> Result<ConvertResult, CoreError> {
     let doc = parse_tex_to_doc(main_tex, source)?;
-    let docx = doc_docx_writer::pack(&doc).map_err(|e| CoreError::Serialize(e.0))?;
+    let docx = doc_docx_writer::pack_with_template(&doc, options.template_bytes.as_deref())
+        .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
         docx,
         warnings: vec![],
@@ -42,10 +43,22 @@ pub fn convert_sync(
 pub fn convert_dir(
     project_root: &Path,
     main_tex: &Path,
-    _options: &ConvertOptions,
+    options: &ConvertOptions,
 ) -> Result<ConvertResult, CoreError> {
     let mut vfs = VirtualFs::new();
     vfs.mount_dir(project_root).map_err(|e| CoreError::Io(e.to_string()))?;
+
+    // Collect PNG/JPEG image assets from VFS
+    let mut image_assets = ImageAssets::new();
+    for path in vfs.paths() {
+        let p_str = path.to_string_lossy();
+        let p_lower = p_str.to_lowercase();
+        if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".jpeg") {
+            if let Ok(bytes) = vfs.read(path) {
+                image_assets.insert(p_str.to_string(), bytes.to_vec());
+            }
+        }
+    }
 
     let main_rel = relative_to_root(project_root, main_tex)?;
     let main_posix = main_rel.to_string_lossy().replace('\\', "/");
@@ -57,7 +70,12 @@ pub fn convert_dir(
         .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
 
     let doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
-    let docx = doc_docx_writer::pack(&doc).map_err(|e| CoreError::Serialize(e.0))?;
+    let docx = doc_docx_writer::pack_with_assets(
+        &doc,
+        options.template_bytes.as_deref(),
+        Some(&image_assets),
+    )
+    .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
         docx,
         warnings: vec![],

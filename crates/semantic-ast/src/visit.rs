@@ -62,6 +62,7 @@ mod tests {
         doc.push(Block::Heading {
             level: 1,
             text: "x".into(),
+            number: None,
             span: Span::default(),
         });
         doc.push(Block::Paragraph {

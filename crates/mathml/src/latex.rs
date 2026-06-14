@@ -2,11 +2,15 @@
 
 use crate::expr::MathExpr;
 
+/// Maximum nesting depth for math expressions (OOM protection).
+/// Prevents stack overflow and memory exhaustion from deeply nested formulas.
+const MAX_EXPR_DEPTH: usize = 100;
+
 /// 解析 LaTeX 公式源码（不含定界符 `$/$$`），返回 [`MathExpr::Seq`]。
 ///
 /// 错误降级：遇到未知语法时累积为 [`MathExpr::Raw`]，不 panic。
 pub fn parse_latex_math(input: &str) -> MathExpr {
-    let mut p = Parser { s: input, i: 0 };
+    let mut p = Parser { s: input, i: 0, depth: 0 };
     let seq = p.parse_seq(false);
     p.skip_ws();
     if p.i < p.s.len() {
@@ -23,6 +27,7 @@ pub fn parse_latex_math(input: &str) -> MathExpr {
 struct Parser<'a> {
     s: &'a str,
     i: usize,
+    depth: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -80,6 +85,13 @@ impl<'a> Parser<'a> {
             }
             // 单反斜杠可能是 \cmd
             if c == b'\\' {
+                if self.depth >= MAX_EXPR_DEPTH {
+                    // Truncate: consume rest as Raw
+                    let rest = self.s[self.i..].to_string();
+                    out.push(MathExpr::Raw(rest));
+                    self.i = self.s.len();
+                    break;
+                }
                 if let Some(e) = self.parse_command() {
                     out.push(e);
                     continue;
@@ -207,8 +219,14 @@ impl<'a> Parser<'a> {
     fn parse_group_or_single(&mut self) -> MathExpr {
         self.skip_ws();
         if self.peek() == Some(b'{') {
+            if self.depth >= MAX_EXPR_DEPTH {
+                self.i += 1;
+                return MathExpr::Raw("{".into());
+            }
             self.i += 1;
+            self.depth += 1;
             let inner = self.parse_seq(true);
+            self.depth -= 1;
             self.skip_ws();
             if self.peek() == Some(b'}') {
                 self.i += 1;
@@ -514,5 +532,14 @@ mod tests {
     #[test]
     fn recovers_on_unknown() {
         let _ = parse_latex_math(r"\foobar x");
+    }
+
+    #[test]
+    fn large_formula_depth_limit() {
+        // Create a deeply nested formula
+        let nested = str::repeat("{a", 200) + &str::repeat("}", 200);
+        let result = parse_latex_math(&nested);
+        // Should not panic and should return some result
+        let _ = format!("{:?}", result);
     }
 }

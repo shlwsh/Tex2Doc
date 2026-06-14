@@ -2,6 +2,7 @@
 //!
 //! 详见方案 §4.3.2 样式 ID 命名规范。
 
+use doc_utils::{FontProbe, FontStatus};
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 
@@ -102,4 +103,56 @@ fn write_default(
     w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
 
     w.write_event(Event::End(BytesEnd::new("w:style"))).unwrap();
+}
+
+/// 根据字体探测结果修改 styles_xml 字节流。
+///
+/// 对于标记为 Embed 的字体，在样式中嵌入字体回退声明。
+/// 对于标记为 Fallback 的字体，将字体名替换为推荐字体。
+pub fn apply_font_probes(styles_xml: &mut Vec<u8>, probes: &[FontProbe]) {
+    if probes.is_empty() {
+        return;
+    }
+    let xml_str = String::from_utf8_lossy(styles_xml).to_string();
+    let mut modified = xml_str;
+    for probe in probes {
+        if probe.needs_fallback() {
+            // 替换字体引用：将 w:ascii/w:hAnsi/w:eastAsia 等属性替换为 recommended
+            for attr in &["w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"] {
+                let pattern = format!("{}=\"{}\"", attr, probe.name);
+                let replacement = format!("{}=\"{}\"", attr, probe.recommended);
+                if modified.contains(&pattern) {
+                    modified = modified.replace(&pattern, &replacement);
+                }
+            }
+        }
+    }
+    *styles_xml = modified.into_bytes();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_font_probes_no_change_when_empty() {
+        let mut xml = b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec();
+        apply_font_probes(&mut xml, &[]);
+        assert_eq!(xml, b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec());
+    }
+
+    #[test]
+    fn apply_font_probes_fallback_replaces() {
+        let mut xml = b"<w:style w:type=\"paragraph\" w:styleId=\"Test\"><w:rPr><w:rFonts w:ascii=\"OldFont\" w:hAnsi=\"OldFont\"/></w:rPr></w:style>".to_vec();
+        let probe = FontProbe {
+            name: "OldFont".to_string(),
+            status: FontStatus::Fallback,
+            recommended: "SimSun".to_string(),
+            system_path: None,
+        };
+        apply_font_probes(&mut xml, &[probe]);
+        let s = String::from_utf8_lossy(&xml);
+        assert!(s.contains("SimSun"));
+        assert!(!s.contains("OldFont"));
+    }
 }

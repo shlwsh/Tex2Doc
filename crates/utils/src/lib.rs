@@ -6,19 +6,22 @@
 //! - [`path`]：LaTeX include / graphicspath 路径解算。
 //! - [`image`]：图片格式探测与重压缩。
 //! - [`fontmap`]：CTeX 字体 → Office 字体映射。
+//! - [`fontdetect`]：字体探测（系统 vs 嵌入）。
 //! - [`error`]：统一错误类型。
 
 #![forbid(unsafe_code)]
 #![deny(rust_2018_idioms)]
 
 pub mod error;
+pub mod fontdetect;
 pub mod fontmap;
 pub mod image;
 pub mod path;
 pub mod vfs;
 
 pub use error::{DocError, DocResult};
+pub use fontdetect::{probe_font, FontDetector, FontProbe, FontStatus};
 pub use fontmap::{default_map, FontMap, OfficeFont};
-pub use image::{read_meta, renormalize, ImageMeta, SupportedFormat};
+pub use image::{read_meta, renormalize, ImageAssets, ImageMeta, SupportedFormat};
 pub use path::{parse_graphics_path, PathResolver};
 pub use vfs::VirtualFs;

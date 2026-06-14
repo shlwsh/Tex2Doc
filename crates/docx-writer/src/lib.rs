@@ -10,6 +10,6 @@ pub mod serializer;
 pub mod styles;
 pub mod template;
 
-pub use packer::pack;
+pub use packer::{pack, pack_with_assets, pack_with_template};
 pub use serializer::serialize_document;
 pub use template::{merge_styles, parse_styles_xml, parse_template, TemplateStyles};
