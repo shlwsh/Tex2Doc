@@ -1,0 +1,100 @@
+% !TEX root = ../../main-jos.tex
+\section{实验与分析}
+
+\subsection{环境与方法}
+实验在 WSL2/Docker 原型集群上进行。主对比实验使用 8 节点配置，规模复核实验扩展到 16 和 32 个 httpbin 微服务及对应的 Sidecar Agent。集群还包含 1 个 OpenResty 网关、1 个日志中心以及 Loki/Redis 等基础设施。应用日志采用 Apache Combined 风格字段，URL 与网关路由保持一致。
+
+对比实验将定向采集和全量采集（\texttt{COLLECTION\_MODE=full}）放在同一硬件环境下对照。负载为 180\,s、并发 50 的混合 HTTP 请求（包含正常请求、500 错误和慢请求），每种模式独立重复 3 次。Loki 入库增量取自 Center 统计接口；Agent CPU/内存在每轮压测结束后，对全部 9 个 Agent 容器执行 \texttt{docker stats} 单次快照并取算术均值。每轮网关流量日志的 Redis 增量约 $1.97\times10^4$ 条，关注清单稳定生成 16 条 URL 模式（包含 \texttt{/status/500}、\texttt{/delay/1} 等异常和慢请求泛化模式），确保高价值请求能被定向规则覆盖。原始数据见 phase3 结果 JSON；清空统计后的 16/32 节点规模复核见 phase4 结果 JSON；同频率对照、Promtail 静态过滤复现与系统级组件消融见 phase5 多进程模拟结果 JSON。
+
+\subsection{研究问题与指标}
+为了让实验与架构贡献形成清晰的对应关系，本文围绕 4 个研究问题组织实验，如表~\ref{tab:rq_mapping} 所示。RQ1 验证采集前端的减量能力（对应架构贡献 1、2），RQ2 验证 Sidecar 资源开销的可控性（对应架构贡献 1），RQ3 验证三层策略的端到端贯通（对应架构贡献 2、3），RQ4 验证缓存与退避机制的可靠性边界（对应架构贡献 4）。
+\begin{table}[H]
+  \centering
+  \small
+  \caption{研究问题、指标与证据映射}\label{tab:rq_mapping}
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{p{1.2cm}p{5.2cm}p{4.2cm}p{4.0cm}}
+    \toprule
+    编号 & 研究问题 & 指标 & 证据位置 \\
+    \midrule
+    RQ1 & 定向采集能否显著降低 Loki 入库日志量？ & Loki 入库条数、带宽估计、降低比例 & 表~\ref{tab:compare}、图~\ref{fig:compare} \\
+    RQ2 & 定向采集是否控制 Sidecar 资源开销？ & Agent CPU、内存均值与标准差 & 表~\ref{tab:compare}、图~\ref{fig:compare} \\
+    RQ3 & 网关预筛选、节点定向采集与中心二次过滤是否形成端到端闭环？ & Redis 网关日志增量、关注清单模式数、链路阶段打通情况 & §6.3 与原始 phase3 JSON \\
+    RQ4 & 固定缓存块与压力感知退避是否具有必要性与有界性？ & 策略仿真消融、微基准耗时、退避单元测试与等待上界 & 图~\ref{fig:ablation}、图~\ref{fig:attention}、式~\ref{eq:backoff} \\
+    \bottomrule
+  \end{tabular}%
+  }
+\end{table}
+\subsection{实验结果}
+表~\ref{tab:compare} 和图~\ref{fig:compare} 给出了 RQ1 与 RQ2 的三期实测对比。和同架构全量模式相比，定向采集在 Loki 入库日志量上降低了 98.4\%（72$\pm$0 条 vs.\ 4388$\pm$1 条），Agent CPU 相对降低 37.5\%（绝对值分别为 0.05$\pm$0.01\% 和 0.08$\pm$0.02\%，标准差存在重叠，需结合效应量来解读）。这里需要说明一点：全量基线除了关闭规则过滤外，应用日志源的发射频率（400\,ms）也高于定向模式（2\,s），所以表~\ref{tab:compare} 中的降幅是\textbf{策略过滤与源配置差异的联合效果}。
+\begin{table}[H]
+  \centering
+  \small
+  \caption{定向采集与全量采集资源对比（八节点，180\,s，$n{=}3$ 实测）}\label{tab:compare}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}lccc}
+    \toprule
+    指标 & 定向采集 & 全量采集 & 降低比例 \\
+    \midrule
+    Loki 入库 (条) & 72$\pm$0 & 4388$\pm$1 & 98.4\% \\
+    Agent CPU (\%) & 0.05$\pm$0.01 & 0.08$\pm$0.02 & 37.5\% \\
+    Agent 内存 (MB) & 95.6$\pm$4.2 & 97.5$\pm$1.7 & 2.0\% \\
+    带宽 (KB/s) & 0.20 & 12.19 & 98.4\% \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{fig3_comparison_bars.pdf}
+  \caption{定向采集与全量采集资源消耗对比（八节点，180\,s，$n{=}3$ 实测）}\label{fig:compare}
+\end{figure}
+\textbf{效应量分析。}对 Loki 入库量（72$\pm$0 vs.\ 4388$\pm$1），Cohen's $d{\approx}6100$，效应量极大，即使只重复 $n{=}3$ 次，检验功效也完全可靠。对 Agent CPU（0.05$\pm$0.01\% vs.\ 0.08$\pm$0.02\%），绝对差值仅 0.03 个百分点，Cohen's $d{\approx}1.9$，在 $n{=}3$ 下检验功效有限。Agent 内存相对差异只有 2.0\%，统计上不显著。因此本文以 Loki 入库量降幅作为主要结论，Agent CPU/内存降幅仅作辅助参考。
+
+\textbf{发射频率敏感性分析。}全量基线的发射频率（400\,ms）高于定向模式（2\,s），为了把策略过滤的贡献单独剥离出来，本文构建了一个\textbf{多进程集群模拟器}做同频率对照实验。该模拟器以 phase3 实测负载分布、URL 结构和节点数为输入，采用虚拟时间推进，避免在 WSL/Docker 资源约束下重新拉起高频长稳集群。模拟中两种模式的发射频率完全一致（均为 2\,s）：定向模式模拟入库 231.7 条，全量模式入库 720 条。完全剔除源发射频率差异后，策略过滤带来的独立降幅为 \textbf{67.8\%}，是原稿实测降幅（98.4\%）的主要贡献。这说明动态定向清单即使在严格同源配置下，仍然有显著的减量价值。
+
+图~\ref{fig:ablation} 是 RQ4 的策略仿真消融结果。为了补充系统级组件消融证据，本文还做了多进程模拟消融：关闭关注清单后 Loki 入库量激增 211.7\%（退化为全量），这说明清单匹配是减量的绝对核心。关闭二次过滤和固定缓存块对入库总量没有显著影响（波动不超过 1\%），只影响传输批次大小，验证了它们作为传输层稳定性保障组件的角色。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{fig4_ablation_bars.pdf}
+  \caption{消融实验结果（\textbf{策略仿真}，非集群实测）}\label{fig:ablation}
+\end{figure}
+对于 RQ3，端到端链路已在集群中实测打通：Nginx 共享内存 $\rightarrow$ \allowbreak{} Agent gRPC $\rightarrow$ \allowbreak{} Redis $\rightarrow$ \allowbreak{} 关注清单生成 $\rightarrow$ \allowbreak{} Agent 规则拉取。对于 RQ4，关注清单生成在 5000 条日志上耗时约 15\,ms（图~\ref{fig:attention}）；指数退避模块通过全部单元测试。上述实验的复现脚本、原始结果 JSON 及单元测试代码均保存在项目仓库\footnote{实验脚本与原始数据见仓库 \texttt{experiments/} 目录；退避单元测试见 \texttt{agent/pkg/retry/} 目录。}中。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{fig6_attention_bench.pdf}
+  \caption{关注清单生成算法微基准}\label{fig:attention}
+\end{figure}
+\subsection{可复现性与效度威胁}
+全部实验脚本、Docker Compose 配置与原始 JSON 结果均保存在项目仓库的 \texttt{experiments/} 目录下，按 phase3（主对比）、phase4（规模复核）和 phase5（多进程模拟）分目录组织。表~\ref{tab:compare} 和图~\ref{fig:compare} 由 phase3 数据派生，16/32 节点规模复核由 phase4 数据派生，同频率对照、Promtail 静态过滤复现与系统级组件消融由 phase5 数据派生。当前结果仍存在以下效度威胁。
+
+\textbf{规模效度}：八节点主对比和十六/三十二节点规模复核是 WSL/Docker 实测，六十四节点仍为基于实测曲线的外推。云环境下的长稳表现与带宽压力还需要进一步验证。
+
+\textbf{基线效度}：本文已给出同架构全量实测基线、Promtail 静态过滤的同负载模拟复现，以及 OpenTelemetry 与 eBPF 的同负载估算（图~\ref{fig:baseline}）。但 Promtail、OpenTelemetry 和 eBPF 的完整端到端部署对照仍有待补充。
+
+\textbf{负载效度}：当前负载由 httpbin 合成，覆盖了正常、错误和慢请求三类场景，但和 DeathStarBench、Alibaba 生产迹等真实微服务流量相比仍有差距。
+
+\textbf{统计效度}：三期对比为 180\,s、$n{=}3$；四期规模矩阵为 60\,s、$n{=}3$；五期多进程模拟同样重复 3 次，但本质上仍是基于实测分布的模拟证据。逐探针命中率受 Agent 批处理影响，不能单独代表稳态漏报率。图~\ref{fig:ablation} 是策略仿真消融，不能与表~\ref{tab:compare} 的集群实测直接比较。
+
+\subsection{规模扩展与质量指标}
+四期实验中，本文补充了 16/32 节点定向模式的规模复核（60\,s、并发 50、重复 3 次）。为避免历史计数干扰，复核前先执行 Redis 清空和 Center 重启，让 \texttt{/api/v1/stats} 从 0 开始计数。图~\ref{fig:scale} 显示：16 节点下网关流量日志增量为 6703.33$\pm$91.78 条/轮，定向模式 Loki 入库为 48.0$\pm$5.2 条/轮，关注清单稳定在 32 项；32 节点下网关流量日志增量为 6692.67$\pm$121.88 条/轮，定向模式 Loki 入库稳定在 99.0$\pm$0.0 条/轮，关注清单达到当前 Top-$K{=}50$ 上限。32 节点时 Agent 平均 CPU 为 0.06$\pm$0.01\%，Center CPU 为 0.06$\pm$0.07\%，没有出现资源失控。64 节点的柱形是基于现有实测趋势的外推值（灰色），\textbf{仅供趋势参考，不作为本文的主要结论}。外推假设资源消耗与节点数大致线性增长，但实际的分布式系统可能因为网络竞争、调度抖动等因素产生非线性增长，还需要在云环境长稳压测中验证。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.95\textwidth]{fig7_scale_bars.pdf}
+  \caption{多规模扩展实验（绿色/实线：8/16/32 节点集群实测；灰色/虚线：64 节点线性外推，\textbf{非实测}）}\label{fig:scale}
+\end{figure}
+\textbf{漏报定义与度量。}本文区分两类指标。第一类是\textbf{规则级漏报}——关注清单是否覆盖了所有满足定向策略条件（响应时延 $>T$ 或状态码 $\in E$）的 URL 模式。第二类是\textbf{探针即时命中率}——某一时刻向指定服务发送探针请求后，对应的应用日志是否在 Agent 批处理窗口内被立即采集并上传。在稳态混合负载下，关注清单稳定覆盖了 \texttt{/status/500}、\texttt{/delay/1} 等泛化模式（八节点 16 条、十六节点 32 条），\textbf{规则级}漏报率为 0。需要指出：这个结论成立的前提是合成负载与当前清单配置（Top-$K{=}50$、固定 URL 集合）。生产环境中 URL 模式的长尾分布、窗口大小和 Top-$K$ 参数都可能影响覆盖率。生产迹风格混合负载（60\% 正常 / 20\% 5xx / 12\% 慢请求 / 8\% 其他，90\,s、十六节点）共发送 3.6$\times10^4$ 次请求，定向入库 77 条，验证了减量能力。逐探针实验的即时命中率受 Agent 2\,s 批处理窗口影响，反映的是\textbf{批处理延迟对采集时效性的影响}，不等同于规则级漏报。
+
+\textbf{端到端延迟与可接受性。}端到端延迟（HTTP $\rightarrow$ Center \texttt{received}）实测结果：P50 为 0.83\,s，P95 为 12\,s（$n{=}30$）。P95 偏高主要是因为 Agent 2\,s 批处理窗口和合成慢请求（如 \texttt{/delay/1} 引入 1\,s 额外响应时间）的叠加。从可接受性来看：业界主流方案（如 ELK/Promtail 推送链路）的典型端到端延迟在 30\,s--60\,s 量级，本文的 P95=12\,s 处于合理范围。如果需要满足秒级实时告警 SLA，可以缩小批处理窗口或引入事件驱动推送机制来降低延迟（代价是上传频率增加）。全量模式同样存在批处理和传输延迟，定向模式并没有引入显著的额外延迟。中心故障恢复实验（\texttt{docker stop/start}）的恢复时间约 1.1\,s。
+
+\subsection{工业基线对照}
+图~\ref{fig:baseline} 在同负载口径下给出了本文定向采集与三类工业基线的趋势对照。为了补充实证对比，本文在多进程模拟器中复现了 Promtail 的静态标签过滤（保留 status$\geq$400 错误或 /delay/ 慢请求路由）。模拟结果显示，同负载分布下 Promtail 静态过滤入库 276.3 条，本文定向策略入库 233.3 条。之所以能进一步降低，是因为引入了网关流量驱动的动态 Top-$K$ 机制，截断了长尾异常噪音。需要强调的是，这个结果是\textbf{规则级模拟复现}，并不是 Promtail 完整部署下的端到端吞吐、资源与延迟对照。OpenTelemetry 尾部采样估算\cite{otel_tail}和 eBPF 内核探针估算\cite{soldani2023ebpf}暂未做实测，图中的柱形应该理解为\textbf{趋势参考}。本文\textbf{不主张}在所有维度上优于工业方案，核心创新是补齐了以应用日志内容特征为基础的采集前端轻量级减量闭环。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.85\textwidth]{fig8_baseline_bars.pdf}
+  \caption{工业基线趋势对比（P3 定向采集为集群实测；Promtail 为同负载多进程规则复现；OTel/eBPF 为同负载估算，柱形样式区分证据等级）}\label{fig:baseline}
+\end{figure}
+\subsection{剩余局限与后续工作}\label{sec:future}
+经过四期实验，本文已补充了 8/16/32 节点规模矩阵、规则级漏报验证、端到端延迟和工业基线估算。五期多进程模拟进一步补齐了同频率发射对照、Promtail 静态过滤对照和系统级组件消融方面的缺失环节，为基于模拟评估的理论界限提供了可追溯的依据。后续主要工作方向如下：
+
+\textbf{近期/中期工作：}（1）在 Kubernetes 环境开展 64 节点云原生实测，替代当前基于 32 节点复核结果的趋势外推，并评估 Top-$K$ 参数对长尾 URL 覆盖率的影响；（2）引入 DeathStarBench、Alibaba 生产迹等真实微服务负载，验证 URL 模式长尾分布下的动态关注清单覆盖率和召回性能；（3）构建完整的商业成本量化模型，把相对日志减量直接转化为存储和网络带宽的绝对费用节约估算。
+
+\textbf{远期工作：}（4）与 OpenTelemetry 追踪上下文、eBPF 应用日志挂钩集成，探索采集前减量与后端智能诊断（如根因定位）的无缝闭环；（5）推进系统关键组件的生产级能力，包括 gRPC TLS 安全通信、多租户策略隔离、可配置的隐私脱敏以及规范化的清单 JSON 开源标准设计。

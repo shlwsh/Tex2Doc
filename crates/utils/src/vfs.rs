@@ -67,7 +67,8 @@ impl VirtualFs {
                 .strip_prefix(root)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
             let bytes = fs::read(&entry)?;
-            let key = normalize_path(root.join(rel));
+            // 以「相对 root」作为 key，与 LaTeX include 解析（相对路径）保持一致。
+            let key = normalize_path(rel.to_path_buf());
             self.files.insert(key, bytes);
             count += 1;
         }

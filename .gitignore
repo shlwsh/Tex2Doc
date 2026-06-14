@@ -32,3 +32,14 @@ Thumbs.db
 **/tests/snapshots/*-pending-snap
 *.docx
 !crates/docx-writer/tests/fixtures/*.docx
+
+# LaTeX 编译产物与 examples 验证产物
+*.aux
+*.log
+*.bbl
+*.blg
+*.out
+*.synctex.gz
+*.pdf
+examples/**/output/
+examples/**/latex/output/

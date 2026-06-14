@@ -1,0 +1,39 @@
+% !TEX root = ../../main-jos.tex
+\section{系统实现}
+
+\subsection{技术选型}
+原型系统的主要实现技术如表~\ref{tab:tech} 所示，组件选择围绕轻量部署、可靠传输和可复现实验展开。
+\begin{table}[H]
+  \centering
+  \small
+  \caption{技术选型}\label{tab:tech}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}ll}
+    \toprule
+    模块 & 技术 \\
+    \midrule
+    Agent / Center & Go 1.22 \\
+    通信 & gRPC + Protobuf \\
+    缓存 & Redis \\
+    存储 & Grafana Loki \\
+    网关采集 & OpenResty + Lua \\
+    本地兜底 & BoltDB \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+\subsection{模块划分}
+系统实现分为 Agent 和 Center 两大模块。\textbf{Agent} 负责节点侧的工作，包括日志采集（collector）、规则匹配（matcher）、固定缓存块管理（cache）、退避重试（retry）、gRPC 上传（uploader）和资源监控（monitor），代码在 \texttt{agent/pkg/} 各子包下。\textbf{Center} 负责中心侧的工作，包括关注清单生成与三次转换（strategy）、二次过滤（receiver）、Loki 批量推送（storage）和规则下发（dispatch），代码在 \texttt{center/pkg/} 各子包下。
+
+\subsection{关键数据结构与匹配实现}
+关注清单在 Redis 中按版本存储。Center 生成新清单后，先写入版本化键，再原子更新当前版本指针。Agent 拉取时会携带本地版本号，只有版本变化或 TTL 快要过期时才更新规则，减少不必要的网络往返。
+
+节点侧匹配器将 URL 模式编译为前缀规则和通配规则，并按服务名分桶。单条日志匹配复杂度近似为 $O(R_s)$，其中 $R_s$ 是该服务当前的关注规则数。在 Top-$K$ 限制下，$R_s$ 通常远小于全局规则数。应用日志采用 Apache Combined 风格字段，至少包含时间戳、方法、URL、状态码和响应字节数。如果日志格式不兼容，需要先通过解析适配器转换成统一字段，再进入匹配器。
+
+\subsection{部署配置}
+Docker Compose 定义了完整的集群环境，包括 Loki、Grafana、Redis、Prometheus、Center、OpenResty 网关、httpbin 模拟微服务以及 9 个 Agent Sidecar（1 个网关 + 8 个微服务）。微服务侧的 \texttt{AppCollector} 生成 Apache Combined 风格应用日志，URL 与网关 \texttt{location} 前缀保持一致。没有关注清单时，Agent 只采集 ERROR 及以上级别的日志，避免退化为全量采集。WSL 环境通过 \texttt{docker-compose.wsl.yml} 限制容器内存，\texttt{docker-compose.scale.yml} 则用于扩展到 8 个微服务节点。
+
+\textbf{对照实验的配置说明}：定向模式下应用日志的发射间隔是 2\,s；全量基线模式是 400\,ms（吞吐量更高），用来模拟工业场景中``尽可能多采''的做法。两种模式共享同一套网关压测负载和硬件环境，确保对比公平。
+
+\subsection{生产部署与标准化接口}
+在 Kubernetes 环境中，网关 Agent 可以部署为 Sidecar 或 DaemonSet，微服务 Agent 优先以 Sidecar 方式与业务容器共享网络命名空间。如果集群的日志文件路径比较统一，也可以用 DaemonSet 来减少实例数。
+
+生产部署需要启用 gRPC TLS、Agent 身份认证和租户隔离。关注清单的键空间按租户、命名空间和服务名分层，防止跨租户的规则泄露。在标准化方面，关注清单可以公开为一份 JSON 规范，包含 \texttt{version}、\texttt{ttl}、\texttt{service}、\texttt{pattern}、\texttt{weight} 和 \texttt{reason} 字段，并与 OpenTelemetry Collector 的过滤处理器、Loki 标签模型对接。按 AIOps-OSA 的能力划分，本文组件承担数据采集层的动态减量和场景实现层的异常/慢请求上下文保留，为后续日志解析、异常检测和根因定位提供更小但更高价值的输入。

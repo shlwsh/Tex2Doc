@@ -1,0 +1,79 @@
+% !TEX encoding = UTF-8
+% !LW recipe = XeLaTeX → BibTeX → XeLaTeX×2
+% 计算机学报风格中文初稿（双语摘要版）
+% 编译：./scripts/build_pdf.sh  或  xelatex main-zh.tex（需 ctex）
+\documentclass[12pt,a4paper]{ctexart}
+\usepackage{graphicx}
+\graphicspath{{../figures/}}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage[super,square,sort&compress]{natbib}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage{hyperref}
+\usepackage{bookmark}
+\usepackage{geometry}
+\geometry{left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm}
+
+\title{网关流量驱动的微服务定向日志采集框架}
+\author{石洪雷\thanks{通讯作者，E-mail: shihonglei0042@link.tyut.edu.cn}，赵涓涓\\
+\small 太原理工大学，山西 太原，030024}
+\date{}
+
+\begin{document}
+\maketitle
+
+% ---------- 中文摘要 ----------
+\input{sections/zh/00_abstract}
+
+\begin{abstract}
+\AbstractContentZh
+\end{abstract}
+
+\noindent\textbf{关键词：}\KeywordsZh
+
+\noindent\textbf{中图法分类号：}TP393 \quad \textbf{文献标识码：}A
+
+\vspace{0.4em}
+\noindent\textbf{建议引用格式：}石洪雷, 赵涓涓. 网关流量驱动的微服务定向日志采集框架[J]. 软件学报投稿稿, 2026.
+
+\vspace{1em}
+\hrule
+\vspace{0.8em}
+
+% ---------- 英文标题与摘要（学报双语体例）----------
+{\centering\bfseries Gateway-Traffic-Driven Microservice Directed Log Collection Framework\par}
+\vspace{0.6em}
+
+\noindent\textbf{Abstract:}
+\AbstractContentEn
+
+\vspace{0.5em}
+\noindent\textbf{Key words:} \KeywordsEn
+
+\vspace{0.4em}
+\noindent\textbf{Authors:} Honglei Shi (Corresponding author), Juanjuan Zhao, Taiyuan University of Technology, Taiyuan 030024, China. E-mail: shihonglei0042@link.tyut.edu.cn
+
+\vspace{1em}
+\hrule
+\vspace{1em}
+
+\input{sections/zh/01_intro.tex}
+\input{sections/zh/02_related.tex}
+\input{sections/zh/03_system.tex}
+\input{sections/zh/04_algorithms.tex}
+\input{sections/zh/05_implementation.tex}
+\input{sections/zh/06_experiments.tex}
+\input{sections/zh/07_conclusion.tex}
+
+\section*{声明}
+本文撰写与实验脚本生成过程中使用了大语言模型辅助，作者对全部内容与数据负责。
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+\section*{作者简介}
+石洪雷，男，博士，CCF专业会员，太原理工大学，主要研究领域为微服务架构开发、智能体系统构建、智能运维与智能机器人应用开发。E-mail: \url{shihonglei0042@link.tyut.edu.cn}。
+
+赵涓涓，女，博士，CCF杰出会员，太原理工大学教授、博士生导师，长期从事智能信息处理、模式识别、情感计算、图像处理等方面的科研工作。E-mail: \url{zh_juanjuan@126.com}。
+
+\end{document}

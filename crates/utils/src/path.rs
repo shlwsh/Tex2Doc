@@ -54,15 +54,21 @@ impl PathResolver {
 
         // 1. 原样
         out.push(normalize(target.to_path_buf()));
+        // 1b. 自动补 .tex 扩展（LaTeX `\input{file}` 约定）
+        push_with_tex_ext(&mut out, target);
 
         // 2. 相对 base_dir
         if let Some(base) = &self.base_dir {
-            out.push(normalize(base.join(target)));
+            let joined = base.join(target);
+            out.push(normalize(joined.clone()));
+            push_with_tex_ext(&mut out, &joined);
         }
 
         // 3. graphicspath
         for gp in &self.graphics_paths {
-            out.push(normalize(gp.join(target)));
+            let joined = gp.join(target);
+            out.push(normalize(joined.clone()));
+            push_with_tex_ext(&mut out, &joined);
         }
 
         out
@@ -72,6 +78,32 @@ impl PathResolver {
 fn normalize(p: PathBuf) -> PathBuf {
     let s = p.to_string_lossy().replace('\\', "/");
     PathBuf::from(s)
+}
+
+/// 若 `target` 不带 LaTeX 识别的扩展名（`.tex` / `.ltx` / `.cls` / `.sty` / `.bib`），
+/// 追加 `.tex` 作为候选，模拟 LaTeX `\input{file}` 的默认行为。
+fn push_with_tex_ext(out: &mut Vec<PathBuf>, target: &Path) {
+    let has_known_ext = target
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| {
+            let e = e.to_ascii_lowercase();
+            e == "tex" || e == "ltx" || e == "cls" || e == "sty" || e == "bib"
+        })
+        .unwrap_or(false);
+    if !has_known_ext {
+        let mut p = target.to_path_buf();
+        let cur = p.extension().map(|e| e.to_os_string()).unwrap_or_default();
+        if !cur.is_empty() {
+            // 已有未知扩展：保留并追加 .tex（不覆盖）
+            let mut s = p.into_os_string();
+            s.push(".tex");
+            p = s.into();
+        } else {
+            p.set_extension("tex");
+        }
+        out.push(normalize(p));
+    }
 }
 
 /// 从 `\graphicspath{{a/{b}c}}` 这类花括号嵌套中提取路径列表。

@@ -7,21 +7,56 @@
 //! 4. 降级到 `semantic-ast`
 //! 5. docx-writer 序列化 + ZIP 打包
 
+use std::path::{Path, PathBuf};
+
 use doc_latex_reader::{lower_to_document, parse_tex, IncludeGraph};
 use doc_semantic_ast::Document;
-use doc_utils::{DocError, DocResult, VirtualFs};
+use doc_utils::VirtualFs;
 
 use crate::error::CoreError;
 use crate::options::ConvertOptions;
 use crate::result::{ConvertResult, ProgressEvent, ProgressPhase};
 
 /// 同步转换入口（V1 M1-M2）。
+///
+/// 仅把 `main_tex` 文本装载到空 VFS；`\input{...}` 解析依赖调用方事先把
+/// 所有 include / graphicspath 资源以 attachment 形式或经 [`convert_dir`] 提供。
 pub fn convert_sync(
     main_tex: &str,
     source: &str,
     _options: &ConvertOptions,
 ) -> Result<ConvertResult, CoreError> {
     let doc = parse_tex_to_doc(main_tex, source)?;
+    let docx = doc_docx_writer::pack(&doc).map_err(|e| CoreError::Serialize(e.0))?;
+    Ok(ConvertResult {
+        docx,
+        warnings: vec![],
+    })
+}
+
+/// 同步转换入口：以真实项目根目录为底座，挂载全部文件后转换 `main_tex`。
+///
+/// 适合本地 / CLI 场景：把 `project_root` 下的 `.tex` / `.bib` / 图片等
+/// 全部映射到 VFS，然后按 `main_tex`（相对 `project_root`）构建 include
+/// 拓扑并完成解析 → 降级 → 打包。
+pub fn convert_dir(
+    project_root: &Path,
+    main_tex: &Path,
+    _options: &ConvertOptions,
+) -> Result<ConvertResult, CoreError> {
+    let mut vfs = VirtualFs::new();
+    vfs.mount_dir(project_root).map_err(|e| CoreError::Io(e.to_string()))?;
+
+    let main_rel = relative_to_root(project_root, main_tex)?;
+    let main_posix = main_rel.to_string_lossy().replace('\\', "/");
+    let source_bytes = vfs
+        .read(&main_posix)
+        .map_err(|e| CoreError::Parse(format!("读取主文件失败：{e}")))?
+        .to_vec();
+    let source = String::from_utf8(source_bytes)
+        .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
+
+    let doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
     let docx = doc_docx_writer::pack(&doc).map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
         docx,
@@ -55,12 +90,27 @@ pub async fn convert_stream(
 pub(crate) fn parse_tex_to_doc(main_tex: &str, source: &str) -> Result<Document, CoreError> {
     let mut vfs = VirtualFs::new();
     vfs.insert(main_tex, source.as_bytes().to_vec());
-    let graph = IncludeGraph::build(&vfs, std::path::Path::new(main_tex))?;
-    let joined = graph.join(&vfs)?;
+    parse_tex_with_vfs(main_tex, source, &mut vfs)
+}
+
+/// 内部：复用同一 VFS（含 include / graphics 资源）→ Document。
+fn parse_tex_with_vfs(
+    main_tex: &str,
+    _source: &str,
+    vfs: &mut VirtualFs,
+) -> Result<Document, CoreError> {
+    let graph = IncludeGraph::build(vfs, Path::new(main_tex))?;
+    let joined = graph.join(vfs)?;
     let parse = parse_tex(&joined.text);
     Ok(lower_to_document(&parse, Some(&joined)))
 }
 
-pub(crate) fn to_doc_err(e: DocError) -> CoreError {
-    e.into()
+fn relative_to_root(root: &Path, p: &Path) -> Result<PathBuf, CoreError> {
+    if p.is_absolute() {
+        p.strip_prefix(root)
+            .map(Path::to_path_buf)
+            .map_err(|_| CoreError::Parse(format!("主文件 {p:?} 不在项目根 {root:?} 之下")))
+    } else {
+        Ok(p.to_path_buf())
+    }
 }

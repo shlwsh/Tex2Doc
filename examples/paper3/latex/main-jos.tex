@@ -1,0 +1,166 @@
+% !TEX encoding = UTF-8
+% !LW recipe = XeLaTeX (软件学报 rjthesis)
+% 《软件学报》排版稿 — 基于 docs/latex-models/software-journal/rjthesis.cls
+% 编译：./scripts/build_pdf_jos.sh
+% 使用系统 Noto CJK 字体，避免 IDE/TeX Live 下 Fandol 的 Script=CJK 警告
+\PassOptionsToClass{fontset=fandol,twoside,UTF8}{ctexart}
+\documentclass{rjthesis}
+\raggedbottom
+% 重新声明页面尺寸：ctexart 内部加载 geometry 会覆盖 cls 中的设置
+% Word 模板: top=1.00cm(纸边→正文)
+% 首页题头由 \rjmaketitle 作为正文起始内容排入。
+\geometry{
+  paperwidth=18.40cm, paperheight=26.00cm,
+  left=1.45cm, right=1.45cm,
+  top=1.00cm, bottom=2.20cm,
+  headheight=13pt,
+  headsep=0.3cm,
+  footskip=1.0cm
+}
+% Fandol 字体集包含仿宋和隶书
+\providecommand{\fangsong}{\kaishu}
+\providecommand{\lishu}{\songti}
+\usepackage{graphicx}
+\graphicspath{{../figures/}}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{float}
+\usepackage[super,square,sort&compress]{natbib}
+\usepackage{hyperref}
+\usepackage{bookmark}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue,urlcolor=blue}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\setlength{\textfloatsep}{2pt plus 1pt minus 1pt}
+\setlength{\floatsep}{2pt plus 1pt minus 1pt}
+\setlength{\intextsep}{2pt plus 1pt minus 1pt}
+\setlength{\abovecaptionskip}{1pt}
+\setlength{\belowcaptionskip}{1pt}
+\providecommand{\kai}{\kaishu}
+\newCJKfontfamily\rjrare{Droid Sans Fallback}
+
+% ---------- 元数据 ----------
+\rjhead{石\hspace{1em}洪\hspace{1em}雷\hspace{1em}等:网关流量驱动的微服务定向日志采集框架}
+\fancyhead[RE]{\xiaowuhao{}\textit{\xiaowuhao{} Journal of Software} {\kai 软件学报}}
+
+\rjtitle{网关流量驱动的微服务定向日志采集框架}
+\rjauthor{石\hspace{1em}洪\hspace{1em}雷, 赵\hspace{1em}涓\hspace{1em}涓}
+\rjinfor{（太原理工大学，山西 太原  030024）\\
+通讯作者: 石洪雷, E-mail: shihonglei0042@link.tyut.edu.cn
+}
+
+\begin{document}
+
+\rjmaketitle
+\let\thefootnote\relax\footnotetext{\xiaowuhao\song{} 收稿时间: XXXX-XX-XX; 修改时间: XXXX-XX-XX; 采用时间: XXXX-XX-XX}
+
+\input{sections/zh/00_abstract}
+
+\begin{rjabstract}
+\AbstractContentZh
+\end{rjabstract}
+\rjkeywords{\KeywordsZh}
+\rjcategory{TP311}
+
+% ---------- 引用格式（2025 模板：分中文/英文两段）----------
+\begin{flushleft}
+\xiaowuhao
+{\hei 中文引用格式:}\hspace{1em}{\kai 石洪雷, 赵涓涓. 网关流量驱动的微服务定向日志采集框架. 软件学报. \url{http://www.jos.org.cn/1000-9825/0000.htm}}
+
+\vspace{0.3em}
+{\hei 英文引用格式:}\hspace{1em}{\kai Shi HL, Zhao JJ. Gateway-traffic-driven microservice directed log collection framework. Ruan Jian Xue Bao/Journal of Software (in Chinese). \url{http://www.jos.org.cn/1000-9825/0000.htm}}
+\end{flushleft}
+
+% ---------- 英文标题/作者/机构（2025 模板格式）----------
+\begin{flushleft}
+{\wuhao\textbf{Gateway-Traffic-Driven Microservice Directed Log Collection Framework}}
+
+\vspace{5pt}
+{\xiaowuhao
+SHI Hong-Lei, ~ZHAO Juan-Juan}
+
+\vspace{5pt}
+{\fontsize{7.5pt}{12pt}\selectfont\song
+(College of Computer Science and Technology, Taiyuan University of Technology, Taiyuan 030024, China)}
+\end{flushleft}
+
+% ---------- 英文摘要/关键词 ----------
+\begin{flushleft}
+\xiaowuhao
+{\hei Abstract:}\hspace{1em}{\kai
+\AbstractContentEn
+}
+
+\vspace{0.6em}
+{\hei Key words:}\hspace{1em}{\kai \KeywordsEn}
+\end{flushleft}
+
+% ---------- 正文（与计算机学报版共用章节源文件）----------
+\input{sections/zh/01_intro.tex}
+\input{sections/zh/02_related.tex}
+\input{sections/zh/03_system.tex}
+\input{sections/zh/04_algorithms.tex}
+\input{sections/zh/05_implementation.tex}
+\input{sections/zh/06_experiments.tex}
+\input{sections/zh/07_conclusion.tex}
+
+\vspace{1em}
+\noindent{\xiaowuhao\song
+本文撰写与实验脚本生成过程中使用了大语言模型辅助，作者对全部内容与数据负责。}
+
+\bibliographystyle{unsrt}
+\bibliography{references}
+
+% ---------- 附中文参考文献（2025 模板格式）----------
+\vspace{0.5em}
+\noindent{\xiaowuhao\hei 附中文参考文献:}
+
+\noindent{\xiaowuhao\song
+\begin{description}[font=\normalfont,labelwidth=2em,leftmargin=2.5em,nosep]
+\item[{[5]}] 冯志勇, 徐砚伟, 薛霄, 陈世展. 微服务技术发展的现状与展望. 计算机研究与发展, 2020, 57(5): 1103--1122.
+\item[{[6]}] 吴化尧, 邓文俊. 面向微服务软件开发方法研究进展. 计算机研究与发展, 2020, 57(3): 525--541.
+\item[{[7]}] 廖湘科, 李姗姗, 董威, 贾周阳, 刘晓东, 周书林. 大规模软件系统日志研究综述. 软件学报, 2016, 27(8): 1934--1947. \url{http://www.jos.org.cn/1000-9825/4910.htm}
+\item[{[8]}] 李明树, 张艳, 王涛, 刘俊. 大规模分布式系统日志管理技术综述. 软件学报, 2019, 30(7): 1959--1979.
+\item[{[11]}] 包航宇, 殷康{\rjrare 璘}, 曹立, 李世宁, 等. 智能运维的实践: 现状与标准化. 软件学报, 2023, 34(9): 4069--4095.
+\item[{[12]}] 贾统, 李影, 吴中海. 基于日志数据的分布式软件系统故障诊断综述. 软件学报, 2020, 31(7): 1997--2018.
+\item[{[13]}] 陈彦宁, 张广艳, 陈康. 面向云数据中心多语法日志通用异常检测机制. 计算机研究与发展, 2020, 57(9): 1844--1856.
+\item[{[16]}] 魏钧宇, 张广艳, 陈军超. 数据模式感知的低成本云日志存储系统. 计算机研究与发展, 2023, 60(11): 2442--2452.
+\item[{[21]}] 杨勇, 李影, 吴中海. 分布式追踪技术综述. 软件学报, 2020, 31(7): 2019--2039.
+\item[{[22]}] 黄梓程, 陈鹏飞, 余广坝, 陈泓仰. 面向Java微服务系统的透明请求追踪及采样方法. 软件学报, 2023, 34(7): 3167--3187.
+\item[{[23]}] 尤勇, 汪浩, 任天, 顾胜晖, 孙佳林. 一种监控系统的链路跟踪型日志数据的存储设计. 软件学报, 2021, 32(5): 1302--1321.
+\item[{[24]}] 于庆洋, 白晓颖, 李明杰, 李奇原, 刘涛, 刘泽胤, 裴丹. 基于调用链控制流分析的大型微服务系统性能建模与异常定位. 软件学报, 2022, 33(5): 1849--1864.
+\item[{[25]}] 张齐勋, 吴一凡, 杨勇, 贾统, 李影, 吴中海. 微服务系统服务依赖发现技术综述. 软件学报, 2024, 35(1): 118--135.
+\item[{[26]}] 王璐, 姜宇轩, 李青山, 等. 微服务故障检测研究综述. 计算机学报, 2023, 46(11): 2342--2373.
+\item[{[27]}] 王智宇, 王涛, 张文博, 陈宁江, 左春. 一种基于执行轨迹监测的微服务故障诊断方法. 软件学报, 2017, 28(6): 1435--1454.
+\item[{[32]}] 刘敏, 周傲英. 面向微服务架构的容器级弹性资源供给方法. 计算机研究与发展, 2017, 54(5): 957--967.
+\item[{[39]}] 梅御东, 陈旭, 孙毓忠, 等. 一种基于日志信息和CNN-text的软件系统异常检测方法. 计算机学报, 2020, 43(2): 524--544.
+\item[{[43]}] 周小晖, 王意洁, 徐鸿祚, 刘铭宇. 基于融合学习的无监督多维时间序列异常检测. 计算机研究与发展, 2023, 60(3): 496--508.
+\item[{[44]}] 方浩天, 李春花, 王清, 周可. 一种基于深度学习的微服务性能异常检测方法. 计算机研究与发展, 2024, 61(3): 600--613.
+\item[{[48]}] 丁丹, 彭鑫, 郭晓峰, 张健, 吴毅坚. 场景驱动且自底向上的单体系统微服务拆分方法. 软件学报, 2020, 31(11): 3461--3480.
+\item[{[49]}] 贾统, 李影, 张齐勋, 吴中海. 基于程序层次树的日志打印位置决策方法. 软件学报, 2021, 32(9): 2713--2728.
+\end{description}
+}
+
+% ---------- 作者简介（2025 模板：纯文本格式，六号字悬挂缩进）----------
+\vspace{0.5em}
+\noindent{\xiaowuhao\textbf{\hei 作者简介}}
+
+\begingroup
+\fontsize{7.5pt}{11.5pt}\selectfont
+\begin{list}{}{%
+  \leftmargin=2em
+  \itemindent=-2em
+  \labelwidth=0pt
+  \labelsep=0pt
+  \parsep=0pt
+  \itemsep=4pt
+  \topsep=0pt
+}
+\item {\hei 石洪雷}，博士，CCF专业会员，主要研究领域为微服务架构开发、智能体系统构建、智能运维与智能机器人应用开发。
+\par\noindent E-mail: \nolinkurl{shihonglei0042@link.tyut.edu.cn}
+\item {\hei 赵涓涓}，博士，教授，博士生导师，CCF杰出会员，主要研究领域为智能信息处理、模式识别、情感计算、图像处理。
+\par\noindent E-mail: \nolinkurl{zh_juanjuan@126.com}
+\end{list}
+\endgroup
+
+
+\end{document}

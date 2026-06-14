@@ -14,14 +14,32 @@
 
 use doc_semantic_ast::{Block, Document, Span, TableCell, TableRow, TextRun, TextStyle};
 
+use crate::expand::{expand_macros_in, MacroMap};
 use crate::include::JoinedStream;
 use crate::parser::Parse;
 
 /// 降级入口。
 pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Document {
+    // 内部新建宏表，自包含。
+    let mut owned = MacroMap::new();
+    lower_with_macros(parse, joined, &mut owned)
+}
+
+/// 共享宏表降级（外部可传入已收集的宏表）。
+pub fn lower_with_macros(
+    parse: &Parse,
+    joined: Option<&JoinedStream>,
+    macros: &mut MacroMap,
+) -> Document {
     let text = joined
         .map(|j| j.text.clone())
         .unwrap_or_else(|| parse.source.clone());
+    // 第一步：宏展开（带共享宏表）。
+    // outer 收集 `\newcommand` 进入 macros，inner 段（rjabstract 等）复用同表
+    // 即可解析 `\AbstractContentZh` 这类宏调用。
+    let text = expand_macros_in(&text, macros);
+    // 第二步：跳过 preamble。
+    let text = strip_preamble(&text);
     let mut doc = Document::new();
     let mut buffer = String::new();
     let mut buffer_start = 0u32;
@@ -42,7 +60,7 @@ pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Docume
         // 环境优先
         if let Some((name, body, end)) = scan_environment(&text, pos) {
             flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span);
-            let blk = lower_environment(name, body, default_span);
+            let blk = lower_environment(name, body, default_span, macros);
             doc.push(blk);
             pos = end;
             continue;
@@ -52,6 +70,14 @@ pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Docume
         if let Some((consumed, block)) = try_top_level_command(&text[pos..], default_span) {
             flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span);
             doc.push(block);
+            pos += consumed;
+            continue;
+        }
+
+        // 顶层「元数据 / 装饰」命令：吞掉，不进段落流。
+        // 见 [`try_top_level_metadata_command`] 注释。
+        if let Some((consumed, _)) = try_top_level_metadata_command(&text[pos..]) {
+            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span);
             pos += consumed;
             continue;
         }
@@ -127,6 +153,28 @@ fn skip_whitespace_and_comment(text: &str, mut pos: usize) -> Option<usize> {
     }
 }
 
+/// 跳过 `\begin{document}` 之前的 preamble（documentclass / usepackage / geometry / ...）。
+///
+/// LaTeX preamble 全部是「导言设置」，与 Word 文档正文无关，混入段落流会
+/// 污染 docx 输出（`{ctexart}`、`\PassOptionsToClass{...}{ctexart}` 等）。本函数
+/// 找到 `\begin{document}` 的位置，截取其后的内容；找不到则返回原文（视为退化）。
+fn strip_preamble(text: &str) -> &str {
+    let needle = "\\begin{document}";
+    match text.find(needle) {
+        Some(idx) => {
+            let after = idx + needle.len();
+            // 同时跳过 `\begin{document}` 之后的可选空白行
+            let bytes = text.as_bytes();
+            let mut p = after;
+            while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n' || bytes[p] == b'\r') {
+                p += 1;
+            }
+            &text[p..]
+        }
+        None => text,
+    }
+}
+
 /// 顶层段命令：\section / \subsection / \subsubsection / \paragraph / \caption
 fn try_top_level_command(s: &str, span: Span) -> Option<(usize, Block)> {
     let prefixes: &[(&str, fn(&str, Span) -> Block)] = &[
@@ -179,6 +227,106 @@ fn try_top_level_command(s: &str, span: Span) -> Option<(usize, Block)> {
     None
 }
 
+/// 顶层「元数据 / 装饰」命令：直接吞掉，不产出块。
+///
+/// rjthesis / ctexart 模板里 `\rjtitle{...}`、`\rjauthor{...}`、`\rjinfor{...}`、
+/// `\fancyhead[...]{...}`、`\hypersetup{...}`、`\bibliographystyle{...}` 等都属此类：
+/// 它们设置页眉 / 元数据 / 引用样式，对 Word 文档正文无视觉贡献，留着只会污染段落流。
+/// 返回值 `(consumed, true)` 表示成功剥离 `consumed` 字节。
+fn try_top_level_metadata_command(s: &str) -> Option<(usize, bool)> {
+    const META_CMDS: &[&str] = &[
+        "rjtitle",
+        "rjauthor",
+        "rjinfor",
+        "rjhead",
+        "rjkeywords",
+        "rjcategory",
+        "rjmaketitle",
+        "fancyhead",
+        "fancyfoot",
+        "fancyhf",
+        "bibliographystyle",
+        "bibliography",
+        "hypersetup",
+        "graphicspath",
+        "newCJKfontfamily",
+        "providecommand",
+        "newcommand",
+        "renewcommand",
+        "setlength",
+        "geometry",
+        "PassOptionsToClass",
+        "documentclass",
+        "usepackage",
+        "newif",
+        "newcounter",
+        "newlength",
+        "newenvironment",
+        "newtheorem",
+        "newlabel",
+        "pagestyle",
+        "thispagestyle",
+        "linespread",
+        "fontsize",
+        "selectfont",
+        "CJKfamily",
+        "songti",
+        "kaishu",
+        "fangsong",
+        "heiti",
+        "lishu",
+        "kai",
+        "hei",
+        "song",
+        "wuhao",
+        "xiaowuhao",
+        "xiaosihao",
+        "sihao",
+    ];
+    for cmd in META_CMDS {
+        if let Some(rest) = s.strip_prefix(&format!("\\{cmd}")) {
+            // 跳过可选空白
+            let bytes = rest.as_bytes();
+            let mut k = 0;
+            while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+                k += 1;
+            }
+            // 必须以 `[` 或 `{` 起始（rj 类 / fancyhead 类 / hypersetup 类等带可选 [...]）
+            if k >= bytes.len() || (bytes[k] != b'{' && bytes[k] != b'[') {
+                continue;
+            }
+            // 吃掉所有可选 `[..]` 与 `{..}` 配对，直到行尾或遇到非命令字符
+            let mut p = k;
+            while p < bytes.len() {
+                if bytes[p] == b'[' {
+                    if let Some(close) = rest[p..].find(']') {
+                        p += close + 1;
+                    } else {
+                        break;
+                    }
+                } else if bytes[p] == b'{' {
+                    if let Some(off) = find_matching_brace(rest, p) {
+                        p = p + 1 + off + 1;
+                    } else {
+                        break;
+                    }
+                } else {
+                    break;
+                }
+                // 跳过组间空白
+                while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
+                    p += 1;
+                }
+            }
+            // 把「到行尾」或「下一个未配对字符」也吃掉，避免下一行被串联
+            let line_end = rest[p..].find('\n').map(|n| p + n).unwrap_or(rest.len());
+            let consumed = (cmd.len() + 1) + line_end;
+            return Some((consumed, true));
+        }
+    }
+    None
+}
+
 /// 寻找 `\\begin{name}`；找到则返回 `(name, body_inclusive_braces, end_pos)`。
 /// 失败返回 None；遇到未闭合自动补齐。
 fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
@@ -207,7 +355,7 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
 }
 
 /// 环境 → 块的降级分派。
-fn lower_environment(name: &str, body: &str, span: Span) -> Block {
+fn lower_environment(name: &str, body: &str, span: Span, macros: &mut MacroMap) -> Block {
     match name {
         "itemize" => lower_list(body, false, span),
         "enumerate" => lower_list(body, true, span),
@@ -223,7 +371,7 @@ fn lower_environment(name: &str, body: &str, span: Span) -> Block {
             // 直接递归降级 body
             let mut sub = Document::new();
             let p = crate::parser::parse(body);
-            let doc2 = lower_to_document(&p, None);
+            let doc2 = lower_with_macros(&p, None, macros);
             for b in doc2.blocks {
                 sub.push(b);
             }
@@ -233,10 +381,37 @@ fn lower_environment(name: &str, body: &str, span: Span) -> Block {
                 span,
             })
         }
+        // 段落容器类环境：递归降级为段落序列，折叠为第一个非空块。
+        // （rjthesis / ctexart 模板里大量使用这类「无视觉变化」的语义容器。）
+        "flushleft" | "flushright" | "center" | "quote" | "quotation" | "verbatim"
+        | "rjabstract" | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor"
+        | "rjinfor" | "rjmaketitle" => lower_paragraph_container(body, span, macros),
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
         },
+    }
+}
+
+/// 把段落容器环境（`flushleft` / `quote` / `rjabstract` / ...）的 body
+/// 递归降级为块序列，折叠成第一个「非空」块；若全部为空则返回 RawFallback。
+///
+/// 行为契约：
+/// - 多个段落的环境（典型如 `flushleft` 包多行）会被压扁成首个块；
+///   这一点与现有 `document` 折叠策略一致，避免新增 Block::Container 变体。
+/// - 内容非空时输出 Paragraph（带清洗后的 run），空时输出 RawFallback（占位）。
+fn lower_paragraph_container(body: &str, span: Span, macros: &mut MacroMap) -> Block {
+    let p = crate::parser::parse(body);
+    let sub = lower_with_macros(&p, None, macros);
+    for b in sub.blocks {
+        match b {
+            Block::RawFallback { .. } => continue,
+            other => return other,
+        }
+    }
+    Block::RawFallback {
+        text: body.to_string(),
+        span,
     }
 }
 
@@ -450,6 +625,11 @@ fn find_matching_brace(s: &str, pos: usize) -> Option<usize> {
 }
 
 /// 去掉行内的简单控制序列（V1 简化）。
+///
+/// 关键：**逐字节**走 `i`，但凡要把字符写入 `out` 时，**必须**走 `chars().next()`
+/// 拿到完整的 `char`（可能 1-4 字节），再用 `char.len_utf8()` 推进 `i`——
+/// 绝不能 `bytes[i] as char`，那会把 UTF-8 多字节字符的字节当 Latin-1 字符再编码，
+/// 形成「mojibake 二次编码」（如「微」`E5 BE AE` 被错误写成 `C3 A5 C2 BE C2 AE`）。
 fn strip_inline(line: &str) -> String {
     let mut out = String::with_capacity(line.len());
     let bytes = line.as_bytes();
@@ -461,8 +641,13 @@ fn strip_inline(line: &str) -> String {
             if c == b'$' {
                 in_math = false;
             }
-            out.push(c as char);
-            i += 1;
+            // 把当前字符（含多字节）原样写出去
+            if let Some(ch) = line[i..].chars().next() {
+                out.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+            }
             continue;
         }
         if c == b'$' {
@@ -517,7 +702,7 @@ fn strip_inline(line: &str) -> String {
                 }
             }
             // \href / \url / \emph 已经处理
-            if matches!(cmd, "href" | "url" | "ref" | "cite" | "label" | "footnote") {
+            if matches!(cmd, "href" | "url" | "ref" | "cite" | "label" | "footnote" | "nolinkurl") {
                 if has_arg {
                     if let Some(off) = find_matching_brace(line, k) {
                         // 多个可选 [..] 参数 + 必选 {..}；简化：吃所有 {…} 拼接
@@ -544,6 +729,32 @@ fn strip_inline(line: &str) -> String {
                     }
                 }
             }
+            // 纯装饰 inline 命令（无视觉含义）：整段吞掉，仅保留 \par 触发换行
+            if matches!(cmd, "hspace" | "vspace" | "bigskip" | "medskip" | "smallskip" | "noindent" | "indent" | "quad" | "qquad" | "mbox" | "hbox" | "vbox" | "textsuperscript" | "textsubscript" | "today" | "protect" | "linebreak" | "pagebreak" | "newpage" | "newline" | "hfill" | "vfill" | "dotfill") {
+                if has_arg {
+                    if let Some(off) = find_matching_brace(line, k) {
+                        i = k + 1 + off + 1;
+                        continue;
+                    }
+                }
+                i = j;
+                continue;
+            }
+            // 字体 / 字号切换命令：吞命令、保留参数文本（V1 简化，不带字体信息）
+            if matches!(
+                cmd,
+                "hei" | "song" | "kai" | "kaishu" | "fangsong" | "lishu" | "you" | "wuhao" | "xiaowuhao" | "xiaosihao" | "sihao"
+            ) {
+                if has_arg {
+                    if let Some(off) = find_matching_brace(line, k) {
+                        out.push_str(&line[k + 1..k + 1 + off]);
+                        i = k + 1 + off + 1;
+                        continue;
+                    }
+                }
+                i = j;
+                continue;
+            }
             if has_arg {
                 if let Some(off) = find_matching_brace(line, k) {
                     i = k + 1 + off + 1;
@@ -553,8 +764,13 @@ fn strip_inline(line: &str) -> String {
             i = j;
             continue;
         }
-        out.push(c as char);
-        i += 1;
+        // fallthrough：非 ASCII 字节的字符走 char 迭代，避免 mojibake 二次编码
+        if let Some(ch) = line[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
+        } else {
+            i += 1;
+        }
     }
     out
 }
