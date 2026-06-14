@@ -1,0 +1,71 @@
+% !TEX root = ../../main-jos.tex
+\section{关键算法}
+
+本节详述框架的三个核心机制：关注清单如何从网关流量中动态生成、定向策略如何在三层之间保持语义一致、以及节点侧如何在资源受限下保障可靠传输。
+
+\subsection{关注清单动态生成}
+\textbf{输入}：时间窗口内网关流量日志集合 $L=\{l_1,\ldots,l_N\}$；定向策略 $S$（响应时延阈值 $T$、错误码集合 $E$）。\\
+\textbf{输出}：关注清单 $A=\{(p_i,w_i)\}$，$p_i$ 为泛化 URL 模式，$w_i$ 为权重。
+
+\begin{algorithm}[H]
+\caption{关注清单动态生成}\label{alg:attention}
+\KwIn{流量日志集合 $L$，策略 $S=(T,E,K,\mathrm{TTL})$}
+\KwOut{关注清单 $A$}
+$H \leftarrow \emptyset$\;
+\ForEach{$l \in L$}{
+  \If{$\mathrm{rt}(l) > T$ \textbf{or} $\mathrm{status}(l) \in E$}{
+    $p \leftarrow \mathrm{Generalize}(l.\mathrm{url})$ \tcp*{数字→\{id\}，UUID→\{uuid\}}
+    $H[p].\mathrm{count} \leftarrow H[p].\mathrm{count} + 1$\;
+    $H[p].\mathrm{severity} \leftarrow \max(H[p].\mathrm{severity},\, \mathrm{Sev}(l))$\;
+  }
+}
+\ForEach{$p \in H$}{
+  $w_p \leftarrow \alpha \cdot H[p].\mathrm{count} + \beta \cdot H[p].\mathrm{severity}$\;
+}
+$A \leftarrow \mathrm{TopK}(H, K)$ \tcp*{按 $w_p$ 降序取前 $K$ 项}
+\ForEach{$(p_i, w_i) \in A$}{附加 TTL\;}
+\Return{$A$}\;
+\end{algorithm}
+
+算法的核心思路很直接：先线性扫描 $N$ 条流量日志，把满足阈值条件的记录映射到 $M$ 个泛化 URL 模式（$M\leq N$），然后从中选出权重最高的 Top-$K$ 项。Top-$K$ 选取有两种实现方式：一种是全量排序，复杂度为 $O(N+M\log M)$，上界可简写为 $O(N\log N)$；另一种是维护一个大小为 $K$ 的最小堆，复杂度为 $O(N+M\log K)$，当 $K \ll M$ 时效率更高。当前原型采用排序实现，主要是便于审计和复现实验。
+
+URL 泛化规则包括：纯数字路径段映射为 \texttt{\{id\}}，UUID 或长哈希段映射为 \texttt{\{uuid\}}，查询参数按键名归一化。这样一来，Apache Combined 风格的访问日志就能直接转换为关注清单项。如果遇到加密日志、非 URL 型业务日志，或者异常极稀疏的窗口，算法会退化为仅保留 ERROR 级别的兜底规则。后文微基准测试显示，处理 5000 条合成日志大约耗时 15\,ms。和 Promtail 依赖静态标签配置不同，本算法以网关 access log 为策略输入，能动态识别高价值 URL 模式。
+
+\subsection{固定缓存块}
+每个节点预先分配一块固定大小的内存 $B$（默认 64--128\,MB），内部组织为环形队列，同时约束条目数和字节数。当占用率超过阈值 $\theta$（默认 80\%）或定时器触发时，就异步做 gzip 压缩上传；队列满了则按 FIFO 策略淘汰最旧的条目，确保内存使用始终有界。
+
+\subsection{定向策略三次转换}
+为了让策略在不同层级之间保持语义一致，本文设计了三次转换机制（表~\ref{tab:strategy_transform}、图~\ref{fig:transform}）：
+\begin{table}[H]
+  \centering
+  \small
+  \caption{定向策略三次转换阶段说明}\label{tab:strategy_transform}
+  \begin{tabular*}{\textwidth}{@{\extracolsep{\fill}}llll}
+    \toprule
+    阶段 & 输入 & 输出 & 作用 \\
+    \midrule
+    第一次 & 定向策略 $S$ & 网关采集规则 & Nginx 预筛选（阈值 $T/5$） \\
+    第二次 & 网关日志+$S$ & Agent 过滤规则 & 驱动节点定向采集 \\
+    第三次 & 关注清单+服务日志 & Loki 存储规则 & 中心二次过滤与入库 \\
+    \bottomrule
+  \end{tabular*}
+\end{table}
+
+三次转换能正确工作，靠的是两个前提：同一关注清单版本号 $v$ 和同一 URL 泛化函数 $\mathrm{Generalize}(\cdot)$。第一次转换用一个较宽松的阈值筛选流量日志，目的是不在网关侧过早丢掉潜在异常。第二次转换把候选集合压缩为 Top-$K$ URL 模式，让 Agent 本地的匹配规则与中心策略保持一致。第三次转换在入库前校验清单版本、TTL 和去重键，过滤掉过期或重复的日志。这样一来，只要服务日志中的 URL 字段可以用同一泛化函数解析，而且清单 TTL 没有过期，节点侧命中的日志就不会在中心侧因为策略语义漂移而被错误丢弃。如果遇到字段缺失或格式不兼容的情况，系统会按 ERROR 级别的兜底规则处理，并在 Center 记录未匹配原因。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.92\textwidth]{fig2_triple_transform.pdf}
+  \caption{定向策略三次转换算法流程}\label{fig:transform}
+\end{figure}
+\subsection{压力感知指数退避}
+上传失败时，第 $n$ 次重试前的等待时间定义为
+\begin{equation}
+d_n=\min\bigl(d_{\max},\, d_0\rho^n+\mathrm{rand}(0,\,d_0\rho^n\xi)\bigr).\label{eq:backoff}
+\end{equation}
+其中 $n$ 是当前重试序号，$d_0{=}200$\,ms 是初始延迟，$\rho{=}2.0$ 是指数增长因子，$d_{\max}{=}30$\,s 是单次等待的上界，$\xi{=}0.3$ 是随机抖动系数，$\mathrm{rand}(\cdot)$ 是均匀随机扰动。当前实现最多重试 6 次；节点资源压力大时 $d_n$ 会翻倍；如果遇到不可重试的错误，则直接写入 BoltDB 本地兜底。延迟分布见图~\ref{fig:backoff}。
+\begin{figure}[H]
+  \centering
+  \includegraphics[width=0.75\textwidth]{fig5_backoff_distribution.pdf}
+  \caption{指数退避重试延迟分布}\label{fig:backoff}
+\end{figure}
+由于 $d_n$ 被 $d_{\max}$ 截断，且最大重试次数固定为 6，单批日志的在线重试等待时间有明确的上界：正常压力下不超过 $6d_{\max}$，高压翻倍时不超过 $12d_{\max}$。超过重试上限后，这批日志会进入本地 BoltDB 兜底队列，后续由后台恢复任务按清单版本重新上传。这就避免了无限重试把 Sidecar 资源耗尽的风险。

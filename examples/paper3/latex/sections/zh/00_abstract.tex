@@ -1,0 +1,18 @@
+% 摘要与关键词（共享内容，供 main-zh.tex 和 main-jos.tex 引用）
+% 修改摘要只需编辑此文件，两个入口文件自动同步。
+
+% ========== 中文摘要 ==========
+\newcommand{\AbstractContentZh}{%
+微服务架构下，日志来源高度分散、格式各异，总量随并发请求线性增长，节点资源、网络带宽和集中存储的压力随之显著增加。传统全量采集模式难以兼顾高价值日志保留与系统开销控制。本文提出一种网关驱动的分布式定向日志采集框架，核心思路是``只采必要日志''。主要架构贡献包括四个方面：（1）构建网关预筛选、节点定向采集与中心二次过滤的三层协同架构，以 Sidecar 模式部署，从源头实现采集前端减量；（2）设计基于网关流量日志（URL、状态码、响应时延）的动态 Top-$K$ 关注清单生成机制，无需静态配置或业务代码侵入即可实时识别高价值 URL 模式；（3）提出定向策略三次转换算法，通过统一的 URL 泛化函数和清单版本控制维持跨层语义一致；（4）引入固定缓存块与压力感知指数退避机制，辅以 BoltDB 本地兜底，保障资源受限环境下的可靠传输。原型基于 Go 和 Grafana Loki 实现。八节点集群对比实验（180\,s、并发 50、$n{=}3$）显示，定向采集将 Loki 入库量从 4388$\pm$1 条降至 72 条（降幅 98.4\%，策略过滤独立贡献 67.8\%），Agent CPU 与内存开销分别降低 37.5\% 和 2.0\%。十六/三十二节点规模复核进一步验证了框架的可扩展性。该框架在显著降低日志入库量的同时有效保留了异常与慢请求的关键上下文，为微服务可观测性提供了高效、低侵入的采集前端解决方案。%
+}
+
+% ========== 英文摘要 ==========
+\newcommand{\AbstractContentEn}{%
+In microservice architectures, log sources are highly distributed with heterogeneous formats, and their aggregate volume grows linearly with request concurrency, imposing significant overhead on node resources, network bandwidth, and centralized storage. Traditional full-volume collection struggles to balance high-value log retention against system overhead. This paper proposes a gateway-driven distributed directed log collection framework guided by the principle of ``collect only what matters.'' The main architectural contributions span four aspects: (1) a three-layer collaborative architecture comprising gateway pre-filtering, node-side directed collection, and center-side secondary filtering, deployed in Sidecar mode to achieve volume reduction at the collection frontend; (2) a dynamic Top-$K$ attention list generation mechanism driven by gateway traffic logs (URLs, status codes, response latencies) that identifies high-value URL patterns at runtime without static configuration or application code modification; (3) a triple strategy transformation algorithm that maintains cross-layer policy semantic consistency through a unified URL generalization function and list version control; (4) fixed-size cache blocks coupled with pressure-aware exponential backoff and BoltDB local fallback to ensure reliable transmission under resource-constrained environments. A prototype built with Go and Grafana Loki is evaluated on a WSL/Docker cluster. Eight-node comparison experiments (180\,s, concurrency 50, $n{=}3$) show that directed collection reduces Loki-ingested logs from 4388$\pm$1 to 72 entries (98.4\% reduction; policy filtering alone contributes 67.8\%), while agent CPU and memory overhead decrease by 37.5\% and 2.0\%, respectively. Scale validations at 16 and 32 nodes further confirm the framework's scalability. The framework substantially reduces log ingestion volume while effectively retaining critical context for anomalous and slow requests, offering an efficient, low-intrusion collection-frontend solution for microservice observability.%
+}
+
+% ========== 中文关键词 ==========
+\newcommand{\KeywordsZh}{微服务;分布式日志采集;定向过滤;动态策略;指数退避;Grafana Loki}
+
+% ========== 英文关键词 ==========
+\newcommand{\KeywordsEn}{microservice; distributed directed log collection; attention list; dynamic policy; exponential backoff; Grafana Loki}
