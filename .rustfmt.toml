@@ -1,0 +1,14 @@
+# 统一格式化配置
+edition = "2021"
+max_width = 100
+tab_spaces = 4
+newline_style = "Unix"
+use_small_heuristics = "default"
+reorder_imports = true
+reorder_modules = true
+imports_granularity = "Crate"
+group_imports = "StdExternalCrate"
+format_strings = true
+format_macro_matchers = true
+trailing_comma = "Vertical"
+trailing_semicolon = true
