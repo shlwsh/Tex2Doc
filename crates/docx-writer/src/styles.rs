@@ -2,7 +2,7 @@
 //!
 //! 详见方案 §4.3.2 样式 ID 命名规范。
 
-use doc_utils::{FontProbe, FontStatus};
+use doc_utils::FontProbe;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 
@@ -84,7 +84,7 @@ fn write_default(
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
 
-    let mut rpr = BytesStart::new("w:rPr");
+    let rpr = BytesStart::new("w:rPr");
     let mut rfonts = BytesStart::new("w:rFonts");
     rfonts.push_attribute(("w:ascii", font));
     rfonts.push_attribute(("w:hAnsi", font));
@@ -133,6 +133,7 @@ pub fn apply_font_probes(styles_xml: &mut Vec<u8>, probes: &[FontProbe]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use doc_utils::FontStatus;
 
     #[test]
     fn apply_font_probes_no_change_when_empty() {

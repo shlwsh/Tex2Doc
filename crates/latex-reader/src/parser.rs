@@ -98,7 +98,7 @@ fn parse_into(text: &str, b: &mut GreenNodeBuilder<'static>) {
         b.finish_node();
         brace_depth -= 1;
     }
-    while let Some(_) = env_stack.pop() {
+    while env_stack.pop().is_some() {
         b.finish_node();
     }
     let _ = env_depth;

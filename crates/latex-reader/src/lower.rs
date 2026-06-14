@@ -30,6 +30,67 @@ pub struct NumberingState {
     table_counter: u32,
 }
 
+type PrefixHandler = fn(&str, Span, &mut NumberingState) -> Block;
+
+/// 顶层段命令：\section / \subsection / \subsubsection / \paragraph / \caption
+fn try_top_level_command(s: &str, span: Span, numbering: &mut NumberingState) -> Option<(usize, Block)> {
+    let prefixes: &[(&str, PrefixHandler)] = &[
+        ("\\section", |b, sp, n| Block::Heading {
+            level: 1,
+            text: b.to_string(),
+            number: Some(n.next_heading(1)),
+            span: sp,
+        }),
+        ("\\subsection", |b, sp, n| Block::Heading {
+            level: 2,
+            text: b.to_string(),
+            number: Some(n.next_heading(2)),
+            span: sp,
+        }),
+        ("\\subsubsection", |b, sp, n| Block::Heading {
+            level: 3,
+            text: b.to_string(),
+            number: Some(n.next_heading(3)),
+            span: sp,
+        }),
+        ("\\paragraph", |b, sp, n| Block::Heading {
+            level: 4,
+            text: b.to_string(),
+            number: Some(n.next_heading(4)),
+            span: sp,
+        }),
+        ("\\caption", |b, sp, _n| Block::Paragraph {
+            runs: vec![TextRun {
+                text: b.to_string(),
+                style: TextStyle::default(),
+                span: sp,
+            }],
+            span: sp,
+        }),
+    ];
+
+    for (prefix, handler) in prefixes {
+        if let Some(rest) = s.strip_prefix(prefix) {
+            let trimmed = rest.trim();
+            if trimmed.strip_prefix('{').is_some() {
+                if let Some(end) = find_matching_brace(trimmed, 0) {
+                    // end = 内部内容长度（ASCII-safe 情况下 = trimmed[1..end+1].len()）。
+                    // slice [1..end+1] 包含完整内部。consumed = prefix + leading-whitespace + `{` + end + `}`
+                    let slice_end = end + 1;
+                    if slice_end > trimmed.len() || !trimmed.is_char_boundary(slice_end) {
+                        return None;
+                    }
+                    let inner = &trimmed[1..slice_end];
+                    let consumed = prefix.len() + (rest.len() - trimmed.len()) + end + 2;
+                    return Some((consumed, handler(inner, span, numbering)));
+                }
+            }
+            return Some((prefix.len(), handler("", span, numbering)));
+        }
+    }
+    None
+}
+
 impl NumberingState {
     pub fn next_heading(&mut self, level: u8) -> String {
         let lvl = (level as usize).min(4);
@@ -110,8 +171,19 @@ pub fn lower_with_macros_and_numbering(
     let mut cite_numbers: HashMap<String, usize> = HashMap::new();
 
     while pos < len {
+        // 防御：pos 必须落在 char 边界上（CJK 字符可能让某些路径产生非边界 offset）
+        if !text.is_char_boundary(pos) {
+            // 字节级推进到下一个 char 起点
+            let mut next = pos + 1;
+            while next < len && !text.is_char_boundary(next) {
+                next += 1;
+            }
+            pos = next;
+            continue;
+        }
+
         // 跳过空白 / 注释
-        if let Some(next) = skip_whitespace_and_comment(&text, pos) {
+        if let Some(next) = skip_whitespace_and_comment(text, pos) {
             if next != pos {
                 pos = next;
                 continue;
@@ -119,7 +191,7 @@ pub fn lower_with_macros_and_numbering(
         }
 
         // 环境优先
-        if let Some((name, body, end)) = scan_environment(&text, pos) {
+        if let Some((name, body, end)) = scan_environment(text, pos) {
             flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
             let blk = lower_environment(name, body, default_span, macros, numbering);
             doc.push(blk);
@@ -335,64 +407,6 @@ fn strip_preamble(text: &str) -> &str {
         }
         None => text,
     }
-}
-
-/// 顶层段命令：\section / \subsection / \subsubsection / \paragraph / \caption
-fn try_top_level_command(s: &str, span: Span, numbering: &mut NumberingState) -> Option<(usize, Block)> {
-    let prefixes: &[(&str, fn(&str, Span, &mut NumberingState) -> Block)] = &[
-        ("\\section", |b, sp, n| Block::Heading {
-            level: 1,
-            text: b.to_string(),
-            number: Some(n.next_heading(1)),
-            span: sp,
-        }),
-        ("\\subsection", |b, sp, n| Block::Heading {
-            level: 2,
-            text: b.to_string(),
-            number: Some(n.next_heading(2)),
-            span: sp,
-        }),
-        ("\\subsubsection", |b, sp, n| Block::Heading {
-            level: 3,
-            text: b.to_string(),
-            number: Some(n.next_heading(3)),
-            span: sp,
-        }),
-        ("\\paragraph", |b, sp, n| Block::Heading {
-            level: 4,
-            text: b.to_string(),
-            number: Some(n.next_heading(4)),
-            span: sp,
-        }),
-    ];
-    for (prefix, ctor) in prefixes {
-        if let Some(rest) = s.strip_prefix(prefix) {
-            // 跳过可选空白
-            let mut k = 0;
-            while k < rest.len()
-                && (rest.as_bytes()[k] == b' ' || rest.as_bytes()[k] == b'\t')
-            {
-                k += 1;
-            }
-            if k >= rest.len() || rest.as_bytes()[k] != b'{' {
-                // 不成对：回退
-                continue;
-            }
-            if let Some(off) = find_matching_brace(rest, k) {
-                let body = &rest[k + 1..k + 1 + off];
-                return Some((prefix.len() + k + off + 2, ctor(body, span, numbering)));
-            } else {
-                return Some((
-                    prefix.len() + s.find('\n').unwrap_or(s.len()),
-                    Block::RawFallback {
-                        text: rest.to_string(),
-                        span,
-                    },
-                ));
-            }
-        }
-    }
-    None
 }
 
 /// 顶层「元数据 / 装饰」命令：直接吞掉，不产出块。
@@ -770,19 +784,14 @@ fn lower_table(body: &str, span: Span) -> Block {
 
             // Check for \rowcolor{color} or \rowcolor[model]{color} in this cell (before strip_inline removes it)
             let raw_for_colorcheck = c.trim();
-            if raw_for_colorcheck.starts_with("\\rowcolor") {
-                // This cell has a rowcolor command - extract it
-                let rest = &raw_for_colorcheck["\\rowcolor".len()..].trim_start();
+            if let Some(stripped) = raw_for_colorcheck.strip_prefix("\\rowcolor") {
+                let rest = stripped.trim_start();
                 let color_text = if rest.starts_with('[') {
                     // \rowcolor[model]{color} format
                     if let Some(close_bracket) = rest.find(']') {
                         let after_bracket = &rest[close_bracket + 1..];
                         if after_bracket.starts_with('{') {
-                            if let Some(close_brace) = after_bracket.find('}') {
-                                Some(after_bracket[1..close_brace].to_string())
-                            } else {
-                                None
-                            }
+                            after_bracket.find('}').map(|close_brace| after_bracket[1..close_brace].to_string())
                         } else {
                             None
                         }
@@ -790,11 +799,7 @@ fn lower_table(body: &str, span: Span) -> Block {
                         None
                     }
                 } else if rest.starts_with('{') {
-                    if let Some(close_brace) = rest.find('}') {
-                        Some(rest[1..close_brace].to_string())
-                    } else {
-                        None
-                    }
+                    rest.find('}').map(|close_brace| rest[1..close_brace].to_string())
                 } else {
                     None
                 };
@@ -1152,91 +1157,84 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                     | "textit"
                     | "texttt"
                     | "emph"
-            ) {
-                if has_arg {
-                    if let Some(off) = find_matching_brace(line, k) {
-                        out.push('\\');
-                        out.push_str(cmd);
-                        out.push('{');
-                        out.push_str(&line[k + 1..k + 1 + off]);
-                        out.push('}');
-                        i = k + 1 + off + 1;
-                        continue;
-                    }
+            ) && has_arg {
+                if let Some(off) = find_matching_brace(line, k) {
+                    out.push('\\');
+                    out.push_str(cmd);
+                    out.push('{');
+                    out.push_str(&line[k + 1..k + 1 + off]);
+                    out.push('}');
+                    i = k + 1 + off + 1;
+                    continue;
                 }
             }
             // \cite{key} → [n] citation number
-            if cmd == "cite" {
-                if has_arg {
-                    if let Some(off) = find_matching_brace(line, k) {
-                        let body_start = k + 1;
-                        let keys_raw = &line[body_start..body_start + off];
-                        let keys: Vec<&str> = keys_raw
-                            .split(',')
-                            .map(|s| s.trim())
-                            .filter(|s| !s.is_empty())
-                            .collect();
-                        let nums: Vec<String> = keys
-                            .iter()
-                            .map(|k| {
-                                let next = cite_numbers.len() + 1;
-                                let n = *cite_numbers.entry(k.to_string()).or_insert(next);
-                                n.to_string()
-                            })
-                            .collect();
-                        out.push_str(&format!("[{}]", nums.join(",")));
-                        // Skip remaining optional {...} args
-                        let mut p = k + 1 + off + 1;
-                        loop {
-                            while p < bytes.len()
-                                && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
-                            {
-                                p += 1;
-                            }
-                            if p < bytes.len() && bytes[p] == b'{' {
-                                if let Some(o2) = find_matching_brace(line, p) {
-                                    p = p + 1 + o2 + 1;
-                                } else {
-                                    break;
-                                }
+            if cmd == "cite" && has_arg {
+                if let Some(off) = find_matching_brace(line, k) {
+                    let body_start = k + 1;
+                    let keys_raw = &line[body_start..body_start + off];
+                    let keys: Vec<&str> = keys_raw
+                        .split(',')
+                        .map(|s| s.trim())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let nums: Vec<String> = keys
+                        .iter()
+                        .map(|k| {
+                            let next = cite_numbers.len() + 1;
+                            let n = *cite_numbers.entry(k.to_string()).or_insert(next);
+                            n.to_string()
+                        })
+                        .collect();
+                    out.push_str(&format!("[{}]", nums.join(",")));
+                    // Skip remaining optional {...} args
+                    let mut p = k + 1 + off + 1;
+                    loop {
+                        while p < bytes.len()
+                            && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
+                        {
+                            p += 1;
+                        }
+                        if p < bytes.len() && bytes[p] == b'{' {
+                            if let Some(o2) = find_matching_brace(line, p) {
+                                p = p + 1 + o2 + 1;
                             } else {
                                 break;
                             }
+                        } else {
+                            break;
                         }
-                        i = p;
-                        continue;
                     }
+                    i = p;
+                    continue;
                 }
             }
             // \ref / \label / \footnote / \href / \url / \nolinkurl → skip (V1)
             if matches!(
                 cmd,
                 "ref" | "label" | "footnote" | "href" | "url" | "nolinkurl"
-            ) {
-                if has_arg {
-                    if let Some(off) = find_matching_brace(line, k) {
-                        // 多个可选 [..] 参数 + 必选 {..}；简化：吃所有 {…} 拼接
-                        let mut p = k + 1 + off + 1;
-                        // 跳过后续可选 {…}
-                        loop {
-                            while p < bytes.len()
-                                && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
-                            {
-                                p += 1;
-                            }
-                            if p < bytes.len() && bytes[p] == b'{' {
-                                if let Some(o2) = find_matching_brace(line, p) {
-                                    p = p + 1 + o2 + 1;
-                                } else {
-                                    break;
-                                }
+            ) && has_arg {
+                if let Some(off) = find_matching_brace(line, k) {
+                    let mut p = k + 1 + off + 1;
+                    // 跳过后续可选 {…}
+                    loop {
+                        while p < bytes.len()
+                            && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
+                        {
+                            p += 1;
+                        }
+                        if p < bytes.len() && bytes[p] == b'{' {
+                            if let Some(o2) = find_matching_brace(line, p) {
+                                p = p + 1 + o2 + 1;
                             } else {
                                 break;
                             }
+                        } else {
+                            break;
                         }
-                        i = p;
-                        continue;
                     }
+                    i = p;
+                    continue;
                 }
             }
             // tabular/array 环境：保留标记以便后续嵌套检测
@@ -1333,7 +1331,7 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             if matches!(cmd, "end") {
                 let rest = &line[i..];
                 if rest.starts_with("\\end{tabular}") || rest.starts_with("\\end{array}") {
-                    out.push_str("]");
+                    out.push(']');
                     i += if rest.starts_with("\\end{tabular}") { 12 } else { 9 };
                     continue;
                 }

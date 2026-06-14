@@ -76,42 +76,39 @@ pub fn expand_macros_in(text: &str, macros: &mut MacroMap) -> String {
             // 1) 定义类命令：整段跳过
             if matches!(cmd, "newcommand" | "providecommand" | "renewcommand") {
                 let macros_ref = &mut *macros;
-                match parse_definition_end(text, j, macros_ref) {
-                    Some(end) => {
-                        // 启发式：本行剩余是否仅为注释 / 行尾空白？
-                        // 若 end 之后到本行末 (`\n` / EOF) 之间全是 ASCII 空白 / `%` 注释，
-                        // 则可安全整行跳过；否则就地停留，避免吞掉同一行内跟在定义
-                        // 后面的宏调用（典型场景：单行测试用例）。
-                        let mut p = end;
-                        let mut only_ws_or_comment = true;
-                        while p < len && bytes[p] != b'\n' {
-                            let b = bytes[p];
-                            if !(b == b' ' || b == b'\t' || b == b'%' || b == b'\r') {
-                                only_ws_or_comment = false;
-                                break;
-                            }
-                            if b == b'%' {
-                                while p < len && bytes[p] != b'\n' {
-                                    p += 1;
-                                }
-                                break;
-                            }
-                            p += 1;
+                if let Some(end) = parse_definition_end(text, j, macros_ref) {
+                    // 启发式：本行剩余是否仅为注释 / 行尾空白？
+                    // 若 end 之后到本行末 (`\n` / EOF) 之间全是 ASCII 空白 / `%` 注释，
+                    // 则可安全整行跳过；否则就地停留，避免吞掉同一行内跟在定义
+                    // 后面的宏调用（典型场景：单行测试用例）。
+                    let mut p = end;
+                    let mut only_ws_or_comment = true;
+                    while p < len && bytes[p] != b'\n' {
+                        let b = bytes[p];
+                        if !(b == b' ' || b == b'\t' || b == b'%' || b == b'\r') {
+                            only_ws_or_comment = false;
+                            break;
                         }
-                        if only_ws_or_comment {
-                            // 整段吞到行末（p 此时指向 \n 或 == len）
+                        if b == b'%' {
                             while p < len && bytes[p] != b'\n' {
                                 p += 1;
                             }
-                            i = p;
-                        } else {
-                            // 同行内还有「真」内容：就地从 end 开始，
-                            // 让主循环 fallthrough 自然写出 end 处的字符。
-                            i = end;
+                            break;
                         }
-                        continue;
+                        p += 1;
                     }
-                    None => {}
+                    if only_ws_or_comment {
+                        // 整段吞到行末（p 此时指向 \n 或 == len）
+                        while p < len && bytes[p] != b'\n' {
+                            p += 1;
+                        }
+                        i = p;
+                    } else {
+                        // 同行内还有「真」内容：就地从 end 开始，
+                        // 让主循环 fallthrough 自然写出 end 处的字符。
+                        i = end;
+                    }
+                    continue;
                 }
                 // 解析失败：把当前 `\` + 命令名原样写入
                 out.push('\\');

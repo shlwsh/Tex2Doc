@@ -6,7 +6,20 @@
   "type": "module",
   "scripts": {
     "verify": "node scripts/verify_paper3.mjs",
-    "verify:install": "node scripts/verify_install.mjs"
+    "verify:install": "node scripts/verify_install.mjs",
+    "build:paper3-zip": "node scripts/build_paper3_zip.mjs",
+    "build:wasm": "wasm-pack build crates/wasm --target web --out-dir ../flutter_app/wasm/pkg --out-name doc_engine --dev",
+    "build:web": "cd flutter_app && flutter build web --no-source-maps --no-tree-shake-icons",
+    "build:native": "cargo build -p doc-native",
+    "build:windows": "cd flutter_app && flutter build windows --debug",
+    "build:all": "npm run build:wasm && npm run build:web",
+    "build:desktop": "npm run build:native && npm run build:windows",
+    "serve:web": "node scripts/serve_flutter_web.mjs",
+    "e2e:paper3": "node scripts/e2e_paper3.mjs",
+    "e2e:server": "node scripts/e2e_server.mjs",
+    "e2e:desktop": "cd flutter_app && dart run bin/native_smoke.dart",
+    "e2e:extension": "node scripts/e2e_extension.mjs",
+    "verify:e2e": "node scripts/build_paper3_zip.mjs && node scripts/e2e_paper3.mjs && node scripts/e2e_server.mjs && npm run e2e:desktop && npm run e2e:extension"
   },
   "dependencies": {
     "fflate": "^0.8.2"

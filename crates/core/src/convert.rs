@@ -7,6 +7,7 @@
 //! 4. 降级到 `semantic-ast`
 //! 5. docx-writer 序列化 + ZIP 打包
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use doc_latex_reader::{lower_to_document, parse_tex, IncludeGraph};
@@ -80,6 +81,80 @@ pub fn convert_dir(
         docx,
         warnings: vec![],
     })
+}
+
+/// WASM 友好入口：接受内存中的 zip 字节流（包含 `.tex` / `.bib` / 图片等），
+/// 内部用 [`zip::ZipArchive`] 解压到 VFS，再走标准解析 → 降级 → 打包。
+///
+/// `main_tex_path` 必须是 zip 内的相对 POSIX 路径（如 `main-jos.tex` 或
+/// `latex/main-jos.tex`），且对应的条目必须存在。
+pub fn convert_zip(
+    zip_bytes: &[u8],
+    main_tex_path: &str,
+    options: &ConvertOptions,
+) -> Result<ConvertResult, CoreError> {
+    use std::collections::BTreeMap;
+
+    let mut archive =
+        zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(zip_io_to_core)?;
+
+    let mut entries: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
+    for i in 0..archive.len() {
+        let mut f = archive
+            .by_index(i)
+            .map_err(|e| CoreError::Io(format!("读取 zip 索引 {i} 失败：{e}")))?;
+        if f.is_dir() {
+            continue;
+        }
+        // 用 entry_name 取得原始相对路径（POSIX），转 PathBuf
+        let name = f.name().to_string();
+        if name.contains("..") {
+            return Err(CoreError::Parse(format!("zip 包含不安全路径：{name}")));
+        }
+        let mut buf = Vec::with_capacity(f.size() as usize);
+        f.read_to_end(&mut buf)
+            .map_err(|e| CoreError::Io(format!("读取 zip 条目 {name} 失败：{e}")))?;
+        entries.insert(PathBuf::from(name.replace('\\', "/")), buf);
+    }
+
+    let main_norm = main_tex_path.replace('\\', "/");
+    let main_pb = PathBuf::from(&main_norm);
+    let main_bytes = entries
+        .get(&main_pb)
+        .ok_or_else(|| CoreError::Parse(format!("zip 缺主文件 {main_tex_path}")))?;
+    let source = String::from_utf8(main_bytes.clone())
+        .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
+
+    // 装载到 VFS
+    let mut vfs = VirtualFs::new();
+    for (p, bytes) in &entries {
+        vfs.insert(p, bytes.clone());
+    }
+
+    // 收集 PNG/JPEG 图片资产
+    let mut image_assets = ImageAssets::new();
+    for (p, bytes) in &entries {
+        let p_lower = p.to_string_lossy().to_lowercase();
+        if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".jpeg") {
+            image_assets.insert(p.to_string_lossy().to_string(), bytes.clone());
+        }
+    }
+
+    let doc = parse_tex_with_vfs(&main_norm, &source, &mut vfs)?;
+    let docx = doc_docx_writer::pack_with_assets(
+        &doc,
+        options.template_bytes.as_deref(),
+        Some(&image_assets),
+    )
+    .map_err(|e| CoreError::Serialize(e.0))?;
+    Ok(ConvertResult {
+        docx,
+        warnings: vec![],
+    })
+}
+
+fn zip_io_to_core(e: zip::result::ZipError) -> CoreError {
+    CoreError::Io(format!("zip 解析失败：{e}"))
 }
 
 /// 进度流入口（占位，M5-M6 落地为真流）。

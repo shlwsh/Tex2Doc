@@ -1,17 +1,70 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="zh-CN">
-  <head>
-    <meta charset="utf-8" />
-    <title>Doc-engine</title>
-    <style>
-      body { width: 360px; font-family: system-ui, sans-serif; margin: 12px; }
-      h1 { font-size: 16px; }
-      button { width: 100%; padding: 8px; }
-    </style>
-  </head>
-  <body>
-    <h1>Doc-engine（占位）</h1>
-    <p>完整 Popup 将在 M11-M12 落地。</p>
-    <button disabled>选择 .tex 文件</button>
-  </body>
+<head>
+  <meta charset="utf-8" />
+  <title>Doc-engine</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <header>
+    <span class="logo">&#x1F4D6;</span>
+    <h1>Doc-engine</h1>
+    <span id="version-badge" class="badge">v-</span>
+  </header>
+
+  <main>
+    <!-- 文件选择 -->
+    <section class="section">
+      <label class="file-label" for="zip-input">
+        <span class="btn primary" id="pick-label">选择 .zip 文件</span>
+        <input type="file" id="zip-input" accept=".zip,.tex" hidden />
+      </label>
+      <p id="file-name" class="file-name">未选择文件</p>
+    </section>
+
+    <!-- 主文件路径 -->
+    <section class="section">
+      <label for="main-tex-input" class="field-label">主 .tex 路径（zip 内）</label>
+      <input
+        type="text"
+        id="main-tex-input"
+        class="text-input"
+        value="main-jos.tex"
+        placeholder="main-jos.tex"
+      />
+    </section>
+
+    <!-- 状态 -->
+    <section class="section">
+      <div id="status-bar" class="status-bar ready">
+        <span id="status-icon" class="status-icon">&#x2713;</span>
+        <span id="status-text" class="status-text">就绪</span>
+      </div>
+    </section>
+
+    <!-- 转换按钮 -->
+    <section class="section">
+      <button id="convert-btn" class="btn primary full-width" disabled>开始转换</button>
+    </section>
+
+    <!-- 结果区 -->
+    <section id="result-section" class="section hidden">
+      <div class="result-card">
+        <p id="result-info"></p>
+        <button id="download-btn" class="btn secondary full-width">下载 .docx</button>
+      </div>
+    </section>
+
+    <!-- 错误区 -->
+    <section id="error-section" class="section hidden">
+      <div class="error-card">
+        <span class="error-icon">&#x26A0;</span>
+        <p id="error-text"></p>
+      </div>
+    </section>
+  </main>
+
+  <!-- WASM blob URL（通过 chrome.runtime.getURL 加载 extension 内部文件） -->
+  <script type="module" src="popup.js"></script>
+</body>
 </html>

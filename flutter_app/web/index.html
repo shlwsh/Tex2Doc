@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <base href="$FLUTTER_BASE_HREF">
+  <meta charset="UTF-8">
+  <meta content="IE=Edge" http-equiv="X-UA-Compatible">
+  <meta name="description" content="Doc-engine · LaTeX → DOCX · 浏览器内 WASM 转换">
+
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black">
+  <meta name="apple-mobile-web-app-title" content="Doc-engine">
+  <link rel="apple-touch-icon" href="icons/Icon-192.png">
+
+  <link rel="icon" type="image/png" href="favicon.png"/>
+  <title>Doc-engine · LaTeX → DOCX</title>
+  <link rel="manifest" href="manifest.json">
+</head>
+<body>
+  <script type="module">
+    // 预加载 + 初始化 Doc-engine WASM 桥接，挂到 window.docEngine。
+    // 在 flutter_bootstrap.js 之前执行；Dart 端通过 dart:js_interop
+    // 访问 window.docEngine.convert_zip / convert_zip_to_docx / version。
+    try {
+      const mod = await import('./wasm/doc_engine.js');
+      await mod.default('./wasm/doc_engine_bg.wasm');
+      // init 之后 exports 在 mod.* 上
+      window.docEngine = {
+        convert_zip: (zipBytes, mainPath, optionsJson) =>
+          mod.convert_zip(zipBytes, mainPath, optionsJson),
+        convert_zip_to_docx: (zipBytes, mainPath, optionsJson) =>
+          mod.convert_zip_to_docx(zipBytes, mainPath, optionsJson),
+        version: () => mod.version(),
+      };
+      window.dispatchEvent(new Event('doc-engine-ready'));
+    } catch (e) {
+      window.docEngineError = e;
+      window.dispatchEvent(new Event('doc-engine-error'));
+      console.error('[doc-engine] WASM 初始化失败：', e);
+    }
+  </script>
+  <script src="flutter_bootstrap.js" async></script>
+</body>
+</html>
