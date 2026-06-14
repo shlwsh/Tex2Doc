@@ -46,6 +46,7 @@ impl<'a> Parser<'a> {
         self.s.as_bytes().get(self.i).copied()
     }
 
+    #[allow(dead_code)]
     fn eat(&mut self, c: u8) -> bool {
         self.skip_ws();
         if self.peek() == Some(c) {
@@ -104,16 +105,10 @@ impl<'a> Parser<'a> {
             if c == b'^' || c == b'_' {
                 // 上下标修饰
                 if let Some(last) = out.pop() {
-                    let cur = self.peek().unwrap();
+                    let _cur = self.peek().unwrap();
                     self.i += 1;
                     let sub = if c == b'_' {
                         self.parse_group_or_single()
-                    } else {
-                        MathExpr::Seq(Vec::new())
-                    };
-                    let sup = if cur == b'^' {
-                        // ^ 已经在 i-1 处理；其实：先把 ^ 处理，看 _ 紧接
-                        MathExpr::Seq(Vec::new())
                     } else {
                         MathExpr::Seq(Vec::new())
                     };

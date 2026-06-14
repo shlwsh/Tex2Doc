@@ -1,0 +1,29 @@
+#![allow(unsafe_op_in_unsafe_fn)]
+#![allow(clippy::undocumented_unsafe_blocks)]
+#![allow(clippy::missing_safety_doc)]
+#![allow(unsafe_code)]
+
+[package]
+name        = "doc-native"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish     = false
+description = "Doc-engine native bridge: cdylib exposing doc-core convert_zip for dart:ffi"
+
+[lib]
+name = "doc_native"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+doc-core = { path = "../core" }
+
+serde     = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+
+[lints.rust]
+unsafe_op_in_unsafe_fn = "allow"

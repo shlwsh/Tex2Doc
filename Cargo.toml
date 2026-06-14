@@ -8,10 +8,11 @@ members = [
     "crates/docx-writer",
     "crates/bib",
     "crates/mathml",
+    "crates/wasm",
+    "crates/native",
+    "crates/server",
 ]
 exclude = [
-    "crates/wasm",
-    "crates/server",
     "crates/cli",
 ]
 
@@ -70,3 +71,6 @@ strip     = "symbols"
 opt-level = 0
 debug     = true
 incremental = true
+
+[workspace.lints.rust]
+unsafe-op-in-unsafe-fn = "allow"

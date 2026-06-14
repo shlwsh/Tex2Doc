@@ -113,7 +113,7 @@ impl IncludeGraph {
     pub fn topo_order(&self) -> DocResult<Vec<SourceId>> {
         let mut indeg: HashMap<SourceId, usize> =
             self.sources.iter().map(|p| (self.by_path[p], 0)).collect();
-        for (_, tos) in &self.edges {
+        for tos in self.edges.values() {
             for t in tos {
                 *indeg.get_mut(t).unwrap() += 1;
             }

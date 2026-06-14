@@ -41,12 +41,9 @@ impl PathResolver {
     /// 在真实文件系统按同样优先级查找（用于 CLI 直接读盘场景）。
     pub fn resolve_real<P: AsRef<Path>>(&self, target: P) -> Option<PathBuf> {
         let target = target.as_ref();
-        for cand in self.candidates(target) {
-            if cand.exists() {
-                return Some(cand);
-            }
-        }
-        None
+        self.candidates(target)
+            .into_iter()
+            .find(|cand| cand.exists())
     }
 
     fn candidates(&self, target: &Path) -> Vec<PathBuf> {

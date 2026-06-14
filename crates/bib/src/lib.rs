@@ -55,7 +55,7 @@ fn get_field(r: &BibRawEntry, name: &str) -> Option<String> {
 }
 
 fn parse_authors(s: &str) -> Vec<String> {
-    s.split(|c| c == ' ' || c == '\n' || c == '\t')
+    s.split([' ', '\n', '\t'])
         .filter(|t| !t.is_empty() && *t != "and")
         .fold(Vec::<String>::new(), |mut acc, t| {
             // 处理 "First Last" / "Last, First"：把单词累积到当前项，遇到 "and" 关闭
