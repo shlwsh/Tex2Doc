@@ -43,3 +43,6 @@ Thumbs.db
 *.pdf
 examples/**/output/
 examples/**/latex/output/
+
+# 构建脚本中间产物
+scripts/combined.html
