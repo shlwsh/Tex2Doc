@@ -8,5 +8,22 @@ publish      = false
 description = "V2 PDF 流水线 · 路径 A：Rust 端可插拔封装外部 TeX 引擎（xelatex / tectonic / latexmk）"
 
 [dependencies]
+# workspace 已有
+anyhow       = { workspace = true }
+thiserror    = { workspace = true }
+serde        = { workspace = true }
+serde_json   = { workspace = true }
+chrono       = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+tracing      = "0.1"
+tokio        = { workspace = true, features = ["time"] }
+
+# 新增
+which        = "6"            # 探测 xelatex / tectonic / latexmk / pdftotext
+tempfile     = "3"            # 隔离编译工作目录
+blake3       = "1"            # 缓存键
+async-trait  = "0.1"          # TexBackend trait 异步方法
+walkdir      = "2"            # 扫描 \input/\include 拓扑 + figures 目录
 
 [dev-dependencies]
+tempfile         = "3"
+pretty_assertions = "1"

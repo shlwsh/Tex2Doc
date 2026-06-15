@@ -46,10 +46,12 @@ V2 **不打破这条边界**：
 | 3 | [03-docx-to-pdf.md](./03-docx-to-pdf.md) | `crates/docx-pdf` 如何把 docx 转成 PDF，含 LibreOffice headless 进程管理 |
 | 4 | [04-quality-comparison.md](./04-quality-comparison.md) | 结构 / 文本 / 视觉三层怎么测、怎么判定"不低" |
 | 5 | [05-implementation-roadmap.md](./05-implementation-roadmap.md) | M1–M5 五个阶段任务、依赖、风险、回滚预案 |
+| 6 | [06-progress-2026-06-15.md](./06-progress-2026-06-15.md) | **实施过程日志**：M2 `tex-facade` 进展快照（已完成代码、当前阻塞、已尝试修复、下一步）。**非设计稿**，不入发布版。 |
 
 ## 状态
 
-- 本章为 **设计稿**（V2 草案），未开始落地实现。
+- 本章（[00](./00-v2-overview.md) ~ [05](./05-implementation-roadmap.md)）为 **设计稿**（V2 草案）。
+- **更新（2026-06-15 11:20）**：M1 骨架已落（HEAD `0c3fa10`）；M2 `tex-facade` 编码 **完成**（1585 行）；单元测试 **16 / 16 通过 / 3 `#[ignore]`**——3 项 `#[ignore]` 集成测试需 CI runner + 预热 xelatex FNDB，本机 MiKTeX 未预热故跳过。`>60s` 阻塞根因是 multi-thread tokio `Runtime::drop()` 在 Windows 上 join worker 线程，改 `current_thread` runtime 解决，详见 [06-progress-2026-06-15.md §6.10](./06-progress-2026-06-15.md)。
 - 实施需在 M1 阶段同时获取 `examples/paper3/latex/main-jos.pdf` 与 `main-jos.bbl` 作为 oracle 锚点（已就绪）。
 - 本章不进入 V1.3 发布版；若开始实施则同步更新 [../01-overview/01-features.md §1.5](../01-overview/01-features.md) 与 [../README.md §"配套原始文档"](../README.md)。
 
