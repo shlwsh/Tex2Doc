@@ -16,14 +16,55 @@
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <!-- 隐藏文件选择器；由 Flutter UI 的按钮通过 JS 事件触发 -->
+  <input type="file" id="zip-file-input" accept=".zip,.tex" hidden />
+
   <script type="module">
-    // 预加载 + 初始化 Doc-engine WASM 桥接，挂到 window.docEngine。
-    // 在 flutter_bootstrap.js 之前执行；Dart 端通过 dart:js_interop
-    // 访问 window.docEngine.convert_zip / convert_zip_to_docx / version。
+    // ================================================================
+    // 文件选择桥接：Flutter <-> HTML Input[type=file]
+    //
+    // 流程：
+    //   1. Flutter 发 'flutter-file-trigger' 事件  →  JS 点击隐藏 input
+    //   2. 用户选文件后 'change' 事件             →  JS 读文件并发 'flutter-file-selected'
+    //   3. Dart 端监听 'flutter-file-selected' 接收数据
+    // ================================================================
+    const fileInput = document.getElementById('zip-file-input');
+
+    window.addEventListener('flutter-file-trigger', () => {
+      console.log('[doc-engine] 文件选择器触发');
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0];
+      if (!file) return;
+      console.log('[doc-engine] 文件已选:', file.name, (file.size / 1024).toFixed(1) + ' KB');
+      try {
+        const buffer = await file.arrayBuffer();
+        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        window.dispatchEvent(new CustomEvent('flutter-file-selected', {
+          detail: {
+            name: file.name,
+            size: file.size,
+            data: base64,
+          },
+        }));
+      } catch (err) {
+        console.error('[doc-engine] 文件读取失败:', err);
+        window.dispatchEvent(new CustomEvent('flutter-file-error', {
+          detail: { message: String(err) },
+        }));
+      }
+      // 重置 input，允许重复选择同一文件
+      fileInput.value = '';
+    });
+
+    // ================================================================
+    // Doc-engine WASM 桥接
+    // ================================================================
     try {
       const mod = await import('./wasm/doc_engine.js');
       await mod.default('./wasm/doc_engine_bg.wasm');
-      // init 之后 exports 在 mod.* 上
       window.docEngine = {
         convert_zip: (zipBytes, mainPath, optionsJson) =>
           mod.convert_zip(zipBytes, mainPath, optionsJson),
@@ -31,11 +72,12 @@
           mod.convert_zip_to_docx(zipBytes, mainPath, optionsJson),
         version: () => mod.version(),
       };
+      console.log('[doc-engine] WASM 引擎就绪，版本:', mod.version());
       window.dispatchEvent(new Event('doc-engine-ready'));
     } catch (e) {
       window.docEngineError = e;
-      window.dispatchEvent(new Event('doc-engine-error'));
       console.error('[doc-engine] WASM 初始化失败：', e);
+      window.dispatchEvent(new Event('doc-engine-error'));
     }
   </script>
   <script src="flutter_bootstrap.js" async></script>
