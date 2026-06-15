@@ -12,8 +12,11 @@ use tokio::time::sleep;
 
 use doc_server::build_router;
 
-const FIXTURE_ZIP: &str =
-    concat!(env!("CARGO_MANIFEST_DIR"), "/../..", "/examples/paper3/upload.zip");
+const FIXTURE_ZIP: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../..",
+    "/examples/paper3/upload.zip"
+);
 
 /// 在当前 task 上下文里跑 server，shutdown 信号来时优雅退出。
 async fn run_server(listener: TcpListener, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
@@ -100,11 +103,16 @@ async fn convert_paper3_zip_returns_docx() {
     let bytes = resp.bytes().await.expect("read bytes");
 
     assert_eq!(
-        status, 200,
+        status,
+        200,
         "expected 200, got {status}, body: {:?}",
         &bytes[..bytes.len().min(200)]
     );
-    assert!(bytes.len() > 4 * 1024, "docx too small: {} bytes", bytes.len());
+    assert!(
+        bytes.len() > 4 * 1024,
+        "docx too small: {} bytes",
+        bytes.len()
+    );
     assert_eq!(&bytes[..4], b"PK\x03\x04", "docx magic mismatch");
     let _ = shutdown.send(());
 }

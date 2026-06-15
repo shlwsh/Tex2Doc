@@ -51,17 +51,14 @@ impl TexBackend for XelatexBackend {
 
     async fn compile(&self, project: &TexProject) -> Result<TexRun> {
         let started = std::time::Instant::now();
-        let output_name = project
-            .output_name
-            .clone()
-            .unwrap_or_else(|| {
-                project
-                    .main_file
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(|s| format!("{s}.pdf"))
-                    .unwrap_or_else(|| "output.pdf".into())
-            });
+        let output_name = project.output_name.clone().unwrap_or_else(|| {
+            project
+                .main_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| format!("{s}.pdf"))
+                .unwrap_or_else(|| "output.pdf".into())
+        });
         let pdf_path = project.workdir.join(&output_name);
         let log_path = project.workdir.join(
             project
@@ -191,7 +188,11 @@ async fn run_bibtex(xelatex_bin: &std::path::Path, project: &TexProject) -> Resu
     // 在 Windows 上 bibtex 与 xelatex 同目录（TeX Live / MiKTeX 都不分）
     let parent = xelatex_bin.parent();
     let bibtex = match parent {
-        Some(p) => p.join(if cfg!(windows) { "bibtex.exe" } else { "bibtex" }),
+        Some(p) => p.join(if cfg!(windows) {
+            "bibtex.exe"
+        } else {
+            "bibtex"
+        }),
         None => PathBuf::from("bibtex"),
     };
     let main_stem = project

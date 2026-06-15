@@ -37,13 +37,18 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         MathExpr::Op(c) => {
             // Full OMML: use <m:oSupp> with paired <m:begChr>/<m:endChr>
             let s = c.to_string();
-            w.write_event(Event::Start(BytesStart::new("m:oSupp"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:begChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:oSupp")))
+                .unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:begChr")))
+                .unwrap();
             write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:begChr"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:begChr")))
+                .unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:endChr")))
+                .unwrap();
             write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:endChr")))
+                .unwrap();
             w.write_event(Event::End(BytesEnd::new("m:oSupp"))).unwrap();
         }
         MathExpr::Space => {}
@@ -224,6 +229,7 @@ mod tests {
     }
 
     #[test]
+    #[allow(non_snake_case)]
     fn omml_op_uses_oSupp() {
         let s = to_omml(&parse_latex_math("x + y"));
         let s = String::from_utf8_lossy(&s);

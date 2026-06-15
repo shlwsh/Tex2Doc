@@ -137,9 +137,13 @@ mod tests {
 
     #[test]
     fn apply_font_probes_no_change_when_empty() {
-        let mut xml = b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec();
+        let mut xml =
+            b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec();
         apply_font_probes(&mut xml, &[]);
-        assert_eq!(xml, b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec());
+        assert_eq!(
+            xml,
+            b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec()
+        );
     }
 
     #[test]

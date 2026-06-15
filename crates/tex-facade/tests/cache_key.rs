@@ -33,10 +33,7 @@ fn compute_key_ignores_path() {
     let p2 = make_project(tmp2.path(), r"\documentclass{article}");
     let k1 = compute_key(&p1).unwrap();
     let k2 = compute_key(&p2).unwrap();
-    assert_eq!(
-        k1, k2,
-        "同字节内容、不同路径 → 同 hash（§2.7 跨平台要求）"
-    );
+    assert_eq!(k1, k2, "同字节内容、不同路径 → 同 hash（§2.7 跨平台要求）");
 }
 
 #[test]
@@ -48,10 +45,7 @@ fn compute_key_changes_on_content() {
     let p2 = make_project(tmp2.path(), r"\documentclass{ report }"); // 多一个空格
     let k1 = compute_key(&p1).unwrap();
     let k2 = compute_key(&p2).unwrap();
-    assert_ne!(
-        k1, k2,
-        "改 1 字节 → 哈希必须变（缓存内容敏感）"
-    );
+    assert_ne!(k1, k2, "改 1 字节 → 哈希必须变（缓存内容敏感）");
 }
 
 #[test]
@@ -70,16 +64,8 @@ fn engine_kind_as_str_matches_design() {
 #[test]
 fn referenced_tex_files_lists_inputs() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::write(
-        tmp.path().join("01_intro.tex"),
-        r"\section{Intro}",
-    )
-    .unwrap();
-    fs::write(
-        tmp.path().join("02_related.tex"),
-        r"\section{Related}",
-    )
-    .unwrap();
+    fs::write(tmp.path().join("01_intro.tex"), r"\section{Intro}").unwrap();
+    fs::write(tmp.path().join("02_related.tex"), r"\section{Related}").unwrap();
     let main = tmp.path().join("main.tex");
     fs::write(
         &main,

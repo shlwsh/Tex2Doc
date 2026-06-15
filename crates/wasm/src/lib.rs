@@ -102,9 +102,11 @@ pub fn convert_zip(
         docx: res.docx,
         warnings: res.warnings,
     };
-    serde_wasm_bindgen::to_value(&out).map_err(|e| to_js_err(WasmError {
-        message: format!("序列化结果失败：{e}"),
-    }))
+    serde_wasm_bindgen::to_value(&out).map_err(|e| {
+        to_js_err(WasmError {
+            message: format!("序列化结果失败：{e}"),
+        })
+    })
 }
 
 /// 便捷入口：返回 docx 的 `Uint8Array`（不附带元信息）。
@@ -140,10 +142,9 @@ fn set_panic_hook() {
 }
 
 fn parse_options(s: &str) -> Result<doc_core::ConvertOptions, WasmError> {
-    let js: ConvertOptionsJs = serde_json::from_str(s)
-        .map_err(|e| WasmError {
-            message: format!("options JSON 解析失败：{e}"),
-        })?;
+    let js: ConvertOptionsJs = serde_json::from_str(s).map_err(|e| WasmError {
+        message: format!("options JSON 解析失败：{e}"),
+    })?;
     let mut out = doc_core::ConvertOptions::default();
     match js.bib_style.as_deref() {
         None | Some("numeric") | Some("") => {

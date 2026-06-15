@@ -104,11 +104,7 @@ impl TexFacade {
         }
 
         // 3. 信号量限流
-        let _permit = self
-            .sem
-            .acquire()
-            .await
-            .context("信号量获取失败")?;
+        let _permit = self.sem.acquire().await.context("信号量获取失败")?;
 
         // 4. 实际编译（带硬超时）
         let compile = backend.compile(project);
@@ -122,7 +118,10 @@ impl TexFacade {
                     engine: backend.kind(),
                     passes: 0,
                     output: PathBuf::from("(timeout)"),
-                    log: format!("编译超过 {}s 仍未完成，已强制放弃", Self::COMPILE_TIMEOUT.as_secs()),
+                    log: format!(
+                        "编译超过 {}s 仍未完成，已强制放弃",
+                        Self::COMPILE_TIMEOUT.as_secs()
+                    ),
                 }
                 .into());
             }

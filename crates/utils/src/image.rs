@@ -5,8 +5,8 @@
 //! - 仅支持 PNG / JPEG；其它格式返回 `Unsupported`。
 //! - 重采样：V1 不做（占位接口），仅做格式归一化与字节透传 + 重新编码（保证路径与 zip 兼容）。
 
-use std::io::Cursor;
 use std::collections::HashMap;
+use std::io::Cursor;
 
 use image::ImageFormat;
 

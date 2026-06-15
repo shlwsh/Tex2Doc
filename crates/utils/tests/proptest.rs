@@ -24,7 +24,7 @@ proptest! {
             v.insert(first, vec![1u8]);
         }
         let hit = v.first_existing(paths.iter());
-        if let Some(first) = paths.first() {
+        if let Some(_first) = paths.first() {
             prop_assert!(hit.is_some());
         } else {
             prop_assert!(hit.is_none());

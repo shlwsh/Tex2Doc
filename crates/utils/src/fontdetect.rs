@@ -72,7 +72,8 @@ impl FontDetector {
 
     /// 注册 Office 字体映射。
     pub fn register_office_mapping(&mut self, latex: &str, office: &str) {
-        self.office_map.insert(latex.to_string(), office.to_string());
+        self.office_map
+            .insert(latex.to_string(), office.to_string());
     }
 
     /// 探测一个字体。
@@ -121,7 +122,7 @@ impl FontDetector {
         // 尝试多种常见扩展名
         let extensions = ["ttf", "otf", "TTF", "OTF"];
         let name_normalized = name.replace(' ', "");
-        
+
         for dir in &self.system_dirs {
             if !dir.exists() {
                 continue;
@@ -182,7 +183,7 @@ fn detect_system_font_dirs() -> Vec<PathBuf> {
         dirs.push(PathBuf::from("/usr/share/fonts"));
         dirs.push(PathBuf::from("/usr/local/share/fonts"));
         if let Ok(home) = std::env::var("HOME") {
-            dirs.push(PathBuf::from(home).join(".fonts"));
+            dirs.push(PathBuf::from(home.clone()).join(".fonts"));
             dirs.push(PathBuf::from(home).join(".local/share/fonts"));
         }
     }

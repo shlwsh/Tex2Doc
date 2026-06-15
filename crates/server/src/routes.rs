@@ -78,7 +78,8 @@ fn extract_multipart_field(body: &[u8], field_name: &str) -> Result<Option<Vec<u
         }
 
         // 找 header 与 content 的分界
-        let (header_end, content_offset) = if let Some(i) = memchr::memmem::find(after, b"\r\n\r\n") {
+        let (header_end, content_offset) = if let Some(i) = memchr::memmem::find(after, b"\r\n\r\n")
+        {
             (i, i + 4)
         } else if let Some(i) = memchr::memmem::find(after, b"\n\n") {
             (i, i + 2)
@@ -92,13 +93,14 @@ fn extract_multipart_field(body: &[u8], field_name: &str) -> Result<Option<Vec<u
         if headers.contains(&search_for) {
             let content = &after[content_offset..];
             // 找下一个 boundary 来确定 content 结束
-            let content_end = if let Some(p) = memchr::memmem::find(content, start_marker.as_bytes()) {
-                p
-            } else if let Some(p) = memchr::memmem::find(content, end_marker.as_bytes()) {
-                p
-            } else {
-                content.len()
-            };
+            let content_end =
+                if let Some(p) = memchr::memmem::find(content, start_marker.as_bytes()) {
+                    p
+                } else if let Some(p) = memchr::memmem::find(content, end_marker.as_bytes()) {
+                    p
+                } else {
+                    content.len()
+                };
 
             // 去掉末尾 CRLF
             let mut end = content_end;
@@ -109,7 +111,10 @@ fn extract_multipart_field(body: &[u8], field_name: &str) -> Result<Option<Vec<u
         }
 
         // 不是目标字段：跳到下一个 part
-        match memchr::memmem::find(&body[part_start + start_marker.len()..], start_marker.as_bytes()) {
+        match memchr::memmem::find(
+            &body[part_start + start_marker.len()..],
+            start_marker.as_bytes(),
+        ) {
             Some(q) => search_pos = part_start + start_marker.len() + q,
             None => break,
         }
@@ -126,8 +131,8 @@ async fn convert(request: Request) -> Result<Response, ApiError> {
         .await
         .map_err(|e| ApiError::Io(format!("body read error: {e}")))?;
 
-    let file_part = extract_multipart_field(&full_body, "file")?
-        .ok_or(ApiError::MissingField("file"))?;
+    let file_part =
+        extract_multipart_field(&full_body, "file")?.ok_or(ApiError::MissingField("file"))?;
 
     if file_part.is_empty() {
         return Err(ApiError::MissingField("file"));

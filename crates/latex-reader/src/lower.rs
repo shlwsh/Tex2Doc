@@ -33,7 +33,11 @@ pub struct NumberingState {
 type PrefixHandler = fn(&str, Span, &mut NumberingState) -> Block;
 
 /// 顶层段命令：\section / \subsection / \subsubsection / \paragraph / \caption
-fn try_top_level_command(s: &str, span: Span, numbering: &mut NumberingState) -> Option<(usize, Block)> {
+fn try_top_level_command(
+    s: &str,
+    span: Span,
+    numbering: &mut NumberingState,
+) -> Option<(usize, Block)> {
     let prefixes: &[(&str, PrefixHandler)] = &[
         ("\\section", |b, sp, n| Block::Heading {
             level: 1,
@@ -192,7 +196,13 @@ pub fn lower_with_macros_and_numbering(
 
         // 环境优先
         if let Some((name, body, end)) = scan_environment(text, pos) {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+            );
             let blk = lower_environment(name, body, default_span, macros, numbering);
             doc.push(blk);
             pos = end;
@@ -203,7 +213,13 @@ pub fn lower_with_macros_and_numbering(
         if let Some((consumed, block)) =
             try_top_level_command(&text[pos..], default_span, numbering)
         {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+            );
             doc.push(block);
             pos += consumed;
             continue;
@@ -212,7 +228,13 @@ pub fn lower_with_macros_and_numbering(
         // 顶层「元数据 / 装饰」命令：吞掉，不进段落流。
         // 见 [`try_top_level_metadata_command`] 注释。
         if let Some((consumed, _)) = try_top_level_metadata_command(&text[pos..]) {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+            );
             pos += consumed;
             continue;
         }
@@ -224,7 +246,13 @@ pub fn lower_with_macros_and_numbering(
         let trimmed = stripped.trim();
 
         if trimmed.is_empty() {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+            );
         } else {
             if buffer.is_empty() {
                 buffer_start = pos as u32;
@@ -235,7 +263,13 @@ pub fn lower_with_macros_and_numbering(
         pos = nl;
     }
 
-    flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+    flush_paragraph(
+        &mut doc,
+        &mut buffer,
+        &mut buffer_start,
+        default_span,
+        macros,
+    );
     doc
 }
 
@@ -564,13 +598,11 @@ fn lower_environment(
         "figure" | "figure*" | "table" | "table*" => {
             lower_captioned_env(name, body, span, macros, numbering)
         }
-        "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => {
-            Block::Equation {
-                latex: body.trim().to_string(),
-                is_block: true,
-                span,
-            }
-        }
+        "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => Block::Equation {
+            latex: body.trim().to_string(),
+            is_block: true,
+            span,
+        },
         "document" => {
             // 直接递归降级 body
             let mut sub = Document::new();
@@ -588,10 +620,8 @@ fn lower_environment(
         // 段落容器类环境：递归降级为段落序列，折叠为第一个非空块。
         // （rjthesis / ctexart 模板里大量使用这类「无视觉变化」的语义容器。）
         "flushleft" | "flushright" | "center" | "quote" | "quotation" | "verbatim"
-        | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor"
-        | "rjinfor" | "rjmaketitle" => {
-            lower_paragraph_container(body, span, macros, numbering)
-        }
+        | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor" | "rjinfor"
+        | "rjmaketitle" => lower_paragraph_container(body, span, macros, numbering),
         // rjabstract 特殊处理：inline math 会抽出为独立 Equation 块，
         // 需要找第一个 Paragraph（而非第一个块），以免中文摘要被 Equation 占位符覆盖。
         "rjabstract" => lower_abstract_paragraph(body, span, macros, numbering),
@@ -791,7 +821,9 @@ fn lower_table(body: &str, span: Span) -> Block {
                     if let Some(close_bracket) = rest.find(']') {
                         let after_bracket = &rest[close_bracket + 1..];
                         if after_bracket.starts_with('{') {
-                            after_bracket.find('}').map(|close_brace| after_bracket[1..close_brace].to_string())
+                            after_bracket
+                                .find('}')
+                                .map(|close_brace| after_bracket[1..close_brace].to_string())
                         } else {
                             None
                         }
@@ -799,7 +831,8 @@ fn lower_table(body: &str, span: Span) -> Block {
                         None
                     }
                 } else if rest.starts_with('{') {
-                    rest.find('}').map(|close_brace| rest[1..close_brace].to_string())
+                    rest.find('}')
+                        .map(|close_brace| rest[1..close_brace].to_string())
                 } else {
                     None
                 };
@@ -816,7 +849,7 @@ fn lower_table(body: &str, span: Span) -> Block {
                 .replace("\\hline", "")
                 .trim()
                 .to_string();
-            
+
             // Check for \multicolumn{n}{spec}{text} - must be at START of cell content
             if let Some((n, cell_text)) = parse_multicolumn(raw_for_multicolumn) {
                 cells.push(TableCell {
@@ -831,7 +864,7 @@ fn lower_table(body: &str, span: Span) -> Block {
                 });
                 continue;
             }
-            
+
             if raw.is_empty() {
                 cells.push(TableCell {
                     runs: vec![],
@@ -846,13 +879,21 @@ fn lower_table(body: &str, span: Span) -> Block {
                 let nested_table = lower_table(nested_body, span);
                 if let Block::Table { rows: nr, .. } = nested_table {
                     // 扁平化嵌套表格为首行文本
-                    let first_row = nr.first().map(|r| {
-                        r.cells
-                            .iter()
-                            .map(|cell| cell.runs.iter().map(|run| run.text.as_str()).collect::<String>())
-                            .collect::<Vec<_>>()
-                            .join(" | ")
-                    }).unwrap_or_else(|| "[嵌套表格]".to_string());
+                    let first_row = nr
+                        .first()
+                        .map(|r| {
+                            r.cells
+                                .iter()
+                                .map(|cell| {
+                                    cell.runs
+                                        .iter()
+                                        .map(|run| run.text.as_str())
+                                        .collect::<String>()
+                                })
+                                .collect::<Vec<_>>()
+                                .join(" | ")
+                        })
+                        .unwrap_or_else(|| "[嵌套表格]".to_string());
                     vec![TextRun {
                         text: format!("[表格: {}]", first_row),
                         style: TextStyle::Code,
@@ -961,7 +1002,7 @@ pub fn parse_multicolumn(cell_text: &str) -> Option<(usize, String)> {
 fn extract_nested_tabulary(text: &str) -> Option<(&str, &str)> {
     let start = text.find("[TAB: ")?;
     let after_marker = &text[start + "[TAB: ".len()..];
-    
+
     // 找列规范的 `}` - 列规范可能包含嵌套的 {}
     let mut depth = 0;
     let mut cb_pos = None;
@@ -980,7 +1021,7 @@ fn extract_nested_tabulary(text: &str) -> Option<(&str, &str)> {
     }
     let cb_pos = cb_pos?;
     let content_start = cb_pos + 1;
-    
+
     // 找匹配的 `]`（结束标记）
     let end_pos = after_marker[content_start..].find(']')?;
     let inner = &after_marker[content_start..content_start + end_pos];
@@ -1023,8 +1064,7 @@ fn lower_captioned_env(
 }
 
 fn extract_includegraphics_and_caption(body: &str) -> (Option<String>, Option<String>) {
-    let img: Option<String> = if let Some(args) = find_command_with_brace(body, "includegraphics")
-    {
+    let img: Option<String> = if let Some(args) = find_command_with_brace(body, "includegraphics") {
         // 形如 \includegraphics[width=.7\textwidth]{path}
         if let Some(close) = args.rfind('}') {
             Some(args[close + 1..].trim().to_string())
@@ -1157,7 +1197,8 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                     | "textit"
                     | "texttt"
                     | "emph"
-            ) && has_arg {
+            ) && has_arg
+            {
                 if let Some(off) = find_matching_brace(line, k) {
                     out.push('\\');
                     out.push_str(cmd);
@@ -1213,7 +1254,8 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             if matches!(
                 cmd,
                 "ref" | "label" | "footnote" | "href" | "url" | "nolinkurl"
-            ) && has_arg {
+            ) && has_arg
+            {
                 if let Some(off) = find_matching_brace(line, k) {
                     let mut p = k + 1 + off + 1;
                     // 跳过后续可选 {…}
@@ -1283,61 +1325,89 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                 i = j;
                 continue;
             }
-    // \multicolumn{n}{spec}{text}：保留完整命令以便 lower_table 检测
-    if cmd == "multicolumn" {
-        // Output \multicolumn{n}{spec}{text} in full
-        out.push_str("\\multicolumn");
-        if has_arg {
-            // First argument: n
-            if let Some(off) = find_matching_brace(line, k) {
-                out.push('{');
-                out.push_str(&line[k + 1..k + 1 + off]);
-                out.push('}');
-                let mut p = k + 1 + off + 1;
-                // Skip whitespace
-                while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
-                    p += 1;
-                }
-                // Second argument: spec
-                if p < bytes.len() && bytes[p] == b'{' {
-                    if let Some(off2) = find_matching_brace(line, p) {
+            // \multicolumn{n}{spec}{text}：保留完整命令以便 lower_table 检测
+            if cmd == "multicolumn" {
+                // Output \multicolumn{n}{spec}{text} in full
+                out.push_str("\\multicolumn");
+                if has_arg {
+                    // First argument: n
+                    if let Some(off) = find_matching_brace(line, k) {
                         out.push('{');
-                        out.push_str(&line[p + 1..p + 1 + off2]);
+                        out.push_str(&line[k + 1..k + 1 + off]);
                         out.push('}');
-                        p = p + 1 + off2 + 1;
+                        let mut p = k + 1 + off + 1;
                         // Skip whitespace
                         while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
                             p += 1;
                         }
-                        // Third argument: text
+                        // Second argument: spec
                         if p < bytes.len() && bytes[p] == b'{' {
-                            if let Some(off3) = find_matching_brace(line, p) {
+                            if let Some(off2) = find_matching_brace(line, p) {
                                 out.push('{');
-                                out.push_str(&line[p + 1..p + 1 + off3]);
+                                out.push_str(&line[p + 1..p + 1 + off2]);
                                 out.push('}');
-                                i = p + 1 + off3 + 1;
-                                continue;
+                                p = p + 1 + off2 + 1;
+                                // Skip whitespace
+                                while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
+                                    p += 1;
+                                }
+                                // Third argument: text
+                                if p < bytes.len() && bytes[p] == b'{' {
+                                    if let Some(off3) = find_matching_brace(line, p) {
+                                        out.push('{');
+                                        out.push_str(&line[p + 1..p + 1 + off3]);
+                                        out.push('}');
+                                        i = p + 1 + off3 + 1;
+                                        continue;
+                                    }
+                                }
                             }
                         }
+                        // Fallback: consume the brace we already ate
+                        let _ = k + 1 + off + 1;
                     }
                 }
-                // Fallback: consume the brace we already ate
-                let _ = k + 1 + off + 1;
+                i = j;
+                continue;
             }
-        }
-        i = j;
-        continue;
-    }
             if matches!(cmd, "end") {
                 let rest = &line[i..];
                 if rest.starts_with("\\end{tabular}") || rest.starts_with("\\end{array}") {
                     out.push(']');
-                    i += if rest.starts_with("\\end{tabular}") { 12 } else { 9 };
+                    i += if rest.starts_with("\\end{tabular}") {
+                        12
+                    } else {
+                        9
+                    };
                     continue;
                 }
             }
             // 纯装饰 inline 命令（无视觉含义）：整段吞掉，仅保留 \par 触发换行
-            if matches!(cmd, "hspace" | "vspace" | "bigskip" | "smallskip" | "noindent" | "indent" | "quad" | "qquad" | "mbox" | "hbox" | "vbox" | "textsuperscript" | "textsubscript" | "today" | "protect" | "linebreak" | "pagebreak" | "newpage" | "newline" | "hfill" | "vfill" | "dotfill") {
+            if matches!(
+                cmd,
+                "hspace"
+                    | "vspace"
+                    | "bigskip"
+                    | "smallskip"
+                    | "noindent"
+                    | "indent"
+                    | "quad"
+                    | "qquad"
+                    | "mbox"
+                    | "hbox"
+                    | "vbox"
+                    | "textsuperscript"
+                    | "textsubscript"
+                    | "today"
+                    | "protect"
+                    | "linebreak"
+                    | "pagebreak"
+                    | "newpage"
+                    | "newline"
+                    | "hfill"
+                    | "vfill"
+                    | "dotfill"
+            ) {
                 if has_arg {
                     if let Some(off) = find_matching_brace(line, k) {
                         i = k + 1 + off + 1;
@@ -1350,7 +1420,17 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             // 字体 / 字号切换命令：吞命令、保留参数文本（V1 简化，不带字体信息）
             if matches!(
                 cmd,
-                "hei" | "song" | "kai" | "kaishu" | "fangsong" | "lishu" | "you" | "wuhao" | "xiaowuhao" | "xiaosihao" | "sihao"
+                "hei"
+                    | "song"
+                    | "kai"
+                    | "kaishu"
+                    | "fangsong"
+                    | "lishu"
+                    | "you"
+                    | "wuhao"
+                    | "xiaowuhao"
+                    | "xiaosihao"
+                    | "sihao"
             ) {
                 if has_arg {
                     if let Some(off) = find_matching_brace(line, k) {
@@ -1513,7 +1593,15 @@ mod tests {
         let eq_count = doc
             .blocks
             .iter()
-            .filter(|b| matches!(b, Block::Equation { is_block: false, .. }))
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Equation {
+                        is_block: false,
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(
             eq_count, 1,
@@ -1523,7 +1611,8 @@ mod tests {
         // Paragraph should contain italic placeholder
         let has_italic = doc.blocks.iter().any(|b| {
             if let Block::Paragraph { runs, .. } = b {
-                runs.iter().any(|r| r.style == TextStyle::Italic && r.text.contains("E = mc^2"))
+                runs.iter()
+                    .any(|r| r.style == TextStyle::Italic && r.text.contains("E = mc^2"))
             } else {
                 false
             }
@@ -1540,7 +1629,15 @@ mod tests {
         let eq_count = doc
             .blocks
             .iter()
-            .filter(|b| matches!(b, Block::Equation { is_block: false, .. }))
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Equation {
+                        is_block: false,
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(eq_count, 2, "expected 2 inline equations");
         // No $...$ literal text in paragraph
@@ -1589,7 +1686,15 @@ mod tests {
         let inline_eq_count = doc
             .blocks
             .iter()
-            .filter(|b| matches!(b, Block::Equation { is_block: false, .. }))
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Equation {
+                        is_block: false,
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(inline_eq_count, 0);
     }
@@ -1600,7 +1705,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1609,7 +1716,11 @@ mod tests {
                 }
             })
             .collect();
-        assert!(text.contains("[1]"), "expected [1] for smith2020, got: {}", text);
+        assert!(
+            text.contains("[1]"),
+            "expected [1] for smith2020, got: {}",
+            text
+        );
     }
 
     #[test]
@@ -1618,7 +1729,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1627,7 +1740,11 @@ mod tests {
                 }
             })
             .collect();
-        assert!(text.contains("[1]") && text.contains("[2]"), "got: {}", text);
+        assert!(
+            text.contains("[1]") && text.contains("[2]"),
+            "got: {}",
+            text
+        );
     }
 
     #[test]
@@ -1637,7 +1754,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1646,7 +1765,11 @@ mod tests {
                 }
             })
             .collect();
-        assert!(text.contains("[1]"), "expected [1] (same cite twice), got: {}", text);
+        assert!(
+            text.contains("[1]"),
+            "expected [1] (same cite twice), got: {}",
+            text
+        );
         // Should not have [2]
         assert!(
             !text.contains("[2]"),
@@ -1662,7 +1785,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1671,8 +1796,11 @@ mod tests {
                 }
             })
             .collect();
-        assert!(text.contains("[1,2]") || (text.contains("[1]") && text.contains("[2]")),
-            "expected comma-separated cite numbers, got: {}", text);
+        assert!(
+            text.contains("[1,2]") || (text.contains("[1]") && text.contains("[2]")),
+            "expected comma-separated cite numbers, got: {}",
+            text
+        );
     }
 
     #[test]
@@ -1682,7 +1810,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1692,7 +1822,11 @@ mod tests {
             })
             .collect();
         // smith2020 = [1], jones2019 = [2] (cross-paragraph numbering)
-        assert!(text.contains("[1]") && text.contains("[2]"), "got: {}", text);
+        assert!(
+            text.contains("[1]") && text.contains("[2]"),
+            "got: {}",
+            text
+        );
     }
 
     #[test]
@@ -1702,11 +1836,23 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let eq_count = doc.blocks.iter()
-            .filter(|b| matches!(b, Block::Equation { is_block: false, .. }))
+        let eq_count = doc
+            .blocks
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Equation {
+                        is_block: false,
+                        ..
+                    }
+                )
+            })
             .count();
         assert_eq!(eq_count, 2, "expected 2 inline equations");
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| {
                 if let Block::Paragraph { runs, .. } = b {
                     Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
@@ -1733,13 +1879,21 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc.blocks.iter()
+        let text: String = doc
+            .blocks
+            .iter()
             .filter_map(|b| match b {
-                Block::Paragraph { runs, .. } => Some(runs.iter().map(|r| r.text.as_str()).collect::<String>()),
+                Block::Paragraph { runs, .. } => {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                }
                 _ => None,
             })
             .collect();
-        assert!(text.contains("微服务架构下"), "Chinese abstract text missing: {}", text);
+        assert!(
+            text.contains("微服务架构下"),
+            "Chinese abstract text missing: {}",
+            text
+        );
     }
 
     // ── M6: 嵌套表格支持 ──────────────────────────────────────────────────────
@@ -1758,14 +1912,21 @@ mod tests {
                 None
             }
         });
-        assert!(table.is_some(), "expected a table block, got: {:#?}", doc.blocks);
+        assert!(
+            table.is_some(),
+            "expected a table block, got: {:#?}",
+            doc.blocks
+        );
         let rows = table.unwrap();
         // First row: "a" and nested table placeholder (flattened)
         assert_eq!(rows[0].cells.len(), 2);
         let nested_cell = &rows[0].cells[1];
         // Nested table content "inner" is extracted and placed in cell
-        assert!(nested_cell.runs.iter().any(|r| r.text.contains("inner")),
-            "nested cell should contain 'inner', got: {:?}", nested_cell.runs);
+        assert!(
+            nested_cell.runs.iter().any(|r| r.text.contains("inner")),
+            "nested cell should contain 'inner', got: {:?}",
+            nested_cell.runs
+        );
     }
 
     #[test]
@@ -1774,13 +1935,25 @@ mod tests {
         let src = "\\begin{tabular}{c|c}\na & \\begin{tabular}{c}inner\\end{tabular} \\\\\n\\end{tabular}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
-        let table = doc.blocks.iter().find_map(|b| {
-            if let Block::Table { rows, .. } = b { Some(rows) } else { None }
-        }).unwrap();
+        let table = doc
+            .blocks
+            .iter()
+            .find_map(|b| {
+                if let Block::Table { rows, .. } = b {
+                    Some(rows)
+                } else {
+                    None
+                }
+            })
+            .unwrap();
         // Nested cell should contain "inner" from the nested tabular
         let nested_cell = &table[0].cells[1];
         let text: String = nested_cell.runs.iter().map(|r| r.text.as_str()).collect();
-        assert!(text.contains("inner"), "nested table content should be preserved, got: {}", text);
+        assert!(
+            text.contains("inner"),
+            "nested table content should be preserved, got: {}",
+            text
+        );
     }
 
     #[test]
@@ -1839,7 +2012,8 @@ mod tests {
 
     #[test]
     fn lower_heading_auto_number() {
-        let src = "\\section{First}\n\n\\subsection{Sub}\n\n\\section{Second}\n\n\\subsection{Sub2}";
+        let src =
+            "\\section{First}\n\n\\subsection{Sub}\n\n\\section{Second}\n\n\\subsection{Sub2}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         let headings: Vec<_> = doc
@@ -1860,10 +2034,7 @@ mod tests {
             })
             .collect();
         assert_eq!(headings[0], (1, "First".to_string(), Some("1".to_string())));
-        assert_eq!(
-            headings[1],
-            (2, "Sub".to_string(), Some("1.1".to_string()))
-        );
+        assert_eq!(headings[1], (2, "Sub".to_string(), Some("1.1".to_string())));
         assert_eq!(
             headings[2],
             (1, "Second".to_string(), Some("2".to_string()))

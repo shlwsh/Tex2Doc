@@ -13,7 +13,7 @@ use crate::error::TexError;
 ///
 /// 优先级：`pdftotext` > `mutool` > `Err(TexError::NoTextExtractor)`。
 pub async fn extract_text(pdf: &Path) -> Result<String> {
-    if let Some(pdftotext) = which::which("pdftotext").ok() {
+    if let Ok(pdftotext) = which::which("pdftotext") {
         let out = Command::new(&pdftotext)
             .arg(pdf)
             .arg("-")
@@ -24,7 +24,7 @@ pub async fn extract_text(pdf: &Path) -> Result<String> {
             return Ok(String::from_utf8_lossy(&out.stdout).into_owned());
         }
     }
-    if let Some(mutool) = which::which("mutool").ok() {
+    if let Ok(mutool) = which::which("mutool") {
         let out = Command::new(&mutool)
             .args(["convert", "-F", "text", "-o", "-"])
             .arg(pdf)

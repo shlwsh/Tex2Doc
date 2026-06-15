@@ -4,9 +4,9 @@
 
 use std::path::PathBuf;
 
-use doc_tex_facade::TexProject;
-use doc_tex_facade::xelatex::XelatexBackend;
 use doc_tex_facade::tectonic::TectonicBackend;
+use doc_tex_facade::xelatex::XelatexBackend;
+use doc_tex_facade::TexProject;
 
 #[test]
 fn xelatex_command_construction() {
@@ -22,8 +22,7 @@ fn xelatex_command_construction() {
     assert!(args.contains(&"-interaction=nonstopmode".to_string()));
     assert!(args.contains(&"-halt-on-error".to_string()));
     assert!(
-        args.iter()
-            .any(|a| a.starts_with("-output-directory=")),
+        args.iter().any(|a| a.starts_with("-output-directory=")),
         "必须带 -output-directory"
     );
     // 主文件是最后一个参数
@@ -38,7 +37,9 @@ fn xelatex_command_construction() {
 fn tectonic_offline_env_disables_network() {
     // 设置 TECTONIC_OFFLINE=1 → 探测时 allow_network=false
     // SAFETY: 单测里只设 / 读，不与多线程共享
-    unsafe { std::env::set_var("TECTONIC_OFFLINE", "1"); }
+    unsafe {
+        std::env::set_var("TECTONIC_OFFLINE", "1");
+    }
     let backend = TectonicBackend {
         bin: PathBuf::from("/usr/bin/tectonic"),
         allow_network: false,
@@ -51,13 +52,17 @@ fn tectonic_offline_env_disables_network() {
     assert!(args.contains(&"--outdir".to_string()));
     assert!(args.contains(&"--keep-logs".to_string()));
     assert!(args.contains(&"--print".to_string()));
-    unsafe { std::env::remove_var("TECTONIC_OFFLINE"); }
+    unsafe {
+        std::env::remove_var("TECTONIC_OFFLINE");
+    }
 }
 
 #[test]
 fn tectonic_online_env_enables_network() {
     // TECTONIC_OFFLINE 未设 → allow_network=true
-    unsafe { std::env::remove_var("TECTONIC_OFFLINE"); }
+    unsafe {
+        std::env::remove_var("TECTONIC_OFFLINE");
+    }
     let backend = TectonicBackend {
         bin: PathBuf::from("/usr/bin/tectonic"),
         allow_network: true,

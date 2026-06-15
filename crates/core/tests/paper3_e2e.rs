@@ -37,11 +37,7 @@ fn paper3_main_jos_to_docx() {
         "项目根目录不存在：{}",
         project_root.display()
     );
-    assert!(
-        main_tex.is_file(),
-        "主 tex 不存在：{}",
-        main_tex.display()
-    );
+    assert!(main_tex.is_file(), "主 tex 不存在：{}", main_tex.display());
 
     let opts = ConvertOptions::default();
     let started = Instant::now();
@@ -55,7 +51,10 @@ fn paper3_main_jos_to_docx() {
         b"PK\x03\x04",
         "docx 缺少 zip 魔数，转换可能未完成"
     );
-    for needle in [b"word/document.xml".as_slice(), b"word/styles.xml".as_slice()] {
+    for needle in [
+        b"word/document.xml".as_slice(),
+        b"word/styles.xml".as_slice(),
+    ] {
         assert!(
             result.docx.windows(needle.len()).any(|w| w == needle),
             "docx 包内未找到 {needle:?}"
@@ -99,10 +98,7 @@ fn paper3_main_jos_to_docx() {
         "📊 块统计：para={para_count} list={list_count} eq={eq_count} fig={fig_count} tbl={tbl_count} h={heading_count} raw={raw_count}"
     );
     // 合理性约束：不能整篇都是 paragraph（结构必须生效）
-    assert!(
-        para_count >= 1,
-        "应当至少有一段正文（中文摘要等）"
-    );
+    assert!(para_count >= 1, "应当至少有一段正文（中文摘要等）");
     assert!(
         list_count >= 1,
         "中文参考文献的 description 列表应被识别为 List"

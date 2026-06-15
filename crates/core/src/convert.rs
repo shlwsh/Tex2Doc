@@ -47,7 +47,8 @@ pub fn convert_dir(
     options: &ConvertOptions,
 ) -> Result<ConvertResult, CoreError> {
     let mut vfs = VirtualFs::new();
-    vfs.mount_dir(project_root).map_err(|e| CoreError::Io(e.to_string()))?;
+    vfs.mount_dir(project_root)
+        .map_err(|e| CoreError::Io(e.to_string()))?;
 
     // Collect PNG/JPEG image assets from VFS
     let mut image_assets = ImageAssets::new();

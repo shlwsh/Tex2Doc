@@ -10,7 +10,11 @@ const MAX_EXPR_DEPTH: usize = 100;
 ///
 /// 错误降级：遇到未知语法时累积为 [`MathExpr::Raw`]，不 panic。
 pub fn parse_latex_math(input: &str) -> MathExpr {
-    let mut p = Parser { s: input, i: 0, depth: 0 };
+    let mut p = Parser {
+        s: input,
+        i: 0,
+        depth: 0,
+    };
     let seq = p.parse_seq(false);
     p.skip_ws();
     if p.i < p.s.len() {

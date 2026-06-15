@@ -117,8 +117,12 @@ impl Cache {
         let snap = dir.join("input.snapshot.json");
         let _ = tokio::fs::write(
             &snap,
-            format!("{{\"key_hex\":\"{}\",\"engine\":\"{}\"}}", key.hex(), engine.as_str())
-                .as_bytes(),
+            format!(
+                "{{\"key_hex\":\"{}\",\"engine\":\"{}\"}}",
+                key.hex(),
+                engine.as_str()
+            )
+            .as_bytes(),
         )
         .await;
 
@@ -187,7 +191,12 @@ pub fn compute_key(project: &TexProject) -> Result<CacheKey> {
             let ext_ok = path
                 .extension()
                 .and_then(|s| s.to_str())
-                .map(|s| matches!(s.to_ascii_lowercase().as_str(), "png" | "jpg" | "jpeg" | "pdf"))
+                .map(|s| {
+                    matches!(
+                        s.to_ascii_lowercase().as_str(),
+                        "png" | "jpg" | "jpeg" | "pdf"
+                    )
+                })
                 .unwrap_or(false);
             if ext_ok {
                 if let Ok(bytes) = std::fs::read(path) {

@@ -32,10 +32,7 @@ impl TectonicBackend {
                 .ok()
                 .map(|v| v != "1" && !v.eq_ignore_ascii_case("true"))
                 .unwrap_or(true);
-            Self {
-                bin,
-                allow_network,
-            }
+            Self { bin, allow_network }
         })
     }
 
@@ -79,17 +76,14 @@ impl TexBackend for TectonicBackend {
 
     async fn compile(&self, project: &TexProject) -> Result<TexRun> {
         let started = std::time::Instant::now();
-        let output_name = project
-            .output_name
-            .clone()
-            .unwrap_or_else(|| {
-                project
-                    .main_file
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .map(|s| format!("{s}.pdf"))
-                    .unwrap_or_else(|| "output.pdf".into())
-            });
+        let output_name = project.output_name.clone().unwrap_or_else(|| {
+            project
+                .main_file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .map(|s| format!("{s}.pdf"))
+                .unwrap_or_else(|| "output.pdf".into())
+        });
         let pdf_path = project.workdir.join(&output_name);
 
         // tectonic 单命令跑完所有 pass + bibtex，无需手动多轮

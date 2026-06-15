@@ -138,8 +138,7 @@ pub unsafe extern "C" fn doc_engine_convert_zip(
     *out_docx_len = docx_len;
 
     // 分配 warnings JSON
-    let warnings_json =
-        serde_json::to_vec(&result.warnings).unwrap_or_else(|_| b"[]".to_vec());
+    let warnings_json = serde_json::to_vec(&result.warnings).unwrap_or_else(|_| b"[]".to_vec());
     let w_len = warnings_json.len();
     let w_buf = unsafe { malloc(w_len) };
     if w_buf.is_null() {

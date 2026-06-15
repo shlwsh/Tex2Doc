@@ -64,7 +64,12 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
 
     for block in &doc.blocks {
         match block {
-            Block::Heading { level, text, number, .. } => {
+            Block::Heading {
+                level,
+                text,
+                number,
+                ..
+            } => {
                 let style = match level {
                     1 => STYLE_HEADING1,
                     2 => STYLE_HEADING2,
@@ -130,10 +135,20 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
                     write_paragraph(&mut w, &para);
                 }
             }
-            Block::Table { rows, caption, number, .. } => {
+            Block::Table {
+                rows,
+                caption,
+                number,
+                ..
+            } => {
                 write_table(&mut w, rows, caption.as_deref(), number.as_deref());
             }
-            Block::Figure { path, caption, number, .. } => {
+            Block::Figure {
+                path,
+                caption,
+                number,
+                ..
+            } => {
                 fig_counter += 1;
                 let fig_id = fig_counter;
                 let fig_key = path.trim();
@@ -165,11 +180,17 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
                             // 组装 inline drawing XML
                             let drawing = format!(
                                 r#"<w:drawing><wp:inline dist="0"><wp:extent cx="{}" cy="{}"/><wp:docPr id="{}" name="Picture {}" descr="{}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{}" name="{}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip><w:binData w:name="word/media/{}">{}</w:binData></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"#,
-                                cx, cy, fig_id, fig_id, xml_escape(fig_key),
-                                fig_id, xml_escape(&media_name),
+                                cx,
+                                cy,
+                                fig_id,
+                                fig_id,
+                                xml_escape(fig_key),
+                                fig_id,
+                                xml_escape(&media_name),
                                 xml_escape(&format!("word/media/{}", media_name)),
                                 b64,
-                                cx, cy
+                                cx,
+                                cy
                             );
 
                             use std::io::Write;
@@ -201,7 +222,11 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
                 let runs = vec![Run {
                     text: format!(
                         "[图片：{}]",
-                        if fig_key.is_empty() { "（未提供）" } else { fig_key }
+                        if fig_key.is_empty() {
+                            "（未提供）"
+                        } else {
+                            fig_key
+                        }
                     ),
                     style_id: None,
                     bold: false,
@@ -443,8 +468,7 @@ fn write_table(
                 shd.push_attribute(("w:fill", fill.as_str()));
                 w.write_event(Event::Empty(shd)).unwrap();
             }
-            w.write_event(Event::End(BytesEnd::new("w:tcPr")))
-                .unwrap();
+            w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
             let p = Paragraph {
                 style_id: if is_header {

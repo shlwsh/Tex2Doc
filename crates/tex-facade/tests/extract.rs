@@ -42,8 +42,5 @@ fn extract_text_invalid_path_returns_error() {
     let result = rt.block_on(doc_tex_facade::extract_text(Path::new(
         "Z:/__definitely_does_not_exist__.pdf",
     )));
-    assert!(
-        result.is_err(),
-        "不存在的 PDF 应返回 Err，不能 panic"
-    );
+    assert!(result.is_err(), "不存在的 PDF 应返回 Err，不能 panic");
 }
