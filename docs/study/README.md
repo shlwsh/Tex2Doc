@@ -41,6 +41,12 @@
 | ⑦ 部署手册 | [07-deployment/04-server-deploy.md](./07-deployment/04-server-deploy.md) | 服务端部署 |
 | ⑦ 部署手册 | [07-deployment/05-extension-pack.md](./07-deployment/05-extension-pack.md) | Chrome 扩展打包 |
 | ⑦ 部署手册 | [07-deployment/06-ci-and-hooks.md](./07-deployment/06-ci-and-hooks.md) | CI 与 Git 钩子 |
+| ⑧ 演进路线 | [08-pdf-pipeline/README.md](./08-pdf-pipeline/README.md) | V2 PDF 流水线草案：docx→PDF 同步输出 + TeX oracle 质量对比 |
+| ⑧ 演进路线 | [08-pdf-pipeline/01-pipeline-overview.md](./08-pdf-pipeline/01-pipeline-overview.md) | V2 端到端总览、产物命名、CI 流程 |
+| ⑧ 演进路线 | [08-pdf-pipeline/02-tex-facade.md](./08-pdf-pipeline/02-tex-facade.md) | `crates/tex-facade` 设计：xelatex / tectonic / latexmk 可插拔封装 |
+| ⑧ 演进路线 | [08-pdf-pipeline/03-docx-to-pdf.md](./08-pdf-pipeline/03-docx-to-pdf.md) | `crates/docx-pdf` 设计：LibreOffice headless 二次转换 |
+| ⑧ 演进路线 | [08-pdf-pipeline/04-quality-comparison.md](./08-pdf-pipeline/04-quality-comparison.md) | `crates/quality` 三层质量对比：结构 + 文本 + 视觉 |
+| ⑧ 演进路线 | [08-pdf-pipeline/05-implementation-roadmap.md](./08-pdf-pipeline/05-implementation-roadmap.md) | M1–M5 实施路线图、风险、回滚 |
 
 ---
 
@@ -82,6 +88,12 @@
 * Rust 核心、Flutter 多端、WASM 产物、HTTP 服务、扩展包的完整构建/打包/发布
 * CI 三平台矩阵（Ubuntu / Windows / macOS）
 * Git 钩子与提交工作流
+
+### 第八章 · 演进路线 V2 · PDF 流水线（[08-pdf-pipeline/](./08-pdf-pipeline/））— 设计稿
+* V1 → V2 演进：新增 docx→PDF 同步生成、TeX oracle 质量对比
+* 三个新 crate：`tex-facade`（可插拔 TeX 封装）、`docx-pdf`（LibreOffice roundtrip）、`quality`（结构+文本+视觉三层）
+* 5 阶段排期（M1–M5），合计 9–14 周
+* **当前状态**：设计稿，未开始落地
 
 ---
 

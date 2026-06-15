@@ -128,6 +128,8 @@
 | 复杂宏包（`minted` / `listings` 高亮） | ❌ RawFallback | V2 路线图 |
 | Office 字体嵌入字形 | ⚠️ 提示级 | `Embed` 状态下在 docx 中声明，但不嵌入字形文件 |
 
+> **V2 草案**：上述边界**主线**不变。V2 在 [../08-pdf-pipeline/](../08-pdf-pipeline/README.md) 引入 docx→PDF 同步生成与 TeX oracle 质量对比，TeX **仅在验证阶段**被可插拔调用，V1 主线依旧"纯解析器不调用 TeX"。详见第八章。
+
 ---
 
 ## 1.6 与同类方案的对比
@@ -159,3 +161,5 @@
 ## 1.8 文档导航
 
 继续阅读 [02-quick-tour.md](./02-quick-tour.md) 跑通最小演示。
+
+> **演进路线（设计稿）**：V1.3 之后，V2 在 [../08-pdf-pipeline/](../08-pdf-pipeline/README.md) 引入 PDF 流水线与三层质量对比，详见第八章。
