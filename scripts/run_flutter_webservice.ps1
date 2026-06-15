@@ -43,13 +43,13 @@ function Clear-Port([int]$port) {
     $pids = Get-PortPid $port
     if (-not $pids) { return $true }
 
-    foreach ($pid in $pids) {
+    foreach ($targetPid in $pids) {
         try {
-            $procName = (Get-Process -Id $pid -ErrorAction SilentlyContinue).ProcessName
-            Write-Warn "Port $port occupied by PID $pid ($procName). Force-killing..."
-            taskkill /F /PID $pid | Out-Null
+            $procName = (Get-Process -Id $targetPid -ErrorAction SilentlyContinue).ProcessName
+            Write-Warn "Port $port occupied by PID $targetPid ($procName). Force-killing..."
+            taskkill /F /PID $targetPid | Out-Null
         } catch {
-            Write-Warn "taskkill /F /PID $pid failed: $_"
+            Write-Warn "taskkill /F /PID $targetPid failed: $_"
         }
     }
 
