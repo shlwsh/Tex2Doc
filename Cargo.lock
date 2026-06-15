@@ -293,6 +293,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-docx-pdf"
+version = "0.1.0"
+
+[[package]]
 name = "doc-docx-writer"
 version = "0.1.0"
 dependencies = [
@@ -341,6 +345,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-quality"
+version = "0.1.0"
+
+[[package]]
 name = "doc-semantic-ast"
 version = "0.1.0"
 dependencies = [
@@ -370,6 +378,10 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
 ]
+
+[[package]]
+name = "doc-tex-facade"
+version = "0.1.0"
 
 [[package]]
 name = "doc-utils"

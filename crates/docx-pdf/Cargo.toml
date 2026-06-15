@@ -1,0 +1,12 @@
+[package]
+name        = "doc-docx-pdf"
+version     = "0.1.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+publish      = false
+description = "V2 PDF 流水线 · 路径 B：用 LibreOffice headless 把 docx 转 PDF"
+
+[dependencies]
+
+[dev-dependencies]

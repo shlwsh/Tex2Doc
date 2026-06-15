@@ -11,6 +11,9 @@ members = [
     "crates/wasm",
     "crates/native",
     "crates/server",
+    "crates/tex-facade",   # M1 新增（V2 路径 A：tex-facade）
+    "crates/docx-pdf",     # M1 新增（V2 路径 B：docx-pdf）
+    "crates/quality",      # M1 新增（V2 路径 C：quality）
 ]
 exclude = [
     "crates/cli",
@@ -54,7 +57,8 @@ base64   = "0.22"
 
 # CLI / 异步（暂未在 M1-M2 使用，保留锁版本）
 clap     = { version = "4.5", features = ["derive"] }
-tokio    = { version = "1.40", features = ["macros", "rt-multi-thread"] }
+# M2 起 tex-facade 需要 process / fs / sync / io-util；union 在各 crate 自声明的 features
+tokio    = { version = "1.40", features = ["macros", "rt-multi-thread", "process", "fs", "sync", "io-util"] }
 
 # 测试 / 基准
 insta      = { version = "1.40", features = ["yaml", "ron"] }

@@ -1,0 +1,12 @@
+[package]
+name        = "doc-tex-facade"
+version     = "0.1.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+publish      = false
+description = "V2 PDF 流水线 · 路径 A：Rust 端可插拔封装外部 TeX 引擎（xelatex / tectonic / latexmk）"
+
+[dependencies]
+
+[dev-dependencies]
