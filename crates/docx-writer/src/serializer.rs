@@ -351,10 +351,10 @@ pub fn serialize_document(
                 number,
                 ..
             } => {
-                // 算法块：先写 "算法 N  caption" 标题，再写 I/O + 代码行
+                // 算法块：先写 "Algorithm N: caption" 标题，再写 I/O + 代码行
                 let cap = format!(
-                    "{}  {}",
-                    number.as_deref().unwrap_or("算法"),
+                    "{}: {}",
+                    number.as_deref().unwrap_or("Algorithm"),
                     caption.as_deref().unwrap_or("")
                 );
                 let para = Paragraph {

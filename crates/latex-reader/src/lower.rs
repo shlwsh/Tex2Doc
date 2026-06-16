@@ -134,7 +134,8 @@ impl NumberingState {
 
     pub fn next_algorithm(&mut self) -> String {
         self.algorithm_counter += 1;
-        format!("算法 {}", self.algorithm_counter)
+        // JOS 期刊约定：算法标题用 "Algorithm N: caption" 英文格式
+        format!("Algorithm {}", self.algorithm_counter)
     }
 }
 
@@ -1417,12 +1418,29 @@ fn lower_table(body: &str, span: Span) -> Block {
 
             // Check for \multicolumn{n}{spec}{text} - must be at START of cell content
             if let Some((n, cell_text)) = parse_multicolumn(raw_for_multicolumn) {
-                cells.push(TableCell {
-                    runs: vec![TextRun {
+                // V2：把 cell_text 也走 normalizer
+                let cite_map: HashMap<String, usize> = HashMap::new();
+                let label_map: HashMap<String, String> = HashMap::new();
+                let normalized = crate::normalize::latex_to_text(&cell_text, &cite_map, &label_map);
+                let runs: Vec<TextRun> = if normalized.runs.is_empty() {
+                    vec![TextRun {
                         text: cell_text,
                         style: TextStyle::Plain,
                         span,
-                    }],
+                    }]
+                } else {
+                    normalized
+                        .runs
+                        .into_iter()
+                        .map(|r| TextRun {
+                            text: r.text,
+                            style: r.style,
+                            span,
+                        })
+                        .collect()
+                };
+                cells.push(TableCell {
+                    runs,
                     colspan: n as u32,
                     rowspan: 1,
                     bg_color: cell_bg_color,
@@ -1465,18 +1483,52 @@ fn lower_table(body: &str, span: Span) -> Block {
                         span,
                     }]
                 } else {
+                    // 退化路径：normalizer 处理 raw
+                    let cite_map: HashMap<String, usize> = HashMap::new();
+                    let label_map: HashMap<String, String> = HashMap::new();
+                    let normalized = crate::normalize::latex_to_text(&raw, &cite_map, &label_map);
+                    if normalized.runs.is_empty() {
+                        vec![TextRun {
+                            text: raw.clone(),
+                            style: TextStyle::Plain,
+                            span,
+                        }]
+                    } else {
+                        normalized
+                            .runs
+                            .into_iter()
+                            .map(|r| TextRun {
+                                text: r.text,
+                                style: r.style,
+                                span,
+                            })
+                            .collect()
+                    }
+                }
+            } else {
+                // V2 接入：把 cell 文本走 latex_to_text normalizer
+                // 否则 \textbf / \textit / $math$ 等会原文泄漏。
+                let cite_map: HashMap<String, usize> = HashMap::new();
+                let label_map: HashMap<String, String> = HashMap::new();
+                let normalized = crate::normalize::latex_to_text(&raw, &cite_map, &label_map);
+                let cell_runs: Vec<TextRun> = normalized
+                    .runs
+                    .into_iter()
+                    .map(|r| TextRun {
+                        text: r.text,
+                        style: r.style,
+                        span,
+                    })
+                    .collect();
+                if cell_runs.is_empty() {
                     vec![TextRun {
                         text: raw.clone(),
                         style: TextStyle::Plain,
                         span,
                     }]
+                } else {
+                    cell_runs
                 }
-            } else {
-                vec![TextRun {
-                    text: raw.clone(),
-                    style: TextStyle::Plain,
-                    span,
-                }]
             };
             cells.push(TableCell {
                 runs: cell_runs,
@@ -1488,14 +1540,30 @@ fn lower_table(body: &str, span: Span) -> Block {
         rows.push(TableRow { cells });
     }
     if rows.is_empty() {
-        // 兜底：单行单列 + 原文
+        // 兜底：单行单列 + 原文（走 normalizer）
+        let cite_map: HashMap<String, usize> = HashMap::new();
+        let label_map: HashMap<String, String> = HashMap::new();
+        let normalized = crate::normalize::latex_to_text(body, &cite_map, &label_map);
+        let runs: Vec<TextRun> = if normalized.runs.is_empty() {
+            vec![TextRun {
+                text: body.to_string(),
+                style: TextStyle::Plain,
+                span,
+            }]
+        } else {
+            normalized
+                .runs
+                .into_iter()
+                .map(|r| TextRun {
+                    text: r.text,
+                    style: r.style,
+                    span,
+                })
+                .collect()
+        };
         rows.push(TableRow {
             cells: vec![TableCell {
-                runs: vec![TextRun {
-                    text: body.to_string(),
-                    style: TextStyle::Plain,
-                    span,
-                }],
+                runs,
                 colspan: 1,
                 rowspan: 1,
                 bg_color: None,
