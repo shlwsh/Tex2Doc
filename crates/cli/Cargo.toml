@@ -1,0 +1,31 @@
+[package]
+name        = "doc-engine"
+version     = "0.1.0"
+edition.workspace     = true
+rust-version.workspace = true
+license.workspace     = true
+publish      = false
+description = "Doc-engine CLI: V2 PDF pipeline entry (convert / tex-compile / docx-to-pdf / verify-pdf)"
+
+[[bin]]
+name = "doc-engine"
+path = "src/main.rs"
+
+[dependencies]
+doc-core        = { path = "../core" }
+doc-tex-facade  = { path = "../tex-facade" }
+doc-docx-pdf    = { path = "../docx-pdf" }
+doc-quality     = { path = "../quality" }
+
+clap     = { workspace = true }
+tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "process", "sync"] }
+anyhow   = { workspace = true }
+serde    = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+zip      = { workspace = true }
+tracing  = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tempfile = "3"
+
+[dev-dependencies]
+tempfile = "3"

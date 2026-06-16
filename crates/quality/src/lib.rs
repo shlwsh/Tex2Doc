@@ -79,21 +79,36 @@ impl Quality {
         }
         let passed = layers.iter().all(|l| l.passed);
         let exit_code = compute_exit_code(&layers);
-        Ok(QualityReport {
+
+        // 顶层汇总：marker 命中 / 字符数 / 字符比例 / 段落数
+        let mut report = QualityReport {
             docx: ctx.docx.clone(),
             rust_pdf: ctx.rust_pdf.clone(),
             oracle_pdf: ctx.oracle_pdf.clone(),
             passed,
             exit_code,
             layer_results: layers,
-            marker_coverage: Vec::new(),        // 由 textual::Runner 填
-            docx_chars: 0,
-            rust_pdf_chars: 0,
-            oracle_pdf_chars: 0,
+            marker_coverage: Vec::new(),
+            docx_chars: crate::normalize::normalize(&ctx.docx_text).chars().count(),
+            rust_pdf_chars: crate::normalize::normalize(&ctx.rust_text).chars().count(),
+            oracle_pdf_chars: crate::normalize::normalize(&ctx.oracle_text).chars().count(),
             char_ratio_docx_to_oracle: 0.0,
             char_ratio_rust_to_oracle: 0.0,
-            paragraphs: 0,
-        })
+            paragraphs: ctx.docx_paragraphs,
+        };
+        report.char_ratio_docx_to_oracle = if report.oracle_pdf_chars == 0 {
+            0.0
+        } else {
+            report.docx_chars as f64 / report.oracle_pdf_chars as f64
+        };
+        report.char_ratio_rust_to_oracle = if report.oracle_pdf_chars == 0 {
+            0.0
+        } else {
+            report.rust_pdf_chars as f64 / report.oracle_pdf_chars as f64
+        };
+        report.marker_coverage =
+            crate::markers::coverage(&ctx.docx_text, &ctx.oracle_text, &ctx.rust_text);
+        Ok(report)
     }
 }
 

@@ -121,9 +121,9 @@ pub fn read_pdf_text(pdf: &std::path::Path) -> Result<String, QualityError> {
         .map_err(|e| QualityError::PdfText(format!("lopdf load 失败：{e}")))?;
     let mut s = String::new();
     let pages = doc.get_pages();
-    let ids: Vec<u32> = pages.values().copied().collect();
-    for id in ids {
-        if let Ok(text) = doc.extract_text(&[id]) {
+    for (_page_num, id) in pages.iter() {
+        let obj_id: u32 = id.1 as u32;
+        if let Ok(text) = doc.extract_text(&[obj_id]) {
             s.push_str(&text);
         }
     }

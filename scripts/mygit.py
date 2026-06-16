@@ -393,18 +393,64 @@ def call_ollama_api(
     url: str,
     payload: dict,
 ) -> requests.Response:
-    """调用本地 Ollama 的 OpenAI 兼容 /chat/completions。
+    """调用本地 Ollama。
+
+    注意：Gemma 4 在 /v1/chat/completions（OpenAI 兼容）端点上会强制消耗
+    所有 max_tokens 于内部 thinking 过程，导致 content 为空字符串（Ollama
+    OpenAI 兼容层不接受 think=False 参数）。本函数改走 Ollama 原生
+    /api/chat 端点并设置 think=False，从而让本地模型真正输出 commit 信息。
 
     本机调用不走代理；超时放宽到 300s（首次加载模型约 10-30s，
     在 8B Q4 模型 + 大 diff 场景下前向推理可能再吃 30-120s）。
     """
-    headers = {"Content-Type": "application/json"}
+    # 把 OpenAI 风格的 url 改写到原生 /api/chat
+    native_url = url.replace("/v1/chat/completions", "/api/chat")
+    native_payload = {
+        "model": payload["model"],
+        "messages": payload["messages"],
+        "stream": False,
+        "think": False,  # 关键:关闭 Gemma 4 thinking,让所有 token 用于实际输出
+        "options": {
+            "num_ctx": int(payload.get("num_ctx", 8192)),
+        },
+    }
+    if "temperature" in payload:
+        native_payload["options"]["temperature"] = payload["temperature"]
+    if "max_tokens" in payload:
+        native_payload["options"]["num_predict"] = payload["max_tokens"]
+
     try:
-        resp = session.post(url, headers=headers, json=payload, timeout=300, proxies={"http": None, "https": None})
+        resp = session.post(
+            native_url,
+            json=native_payload,
+            timeout=300,
+            proxies={"http": None, "https": None},
+        )
         resp.raise_for_status()
-        return resp
     except requests.RequestException as exc:
         raise RuntimeError(f"Ollama 请求失败: {exc}") from exc
+
+    # 把原生响应包装成 OpenAI 兼容的 choices 形式，让上游 strip_markdown_fence
+    # 逻辑无需改动
+    data = resp.json()
+    message = data.get("message") or {}
+    class _Shim:
+        def __init__(self, d):
+            self._d = d
+        def json(self):
+            return {
+                "choices": [
+                    {
+                        "message": {
+                            "role": message.get("role", "assistant"),
+                            "content": message.get("content", ""),
+                        }
+                    }
+                ]
+            }
+        def raise_for_status(self):
+            return None
+    return _Shim(data)
 
 
 def warmup_ollama(base_url: str, model: str) -> bool:

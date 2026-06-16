@@ -14,9 +14,7 @@ members = [
     "crates/tex-facade",   # M1 新增（V2 路径 A：tex-facade）
     "crates/docx-pdf",     # M1 新增（V2 路径 B：docx-pdf）
     "crates/quality",      # M1 新增（V2 路径 C：quality）
-]
-exclude = [
-    "crates/cli",
+    "crates/cli",          # V2 子命令入口：convert / tex-compile / docx-to-pdf / verify-pdf / build
 ]
 
 [workspace.package]
