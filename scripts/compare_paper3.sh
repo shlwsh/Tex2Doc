@@ -67,6 +67,7 @@ if [[ $DO_CONVERT -eq 1 ]]; then
     "$DOCX_TOOL" convert \
         --zip "$ZIP" \
         --main-tex main-jos.tex \
+        --page-setup jos-paper3 \
         --out "$DOCX" 2>&1 | tail -2
 fi
 

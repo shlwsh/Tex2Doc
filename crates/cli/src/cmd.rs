@@ -27,6 +27,8 @@ impl PageSetupKind {
                 margin_right: None,
                 margin_bottom: None,
                 margin_left: None,
+                margin_header: None,
+                margin_footer: None,
                 cols_space: None,
                 cols_num: None,
             }),

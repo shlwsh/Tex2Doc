@@ -481,17 +481,33 @@ pub fn serialize_document(
     pg_sz.push_attribute(("w:h", ps.height_twips.to_string().as_str()));
     w.write_event(Event::Empty(pg_sz)).unwrap();
 
-    // pgMar：页边距（仅在 page_setup 显式提供时写）
-    if let (Some(t), Some(r), Some(b), Some(l)) =
-        (ps.margin_top, ps.margin_right, ps.margin_bottom, ps.margin_left)
+    // pgMar：仅在 page_setup 显式提供时写
+    if ps.margin_top.is_some()
+        || ps.margin_right.is_some()
+        || ps.margin_bottom.is_some()
+        || ps.margin_left.is_some()
+        || ps.margin_header.is_some()
+        || ps.margin_footer.is_some()
     {
         let mut pg_mar = BytesStart::new("w:pgMar");
-        pg_mar.push_attribute(("w:top", t.to_string().as_str()));
-        pg_mar.push_attribute(("w:right", r.to_string().as_str()));
-        pg_mar.push_attribute(("w:bottom", b.to_string().as_str()));
-        pg_mar.push_attribute(("w:left", l.to_string().as_str()));
-        pg_mar.push_attribute(("w:header", "0"));
-        pg_mar.push_attribute(("w:footer", "0"));
+        if let Some(t) = ps.margin_top {
+            pg_mar.push_attribute(("w:top", t.to_string().as_str()));
+        }
+        if let Some(r) = ps.margin_right {
+            pg_mar.push_attribute(("w:right", r.to_string().as_str()));
+        }
+        if let Some(b) = ps.margin_bottom {
+            pg_mar.push_attribute(("w:bottom", b.to_string().as_str()));
+        }
+        if let Some(l) = ps.margin_left {
+            pg_mar.push_attribute(("w:left", l.to_string().as_str()));
+        }
+        if let Some(h) = ps.margin_header {
+            pg_mar.push_attribute(("w:header", h.to_string().as_str()));
+        }
+        if let Some(f) = ps.margin_footer {
+            pg_mar.push_attribute(("w:footer", f.to_string().as_str()));
+        }
         pg_mar.push_attribute(("w:gutter", "0"));
         w.write_event(Event::Empty(pg_mar)).unwrap();
     }

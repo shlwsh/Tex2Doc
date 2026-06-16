@@ -17,6 +17,10 @@ pub struct PageSetup {
     pub margin_right: Option<u32>,
     pub margin_bottom: Option<u32>,
     pub margin_left: Option<u32>,
+    /// 页眉到顶边的距离（twips）；缺省 None。
+    pub margin_header: Option<u32>,
+    /// 页脚到底边的距离（twips）；缺省 None。
+    pub margin_footer: Option<u32>,
     /// 分栏（cols space / num）。缺省 = 1 栏 + 720 twips 间距。
     pub cols_space: Option<u32>,
     pub cols_num: Option<u32>,
@@ -32,6 +36,8 @@ impl Default for PageSetup {
             margin_right: None,
             margin_bottom: None,
             margin_left: None,
+            margin_header: None,
+            margin_footer: None,
             cols_space: None,
             cols_num: None,
         }
@@ -39,15 +45,20 @@ impl Default for PageSetup {
 }
 
 impl PageSetup {
-    /// JOS 18.40cm × 26.00cm 模板（实测值，含装订余量）。
+    /// JOS 18.40cm × 26.00cm 模板（设计稿 §7.1）。
+    ///
+    /// 页面 18.4 × 26.0 cm；上下左右 = 1.0/1.45/2.20/1.45 cm；
+    /// header=1.30 cm；footer=2.22 cm（比样例 0.85 大，JOS 投稿实测 2.0+）。
     pub fn jos_paper3() -> Self {
         Self {
             width_twips: 10433,
             height_twips: 14742,
-            margin_top: Some(567),
-            margin_right: Some(850),
-            margin_bottom: Some(850),
-            margin_left: Some(850),
+            margin_top: Some(567),     // 1.00 cm
+            margin_right: Some(822),   // 1.45 cm
+            margin_bottom: Some(1247), // 2.20 cm
+            margin_left: Some(822),    // 1.45 cm
+            margin_header: Some(737),  // 1.30 cm
+            margin_footer: Some(1260), // 2.22 cm
             cols_space: Some(720),
             cols_num: Some(1),
         }
