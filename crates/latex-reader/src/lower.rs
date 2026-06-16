@@ -185,8 +185,13 @@ pub fn lower_with_macros_and_numbering(
     // Citation number tracking across the document
     let mut cite_numbers: HashMap<String, usize> = HashMap::new();
 
+    let mut pos: usize = 0;
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    // Citation number tracking across the document
+    let mut cite_numbers: HashMap<String, usize> = HashMap::new();
+
     while pos < len {
-        // 防御：pos 必须落在 char 边界上（CJK 字符可能让某些路径产生非边界 offset）
         if !text.is_char_boundary(pos) {
             // 字节级推进到下一个 char 起点
             let mut next = pos + 1;
@@ -237,11 +242,11 @@ pub fn lower_with_macros_and_numbering(
             }
         }
     } else if name == "rjabstract" {
-        // rjabstract 的"摘 要"标签由 .cls 注入；这里显式追加标签段。
+        // "摘 要" 标签用纯文本（不加 LaTeX 命令；normalizer 会处理其他残留）
         doc.push(Block::Paragraph {
             runs: vec![TextRun {
-                text: "\\textbf{摘  要}".to_string(),
-                style: TextStyle::Plain,
+                text: "摘  要".to_string(),
+                style: TextStyle::Bold,
                 span: default_span,
             }],
             span: default_span,
@@ -249,11 +254,11 @@ pub fn lower_with_macros_and_numbering(
         let blk = lower_environment(name, body, default_span, macros, numbering);
         doc.push(blk);
     } else if name == "rjkeywords" {
-        // rjkeywords 的"关键词"标签由 .cls 注入；显式追加。
+        // "关键词" 标签
         doc.push(Block::Paragraph {
             runs: vec![TextRun {
-                text: "\\textbf{关键词}".to_string(),
-                style: TextStyle::Plain,
+                text: "关键词".to_string(),
+                style: TextStyle::Bold,
                 span: default_span,
             }],
             span: default_span,
@@ -310,15 +315,15 @@ pub fn lower_with_macros_and_numbering(
             // 找匹配 `}`
             if let Some(end) = find_matching_brace(text, pos + "\\rjkeywords".len()) {
                 let body = &text[pos + "\\rjkeywords".len() + 1..pos + "\\rjkeywords".len() + 1 + end];
-                // 标签段
-                doc.push(Block::Paragraph {
-                    runs: vec![TextRun {
-                        text: "\\textbf{关键词}".to_string(),
-                        style: TextStyle::Plain,
-                        span: default_span,
-                    }],
+            // 标签段
+            doc.push(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: "关键词".to_string(),
+                    style: TextStyle::Bold,
                     span: default_span,
-                });
+                }],
+                span: default_span,
+            });
                 // 关键词内容段
                 let stripped = strip_inline(body, &mut cite_numbers).trim().to_string();
                 if !stripped.is_empty() {
@@ -343,8 +348,8 @@ pub fn lower_with_macros_and_numbering(
             flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
             doc.push(Block::Paragraph {
                 runs: vec![TextRun {
-                    text: format!("\\textbf{{{label_text}}}"),
-                    style: TextStyle::Plain,
+                    text: label_text.to_string(),
+                    style: TextStyle::Bold,
                     span: default_span,
                 }],
                 span: default_span,
@@ -473,47 +478,27 @@ fn flush_paragraph(
     let body = buffer.trim().to_string();
     let s = *start;
 
-    let parts = split_inline_math(&body);
-    let has_inline_math = parts.iter().any(|p| matches!(p, RunPart::InlineMath(_)));
-
-    if !has_inline_math {
+    // V2 接入：把 LaTeX 段落走过 `latex_to_text` normalizer，
+    // 输出多 run（plain / italic / bold / sup / sub）。
+    // 注意：inline math ($...$) 不再单独提取为 Block::Equation，
+    // 直接作为 TextStyle::MathInline 留在段落中（适合中文学术文档）。
+    let cite_map: HashMap<String, usize> = HashMap::new();
+    let label_map: HashMap<String, String> = HashMap::new();
+    let normalized = crate::normalize::latex_to_text(&body, &cite_map, &label_map);
+    let runs: Vec<TextRun> = normalized
+        .runs
+        .into_iter()
+        .map(|r| TextRun {
+            text: r.text,
+            style: r.style,
+            span: Span::new(s, s + buffer.len() as u32, span.source),
+        })
+        .collect();
+    if !runs.is_empty() {
         doc.push(Block::Paragraph {
-            runs: vec![TextRun {
-                text: body,
-                style: TextStyle::Plain,
-                span: Span::new(s, s + buffer.len() as u32, span.source),
-            }],
-            span,
+            runs,
+            span: Span::new(s, s + buffer.len() as u32, span.source),
         });
-    } else {
-        let mut runs = Vec::new();
-        for part in parts {
-            match part {
-                RunPart::Text(text) if !text.is_empty() => {
-                    runs.push(TextRun {
-                        text: text.to_string(),
-                        style: TextStyle::Plain,
-                        span,
-                    });
-                }
-                RunPart::InlineMath(math) => {
-                    runs.push(TextRun {
-                        text: format!("[公式：{}]", math),
-                        style: TextStyle::Italic,
-                        span,
-                    });
-                    doc.push(Block::Equation {
-                        latex: math.to_string(),
-                        is_block: false,
-                        span,
-                    });
-                }
-                _ => {}
-            }
-        }
-        if !runs.is_empty() {
-            doc.push(Block::Paragraph { runs, span });
-        }
     }
     buffer.clear();
 }
@@ -1617,40 +1602,35 @@ fn lower_captioned_env(
     _macros: &mut MacroMap,
     numbering: &mut NumberingState,
 ) -> Block {
-    // algorithm 环境：发出 "算法 N" 标题段 + RawFallback。
+    // algorithm 环境：发出 "算法 N" 标题段 + AlgLine 序列。
     if name == "algorithm" || name == "algorithm*" {
         let (caption_text, _label) = extract_caption_and_label(body);
         let num = numbering.next_algorithm();
-        let inner_text = body
-            .lines()
-            .filter(|l| !l.trim().starts_with("\\caption"))
-            .filter(|l| !l.trim().starts_with("\\label"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut blocks: Vec<Block> = vec![];
-        if !inner_text.trim().is_empty() {
-            blocks.push(Block::RawFallback { text: inner_text, span });
-        }
-        let cap_text = format!("{} {}", num, caption_text.unwrap_or_default());
-        blocks.insert(0, Block::Paragraph {
-            runs: vec![TextRun {
-                text: cap_text,
-                style: TextStyle::Plain,
-                span,
-            }],
+        let (io, cap_from_io, label_from_io) = crate::algorithm::extract_algorithm_io(body);
+        let cap = caption_text.or(cap_from_io).unwrap_or_default();
+        let cap_normalized = normalize_caption(&cap);
+        let _label_final = _label;
+        let _ = label_from_io;
+        let rows = crate::algorithm::parse_algorithm_rows(body);
+        return Block::Algorithm {
+            lines: rows,
+            io,
+            caption: if cap_normalized.is_empty() {
+                None
+            } else {
+                Some(cap_normalized)
+            },
+            number: Some(num),
             span,
-        });
-        return blocks.into_iter().next().unwrap_or(Block::RawFallback {
-            text: body.to_string(),
-            span,
-        });
+        };
     }
 
     let (img, caption) = extract_includegraphics_and_caption(body);
+    let caption_normalized = caption.as_deref().map(normalize_caption);
     if name.starts_with("figure") {
         Block::Figure {
             path: img.unwrap_or_default(),
-            caption,
+            caption: caption_normalized,
             scale: 1.0,
             number: Some(numbering.next_figure()),
             span,
@@ -1663,11 +1643,23 @@ fn lower_captioned_env(
             ..
         } = &mut table
         {
-            *c = caption;
+            *c = caption_normalized;
             *n = Some(numbering.next_table());
         }
         table
     }
+}
+
+/// 把 caption 文本（可能是 raw LaTeX）走一遍 `latex_to_text`，
+/// 输出 join_plain 字符串（保留 \\textbf 已经被处理过的内容）。
+fn normalize_caption(text: &str) -> String {
+    let (cite, label) = (HashMap::new(), HashMap::new());
+    let n = crate::normalize::latex_to_text(text, &cite, &label);
+    let mut out = String::new();
+    for r in n.runs {
+        out.push_str(&r.text);
+    }
+    out.trim().to_string()
 }
 
 /// 从 algorithm body 中抽 caption 和 label。
@@ -1815,18 +1807,62 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             i += 1;
             continue;
         }
-        if c == b'\\' {
-            let cmd_start = i + 1;
+            if c == b'\\' {
+                let cmd_start = i + 1;
             let mut j = cmd_start;
             if j < bytes.len() && bytes[j] == b'\\' {
+                // 探测 `\\\\` (四个反斜杠) 形式：
+                //   - `\\`  + `\\`  → 两次行终止（保留第二个 `\\` 不输出）
+                //   - `\\`  + `\` + alpha → 行终止 + 命令（如 `\\\\textbf`）
+                // 两种情况都让下次迭代重新判断。
+                let k2 = j + 1;
+                if k2 < bytes.len() && bytes[k2] == b'\\' {
+                    out.push('\n');
+                    // i 停在第三个 `\\` 上（位置 k2），下次迭代会再次进入此分支
+                    i = k2;
+                    continue;
+                }
                 out.push('\n');
                 i = j + 1;
                 continue;
             }
-            while j < bytes.len() && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'@') {
-                j += 1;
+            // 命令名：alpha / @ / 单字符转义（\% \$ \& \# \_ \{ \}）
+            // 对单字符转义（不在 alpha 集中），j 必须至少推进 1 步，
+            // 否则 cmd 会是空串，"cmd.len() == 1" 判断永远不成立。
+            if j < bytes.len() {
+                let b = bytes[j];
+                let is_escape_char = matches!(b, b'%' | b'$' | b'&' | b'#' | b'_' | b'{' | b'}');
+                if is_escape_char {
+                    j += 1;
+                } else {
+                    while j < bytes.len() && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'@') {
+                        j += 1;
+                    }
+                }
             }
             let cmd = &line[cmd_start..j];
+            // 通用 LaTeX 转义：\% \$ \& \# \_ \{ \}  → 保留为转义形式
+            // （即 `\%` 写成两个字符 `\` + `%`），让下游 latex_to_text 的
+            // strip_comments 能正确识别 `\%` 为字面 %（奇数个 `\`）。
+            if cmd.len() == 1 {
+                let esc = cmd.as_bytes()[0];
+                let literal = match esc {
+                    b'%' => Some("%"),
+                    b'$' => Some("$"),
+                    b'&' => Some("&"),
+                    b'#' => Some("#"),
+                    b'_' => Some("_"),
+                    b'{' => Some("{"),
+                    b'}' => Some("}"),
+                    _ => None,
+                };
+                if let Some(s) = literal {
+                    out.push('\\');
+                    out.push_str(s);
+                    i = j;
+                    continue;
+                }
+            }
             let mut k = j;
             while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
                 k += 1;
@@ -2171,7 +2207,14 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         if let Block::Paragraph { runs, .. } = &doc.blocks[0] {
-            assert!(runs[0].text.contains("bold"));
+            // V2：\\textbf{...} 现在会产生一个 Bold run，plain runs 在两侧。
+            let combined: String = runs.iter().map(|r| r.text.as_str()).collect();
+            assert!(combined.contains("bold"), "runs combined: {combined:?}");
+            // 至少一个 run 是 Bold 且包含 "bold"
+            let bold_with_text = runs
+                .iter()
+                .any(|r| r.style == TextStyle::Bold && r.text.contains("bold"));
+            assert!(bold_with_text, "no Bold run with 'bold' in {:?}", runs);
         } else {
             panic!("expected paragraph");
         }
@@ -2274,11 +2317,12 @@ mod tests {
 
     #[test]
     fn lower_inline_math() {
+        // V2: inline math $...$ stays in paragraph, no separate Block::Equation created
         let src = "Einstein said $E = mc^2$ is famous.";
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        // 第一个块是 Equation（is_block=false），第二个是 Paragraph
+        // NO separate Block::Equation blocks for inline math
         let eq_count = doc
             .blocks
             .iter()
@@ -2293,43 +2337,11 @@ mod tests {
             })
             .count();
         assert_eq!(
-            eq_count, 1,
-            "expected 1 inline equation block, got {:#?}",
+            eq_count, 0,
+            "expected 0 inline equation blocks, got {:#?}",
             doc.blocks
         );
-        // Paragraph should contain italic placeholder
-        let has_italic = doc.blocks.iter().any(|b| {
-            if let Block::Paragraph { runs, .. } = b {
-                runs.iter()
-                    .any(|r| r.style == TextStyle::Italic && r.text.contains("E = mc^2"))
-            } else {
-                false
-            }
-        });
-        assert!(has_italic, "expected italic [公式：...] in paragraph runs");
-    }
-
-    #[test]
-    fn lower_inline_math_multiple() {
-        let src = "We have $a + b = c$ and also $x^2$.";
-        let p = parse(src);
-        let mut macros = crate::expand::MacroMap::new();
-        let doc = lower_with_macros(&p, None, &mut macros);
-        let eq_count = doc
-            .blocks
-            .iter()
-            .filter(|b| {
-                matches!(
-                    b,
-                    Block::Equation {
-                        is_block: false,
-                        ..
-                    }
-                )
-            })
-            .count();
-        assert_eq!(eq_count, 2, "expected 2 inline equations");
-        // No $...$ literal text in paragraph
+        // Paragraph should contain no raw $ delimiters
         let paragraph_text: String = doc
             .blocks
             .iter()
@@ -2343,7 +2355,49 @@ mod tests {
             .collect();
         assert!(
             !paragraph_text.contains("$"),
-            "paragraph should not contain raw $ delimiters"
+            "paragraph should not contain raw $ delimiters, got: {}",
+            paragraph_text
+        );
+    }
+
+    #[test]
+    fn lower_inline_math_multiple() {
+        // V2: inline math $...$ stays in paragraph, no separate Block::Equation created
+        let src = "We have $a + b = c$ and also $x^2$.";
+        let p = parse(src);
+        let mut macros = crate::expand::MacroMap::new();
+        let doc = lower_with_macros(&p, None, &mut macros);
+        // NO separate Block::Equation blocks for inline math
+        let eq_count = doc
+            .blocks
+            .iter()
+            .filter(|b| {
+                matches!(
+                    b,
+                    Block::Equation {
+                        is_block: false,
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(eq_count, 0, "expected 0 inline equation blocks");
+        // Paragraph should contain no raw $ delimiters
+        let paragraph_text: String = doc
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                if let Block::Paragraph { runs, .. } = b {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            !paragraph_text.contains("$"),
+            "paragraph should not contain raw $ delimiters, got: {}",
+            paragraph_text
         );
     }
 
@@ -2520,11 +2574,12 @@ mod tests {
 
     #[test]
     fn lower_inline_math_and_cite_together() {
-        // Both features working together
+        // V2: inline math stays in paragraph, no separate Block::Equation created
         let src = "According to $E=mc^2$ \\cite{einstein1905}, we get $a+b=c$.";
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
+        // NO separate Block::Equation blocks for inline math
         let eq_count = doc
             .blocks
             .iter()
@@ -2538,7 +2593,7 @@ mod tests {
                 )
             })
             .count();
-        assert_eq!(eq_count, 2, "expected 2 inline equations");
+        assert_eq!(eq_count, 0, "expected 0 inline equation blocks");
         let text: String = doc
             .blocks
             .iter()
@@ -2551,9 +2606,10 @@ mod tests {
             })
             .collect();
         assert!(text.contains("[1]"), "expected [1] for cite, got: {}", text);
+        // Paragraph should contain no raw $ delimiters
         assert!(
-            text.contains("[公式："),
-            "expected [公式：] placeholder in paragraph, got: {}",
+            !text.contains("$"),
+            "paragraph should not contain raw $ delimiters, got: {}",
             text
         );
     }

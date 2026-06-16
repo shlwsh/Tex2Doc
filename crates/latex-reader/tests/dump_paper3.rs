@@ -8,7 +8,12 @@ use std::path::{Path, PathBuf};
 #[test]
 fn dump_paper3_blocks() {
     let zip_path = std::env::var("PAPER3_ZIP")
-        .unwrap_or_else(|_| "../examples/paper3/upload_full.zip".to_string());
+        .unwrap_or_else(|_| {
+            // 从 crates/latex-reader/ 回到工程根，再指向 examples/paper3/upload_full.zip
+            let p = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../../examples/paper3/upload_full.zip");
+            p.to_string_lossy().to_string()
+        });
     let main_path =
         std::env::var("PAPER3_MAIN").unwrap_or_else(|_| "main-jos.tex".to_string());
 
@@ -48,7 +53,21 @@ fn dump_paper3_blocks() {
             }
             doc_semantic_ast::Block::Paragraph { runs, .. } => {
                 let t: String = runs.iter().map(|r| r.text.as_str()).collect();
-                format!("P({})={}", t.chars().count(), t.chars().take(50).collect::<String>())
+                let previews: Vec<String> = runs
+                    .iter()
+                    .take(6)
+                    .map(|r| {
+                        let s: String = r.text.chars().take(40).collect();
+                        format!("[{:?}:{}]", r.style, s)
+                    })
+                    .collect();
+                format!(
+                    "P({}) runs={}={} | first_runs={:?}",
+                    t.chars().count(),
+                    runs.len(),
+                    t.chars().take(80).collect::<String>(),
+                    previews
+                )
             }
             doc_semantic_ast::Block::Figure { path, caption, .. } => {
                 format!("F={path} cap={}", caption.as_deref().unwrap_or(""))
@@ -62,6 +81,7 @@ fn dump_paper3_blocks() {
                 &latex[..latex.len().min(40)]
             ),
             doc_semantic_ast::Block::Bibliography { .. } => "B".to_string(),
+            doc_semantic_ast::Block::Algorithm { .. } => "Alg".to_string(),
             doc_semantic_ast::Block::RawFallback { text, .. } => format!(
                 "R({})={}",
                 text.chars().count(),
