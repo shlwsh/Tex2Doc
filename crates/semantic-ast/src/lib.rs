@@ -83,11 +83,39 @@ pub enum Block {
     Bibliography {
         entries: Vec<BibEntry>,
     },
+    /// V2：算法块（algorithm2e 环境）
+    /// `lines` 是按行解析后的 {indent, code, comment, keyword} 序列
+    /// `io` 是 \KwIn / \KwOut 等元数据
+    /// `caption` / `number` 来自 \caption{...} 和自动计数
+    Algorithm {
+        lines: Vec<AlgLine>,
+        io: Vec<(String, String)>,
+        caption: Option<String>,
+        number: Option<String>,
+        span: Span,
+    },
     /// 错误降级：解析失败但仍保留原文
     RawFallback {
         text: String,
         span: Span,
     },
+}
+
+/// 算法块的一行。
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct AlgLine {
+    /// 缩进级数（0 = 顶层）
+    pub indent: u8,
+    /// 此行**上方**的悬挂缩进竖线位置（缩进级数列表）
+    pub guides: Vec<u8>,
+    /// 此行**下方**的竖线位置（用于 "end" 收尾）
+    pub end_guides: Vec<u8>,
+    /// 清洗后的代码文本
+    pub code: String,
+    /// 行尾注释（`\tcp*{...}`）
+    pub comment: String,
+    /// 关键字标记：`ForEach` / `If` / `Return` / `For` / `While`
+    pub keyword: Option<String>,
 }
 
 /// 表格行。
@@ -135,6 +163,10 @@ pub enum TextStyle {
     BoldItalic,
     Code,
     MathInline,
+    /// V2：上标（来自 `[N]` / `^X` / `^{XYZ}`）
+    Superscript,
+    /// V2：下标（来自 `_X` / `_{XYZ}`）
+    Subscript,
 }
 
 /// BibLaTeX 渲染条目（V1 最小集）。

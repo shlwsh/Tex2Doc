@@ -36,6 +36,7 @@ pub trait Visitor {
             Block::Figure { .. }
             | Block::Equation { .. }
             | Block::Bibliography { .. }
+            | Block::Algorithm { .. }
             | Block::RawFallback { .. } => {}
         }
     }

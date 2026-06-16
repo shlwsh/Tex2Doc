@@ -344,6 +344,62 @@ pub fn serialize_document(
                 };
                 write_paragraph(&mut w, &para);
             }
+            Block::Algorithm {
+                lines,
+                io,
+                caption,
+                number,
+                ..
+            } => {
+                // 算法块：先写 "算法 N  caption" 标题，再写 I/O + 代码行
+                let cap = format!(
+                    "{}  {}",
+                    number.as_deref().unwrap_or("算法"),
+                    caption.as_deref().unwrap_or("")
+                );
+                let para = Paragraph {
+                    style_id: Some(STYLE_HEADING2.to_string()),
+                    runs: vec![Run {
+                        text: cap,
+                        style_id: Some(STYLE_HEADING2.to_string()),
+                        bold: true,
+                        italic: false,
+                    }],
+                };
+                write_paragraph(&mut w, &para);
+                for (kind, content) in io {
+                    let line = format!("{kind}: {content}");
+                    let para = Paragraph {
+                        style_id: Some(STYLE_BODY.to_string()),
+                        runs: vec![Run {
+                            text: line,
+                            style_id: None,
+                            bold: false,
+                            italic: true,
+                        }],
+                    };
+                    write_paragraph(&mut w, &para);
+                }
+                for alg in lines {
+                    let indent_spaces = "  ".repeat(alg.indent as usize);
+                    let comment = if alg.comment.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" /* {} */", alg.comment)
+                    };
+                    let code = format!("{indent_spaces}{}{comment}", alg.code);
+                    let para = Paragraph {
+                        style_id: Some(STYLE_BODY.to_string()),
+                        runs: vec![Run {
+                            text: code,
+                            style_id: Some(STYLE_BODY.to_string()),
+                            bold: false,
+                            italic: false,
+                        }],
+                    };
+                    write_paragraph(&mut w, &para);
+                }
+            }
         }
     }
 
