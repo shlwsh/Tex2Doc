@@ -39,6 +39,14 @@ impl MacroMap {
         self.defs.get(name).map(String::as_str)
     }
 
+    /// Merge entries from another HashMap (used by VFS-aware macro expansion)
+    pub fn extend(&mut self, other: std::collections::hash_map::HashMap<String, String>) {
+        for (k, v) in other {
+            self.defs.entry(k).or_insert(v);
+        }
+    }
+
+    /// Debug: how many macros are registered
     pub fn len(&self) -> usize {
         self.defs.len()
     }
@@ -60,6 +68,10 @@ impl MacroMap {
 /// **重要**：`macros` 由调用方持有，跨多次 `expand_macros_in` 调用累加。
 /// 这样 outer 文档收集的宏表可以在 inner 段（rjabstract / rjtitle 等环境）复用。
 pub fn expand_macros_in(text: &str, macros: &mut MacroMap) -> String {
+    expand_macros_in_impl(text, macros)
+}
+
+fn expand_macros_in_impl(text: &str, macros: &mut MacroMap) -> String {
     let bytes = text.as_bytes();
     let len = bytes.len();
     let mut out = String::with_capacity(len);
@@ -143,6 +155,124 @@ pub fn expand_macros_in(text: &str, macros: &mut MacroMap) -> String {
     out
 }
 
+/// 在 `joined` 上做两阶段扫描：
+/// 1. 先从 VFS 解析所有 `\input{file}` 和 `\include{file}` 内容，递归处理子文件收集宏定义
+///    并把 `\input` 替换为文件内容（`\input` 行从输出中移除）。
+/// 2. 然后在合并后的文本上执行标准宏展开。
+///
+/// 这样 preamble 中的 `\input` 能把子文件的 `\newcommand` 引入宏表，
+/// 而 `\begin{rjabstract}` 等环境内的 `\AbstractContentZh` 宏就能正确展开。
+pub fn expand_macros_with_input(
+    joined: &crate::include::JoinedStream,
+    vfs: &doc_utils::VirtualFs,
+    macros: &mut MacroMap,
+) -> String {
+    let mut result = String::new();
+    let text = &joined.text;
+    let bytes = text.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        if bytes[i] != b'\\' {
+            // Non-command: copy one char
+            if let Some(ch) = text[i..].chars().next() {
+                result.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+            }
+            continue;
+        }
+
+        // Command start
+        let cmd_start = i + 1;
+        let mut j = cmd_start;
+        while j < len && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'@') {
+            j += 1;
+        }
+        let cmd = &text[cmd_start..j];
+
+        // `\input{file}` / `\include{file}`: replace with file content
+        if matches!(cmd, "input" | "include") {
+            // Find the {file} argument
+            let mut p = j;
+            while p < len && (bytes[p] == b' ' || bytes[p] == b'\t') {
+                p += 1;
+            }
+            if p < len && bytes[p] == b'{' {
+                if let Some(end_off) = find_matching_brace(text, p) {
+                    let file_body = &text[p + 1..p + 1 + end_off];
+                    // Try to resolve the file in VFS
+                    if let Some(content) = resolve_vfs_file(vfs, file_body) {
+                        // Recursively expand this file's content (collect macros but don't emit yet)
+                        let sub_macros = &mut MacroMap::new();
+                        let sub_text =
+                            expand_macros_in_impl(&content, sub_macros);
+                        // Merge sub_macros into main macros
+                        macros.extend(std::mem::take(&mut sub_macros.defs));
+                        // Append expanded sub-text
+                        result.push_str(&sub_text);
+                        // Append a newline to maintain line structure
+                        result.push('\n');
+                    }
+                    i = p + 1 + end_off + 1;
+                    continue;
+                }
+            }
+        }
+
+        // Other commands: copy as-is (let expand_macros_in_impl handle it later)
+        // For now, copy the command and move on
+        result.push('\\');
+        result.push_str(cmd);
+        i = j;
+    }
+
+    // Now expand macros on the result
+    let mut macros2 = MacroMap::new();
+    // Preserve macros already defined
+    for (k, v) in &macros.defs {
+        macros2.defs.insert(k.clone(), v.clone());
+    }
+    let expanded = expand_macros_in_impl(&result, &mut macros2);
+    // Merge any newly collected macros back
+    macros.extend(std::mem::take(&mut macros2.defs));
+    expanded
+}
+
+/// 在 VFS 中解析 `target`，支持：
+/// 1. 原样路径（已规范化的 POSIX）
+/// 2. 自动补 .tex 扩展
+/// 3. 相对 base_dir 的路径
+fn resolve_vfs_file(vfs: &doc_utils::VirtualFs, target: &str) -> Option<String> {
+    // Try original + with .tex
+    let candidates = vec![
+        target.to_string(),
+        format!("{}.tex", target),
+    ];
+    for cand in candidates {
+        if let Ok(bytes) = vfs.read(&cand) {
+            if let Ok(s) = std::str::from_utf8(bytes) {
+                return Some(s.to_string());
+            }
+        }
+    }
+    // Try without parent directory components (just filename)
+    if let Some(name) = target.rsplit('/').next() {
+        let bare = name.to_string();
+        let candidates2 = vec![bare.clone(), format!("{}.tex", bare)];
+        for cand in candidates2 {
+            if let Ok(bytes) = vfs.read(&cand) {
+                if let Ok(s) = std::str::from_utf8(bytes) {
+                    return Some(s.to_string());
+                }
+            }
+        }
+    }
+    None
+}
+
 /// 尝试在 `pos`（命令名结束处）解析宏定义 `{name}` → 可选 `[n]` → `{body}`。
 ///
 /// 解析成功：
@@ -161,7 +291,12 @@ fn parse_definition_end(text: &str, pos: usize, macros: &mut MacroMap) -> Option
         return None;
     }
     // name 所在的外层 `{...}`，内容是 `\X` 形式——去掉前导 `\` 再做宏表 key
-    let name_off = find_matching_brace(text, p)?;
+    let name_off = match find_matching_brace(text, p) {
+        Some(off) => off,
+        None => {
+            return None;
+        }
+    };
     let raw_name = &text[p + 1..p + 1 + name_off];
     let name = raw_name.trim_start_matches('\\').to_string();
     p = p + 1 + name_off + 1;
@@ -179,13 +314,34 @@ fn parse_definition_end(text: &str, pos: usize, macros: &mut MacroMap) -> Option
             p += 1;
         }
     }
+    // 找 body 的 `{...}`
     if p >= len || bytes[p] != b'{' {
         return None;
     }
-    if let Some(off) = find_matching_brace(text, p) {
-        let body = text[p + 1..p + 1 + off].to_string();
-        macros.define(&name, body);
-        return Some(p + 1 + off + 1);
+    // 特殊处理：LaTeX 中 `\newcommand{...}{body}` 的 body 可能跨多行，
+    // 且行末的 `%` 表示该行剩余内容是注释（在 depth=0 时才生效）。
+    let mut depth = 0;
+    let mut i = p;
+    while i < len {
+        let b = bytes[i];
+        if b == b'%' && depth == 0 {
+            // 跳过至行末（LaTeX 注释仅在顶层有效）
+            while i < len && bytes[i] != b'\n' {
+                i += 1;
+            }
+            i += 1;
+            continue;
+        }
+        if b == b'{' { depth += 1; }
+        if b == b'}' {
+            depth -= 1;
+            if depth == 0 {
+                let body = text[p + 1..i].to_string();
+                macros.define(&name, body);
+                return Some(i + 1);
+            }
+        }
+        i += 1;
     }
     None
 }

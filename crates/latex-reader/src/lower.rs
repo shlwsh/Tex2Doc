@@ -4,22 +4,22 @@
 //!
 //! 1. **顶层行扫描**：`split_inclusive('\n')` 切行。
 //! 2. **环境优先**：遇到 `\begin{xxx}…\end{xxx}` 直接整段扣出做专项降级。
-//!    支持环境：`itemize` / `enumerate` / `description` / `tabular` / `array` / `figure` / `table` / `equation` / `equation*`。
+//!    支持环境：`itemize` / `enumerate` / `description` / `tabular` / `array` / `figure` / `table` / `equation` / `equation*` / `algorithm` / `flushleft` 等。
 //! 3. **段落**：非空行累计到一个 buffer，遇空行 / 段命令 / 新环境 / EOF 触发 flush。
 //! 4. **段落内联清洗**：`strip_inline` 处理 `\textbf{...}` 等命令。
 //! 5. **数学**：`$…$` 与 `$$…$$` / `\(...\)` / `\[...\]` 整段抽出为 `Equation::latex`。
 //! 6. **图片**：`\includegraphics[…]{path}` 在段落中追加 Figure 占位（M3 简化）。
-//! 7. **引用 / 链接**：`\href{url}{text}` / `\url{url}` / `\ref{label}`。
+//! 7. **引用 / 链接**：`\href{url}{text}` / `\url{url}` / `\ref{label}` / `\nolinkurl{url}`。
 //! 8. **错误降级**：未匹配内容进入 `Block::RawFallback`（绝不 panic）。
 
 use doc_semantic_ast::{Block, Document, Span, TableCell, TableRow, TextRun, TextStyle};
 use std::collections::HashMap;
 
-use crate::expand::{expand_macros_in, MacroMap};
+use crate::expand::{expand_macros_in, expand_macros_with_input, MacroMap};
 use crate::include::JoinedStream;
 use crate::parser::Parse;
 
-/// 编号状态（heading 1.1.1 / figure / table 自动计数）。
+/// 编号状态（heading 1.1.1 / figure / table / algorithm 自动计数）。
 #[derive(Default)]
 pub struct NumberingState {
     /// Heading 计数器：level 1, 2, 3, 4 各自的计数
@@ -28,6 +28,8 @@ pub struct NumberingState {
     figure_counter: u32,
     /// 下一个 table 编号
     table_counter: u32,
+    /// 下一个 algorithm 编号
+    algorithm_counter: u32,
 }
 
 type PrefixHandler = fn(&str, Span, &mut NumberingState) -> Block;
@@ -129,6 +131,11 @@ impl NumberingState {
         self.table_counter += 1;
         format!("表 {}", self.table_counter)
     }
+
+    pub fn next_algorithm(&mut self) -> String {
+        self.algorithm_counter += 1;
+        format!("算法 {}", self.algorithm_counter)
+    }
 }
 
 /// 降级入口。
@@ -158,10 +165,14 @@ pub fn lower_with_macros_and_numbering(
     let text = joined
         .map(|j| j.text.clone())
         .unwrap_or_else(|| parse.source.clone());
-    // 第一步：宏展开（带共享宏表）。
-    // outer 收集 `\newcommand` 进入 macros，inner 段（rjabstract 等）复用同表
-    // 即可解析 `\AbstractContentZh` 这类宏调用。
-    let text = expand_macros_in(&text, macros);
+    // 第一步：VFS感知的宏展开。
+    // 处理 \input{file} 递归，把子文件的 \newcommand 引入宏表，
+    // 再对全文做宏展开，使 \AbstractContentZh 等环境内宏正确展开。
+    let text = if let Some(j) = joined {
+        expand_macros_with_input(j, &j.vfs, macros)
+    } else {
+        expand_macros_in(&text, macros)
+    };
     // 第二步：跳过 preamble。
     let text = strip_preamble(&text);
     let mut doc = Document::new();
@@ -203,41 +214,53 @@ pub fn lower_with_macros_and_numbering(
                 default_span,
                 macros,
             );
-            // V2 (paper3)：`flushleft` / `flushright` / `center` / `quote` /
-            // `quotation` / `verbatim` 等"段落容器"环境内**多段**都会被
-            // `lower_paragraph_container` 折叠成第一个非空块，导致 `Key words:`
-            // 等第二段以后的内容丢失。这里改成：若 `lower_paragraph_container`
-            // 命中并有 sub blocks，把 sub blocks 全部 push 到 doc。
-            let para_container_envs = [
-                "flushleft",
-                "flushright",
-                "center",
-                "quote",
-                "quotation",
-                "verbatim",
-            ];
-            if para_container_envs.contains(&name) {
-                let p = crate::parser::parse(body);
-                let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
-                let mut pushed = 0;
-                for b in sub.blocks {
-                    match b {
-                        Block::RawFallback { .. } => continue,
-                        Block::Equation { .. } => continue,
-                        other => {
-                            doc.push(other);
-                            pushed += 1;
-                        }
-                    }
-                }
-                if pushed == 0 {
-                    // 全部为空：保留 RawFallback 占位
-                    doc.push(Block::RawFallback {
-                        text: body.to_string(),
-                        span: default_span,
-                    });
-                }
-            } else {
+            // `flushleft` / `flushright` / `center` / `quote` / `quotation` / `verbatim`
+            // 等"段落容器"环境内可能有**多段**内容（V1 折叠成首段导致次段丢失）。
+            // 这里直接把 body 递归降级，把所有 sub blocks 全部 push 到 doc。
+            // 对于 algorithm 环境，也走这条路但 lower_environment 会返回带编号的图块。
+    let multi_block_envs = [
+        "flushleft",
+        "flushright",
+        "center",
+        "quote",
+        "quotation",
+        "verbatim",
+    ];
+    if multi_block_envs.contains(&name) {
+        let p = crate::parser::parse(body);
+        let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
+        for b in sub.blocks {
+            match b {
+                Block::RawFallback { .. } => continue,
+                Block::Equation { .. } => continue,
+                other => doc.push(other),
+            }
+        }
+    } else if name == "rjabstract" {
+        // rjabstract 的"摘 要"标签由 .cls 注入；这里显式追加标签段。
+        doc.push(Block::Paragraph {
+            runs: vec![TextRun {
+                text: "\\textbf{摘  要}".to_string(),
+                style: TextStyle::Plain,
+                span: default_span,
+            }],
+            span: default_span,
+        });
+        let blk = lower_environment(name, body, default_span, macros, numbering);
+        doc.push(blk);
+    } else if name == "rjkeywords" {
+        // rjkeywords 的"关键词"标签由 .cls 注入；显式追加。
+        doc.push(Block::Paragraph {
+            runs: vec![TextRun {
+                text: "\\textbf{关键词}".to_string(),
+                style: TextStyle::Plain,
+                span: default_span,
+            }],
+            span: default_span,
+        });
+        let blk = lower_environment(name, body, default_span, macros, numbering);
+        doc.push(blk);
+    } else {
                 let blk = lower_environment(name, body, default_span, macros, numbering);
                 doc.push(blk);
             }
@@ -258,6 +281,77 @@ pub fn lower_with_macros_and_numbering(
             );
             doc.push(block);
             pos += consumed;
+            continue;
+        }
+
+        // \bibliography{refs} → 插入 "References" 标题段落，引导 bib 内容进入 docx。
+        // （BibTeX 记录体由 \putbib（未处理）外接 references.bib 提供；V1 语义上
+        // 只保证 "References" 标签出现在文档流中。）
+        if text[pos..].starts_with("\\bibliography{") {
+            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            doc.push(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: "References".to_string(),
+                    style: TextStyle::Plain,
+                    span: default_span,
+                }],
+                span: default_span,
+            });
+            // 跳过 \bibliography{...} 到行末
+            let line_end = text[pos..].find('\n').map(|n| n + 1).unwrap_or(len - pos);
+            pos += line_end;
+            continue;
+        }
+
+        // \rjkeywords{keywords} → 显式输出"关键词"标签段 + 关键词内容段。
+        // 模板：\newcommand{\rjkeywords}[1]{\par\noindent\xiaowuhao {\hei 关键词:}\hspace{1em}{\kai#1}\par\vspace{0.4em}}
+        if text[pos..].starts_with("\\rjkeywords{") {
+            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            // 找匹配 `}`
+            if let Some(end) = find_matching_brace(text, pos + "\\rjkeywords".len()) {
+                let body = &text[pos + "\\rjkeywords".len() + 1..pos + "\\rjkeywords".len() + 1 + end];
+                // 标签段
+                doc.push(Block::Paragraph {
+                    runs: vec![TextRun {
+                        text: "\\textbf{关键词}".to_string(),
+                        style: TextStyle::Plain,
+                        span: default_span,
+                    }],
+                    span: default_span,
+                });
+                // 关键词内容段
+                let stripped = strip_inline(body, &mut cite_numbers).trim().to_string();
+                if !stripped.is_empty() {
+                    doc.push(Block::Paragraph {
+                        runs: vec![TextRun {
+                            text: stripped,
+                            style: TextStyle::Plain,
+                            span: default_span,
+                        }],
+                        span: default_span,
+                    });
+                }
+                pos = pos + "\\rjkeywords".len() + 1 + end + 1;
+                continue;
+            }
+        }
+
+        // paper3 模板：\noindent{\xiaowuhao\hei 附中文参考文献:} 这样的 section label
+        // 不在环境里，是裸 \noindent 段；这里按内容匹配生成对应的 label block。
+        // 检查是否进入"附中文参考文献"或"作者简介"段
+        if let Some(label_text) = detect_section_label(&text[pos..]) {
+            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            doc.push(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("\\textbf{{{label_text}}}"),
+                    style: TextStyle::Plain,
+                    span: default_span,
+                }],
+                span: default_span,
+            });
+            // 跳到行末
+            let line_end = text[pos..].find('\n').map(|n| n + 1).unwrap_or(len - pos);
+            pos += line_end;
             continue;
         }
 
@@ -465,7 +559,6 @@ fn strip_preamble(text: &str) -> &str {
     match text.find(needle) {
         Some(idx) => {
             let after = idx + needle.len();
-            // 同时跳过 `\begin{document}` 之后的可选空白行
             let bytes = text.as_bytes();
             let mut p = after;
             while p < bytes.len()
@@ -491,14 +584,12 @@ fn try_top_level_metadata_command(s: &str) -> Option<(usize, bool)> {
         "rjauthor",
         "rjinfor",
         "rjhead",
-        "rjkeywords",
         "rjcategory",
         "rjmaketitle",
         "fancyhead",
         "fancyfoot",
         "fancyhf",
         "bibliographystyle",
-        "bibliography",
         "hypersetup",
         "graphicspath",
         "newCJKfontfamily",
@@ -596,13 +687,49 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
     let name = &text[after..name_end];
     // 找配对 \end{name}
     let body_start = name_end + 1;
+    let bytes = text.as_bytes();
 
-    // Skip optional argument braces like {ccc} in \begin{tabular}{ccc}
-    // These are not body content
+    // Skip optional argument braces/Brackets like {ccc} in \begin{tabular}{ccc}
+    // and [font=...] in \begin{description}[...].
+    // These are not body content.
     let mut actual_body_start = body_start;
-    while actual_body_start < bytes.len() && bytes[actual_body_start] == b'{' {
-        if let Some(offset) = find_matching_brace(text, actual_body_start) {
-            actual_body_start = actual_body_start + 1 + offset + 1;
+    while actual_body_start < bytes.len() {
+        if bytes[actual_body_start] == b'{' {
+            if let Some(offset) = find_matching_brace(text, actual_body_start) {
+                actual_body_start = actual_body_start + 1 + offset + 1;
+            } else {
+                break;
+            }
+        } else if bytes[actual_body_start] == b'[' {
+            // Skip optional [...] argument (supports nested {…})
+            let mut i = actual_body_start + 1;
+            let mut depth = 1;
+            let mut found = false;
+            while i < bytes.len() {
+                match bytes[i] {
+                    b'[' => { depth += 1; i += 1; }
+                    b']' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            actual_body_start = i + 1;
+                            found = true;
+                            break;
+                        }
+                        i += 1;
+                    }
+                    b'{' => {
+                        if let Some(off) = find_matching_brace(text, i) {
+                            i = i + 1 + off + 1;
+                        } else {
+                            break;
+                        }
+                    }
+                    _ => { i += 1; }
+                }
+            }
+            if !found {
+                break;
+            }
         } else {
             break;
         }
@@ -618,6 +745,25 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
     Some((name, body, after_end))
 }
 
+/// 检测当前行是否是 paper3 模板里的"附中文参考文献"或"作者简介"section 标签。
+///
+/// 形式为 `\noindent{\xiaowuhao\hei 附中文参考文献:}` 或带 `\textbf`。
+/// 返回 Some("附中文参考文献") 或 Some("作者简介") 或 None。
+fn detect_section_label(s: &str) -> Option<&'static str> {
+    const LABELS: &[&str] = &[
+        "附中文参考文献",
+        "作者简介",
+    ];
+    let line_end = s.find('\n').unwrap_or(s.len());
+    let line = &s[..line_end];
+    for label in LABELS {
+        if line.contains(label) {
+            return Some(label);
+        }
+    }
+    None
+}
+
 /// 环境 → 块的降级分派。
 fn lower_environment(
     name: &str,
@@ -629,12 +775,14 @@ fn lower_environment(
     match name {
         "itemize" | "itemize*" => lower_list(body, false, span, macros, numbering),
         "enumerate" | "enumerate*" => lower_list(body, true, span, macros, numbering),
-        "description" | "description*" => lower_list(body, false, span, macros, numbering),
+        // description*: 发出 `\item` 标签作为段落，让 "附中文参考文献" / "作者简介" 等
+        // 标签文字进 docx；items 内容走标准 list 降级。
+        "description" | "description*" => lower_description_with_label(body, span, macros, numbering),
         // JOS 论文参考文献用 `\begin{list}{}{... \item[{[N]}] ... }`，
         // 视为无序 List，items 已有 `[N] —` 前缀（lower_list 中处理）。
         "list" | "list*" => lower_list(body, false, span, macros, numbering),
         "tabular" | "tabular*" | "array" => lower_table(body, span),
-        "figure" | "figure*" | "table" | "table*" => {
+        "figure" | "figure*" | "table" | "table*" | "algorithm" | "algorithm*" => {
             lower_captioned_env(name, body, span, macros, numbering)
         }
         "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => Block::Equation {
@@ -658,11 +806,9 @@ fn lower_environment(
         }
         // 段落容器类环境：递归降级为段落序列，折叠为第一个非空块。
         // （rjthesis / ctexart 模板里大量使用这类「无视觉变化」的语义容器。）
-        "flushleft" | "flushright" | "center" | "quote" | "quotation" | "verbatim"
-        | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor" | "rjinfor"
-        | "rjmaketitle" => lower_paragraph_container(body, span, macros, numbering),
-        // rjabstract 特殊处理：inline math 会抽出为独立 Equation 块，
-        // 需要找第一个 Paragraph（而非第一个块），以免中文摘要被 Equation 占位符覆盖。
+        // 注意：flushleft/flushright/center/quote/quotation/verbatim 已由主循环直接处理。
+        "minipage" | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor"
+        | "rjinfor" | "rjmaketitle" => lower_paragraph_container(body, span, macros, numbering),
         "rjabstract" => lower_abstract_paragraph(body, span, macros, numbering),
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
@@ -701,11 +847,12 @@ fn lower_paragraph_container(
     }
 }
 
-/// rjabstract 特殊处理：跳过 Equation 类型的辅助块，找到第一个 Paragraph 块返回。
+/// rjabstract 处理：把 body 降级为块序列（标签 + 正文 + 后续内容）。
 ///
-/// rjabstract 内容可能包含 `$...$` inline math，而 inline math 现在由
-/// `flush_paragraph` 抽出为独立的 `Block::Equation`。若直接返回第一个块，
-/// 会把 Equation 占位符当作摘要正文；本函数只找 Paragraph，确保中文摘要内容正确。
+/// rjthesis.cls 里 rjabstract 定义为：
+///   \begin{flushleft}\xiaowuhao {\hei 摘\hspace{2em}要:} \kai} <body> {\end{flushleft}\xiaowuhao}
+/// 因此 \begin{rjabstract} 内部已经包含 "摘 要" 标签 + 正文 + 后续 flushleft 收尾。
+/// 本函数只负责把 body 降级，返回第一个非空 Paragraph（与原 lower_abstract_paragraph 一致）。
 fn lower_abstract_paragraph(
     body: &str,
     span: Span,
@@ -756,7 +903,10 @@ fn lower_list(
                     continue;
                 }
             }
-            current = Some(after);
+            // 兜底：`\item {label}` 格式（如作者简介 `\item {\hei 石洪雷}`）。
+            // 剥掉外层 `{}` 和 LaTeX 格式化命令，取纯文字作为 item 内容。
+            let item_content = strip_item_braces_and_formatting(after.trim());
+            current = Some(Box::leak(item_content.into_boxed_str()));
         } else if current.is_some() {
             let buf = current.unwrap();
             let mut owned = String::from(buf);
@@ -773,6 +923,394 @@ fn lower_list(
         items,
         span,
     }
+}
+
+/// 解析 `\item[{label}]` 中的 `[...]` 包裹内容，返回 `(label, rest)`。
+/// rest = 第一个未匹配的 `]` 之后的内容。
+///
+/// 策略：维护 `[`/`{` 嵌套深度，遇 `]` 使深度递减。
+/// 深度回到 ≤0 时即找到最外层闭合。
+///
+/// 支持：
+/// - `{[5]}` → label=`"[5]"`, rest=`" 冯..."`
+/// - `[{[5]}]` → label=`"[5]"`, rest=`" 冯..."` (malformed: outer `{}` stripped)
+fn extract_bracketed_label(s: &str) -> Option<(&str, &str)> {
+    if !s.starts_with('[') {
+        return None;
+    }
+    let rest_inside = &s[1..]; // skip the opening '['
+    let mut depth = 0; // net: +1 for the outer '[', each '{' +1, each '}' -1, each '[' +1, each ']' -1
+
+    for (i, ch) in rest_inside.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => depth -= 1,
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth <= 0 {
+                    // Found the closing ']' of the outer '['
+                    let label_raw = &rest_inside[..i];
+                    // Strip outer braces: malformed `\item[{...}]` wraps the label in extra `{}`.
+                    // After stripping outer `{` (at position 0) and the matching `}` (at `fc-1`),
+                    // the label is label_raw[1..fc-1].
+                    let label_clean = if label_raw.starts_with('{') {
+                        // Find the position of the first balanced closing `}`.
+                        let mut d = 0;
+                        let mut first_close_byte = None;
+                        for (j, c) in label_raw.char_indices() {
+                            match c {
+                                '{' => d += 1,
+                                '}' => {
+                                    d -= 1;
+                                    if d == 0 {
+                                        first_close_byte = Some(j);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
+                        if let Some(close_pos) = first_close_byte {
+                            // label_raw[1..close_pos] strips outer { and }
+                            if close_pos >= 1 {
+                                &label_raw[1..close_pos]
+                            } else {
+                                ""
+                            }
+                        } else {
+                            label_raw
+                        }
+                    } else {
+                        label_raw
+                    };
+                    // Skip trailing `}` from malformed `\item[{[5]}]`
+                    let rest_raw = rest_inside[i + 1..].trim_start();
+                    let rest = if rest_raw.starts_with('}') {
+                        &rest_raw[1..]
+                    } else {
+                        rest_raw
+                    };
+                    return Some((label_clean.trim(), rest.trim_start()));
+                }
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// description 环境特殊处理：
+/// 把 `[label]` 格式的 `\item` 标签抽出来作为独立 Paragraph，让"附中文参考文献"等
+/// 标签文本进入 docx 流；items 内容作为无序 List。
+/// paper3 的附中文参考文献格式：`\begin{description}[font=...]` 后跟 `\item[{[5]}] 冯志勇…`
+///
+/// 根因：`scan_environment` 已升级为跳过 `[...]` 可选参数，
+/// 但 description 环境的 `[font=...]` 参数会被误解析为 item label。
+/// 本函数在处理 body 前，先跳过 leading optional `[...]` 参数。
+fn lower_description_with_label(
+    body: &str,
+    span: Span,
+    macros: &mut MacroMap,
+    numbering: &mut NumberingState,
+) -> Block {
+    // Strip leading optional `[...]` argument (e.g., `[font=\normalfont,labelwidth=...]`).
+    let body = strip_leading_optional_arg(body);
+    let body = body.trim_start();
+
+    // 把 body 按 `\item` 分段。第一个 `\item` 之前的行是 section label（如 `附中文参考文献:`）。
+    // `split_inclusive('\n')` 产生的第一段可能以 `\item` 开头（说明没有 label），
+    // 也可能以其他内容开头（说明第一段是 label）。
+    let lines: Vec<&str> = body.split('\n').collect();
+    let first_line = lines.first().unwrap_or(&body);
+
+    // section_label：第一个非空、非 `\item` 行提取为 label block
+    let mut section_label: Option<String> = None;
+    let item_start: usize;
+    let first_trimmed = first_line.trim();
+    if first_trimmed.is_empty() {
+        // 首行是空行（如 description 环境以 `\n` 开头）：无 label，直接从 items 开始
+        item_start = 0;
+    } else if first_trimmed.starts_with("\\item") {
+        item_start = 0;
+    } else {
+        // 第一个非空行是 section label（如 `{\xiaowuhao\hei 附中文参考文献:}`）
+        let label_text = extract_item_label_text(first_trimmed);
+        let label_clean = label_text.trim().trim_end_matches('}').trim_end_matches(':');
+        if !label_clean.is_empty() {
+            section_label = Some(label_clean.to_string());
+        }
+        item_start = 1;
+    }
+
+    let mut label_blocks: Vec<Block> = Vec::new();
+    let mut list_items: Vec<Vec<Block>> = Vec::new();
+    let mut current_body: Option<&str> = None;
+
+    for line in lines.iter().skip(item_start) {
+        let s = line.trim_end_matches(&['\r'][..]);
+        if s.trim_start().starts_with("\\item") {
+            // 把前一个 \item 的 body 做成 list item
+            if let Some(buf) = current_body.take() {
+                list_items.push(lower_item_body(buf, span, macros, numbering));
+            }
+
+            let after = s.trim_start().trim_start_matches("\\item").trim_start();
+            // description 环境格式：`\item[{[5]}] 冯志勇…`
+            if after.starts_with('[') {
+                if let Some((label_text, rest)) = extract_bracketed_label(after) {
+                    if !label_text.is_empty() {
+                        let label_clean = strip_label_formatting(&label_text);
+                        label_blocks.push(Block::Paragraph {
+                            runs: vec![TextRun {
+                                text: label_clean,
+                                style: TextStyle::Plain,
+                                span,
+                            }],
+                            span,
+                        });
+                    }
+                    current_body = Some(rest);
+                    continue;
+                }
+            }
+            // `\item {\hei name}，title` 格式（作者简介）
+            if after.starts_with('{') {
+                let label_text = extract_item_label_text(after.trim());
+                let label_clean = label_text.trim().trim_end_matches('}').trim_end_matches(':');
+                if !label_clean.is_empty() {
+                    label_blocks.push(Block::Paragraph {
+                        runs: vec![TextRun {
+                            text: label_clean.to_string(),
+                            style: TextStyle::Plain,
+                            span,
+                        }],
+                        span,
+                    });
+                }
+            }
+            current_body = Some(after);
+        } else if current_body.is_some() {
+            // 多行 item 内容
+            let buf = current_body.take().unwrap();
+            let mut owned = String::from(buf);
+            owned.push('\n');
+            owned.push_str(s);
+            current_body = Some(Box::leak(owned.into_boxed_str()));
+        }
+    }
+    if let Some(buf) = current_body.take() {
+        list_items.push(lower_item_body(buf, span, macros, numbering));
+    }
+
+    // 先 push section label（如有）
+    if let Some(label) = section_label {
+        label_blocks.insert(0, Block::Paragraph {
+            runs: vec![TextRun {
+                text: label,
+                style: TextStyle::Plain,
+                span,
+            }],
+            span,
+        });
+    }
+
+    // 如果有 list items，发出一个 List block
+    if !list_items.is_empty() {
+        label_blocks.push(Block::List {
+            is_ordered: false,
+            items: list_items,
+            span,
+        });
+    }
+
+    // 返回第一个块
+    label_blocks.into_iter().next().unwrap_or(Block::RawFallback {
+        text: body.to_string(),
+        span,
+    })
+}
+
+/// 从 `\item` 行的内容中提取 label 文字。
+///
+/// LaTeX 里 section label 常写成 `\item {\hei 附中文参考文献}` 或 `{\xiaowuhao\hei 附中文参考文献:}`。
+/// 本函数剥掉 LaTeX 格式化命令前缀（如 `\hei`、`\xiaowuhao`），提取内部纯文字。
+/// 对于 `{\hei name}，title` 格式，只取 `name` 部分。
+///
+/// 例如：`\xiaowuhao\hei 附中文参考文献:}` → `"附中文参考文献"`
+/// `{\hei 石洪雷}，博士…` → `"石洪雷"`
+/// `{\textbf{作者简介}}` → `"作者简介"`
+///
+/// 返回提取的 label 文本。
+fn extract_item_label_text(s: &str) -> String {
+    let bytes = s.as_bytes();
+    // 如果被外层 `{}` 包裹，先剥掉外壳
+    let s = if bytes.first() == Some(&b'{') {
+        if let Some(len) = find_matching_brace(s, 0) {
+            &s[1..1 + len]
+        } else {
+            s
+        }
+    } else {
+        s
+    };
+    let bytes = s.as_bytes();
+    // 收集所有非命令文字
+    let mut result = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            // 命令：识别命令名 + 跳到 `{...}` 内部（若有）
+            let j = i + 1;
+            let mut k = j;
+            while k < bytes.len() && (bytes[k].is_ascii_alphabetic() || bytes[k] == b'@') {
+                k += 1;
+            }
+            // 跳过命令后空白
+            let mut m = k;
+            while m < bytes.len() && (bytes[m] == b' ' || bytes[m] == b'\t') {
+                m += 1;
+            }
+            // 命令后是 `{` → 剥掉命令，递归取内部
+            if m < bytes.len() && bytes[m] == b'{' {
+                if let Some(inner_len) = find_matching_brace(s, m) {
+                    let inner = &s[m + 1..m + 1 + inner_len];
+                    let inner_result = extract_item_label_text(inner);
+                    if !inner_result.is_empty() {
+                        result.push_str(&inner_result);
+                    }
+                    i = m + 1 + inner_len + 1;
+                    continue;
+                }
+            }
+            // 命令后无 `{` 或找不到闭合 → 跳过命令，继续
+            i = k;
+        } else {
+            // 非命令字符：原样保留
+            if let Some(ch) = s[i..].chars().next() {
+                result.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+            }
+        }
+    }
+    result
+}
+
+/// 剥掉 item 内容最外层的 `{}` 并递归剥掉 LaTeX 格式化命令，还原纯文字。
+///
+/// 用于处理 `list` 环境中的 `\item {\hei 姓名}` 或 `description` 环境中的裸 item。
+/// 例如：`{\hei 石洪雷}` → `"石洪雷"`，`{\textbf{作者简介}}` → `"作者简介"`。
+fn strip_item_braces_and_formatting(s: &str) -> String {
+    let bytes = s.as_bytes();
+    // 如果被 `{}` 包裹，剥掉外壳
+    if bytes.first() == Some(&b'{') {
+        if let Some(len) = find_matching_brace(s, 0) {
+            let inner = &s[1..1 + len];
+            return strip_item_braces_and_formatting(inner);
+        }
+    }
+    strip_label_formatting(s)
+}
+
+/// 剥掉 label 文本中的 LaTeX 格式化命令前缀，保留纯文字。
+///
+/// LaTeX 里 item label 常写成 `\item {\hei 附中文参考文献}` 或 `\item {\textbf{作者简介}}`。
+/// 本函数把 `\hei{text}` → `text`、`\textbf{text}` → `text`，
+/// 处理嵌套的命令如 `\hei {\textbf{text}}`（剥两层）。
+fn strip_label_formatting(raw: &str) -> String {
+    let bytes = raw.as_bytes();
+    // 如果整个字符串被外层 `{}` 包裹，先剥掉外壳（如 `"{[5]}"` → `"[5]"`）
+    if bytes.first() == Some(&b'{') {
+        if let Some(len) = find_matching_brace(raw, 0) {
+            let inner = &raw[1..1 + len];
+            return strip_label_formatting(inner);
+        }
+    }
+    let mut out = String::with_capacity(raw.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'\\' {
+            let j = i + 1;
+            let mut k = j;
+            while k < bytes.len() && (bytes[k].is_ascii_alphabetic() || bytes[k] == b'@') {
+                k += 1;
+            }
+            // 命令名
+            let cmd = std::str::from_utf8(&bytes[j..k]).unwrap_or("");
+            // 跳过命令后空白
+            let mut m = k;
+            while m < bytes.len() && (bytes[m] == b' ' || bytes[m] == b'\t') {
+                m += 1;
+            }
+            // 命令后是 `{` → 剥掉 `\{cmd}{`，取内部内容
+            if m < bytes.len() && bytes[m] == b'{' {
+                if let Some(inner_len) = find_matching_brace(raw, m) {
+                    let inner = &raw[m + 1..m + 1 + inner_len];
+                    // 递归处理内部（处理嵌套的格式化命令）
+                    out.push_str(&strip_label_formatting(inner));
+                    i = m + 1 + inner_len + 1;
+                    continue;
+                }
+            }
+            // 不是格式化命令格式：原样写 `\cmd`
+            out.push('\\');
+            out.push_str(cmd);
+            i = k;
+        } else {
+            if let Some(ch) = raw[i..].chars().next() {
+                out.push(ch);
+                i += ch.len_utf8();
+            } else {
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// 跳过 body 开头的 optional `[...]` 参数（如 `[font=\normalfont,labelwidth=...]`）。
+/// 返回跳过后的子串。
+fn strip_leading_optional_arg(body: &str) -> &str {
+    let trimmed = body.trim_start();
+    if !trimmed.starts_with('[') {
+        return body;
+    }
+    let bytes = trimmed.as_bytes();
+    let mut i = 1; // skip '['
+    let mut depth = 1;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'[' => { depth += 1; i += 1; }
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    let after_close = &trimmed[i + 1..];
+                    let after_trimmed = after_close.trim_start();
+                    if after_trimmed.starts_with("\\item") {
+                        // This [..] is the item label, don't strip
+                        return body;
+                    }
+                    return after_close;
+                }
+                i += 1;
+            }
+            b'{' => {
+                let mut d = 1;
+                let mut j = i + 1;
+                while j < bytes.len() && d > 0 {
+                    match bytes[j] {
+                        b'{' => { d += 1; j += 1; }
+                        b'}' => { d -= 1; j += 1; }
+                        _ => { j += 1; }
+                    }
+                }
+                i = j;
+            }
+            _ => { i += 1; }
+        }
+    }
+    body
 }
 
 fn lower_item_body(
@@ -1071,7 +1609,7 @@ fn extract_nested_tabulary(text: &str) -> Option<(&str, &str)> {
     Some((inner, rest.trim()))
 }
 
-/// `\caption{...}` 在 figure/table 环境中。
+/// `\caption{...}` 在 figure/table 环境中，或 algorithm 环境。
 fn lower_captioned_env(
     name: &str,
     body: &str,
@@ -1079,7 +1617,35 @@ fn lower_captioned_env(
     _macros: &mut MacroMap,
     numbering: &mut NumberingState,
 ) -> Block {
-    // 找 \includegraphics 与 \caption
+    // algorithm 环境：发出 "算法 N" 标题段 + RawFallback。
+    if name == "algorithm" || name == "algorithm*" {
+        let (caption_text, _label) = extract_caption_and_label(body);
+        let num = numbering.next_algorithm();
+        let inner_text = body
+            .lines()
+            .filter(|l| !l.trim().starts_with("\\caption"))
+            .filter(|l| !l.trim().starts_with("\\label"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut blocks: Vec<Block> = vec![];
+        if !inner_text.trim().is_empty() {
+            blocks.push(Block::RawFallback { text: inner_text, span });
+        }
+        let cap_text = format!("{} {}", num, caption_text.unwrap_or_default());
+        blocks.insert(0, Block::Paragraph {
+            runs: vec![TextRun {
+                text: cap_text,
+                style: TextStyle::Plain,
+                span,
+            }],
+            span,
+        });
+        return blocks.into_iter().next().unwrap_or(Block::RawFallback {
+            text: body.to_string(),
+            span,
+        });
+    }
+
     let (img, caption) = extract_includegraphics_and_caption(body);
     if name.starts_with("figure") {
         Block::Figure {
@@ -1090,7 +1656,6 @@ fn lower_captioned_env(
             span,
         }
     } else {
-        // table 仍以 table 形式表达（M3 占位）
         let mut table = lower_table(body, span);
         if let Block::Table {
             caption: c,
@@ -1103,6 +1668,49 @@ fn lower_captioned_env(
         }
         table
     }
+}
+
+/// 从 algorithm body 中抽 caption 和 label。
+fn extract_caption_and_label(body: &str) -> (Option<String>, String) {
+    let mut caption: Option<String> = None;
+    let mut label: String = String::new();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("\\caption") {
+            if let Some(text) = extract_brace_arg(trimmed, "caption") {
+                caption = Some(text);
+            }
+        }
+        if trimmed.starts_with("\\label") {
+            if let Some(lbl) = extract_brace_arg(trimmed, "label") {
+                label = lbl;
+            }
+        }
+    }
+    (caption, label)
+}
+
+/// 抽 \cmd{...} 的 {…} 参数。
+fn extract_brace_arg(line: &str, cmd: &str) -> Option<String> {
+    let rest = line.strip_prefix(&format!("\\{cmd}"))?;
+    let rest = rest.trim_start();
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let mut depth = 0;
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(rest[1..i].to_string());
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 fn extract_includegraphics_and_caption(body: &str) -> (Option<String>, Option<String>) {
@@ -1292,15 +1900,26 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                     continue;
                 }
             }
-            // \ref / \label / \footnote / \href / \url / \nolinkurl → skip (V1)
+            // \ref → emit label so "算法 1" etc. appears in text
+            // \footnote → skip (V1)
+            // \href{url}{text} → emit text
+            // \url{url} / \nolinkurl{url} → emit URL
+            // \label → skip (no text content)
             if matches!(
                 cmd,
-                "ref" | "label" | "footnote" | "href" | "url" | "nolinkurl"
+                "ref" | "footnote" | "label"
             ) && has_arg
             {
                 if let Some(off) = find_matching_brace(line, k) {
+                    // \ref{label} → emit the label text (e.g., "alg:attention" → no visible text,
+                    // but \ref{tab:foo} → emit "表 N" — V1: emit label text for discoverability)
+                    if cmd == "ref" {
+                        let label_start = k + 1;
+                        let label_text = &line[label_start..label_start + off];
+                        out.push_str(label_text);
+                    }
+                    // \label / \footnote: skip
                     let mut p = k + 1 + off + 1;
-                    // 跳过后续可选 {…}
                     loop {
                         while p < bytes.len()
                             && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
@@ -1318,6 +1937,34 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                         }
                     }
                     i = p;
+                    continue;
+                }
+            }
+            // \href{url}{text}: emit text
+            if cmd == "href" && has_arg {
+                if let Some(off) = find_matching_brace(line, k) {
+                    let href_body = &line[k + 1..k + 1 + off];
+                    let rest = line[k + 1 + off + 1..].trim_start();
+                    if rest.starts_with('{') {
+                        if let Some(off2) = find_matching_brace(rest, 0) {
+                            let text = &rest[1..1 + off2];
+                            out.push_str(text);
+                            i = k + 1 + off + 1 + 1 + off2 + 1;
+                            continue;
+                        }
+                    }
+                    out.push_str(href_body);
+                    i = k + 1 + off + 1;
+                    continue;
+                }
+            }
+            // \url{url} / \nolinkurl{url}: emit URL
+            if matches!(cmd, "url" | "nolinkurl") && has_arg {
+                if let Some(off) = find_matching_brace(line, k) {
+                    let url_start = k + 1;
+                    let url = &line[url_start..url_start + off];
+                    out.push_str(url);
+                    i = k + 1 + off + 1;
                     continue;
                 }
             }

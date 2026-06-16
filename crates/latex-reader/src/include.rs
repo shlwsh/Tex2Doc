@@ -156,6 +156,8 @@ pub struct JoinedStream {
     pub text: String,
     /// 每个字符的 `SourceId`（长度 == text.len()）
     pub source_map: Vec<SourceId>,
+    /// VFS 引用（用于 VFS 感知的宏展开）
+    pub vfs: doc_utils::VirtualFs,
 }
 
 impl IncludeGraph {
@@ -179,6 +181,7 @@ impl IncludeGraph {
         Ok(JoinedStream {
             text,
             source_map: map,
+            vfs: vfs.clone(),
         })
     }
 }

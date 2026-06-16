@@ -188,14 +188,23 @@ pub fn convert_zip(
             }
         }
     }
-    eprintln!("[doc-core] zip entries scanned: {} (figures+tex)", entries.len());
-    eprintln!("[doc-core] has abstract: {}", entries.keys().any(|p| p.to_string_lossy().contains("00_abstract")));
-
-    let doc = parse_tex_with_vfs(&main_norm, &source, &mut vfs)?;
-    eprintln!("[doc-core] doc has {} blocks", doc.blocks.len());
-    eprintln!(
+    let parsed_doc = parse_tex_with_vfs(&main_norm, &source, &mut vfs)?;
+    tracing::debug!(
+        "[doc-core] zip entries scanned: {} (figures+tex)",
+        entries.len()
+    );
+    tracing::debug!(
+        "[doc-core] has abstract: {}",
+        entries.keys().any(|p| p.to_string_lossy().contains("00_abstract"))
+    );
+    tracing::debug!(
+        "[doc-core] parsed_doc has {} blocks",
+        parsed_doc.blocks.len()
+    );
+    tracing::debug!(
         "[doc-core] block kinds: {}",
-        doc.blocks
+        parsed_doc
+            .blocks
             .iter()
             .map(|b| match b {
                 doc_semantic_ast::Block::Heading { .. } => "H",
@@ -211,7 +220,7 @@ pub fn convert_zip(
             .join("")
     );
     let docx = doc_docx_writer::pack_with_page_setup(
-        &doc,
+        &parsed_doc,
         options.template_bytes.as_deref(),
         Some(&image_assets),
         options.page_setup.as_ref(),

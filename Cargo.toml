@@ -41,6 +41,9 @@ anyhow    = "1.0"
 serde     = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 
+# 日志
+tracing = "0.1"
+
 # 文本处理
 logos = "0.14"
 rowan = "0.15"

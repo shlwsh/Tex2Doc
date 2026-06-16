@@ -19,4 +19,7 @@ serde = { workspace = true }
 [dev-dependencies]
 insta = { workspace = true }
 proptest = { workspace = true }
+doc-utils        = { workspace = true }
+doc-semantic-ast = { workspace = true }
+zip              = { workspace = true }
 

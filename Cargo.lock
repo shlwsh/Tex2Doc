@@ -581,6 +581,7 @@ dependencies = [
  "serde",
  "serde_json",
  "thiserror 1.0.69",
+ "tracing",
  "zip",
 ]
 
@@ -648,6 +649,7 @@ dependencies = [
  "rowan",
  "serde",
  "thiserror 1.0.69",
+ "zip",
 ]
 
 [[package]]
