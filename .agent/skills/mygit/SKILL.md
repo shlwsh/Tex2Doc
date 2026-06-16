@@ -64,12 +64,17 @@ bun run mygit:check         # 环境检查
 
 | 配置项 | 环境变量名 | 说明 |
 |-------|-----------|------|
-| API 密钥 | `DASHSCOPE_API_KEY` | 阿里云 DashScope 平台密钥 |
-| API 地址 | `DASHSCOPE_BASE_URL` | OpenAI 兼容接口地址 |
-| 模型名称 | `DASHSCOPE_MODEL` | 推荐 `deepseek-v3` |
+| **本地 Ollama 优先** | `OLLAMA_BASE_URL` | 本机 Ollama 服务地址，默认 `http://127.0.0.1:11434` |
+| | `OLLAMA_MODEL` | 本地模型名，默认 `gemma4:e4b`（需 `ollama pull gemma4:e4b`） |
+| | `MYGIT_PREFER_OLLAMA=0` | 关闭本地优先，强制走云端 |
+| 云端 API 密钥 | `DASHSCOPE_API_KEY` | 阿里云 DashScope 平台密钥（Ollama 不可用时备选） |
+| 云端 API 地址 | `DASHSCOPE_BASE_URL` | OpenAI 兼容接口地址 |
+| 云端模型名称 | `DASHSCOPE_MODEL` | 推荐 `deepseek-v3` |
 | HTTP 代理 | `MYGIT_HTTP_PROXY` | WSL 下推荐 `http://127.0.0.1:7897` |
 | 跳过 AI | `MYGIT_NO_AI=1` | 始终用规则生成（最快） |
 | 强制 AI | `MYGIT_FORCE_AI=1` | 含 PDF 时仍调用 AI |
+
+**后端优先级**：`Ollama 本地` → `DashScope 云端` → `规则托底`。Ollama 走本机 127.0.0.1:11434（不消耗 token、不需要代理），DashScope 走外网（需 API key + 代理）。
 
 ### 5. 提交信息生成规则
 

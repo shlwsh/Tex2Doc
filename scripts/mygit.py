@@ -335,6 +335,102 @@ def call_dashscope_api(
     raise last_error or RuntimeError("AI 请求失败")
 
 
+# =============================================================================
+# 本地 Ollama（OpenAI 兼容端点）支持
+# =============================================================================
+# Ollama 暴露 /v1/chat/completions（OpenAI 兼容），可零改造复用调用逻辑。
+# 与 DashScope 的区别：
+#   1) 端点固定为本机 127.0.0.1:11434，不走代理；
+#   2) Authorization 可省略（Ollama 默认本地无鉴权），脚本即便配置了也忽略；
+#   3) 默认模型 gemma4:e4b（4-bit 量化、约 8B，CPU/GPU 都能跑），需在 Ollama
+#      中 `ollama pull gemma4:e4b` 才会存在。
+# 通过 MYGIT_PREFER_OLLAMA=0 关闭本节逻辑，回到纯 DashScope 流程。
+OLLAMA_DEFAULT_BASE_URL = "http://127.0.0.1:11434/v1"
+OLLAMA_DEFAULT_MODEL = "gemma4:e4b"
+OLLAMA_PROBE_TIMEOUT = 1.5  # 探测阶段超时（秒）
+
+
+def _strip_v1_suffix(url: str) -> str:
+    """去掉末尾的 /v1，便于拼 /models、/chat/completions。"""
+    return url.rstrip("/").removesuffix("/v1")
+
+
+def detect_ollama(config: dict[str, str]) -> tuple[str, str] | None:
+    """探测本地 Ollama 服务是否在线且指定模型已下载。
+
+    Returns:
+        (base_url, model) —— 可用于调用；None 表示不可用。
+    """
+    if config.get("MYGIT_PREFER_OLLAMA") == "0":
+        return None
+
+    base_raw = (config.get("OLLAMA_BASE_URL") or OLLAMA_DEFAULT_BASE_URL).strip()
+    model = (config.get("OLLAMA_MODEL") or OLLAMA_DEFAULT_MODEL).strip()
+    base = _strip_v1_suffix(base_raw)
+    probe_url = f"{base}/api/show"
+
+    try:
+        resp = requests.post(
+            probe_url,
+            json={"name": model},
+            timeout=OLLAMA_PROBE_TIMEOUT,
+        )
+        if resp.status_code != 200:
+            return None
+        # /api/show 在模型不存在时返回 404
+        return f"{base}/v1", model
+    except (requests.RequestException, OSError, ValueError):
+        return None
+
+
+def call_ollama_api(
+    session: requests.Session,
+    url: str,
+    payload: dict,
+) -> requests.Response:
+    """调用本地 Ollama 的 OpenAI 兼容 /chat/completions。
+
+    本机调用不走代理；超时放宽到 180s（Ollama 首次加载模型可能 10-30s）。
+    """
+    headers = {"Content-Type": "application/json"}
+    try:
+        resp = session.post(url, headers=headers, json=payload, timeout=180, proxies={"http": None, "https": None})
+        resp.raise_for_status()
+        return resp
+    except requests.RequestException as exc:
+        raise RuntimeError(f"Ollama 请求失败: {exc}") from exc
+
+
+def warmup_ollama(base_url: str, model: str) -> None:
+    """后台触发一次空推理，把模型从磁盘加载进内存/显存。
+
+    首次加载常常 10-30s（gemma4:e4b 约 9.6GB），提前预热可避免下一次
+    chat/completions 把时间花在前向推理前的模型加载阶段。
+    """
+    import threading
+
+    def _run() -> None:
+        try:
+            session = requests.Session()
+            payload = {
+                "model": model,
+                "messages": [{"role": "user", "content": "ok"}],
+                "max_tokens": 4,
+                "temperature": 0.0,
+                "stream": False,
+            }
+            session.post(
+                f"{base_url}/chat/completions",
+                json=payload,
+                timeout=180,
+                proxies={"http": None, "https": None},
+            ).raise_for_status()
+        except Exception:
+            pass  # 预热失败不影响主流程
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def strip_markdown_fence(text: str) -> str:
     message = text.strip()
     if message.startswith("```"):
@@ -430,18 +526,25 @@ def generate_fallback_commit_message(status: ChangeStatus) -> str:
     return f"{title}\n\n" + "\n".join(details)
 
 
-def should_use_ai(status: ChangeStatus, config: dict[str, str]) -> tuple[bool, str]:
+def should_use_ai(
+    status: ChangeStatus,
+    config: dict[str, str],
+    ollama: tuple[str, str] | None = None,
+    dashscope_ready: bool = True,
+) -> tuple[bool, str]:
     if config.get("MYGIT_NO_AI") == "1" or config.get("MYGIT_FAST_RULES") == "1":
         return False, "fast-mode"
-    api_key = config.get("DASHSCOPE_API_KEY", "").strip()
-    if api_key in PLACEHOLDER_API_KEYS:
-        return False, "no-key"
     files = status.all_files
     if files and all(is_binary_artifact(f) for f in files):
         return False, "binary-only"
     if any(is_binary_artifact(f) for f in files) and config.get("MYGIT_FORCE_AI") != "1":
         return False, "binary-mixed"
-    return True, "ai"
+    # 至少有一个可用后端（Ollama / DashScope）
+    if ollama is not None:
+        return True, "ai-ollama"
+    if dashscope_ready:
+        return True, "ai-dashscope"
+    return False, "no-key"
 
 
 def get_staged_diff_for_files(text_files: list[str]) -> str:
@@ -669,9 +772,23 @@ def main() -> None:
     model = config.get("DASHSCOPE_MODEL", "").strip()
     github_token = config.get("GITHUB_TOKEN") or config.get("GH_TOKEN")
 
-    if not all([api_key, base_url, model]):
-        print("❌ 错误: 配置缺少 DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL / DASHSCOPE_MODEL")
+    # 探测本地 Ollama（OpenAI 兼容端点）
+    ollama = detect_ollama(config)
+    dashscope_ready = bool(api_key and api_key not in PLACEHOLDER_API_KEYS and base_url and model)
+
+    if ollama is None and not dashscope_ready:
+        print("❌ 错误: 未找到可用的 AI 后端")
+        print("   - 本地 Ollama 未运行或未安装 gemma4:e4b")
+        print("   - 云端 DashScope 缺少 DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL / DASHSCOPE_MODEL")
+        print("   - 或设 MYGIT_NO_AI=1 走纯规则模式")
         sys.exit(1)
+
+    if ollama is not None:
+        ollama_base, ollama_model = ollama
+        print(f"🦙 检测到本地 Ollama：{ollama_base} · model={ollama_model}（优先使用）")
+        warmup_ollama(ollama_base, ollama_model)
+    elif dashscope_ready:
+        print(f"☁️  使用云端 DashScope：{base_url} · model={model}")
 
     proxy_url = resolve_proxy(config)
     if proxy_url:
@@ -738,46 +855,57 @@ def main() -> None:
     if len(diff_content) > 15000:
         diff_content = diff_content[:15000] + "\n... (Diff truncated)"
 
-    use_ai, ai_reason = should_use_ai(status, config)
+    use_ai, ai_reason = should_use_ai(status, config, ollama=ollama, dashscope_ready=dashscope_ready)
     commit_msg = ""
     source_label = "规则生成"
+    user_prompt = (
+        f"变更摘要:\n{status_output}\n\n"
+        f"变更详情:\n{build_staged_diff(text_files, binary_files, stat, diff_content)}"
+    )
+    system_prompt = P3_SYSTEM_PROMPT.replace("p3-microservice", project_name)
 
     if use_ai:
-        print("🤖 正在使用 AI 生成提交信息...")
-        try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {api_key}",
-            }
-            payload = {
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": P3_SYSTEM_PROMPT.replace("p3-microservice", project_name)},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"变更摘要:\n{status_output}\n\n"
-                            f"变更详情:\n{build_staged_diff(text_files, binary_files, stat, diff_content)}"
-                        ),
-                    },
-                ],
-                "max_tokens": 500,
-                "temperature": 0.7,
-            }
-            session = requests.Session()
-            resp = call_dashscope_api(
-                session,
-                f"{base_url}/chat/completions",
-                headers,
-                payload,
-                proxy_url,
-            )
-            commit_msg = strip_markdown_fence(
-                resp.json()["choices"][0]["message"]["content"]
-            )
-            source_label = "AI 生成"
-        except Exception as exc:
-            print(f"⚠️  AI 生成提交信息失败 ({exc})，正在使用托底逻辑...")
+        # 决定使用哪个后端：Ollama 优先，DashScope 备选
+        backends: list[tuple[str, str, str]] = []  # (label, url, model_name)
+        if ollama is not None:
+            ollama_base, ollama_model = ollama
+            backends.append(("Ollama", f"{ollama_base}/chat/completions", ollama_model))
+        if dashscope_ready:
+            backends.append(("DashScope", f"{base_url}/chat/completions", model))
+
+        commit_msg = ""
+        for backend_label, backend_url, backend_model in backends:
+            print(f"🤖 正在使用 {backend_label}（{backend_model}）生成提交信息...")
+            try:
+                payload = {
+                    "model": backend_model,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                    "max_tokens": 500,
+                    "temperature": 0.7,
+                }
+                session = requests.Session()
+                if backend_label == "Ollama":
+                    resp = call_ollama_api(session, backend_url, payload)
+                else:
+                    headers = {
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    }
+                    resp = call_dashscope_api(session, backend_url, headers, payload, proxy_url)
+                commit_msg = strip_markdown_fence(
+                    resp.json()["choices"][0]["message"]["content"]
+                )
+                source_label = f"AI 生成（{backend_label}）"
+                break
+            except Exception as exc:
+                print(f"⚠️  {backend_label} 生成失败 ({exc})，{'切换到下一后端' if len(backends) > 1 else '降级到托底'}...")
+                continue
+
+        if not commit_msg:
+            print("⚠️  所有 AI 后端均失败，正在使用托底逻辑...")
             today = datetime.now().strftime("%Y-%m-%d")
             commit_msg = (
                 f"chore: 自动同步代码变更 ({today})\n\n"
@@ -788,7 +916,7 @@ def main() -> None:
     else:
         reason_map = {
             "fast-mode": "快速模式（MYGIT_NO_AI）",
-            "no-key": "未配置有效 API Key",
+            "no-key": "未配置有效 AI 后端",
             "binary-only": "变更均为二进制文件",
             "binary-mixed": "含二进制文件（设 MYGIT_FORCE_AI=1 可强制 AI）",
         }
