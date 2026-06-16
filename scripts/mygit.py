@@ -367,18 +367,23 @@ def detect_ollama(config: dict[str, str]) -> tuple[str, str] | None:
     base_raw = (config.get("OLLAMA_BASE_URL") or OLLAMA_DEFAULT_BASE_URL).strip()
     model = (config.get("OLLAMA_MODEL") or OLLAMA_DEFAULT_MODEL).strip()
     base = _strip_v1_suffix(base_raw)
-    probe_url = f"{base}/api/show"
-
+    # 探测：GET /api/tags（无 model 参数，跨 Ollama 版本稳定），
+    # 再从返回的 models 列表里查找目标 model（兼容 ":latest" 后缀）。
     try:
-        resp = requests.post(
-            probe_url,
-            json={"name": model},
+        resp = requests.get(
+            f"{base}/api/tags",
             timeout=OLLAMA_PROBE_TIMEOUT,
         )
         if resp.status_code != 200:
             return None
-        # /api/show 在模型不存在时返回 404
-        return f"{base}/v1", model
+        names = {m.get("name", "") for m in (resp.json().get("models") or [])}
+        if model in names or f"{model}:latest" in names:
+            return f"{base}/v1", model
+        # 宽松匹配：仅按短名（gemma4:e4b → gemma4）查找
+        short = model.split(":")[0]
+        if any(n.split(":")[0] == short for n in names if n):
+            return f"{base}/v1", model
+        return None
     except (requests.RequestException, OSError, ValueError):
         return None
 
@@ -390,45 +395,44 @@ def call_ollama_api(
 ) -> requests.Response:
     """调用本地 Ollama 的 OpenAI 兼容 /chat/completions。
 
-    本机调用不走代理；超时放宽到 180s（Ollama 首次加载模型可能 10-30s）。
+    本机调用不走代理；超时放宽到 300s（首次加载模型约 10-30s，
+    在 8B Q4 模型 + 大 diff 场景下前向推理可能再吃 30-120s）。
     """
     headers = {"Content-Type": "application/json"}
     try:
-        resp = session.post(url, headers=headers, json=payload, timeout=180, proxies={"http": None, "https": None})
+        resp = session.post(url, headers=headers, json=payload, timeout=300, proxies={"http": None, "https": None})
         resp.raise_for_status()
         return resp
     except requests.RequestException as exc:
         raise RuntimeError(f"Ollama 请求失败: {exc}") from exc
 
 
-def warmup_ollama(base_url: str, model: str) -> None:
-    """后台触发一次空推理，把模型从磁盘加载进内存/显存。
+def warmup_ollama(base_url: str, model: str) -> bool:
+    """同步预热 Ollama：把模型从磁盘加载进内存/显存，返回是否成功。
 
-    首次加载常常 10-30s（gemma4:e4b 约 9.6GB），提前预热可避免下一次
-    chat/completions 把时间花在前向推理前的模型加载阶段。
+    8B Q4 模型首次加载常需 10-30s，提前同步预热可避免下一次
+    chat/completions 把时间花在前向推理前的模型加载阶段，从而让主调用
+    在统一超时内完成。仅在本地调用环境下使用，不影响 DashScope 后端。
     """
-    import threading
-
-    def _run() -> None:
-        try:
-            session = requests.Session()
-            payload = {
-                "model": model,
-                "messages": [{"role": "user", "content": "ok"}],
-                "max_tokens": 4,
-                "temperature": 0.0,
-                "stream": False,
-            }
-            session.post(
-                f"{base_url}/chat/completions",
-                json=payload,
-                timeout=180,
-                proxies={"http": None, "https": None},
-            ).raise_for_status()
-        except Exception:
-            pass  # 预热失败不影响主流程
-
-    threading.Thread(target=_run, daemon=True).start()
+    try:
+        session = requests.Session()
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": "ok"}],
+            "max_tokens": 4,
+            "temperature": 0.0,
+            "stream": False,
+        }
+        session.post(
+            f"{base_url}/chat/completions",
+            json=payload,
+            timeout=300,
+            proxies={"http": None, "https": None},
+        ).raise_for_status()
+        return True
+    except Exception as exc:
+        print(f"⚠️  Ollama 预热失败（{exc}），继续提交流程...")
+        return False
 
 
 def strip_markdown_fence(text: str) -> str:
@@ -786,7 +790,9 @@ def main() -> None:
     if ollama is not None:
         ollama_base, ollama_model = ollama
         print(f"🦙 检测到本地 Ollama：{ollama_base} · model={ollama_model}（优先使用）")
+        print("⏳ 正在预热本地模型（首次加载约 10-30s）...")
         warmup_ollama(ollama_base, ollama_model)
+        print("✅ Ollama 预热完成")
     elif dashscope_ready:
         print(f"☁️  使用云端 DashScope：{base_url} · model={model}")
 
