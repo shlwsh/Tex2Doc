@@ -8,6 +8,7 @@
 | V1.3 | 2026-06-14 | 三端联调：Flutter 桌面（FFI）+ Chrome MV3 扩展 + crates/server（Axum MVP）+ LaTeX 解析 char-boundary 健壮性 |
 | V1.4 | 2026-06-16 | V2 docx→pdf 全链路 + 质量三色对比：PageSetup 模板 / PDF→PNG 内嵌 / JOS 参考文献样式 / soffice Windows 卡死修复 |
 | **V1.5** | **2026-06-16** | **paper3 22 marker 全覆盖 + VFS 感知宏展开 + rjabstract/rjkeywords 标签注入 + 段首 item_label 解析修复** |
+| **V2.0** | **2026-06-16** | **V2 全面重构：latex_to_text normalizer（含 clean_math / wrap_styled_command sentinel + split_runs_with_sup_sub 双层 split）+ figure/table/algorithm caption normalizer + strip_comments 奇数反斜杠保护 + 65 个 unit test + integration test** |
 
 ## 1. 总览
 
