@@ -54,6 +54,11 @@ impl MacroMap {
     pub fn is_empty(&self) -> bool {
         self.defs.is_empty()
     }
+
+    /// Convert to a HashMap clone (for callers that need the loose form).
+    pub fn to_hashmap(&self) -> std::collections::HashMap<String, String> {
+        self.defs.clone()
+    }
 }
 
 /// 在 `text` 上做一次扫描：

@@ -17,8 +17,10 @@ use quick_xml::Writer;
 use crate::model::{Paragraph, Run};
 use crate::page_setup::PageSetup;
 use crate::styles::{
-    STYLE_BODY, STYLE_BODY_NO_INDENT, STYLE_CAPTION, STYLE_CODE, STYLE_HEADING1, STYLE_HEADING2,
-    STYLE_HEADING3, STYLE_LIST_BULLET, STYLE_LIST_NUMBER, STYLE_REFERENCE, STYLE_TABLE_TEXT,
+    STYLE_ABSTRACT_EN, STYLE_ABSTRACT_ZH, STYLE_AUTHOR_ZH, STYLE_BODY, STYLE_BODY_NO_INDENT,
+    STYLE_CAPTION, STYLE_CODE, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
+    STYLE_HEADING3, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS, STYLE_LIST_BULLET, STYLE_LIST_NUMBER,
+    STYLE_REFERENCE, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
 };
 
 /// 把 semantic-ast 的 `TextRun` 映射到 docx-writer 的 `Run`。
@@ -89,6 +91,9 @@ pub fn serialize_document(
         .unwrap();
 
     let mut fig_counter: u32 = 0;
+
+    // V2：先写 front matter（中文标题 / 作者 / 单位 / 摘要 / 关键词 / 引用 / 英文标题块）
+    write_front_matter(&mut w, &doc.metadata);
 
     for block in &doc.blocks {
         match block {
@@ -858,4 +863,311 @@ fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
     .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:t"))).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
+}
+
+// ════════════════════════════════════════════════════════════════════
+//  Front matter
+// ════════════════════════════════════════════════════════════════════
+
+/// 写出 doc.metadata 中的全部 front matter 块。
+///
+/// 输出顺序（对齐 oracle PDF）：
+/// 1. 中文标题 (JOSTitleZh)
+/// 2. 中文作者 (JOSAuthorZh)
+/// 3. 中文单位 (JOSInstituteZh) — 每行一段
+/// 4. 中文摘要 (JOSAbstractZh) — 标签 "摘   要:" + 正文
+/// 5. 中文关键词 (JOSKeywords) — 标签 "关键词:" + 列表
+/// 6. 中图法分类号 (JOSBodyNoIndent) — 标签 "中图法分类号:" + 内容
+/// 7. 中文引用格式 + 英文引用格式 (JOSBodyNoIndent)
+/// 8. 英文标题 (JOSEnglishTitle) + 粗体
+/// 9. 英文作者 (JOSBodyNoIndent)
+/// 10. 英文单位 (JOSBodyNoIndent)
+/// 11. 英文摘要 (JOSAbstractEn) — 标签 "Abstract:" + 正文
+/// 12. 英文关键词 (JOSKeywords) — 标签 "Key words:" + 列表
+fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData) {
+    use doc_semantic_ast::MetaData;
+
+    // ── 中文标题 ──
+    if let Some(title) = &meta.title {
+        let p = Paragraph {
+            style_id: Some(STYLE_TITLE_ZH.to_string()),
+            runs: vec![Run {
+                text: title.clone(),
+                style_id: None,
+                style: TextStyle::Bold,
+                bold: true,
+                italic: false,
+                font_ascii: None,
+                font_east: None,
+            }],
+            jc: Some("center".into()),
+            keep_next: false,
+            keep_lines: true,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文作者 ──
+    if !meta.authors.is_empty() {
+        let p = Paragraph {
+            style_id: Some(STYLE_AUTHOR_ZH.to_string()),
+            runs: meta
+                .authors
+                .iter()
+                .map(|a| Run::plain(a.clone()))
+                .collect(),
+            jc: Some("center".into()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文单位（每行一段）──
+    for line in &meta.institute_lines {
+        let p = Paragraph {
+            style_id: Some(STYLE_INSTITUTE_ZH.to_string()),
+            runs: vec![Run::plain(line.clone())],
+            jc: Some("center".into()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文摘要（标签 + 正文）──
+    if let Some(abstract_zh) = &meta.abstract_text {
+        if !abstract_zh.is_empty() {
+            // 标签段
+            let label_p = Paragraph {
+                style_id: Some(STYLE_ABSTRACT_ZH.to_string()),
+                runs: vec![Run {
+                    text: "摘   要:".to_string(),
+                    style_id: None,
+                    style: TextStyle::Bold,
+                    bold: true,
+                    italic: false,
+                    font_ascii: None,
+                    font_east: None,
+                }],
+                jc: None,
+                keep_next: true,
+                keep_lines: false,
+            };
+            write_paragraph(w, &label_p);
+            // 正文段
+            let body_p = Paragraph {
+                style_id: Some(STYLE_ABSTRACT_ZH.to_string()),
+                runs: vec![Run::plain(abstract_zh.clone())],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &body_p);
+        }
+    }
+
+    // ── 中文关键词（标签 + 列表）──
+    if !meta.keywords.is_empty() {
+        let joined = meta.keywords.join("; ");
+        let p = Paragraph {
+            style_id: Some(STYLE_KEYWORDS.to_string()),
+            runs: vec![
+                Run {
+                    text: "关键词: ".to_string(),
+                    style_id: None,
+                    style: TextStyle::Bold,
+                    bold: true,
+                    italic: false,
+                    font_ascii: None,
+                    font_east: None,
+                },
+                Run::plain(joined),
+            ],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中图法分类号 ──
+    if let Some(cat) = &meta.category {
+        let p = Paragraph {
+            style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+            runs: vec![
+                Run {
+                    text: "中图法分类号: ".to_string(),
+                    style_id: None,
+                    style: TextStyle::Bold,
+                    bold: true,
+                    italic: false,
+                    font_ascii: None,
+                    font_east: None,
+                },
+                Run::plain(cat.clone()),
+            ],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文引用格式 ──
+    if let Some(cz) = &meta.citation_zh {
+        if !cz.is_empty() {
+            let p = Paragraph {
+                style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+                runs: vec![
+                    Run {
+                        text: "中文引用格式: ".to_string(),
+                        style_id: None,
+                        style: TextStyle::Bold,
+                        bold: true,
+                        italic: false,
+                        font_ascii: None,
+                        font_east: None,
+                    },
+                    Run::plain(cz.clone()),
+                ],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 英文引用格式 ──
+    if let Some(ce) = &meta.citation_en {
+        if !ce.is_empty() {
+            let p = Paragraph {
+                style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+                runs: vec![
+                    Run {
+                        text: "英文引用格式: ".to_string(),
+                        style_id: None,
+                        style: TextStyle::Bold,
+                        bold: true,
+                        italic: false,
+                        font_ascii: None,
+                        font_east: None,
+                    },
+                    Run::plain(ce.clone()),
+                ],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 英文标题 ──
+    if let Some(title_en) = &meta.title_en {
+        let p = Paragraph {
+            style_id: Some(STYLE_ENGLISH_TITLE.to_string()),
+            runs: vec![Run {
+                text: title_en.clone(),
+                style_id: None,
+                style: TextStyle::Bold,
+                bold: true,
+                italic: false,
+                font_ascii: None,
+                font_east: None,
+            }],
+            jc: Some("center".into()),
+            keep_next: false,
+            keep_lines: true,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 英文作者 ──
+    if !meta.authors_en.is_empty() {
+        let p = Paragraph {
+            style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+            runs: meta
+                .authors_en
+                .iter()
+                .map(|a| Run::plain(a.clone()))
+                .collect(),
+            jc: Some("center".into()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 英文单位 ──
+    if let Some(inst_en) = &meta.institute_en {
+        if !inst_en.is_empty() {
+            let p = Paragraph {
+                style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+                runs: vec![Run::plain(inst_en.clone())],
+                jc: Some("center".into()),
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 英文摘要（标签 + 正文）──
+    if let Some(abstract_en) = &meta.abstract_en {
+        if !abstract_en.is_empty() {
+            let label_p = Paragraph {
+                style_id: Some(STYLE_ABSTRACT_EN.to_string()),
+                runs: vec![Run {
+                    text: "Abstract: ".to_string(),
+                    style_id: None,
+                    style: TextStyle::Bold,
+                    bold: true,
+                    italic: false,
+                    font_ascii: None,
+                    font_east: None,
+                }],
+                jc: None,
+                keep_next: true,
+                keep_lines: false,
+            };
+            write_paragraph(w, &label_p);
+            let body_p = Paragraph {
+                style_id: Some(STYLE_ABSTRACT_EN.to_string()),
+                runs: vec![Run::plain(abstract_en.clone())],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &body_p);
+        }
+    }
+
+    // ── 英文关键词 ──
+    if !meta.keywords_en.is_empty() {
+        let joined = meta.keywords_en.join("; ");
+        let p = Paragraph {
+            style_id: Some(STYLE_KEYWORDS.to_string()),
+            runs: vec![
+                Run {
+                    text: "Key words: ".to_string(),
+                    style_id: None,
+                    style: TextStyle::Bold,
+                    bold: true,
+                    italic: false,
+                    font_ascii: None,
+                    font_east: None,
+                },
+                Run::plain(joined),
+            ],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // 兜底：避免编译器认为 MetaData 未使用
+    let _ = MetaData::default();
 }

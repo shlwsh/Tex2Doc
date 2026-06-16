@@ -406,6 +406,64 @@ pub fn lower_with_macros_and_numbering(
         default_span,
         macros,
     );
+
+    // V2：填充 doc.metadata = FrontMatter（标题/作者/单位/中英文摘要/关键词/引用/页眉页脚）。
+    // 用 strip_preamble 后的正文作为主 tex 源，宏表已包含 AbstractContentZh 等。
+    let pre_stripped = strip_preamble(&text);
+    // expanded 已被 strip_preamble → 取 parse.source 原文（用 expand 前更稳）
+    let fm = crate::latex_to_text::extract_front_matter(
+        &parse.source,
+        &pre_stripped,
+        &macros.to_hashmap(),
+    );
+    doc.metadata.title = Some(fm.title_zh.clone()).filter(|s| !s.is_empty());
+    doc.metadata.authors = if fm.authors_zh.is_empty() {
+        Vec::new()
+    } else {
+        fm.authors_zh
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    doc.metadata.institute_lines = fm.institute_lines.clone();
+    doc.metadata.abstract_text = Some(fm.abstract_zh.clone()).filter(|s| !s.is_empty());
+    doc.metadata.keywords = if fm.keywords_zh.is_empty() {
+        Vec::new()
+    } else {
+        fm.keywords_zh
+            .split(';')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    doc.metadata.category = Some(fm.category).filter(|s| !s.is_empty());
+    doc.metadata.title_en = Some(fm.title_en).filter(|s| !s.is_empty());
+    doc.metadata.authors_en = if fm.authors_en.is_empty() {
+        Vec::new()
+    } else {
+        fm.authors_en
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    doc.metadata.institute_en = Some(fm.institute_en).filter(|s| !s.is_empty());
+    doc.metadata.abstract_en = Some(fm.abstract_en).filter(|s| !s.is_empty());
+    doc.metadata.keywords_en = if fm.keywords_en.is_empty() {
+        Vec::new()
+    } else {
+        fm.keywords_en
+            .split(';')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()
+    };
+    doc.metadata.citation_zh = Some(fm.citation_zh).filter(|s| !s.is_empty());
+    doc.metadata.citation_en = Some(fm.citation_en).filter(|s| !s.is_empty());
+    doc.metadata.running_header = Some(fm.running_header).filter(|s| !s.is_empty());
+    doc.metadata.first_footer_text = Some(fm.first_footer_text).filter(|s| !s.is_empty());
+
     doc
 }
 

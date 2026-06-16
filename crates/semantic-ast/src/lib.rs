@@ -12,13 +12,30 @@ pub mod visit;
 
 pub use span::{SourceId, Span};
 
-/// 文档元数据。
+/// 文档元数据（V2：包含 JOS 期刊投稿所需的全部 front matter）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MetaData {
+    // ── 中文 ──
     pub title: Option<String>,
     pub authors: Vec<String>,
+    /// 单位 / 通讯地址（按 `\\` 拆分行）
+    pub institute_lines: Vec<String>,
     pub abstract_text: Option<String>,
     pub keywords: Vec<String>,
+    /// 中图法分类号
+    pub category: Option<String>,
+    // ── 英文 ──
+    pub title_en: Option<String>,
+    pub authors_en: Vec<String>,
+    pub institute_en: Option<String>,
+    pub abstract_en: Option<String>,
+    pub keywords_en: Vec<String>,
+    // ── 引用格式 ──
+    pub citation_zh: Option<String>,
+    pub citation_en: Option<String>,
+    // ── 页眉页脚 ──
+    pub running_header: Option<String>,
+    pub first_footer_text: Option<String>,
 }
 
 /// 文档主体。
