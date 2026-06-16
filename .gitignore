@@ -46,3 +46,9 @@ examples/**/latex/output/
 
 # 构建脚本中间产物
 scripts/combined.html
+
+# 本地工具 / 临时产物（不进入版本库）
+.tools/
+**/__pycache__/
+**/*.pyc
+**/*.pyo
