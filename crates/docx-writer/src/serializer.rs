@@ -17,6 +17,7 @@ use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 
 use crate::model::{Paragraph, Run};
+use crate::page_setup::PageSetup;
 use crate::styles::{
     STYLE_BODY, STYLE_CAPTION, STYLE_HEADING1, STYLE_HEADING2, STYLE_HEADING3, STYLE_LIST_BULLET,
     STYLE_LIST_NUMBER, STYLE_TABLE_HEADER, STYLE_TITLE,
@@ -26,7 +27,13 @@ use crate::styles::{
 ///
 /// `image_assets` 提供图片字节（来自 VFS）；若 `Block::Figure` 的路径命中，
 /// 则以 OOXML inline drawing + base64 嵌入形式输出；否则回退到占位文本。
-pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) -> Vec<u8> {
+///
+/// `page_setup`：Some → 写自定义 `pgSz / pgMar / cols`；None → 12240×15840 + 默认 margins。
+pub fn serialize_document(
+    doc: &Document,
+    image_assets: Option<&ImageAssets>,
+    page_setup: Option<&PageSetup>,
+) -> Vec<u8> {
     let mut w = Writer::new(Vec::new());
     w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
         .unwrap();
@@ -92,8 +99,24 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
                 write_paragraph(&mut w, &para);
             }
             Block::Paragraph { runs, .. } => {
+                // 启发：参考文献样式 — 段落以 `[数字]` 开头时用 JOSReference
+                // （悬挂缩进，西文 Times New Roman，中文宋体）。
+                // 这样在 paper3 这类「顶层 \item 不在 list env 内」的
+                // 场景也能拿到正确的样式。
+                let is_jos_ref = runs.iter().any(|r| {
+                    let t = r.text.trim_start();
+                    t.starts_with('[')
+                        && t.chars()
+                            .nth(1)
+                            .map(|c| c.is_ascii_digit())
+                            .unwrap_or(false)
+                });
                 let para = Paragraph {
-                    style_id: Some(STYLE_BODY.to_string()),
+                    style_id: Some(if is_jos_ref {
+                        "JOSReference".to_string()
+                    } else {
+                        STYLE_BODY.to_string()
+                    }),
                     runs: runs
                         .iter()
                         .map(|r| Run {
@@ -112,21 +135,29 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
             Block::List {
                 is_ordered, items, ..
             } => {
-                let style = if *is_ordered {
+                // JOS 参考文献模式：item 文本含 `[N] —` 形式
+                // （来自 `\item[{[N]}]`，lower_list 加了 `{` 包装）。
+                // 使用 `JOSReference` 样式（悬挂缩进 + Times New Roman + SimSun）。
+                let is_jos_ref = items.iter().any(|sub| {
+                    let s = summarize(sub);
+                    s.contains('[')
+                        && s.chars()
+                            .any(|c| c.is_ascii_digit())
+                        && (s.contains('—') || s.contains("--"))
+                });
+                let style = if is_jos_ref {
+                    "JOSReference"
+                } else if *is_ordered {
                     STYLE_LIST_NUMBER
                 } else {
                     STYLE_LIST_BULLET
                 };
-                for (idx, sub) in items.iter().enumerate() {
-                    let label = if *is_ordered {
-                        format!("{}.", idx + 1)
-                    } else {
-                        "•".to_string()
-                    };
+                for sub in items.iter() {
+                    let text = summarize(sub);
                     let para = Paragraph {
                         style_id: Some(style.to_string()),
                         runs: vec![Run {
-                            text: format!("{} {}", label, summarize(sub)),
+                            text,
                             style_id: None,
                             bold: false,
                             italic: false,
@@ -156,7 +187,24 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
                 // 尝试嵌入图片
                 if let Some(assets) = image_assets {
                     if !fig_key.is_empty() {
-                        if let Some(bytes) = assets.get(fig_key) {
+                        // 尝试多个候选 key：
+                        // 1) 原始 fig_key
+                        // 2) fig_key 去掉目录前缀（basename）
+                        // 3) fig_key 把 .pdf/.PDF 换成 .png（设计稿 §4.5.1 PDF→PNG fallback）
+                        let basename = std::path::Path::new(fig_key)
+                            .file_name()
+                            .and_then(|n| n.to_str())
+                            .unwrap_or(fig_key);
+                        let png_basename = if basename.to_lowercase().ends_with(".pdf") {
+                            basename.trim_end_matches(".pdf").trim_end_matches(".PDF").to_string() + ".png"
+                        } else {
+                            basename.to_string()
+                        };
+                        let bytes_opt = assets
+                            .get(fig_key)
+                            .or_else(|| assets.get(basename))
+                            .or_else(|| assets.get(png_basename.as_str()));
+                        if let Some(bytes) = bytes_opt {
                             // 探测格式
                             let ext = if bytes.len() >= 8
                                 && bytes[0] == 0x89
@@ -301,10 +349,39 @@ pub fn serialize_document(doc: &Document, image_assets: Option<&ImageAssets>) ->
 
     let sect = BytesStart::new("w:sectPr");
     w.write_event(Event::Start(sect)).unwrap();
+
+    // pgSz：纸张尺寸（twips）
+    let ps = page_setup.cloned().unwrap_or_default();
     let mut pg_sz = BytesStart::new("w:pgSz");
-    pg_sz.push_attribute(("w:w", "12240"));
-    pg_sz.push_attribute(("w:h", "15840"));
+    pg_sz.push_attribute(("w:w", ps.width_twips.to_string().as_str()));
+    pg_sz.push_attribute(("w:h", ps.height_twips.to_string().as_str()));
     w.write_event(Event::Empty(pg_sz)).unwrap();
+
+    // pgMar：页边距（仅在 page_setup 显式提供时写）
+    if let (Some(t), Some(r), Some(b), Some(l)) =
+        (ps.margin_top, ps.margin_right, ps.margin_bottom, ps.margin_left)
+    {
+        let mut pg_mar = BytesStart::new("w:pgMar");
+        pg_mar.push_attribute(("w:top", t.to_string().as_str()));
+        pg_mar.push_attribute(("w:right", r.to_string().as_str()));
+        pg_mar.push_attribute(("w:bottom", b.to_string().as_str()));
+        pg_mar.push_attribute(("w:left", l.to_string().as_str()));
+        pg_mar.push_attribute(("w:header", "0"));
+        pg_mar.push_attribute(("w:footer", "0"));
+        pg_mar.push_attribute(("w:gutter", "0"));
+        w.write_event(Event::Empty(pg_mar)).unwrap();
+    }
+
+    // cols：分栏（仅在 page_setup 显式提供 num 时写）
+    if let Some(num) = ps.cols_num {
+        let mut cols = BytesStart::new("w:cols");
+        cols.push_attribute(("w:num", num.to_string().as_str()));
+        if let Some(space) = ps.cols_space {
+            cols.push_attribute(("w:space", space.to_string().as_str()));
+        }
+        w.write_event(Event::Empty(cols)).unwrap();
+    }
+
     w.write_event(Event::End(BytesEnd::new("w:sectPr")))
         .unwrap();
 

@@ -1,0 +1,1 @@
+2026-06-16T05:01:54.991562Z  INFO docx → pdf 完成：examples/paper3/build/out.docx → examples/paper3/build\out.pdf (29696 ms, 3549863 bytes, pages=25)

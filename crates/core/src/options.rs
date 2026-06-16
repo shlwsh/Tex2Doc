@@ -2,6 +2,7 @@
 //!
 //! 桥接层（FFI / WASM / HTTP）以此为入参契约。
 
+use doc_docx_writer::PageSetup;
 use serde::{Deserialize, Serialize};
 
 /// BibTeX 渲染样式（V1 内置）。
@@ -23,6 +24,8 @@ pub struct ConvertOptions {
     pub attachments: Vec<Attachment>,
     /// 可选 reference.docx 模板字节流（用于样式继承）
     pub template_bytes: Option<Vec<u8>>,
+    /// V2 新增：显式页面设置（缺省 = Letter）
+    pub page_setup: Option<PageSetup>,
 }
 
 /// 内联资源附件。

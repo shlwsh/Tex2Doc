@@ -15,6 +15,8 @@ pub const STYLE_LIST_BULLET: &str = "ListBullet";
 pub const STYLE_LIST_NUMBER: &str = "ListNumber";
 pub const STYLE_CAPTION: &str = "Caption";
 pub const STYLE_TABLE_HEADER: &str = "TableHeader";
+/// JOS 论文参考文献悬挂缩进样式
+pub const STYLE_JOS_REFERENCE: &str = "JOSReference";
 
 /// 写出 `styles.xml` 字节流。
 pub fn write_styles() -> Vec<u8> {
@@ -59,10 +61,55 @@ pub fn write_styles() -> Vec<u8> {
         22,
         true,
     );
+    write_jos_reference(&mut w);
 
     w.write_event(Event::End(BytesEnd::new("w:styles")))
         .unwrap();
     w.into_inner()
+}
+
+/// JOS 论文参考文献样式：悬挂缩进 420 twips（≈0.74cm），
+/// 西文 Times New Roman，中文宋体（SimSun），1.5 倍行距。
+fn write_jos_reference(w: &mut Writer<Vec<u8>>) {
+    let mut s = BytesStart::new("w:style");
+    s.push_attribute(("w:type", "paragraph"));
+    s.push_attribute(("w:styleId", STYLE_JOS_REFERENCE));
+    w.write_event(Event::Start(s.clone())).unwrap();
+
+    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(
+        "JOS Reference",
+    )))
+    .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
+    // w:basedOn 必须用 w:val 属性（不是文本节点）
+    let mut based_on = BytesStart::new("w:basedOn");
+    based_on.push_attribute(("w:val", STYLE_BODY));
+    w.write_event(Event::Empty(based_on)).unwrap();
+
+    // 段落属性：悬挂缩进 420 twips，左缩进 420 twips，1.5 倍行距
+    w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+    let mut ind = BytesStart::new("w:ind");
+    ind.push_attribute(("w:left", "420"));
+    ind.push_attribute(("w:hanging", "420"));
+    w.write_event(Event::Empty(ind)).unwrap();
+    let mut sp = BytesStart::new("w:spacing");
+    sp.push_attribute(("w:line", "360"));
+    sp.push_attribute(("w:lineRule", "auto"));
+    w.write_event(Event::Empty(sp)).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
+
+    // run 字体：西文 Times New Roman，中文宋体（self-closing）
+    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
+    let mut rfonts = BytesStart::new("w:rFonts");
+    rfonts.push_attribute(("w:ascii", "Times New Roman"));
+    rfonts.push_attribute(("w:hAnsi", "Times New Roman"));
+    rfonts.push_attribute(("w:eastAsia", "SimSun"));
+    rfonts.push_attribute(("w:cs", "Times New Roman"));
+    w.write_event(Event::Empty(rfonts)).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
+
+    w.write_event(Event::End(BytesEnd::new("w:style"))).unwrap();
 }
 
 fn write_default(

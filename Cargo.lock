@@ -576,6 +576,8 @@ dependencies = [
  "doc-latex-reader",
  "doc-semantic-ast",
  "doc-utils",
+ "image",
+ "pdfium-render",
  "serde",
  "serde_json",
  "thiserror 1.0.69",

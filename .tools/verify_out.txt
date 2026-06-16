@@ -1,0 +1,2 @@
+2026-06-16T06:00:34.554145Z  INFO 报告：md=e:\work\Tex2Doc\examples\paper3\build\quality-report.md json=e:\work\Tex2Doc\examples\paper3\build\quality-report.json
+2026-06-16T06:00:34.554261Z  INFO verify-pdf 完成：exit_code=1 passed=false

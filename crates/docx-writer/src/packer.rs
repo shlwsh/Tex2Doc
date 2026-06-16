@@ -9,13 +9,14 @@ use doc_utils::ImageAssets;
 use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
+use crate::page_setup::PageSetup;
 use crate::serializer::serialize_document;
 use crate::styles::write_styles;
 use crate::template::{merge_styles, parse_template, TemplateStyles};
 
 /// 序列化 + 打包（无模板、无图片）。
 pub fn pack(doc: &Document) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_assets(doc, None, None)
+    pack_with_page_setup(doc, None, None, None)
 }
 
 /// 序列化 + 打包 + 模板样式合并（无图片）。
@@ -23,7 +24,7 @@ pub fn pack_with_template(
     doc: &Document,
     template_bytes: Option<&[u8]>,
 ) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_assets(doc, template_bytes, None)
+    pack_with_page_setup(doc, template_bytes, None, None)
 }
 
 /// 序列化 + 打包 + 模板样式合并 + 图片嵌入。
@@ -32,7 +33,20 @@ pub fn pack_with_assets(
     template_bytes: Option<&[u8]>,
     image_assets: Option<&ImageAssets>,
 ) -> Result<Vec<u8>, DocxWriteError> {
-    let document_xml = serialize_document(doc, image_assets);
+    pack_with_page_setup(doc, template_bytes, image_assets, None)
+}
+
+/// V2 新增：序列化 + 打包 + 模板 + 图片 + 自定义页面设置。
+///
+/// `page_setup`：Some → 写自定义 `pgSz / pgMar / cols`；None → fallback 到
+/// `PageSetup::default()`（12240×15840 twips + 1440/1800/1440/1440 margins + 1 col）。
+pub fn pack_with_page_setup(
+    doc: &Document,
+    template_bytes: Option<&[u8]>,
+    image_assets: Option<&ImageAssets>,
+    page_setup: Option<&PageSetup>,
+) -> Result<Vec<u8>, DocxWriteError> {
+    let document_xml = serialize_document(doc, image_assets, page_setup);
     let mut styles_xml = write_styles();
 
     // 解析模板并合并

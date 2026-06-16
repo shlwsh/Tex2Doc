@@ -63,6 +63,8 @@ pub trait DocxToPdfBackend: Send + Sync {
 pub struct DocxToPdf {
     backends: Vec<Arc<dyn DocxToPdfBackend>>,
     config: Config,
+    /// 全局串行化：soffice 默认 user profile 不可并发，跑多次会卡。
+    sem: tokio::sync::Mutex<()>,
 }
 
 /// 转换配置。
@@ -106,19 +108,21 @@ impl DocxToPdf {
         if backends.is_empty() {
             return Err(crate::error::PdfError::NoBackend.into());
         }
-        Ok(Self {
-            backends,
-            config: Config::default(),
-        })
-    }
-
-    /// 显式指定单个后端。
-    pub fn with_backend(b: Arc<dyn DocxToPdfBackend>) -> Self {
-        Self {
-            backends: vec![b],
-            config: Config::default(),
+            Ok(Self {
+                backends,
+                config: Config::default(),
+                sem: tokio::sync::Mutex::new(()),
+            })
         }
-    }
+
+        /// 显式指定单个后端。
+        pub fn with_backend(b: Arc<dyn DocxToPdfBackend>) -> Self {
+            Self {
+                backends: vec![b],
+                config: Config::default(),
+                sem: tokio::sync::Mutex::new(()),
+            }
+        }
 
     /// 链式设置 Config。
     pub fn with_config(mut self, c: Config) -> Self {
@@ -143,6 +147,9 @@ impl DocxToPdf {
         let backend = self
             .first_available()
             .ok_or_else(|| crate::error::PdfError::NoBackend)?;
+
+        // 全局串行：soffice 默认 user profile 不可并发。
+        let _permit = self.sem.lock().await;
 
         let cfg = &self.config;
         let mut last_err: Option<anyhow::Error> = None;

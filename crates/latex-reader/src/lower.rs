@@ -203,8 +203,44 @@ pub fn lower_with_macros_and_numbering(
                 default_span,
                 macros,
             );
-            let blk = lower_environment(name, body, default_span, macros, numbering);
-            doc.push(blk);
+            // V2 (paper3)：`flushleft` / `flushright` / `center` / `quote` /
+            // `quotation` / `verbatim` 等"段落容器"环境内**多段**都会被
+            // `lower_paragraph_container` 折叠成第一个非空块，导致 `Key words:`
+            // 等第二段以后的内容丢失。这里改成：若 `lower_paragraph_container`
+            // 命中并有 sub blocks，把 sub blocks 全部 push 到 doc。
+            let para_container_envs = [
+                "flushleft",
+                "flushright",
+                "center",
+                "quote",
+                "quotation",
+                "verbatim",
+            ];
+            if para_container_envs.contains(&name) {
+                let p = crate::parser::parse(body);
+                let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
+                let mut pushed = 0;
+                for b in sub.blocks {
+                    match b {
+                        Block::RawFallback { .. } => continue,
+                        Block::Equation { .. } => continue,
+                        other => {
+                            doc.push(other);
+                            pushed += 1;
+                        }
+                    }
+                }
+                if pushed == 0 {
+                    // 全部为空：保留 RawFallback 占位
+                    doc.push(Block::RawFallback {
+                        text: body.to_string(),
+                        span: default_span,
+                    });
+                }
+            } else {
+                let blk = lower_environment(name, body, default_span, macros, numbering);
+                doc.push(blk);
+            }
             pos = end;
             continue;
         }
@@ -591,9 +627,12 @@ fn lower_environment(
     numbering: &mut NumberingState,
 ) -> Block {
     match name {
-        "itemize" => lower_list(body, false, span, macros, numbering),
-        "enumerate" => lower_list(body, true, span, macros, numbering),
-        "description" => lower_list(body, false, span, macros, numbering),
+        "itemize" | "itemize*" => lower_list(body, false, span, macros, numbering),
+        "enumerate" | "enumerate*" => lower_list(body, true, span, macros, numbering),
+        "description" | "description*" => lower_list(body, false, span, macros, numbering),
+        // JOS 论文参考文献用 `\begin{list}{}{... \item[{[N]}] ... }`，
+        // 视为无序 List，items 已有 `[N] —` 前缀（lower_list 中处理）。
+        "list" | "list*" => lower_list(body, false, span, macros, numbering),
         "tabular" | "tabular*" | "array" => lower_table(body, span),
         "figure" | "figure*" | "table" | "table*" => {
             lower_captioned_env(name, body, span, macros, numbering)
@@ -649,7 +688,10 @@ fn lower_paragraph_container(
     let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
     for b in sub.blocks {
         match b {
+            // V1：与 `rjabstract` 一致，段落容器里若首块是 inline math 抽出的
+            // Equation，会把公式当成容器内容；要找到第一个真正「内容」块。
             Block::RawFallback { .. } => continue,
+            Block::Equation { .. } => continue,
             other => return other,
         }
     }

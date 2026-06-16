@@ -13,11 +13,9 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
-use tokio::process::Command;
 
 use crate::backend::{BackendKind, DocxToPdfBackend, DocxToPdfRun};
 use crate::error::PdfError;
-use crate::profile::temp_user_profile;
 
 #[derive(Debug, Clone)]
 pub struct LibreOfficeBackend {
@@ -86,14 +84,13 @@ impl LibreOfficeBackend {
     }
 
     /// 构造命令行参数（**测试可见**）。
-    pub fn build_args(&self, profile_url: &str, docx: &Path, outdir: &Path) -> Vec<String> {
+    pub fn build_args(&self, _profile_url: &str, docx: &Path, outdir: &Path) -> Vec<String> {
         vec![
             "--headless".to_string(),
             "--convert-to".to_string(),
             "pdf".to_string(),
             "--outdir".to_string(),
             outdir.display().to_string(),
-            format!("-env:UserInstallation={profile_url}"),
             docx.display().to_string(),
         ]
     }
@@ -109,12 +106,14 @@ impl DocxToPdfBackend for LibreOfficeBackend {
         if tokio::fs::metadata(&self.soffice).await.is_err() {
             return false;
         }
-        match tokio::time::timeout(
-            self.spawn_timeout,
-            Command::new(&self.soffice).arg("--version").output(),
-        )
-        .await
-        {
+        let soffice = self.soffice.clone();
+        let res = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(&soffice)
+                .arg("--version")
+                .output()
+        })
+        .await;
+        match res {
             Ok(Ok(o)) => o.status.success(),
             _ => false,
         }
@@ -125,28 +124,80 @@ impl DocxToPdfBackend for LibreOfficeBackend {
             return Err(PdfError::DocxUnreadable(docx.to_path_buf()).into());
         }
 
-        // 1. 建独立 user-profile
-        let profile_dir = temp_user_profile()?;
-        let profile_url = format!("file://{}", profile_dir.display());
-
+        // 用默认 user profile（见上方注释）；并发靠 [`crate::backend::DocxToPdf`] 的
+        // `Mutex` 串行化。
+        let profile_url = String::new();
+        let soffice = self.soffice.clone();
+        let args = self.build_args(&profile_url, docx, outdir);
         let started = std::time::Instant::now();
-        let child = Command::new(&self.soffice)
-            .args(self.build_args(&profile_url, docx, outdir))
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
-            .kill_on_drop(true)
-            .spawn()
-            .with_context(|| format!("启动 soffice 失败：{}", self.soffice.display()))?;
 
-        let out = child
-            .wait_with_output()
+        // **关键发现（Windows）**：soffice 若不是 console 父进程（被 Rust /
+        // PowerShell `Start-Process` / `tokio::process` spawn 出来）会 fork 出
+        // 一个 watcher 线程，**主进程永不退出**。`Stdio::null/piped/inherit` 全
+        // 试过都卡。唯一稳定方案：spawn `cmd.exe /c` 跑 soffice——cmd 是 console
+        // 进程，soffice 检测到 console 父进程后正常退出。
+        // macOS / Linux 上直接 `spawn(soffice)` 即可。
+        #[cfg(windows)]
+        let output = {
+            let soffice_path = soffice.clone();
+            let args_clone = args.clone();
+            let cmdline_for_log = format!(
+                "cmd.exe /c \"{}\" {}",
+                soffice_path.display(),
+                args_clone
+                    .iter()
+                    .map(|a| if a.contains(' ') {
+                        format!("\"{}\"", a)
+                    } else {
+                        a.clone()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            );
+            let log_path = std::env::temp_dir().join("doc-docx-pdf.log");
+            let log_line = format!(
+                "[{}] spawn: {}\n",
+                chrono::Utc::now().to_rfc3339(),
+                cmdline_for_log
+            );
+            let _ = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&log_path)
+                .and_then(|mut f| std::io::Write::write_all(&mut f, log_line.as_bytes()));
+            tokio::task::spawn_blocking(move || {
+                let mut cmd = std::process::Command::new("cmd.exe");
+                cmd.arg("/c");
+                cmd.arg(&soffice_path);
+                for a in &args_clone {
+                    cmd.arg(a);
+                }
+                cmd.stdout(std::process::Stdio::null())
+                    .stderr(std::process::Stdio::null())
+                    .stdin(std::process::Stdio::null())
+                    .output()
+            })
             .await
-            .with_context(|| format!("等待 soffice 失败：{}", self.soffice.display()))?;
+            .map_err(|e| anyhow::anyhow!("spawn_blocking join 失败：{e}"))?
+            .with_context(|| format!("启动 soffice 失败"))?
+        };
+        #[cfg(not(windows))]
+        let output = tokio::task::spawn_blocking(move || {
+            std::process::Command::new(&soffice)
+                .args(&args)
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .stdin(std::process::Stdio::null())
+                .output()
+        })
+        .await
+        .map_err(|e| anyhow::anyhow!("spawn_blocking join 失败：{e}"))?
+        .with_context(|| format!("启动 soffice 失败"))?;
 
-        if !out.status.success() {
+        if !output.status.success() {
             return Err(PdfError::LibreOfficeFailed {
-                code: out.status.code(),
-                stderr: String::from_utf8_lossy(&out.stderr).into_owned(),
+                code: output.status.code(),
+                stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
             }
             .into());
         }

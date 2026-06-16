@@ -18,6 +18,28 @@ use crate::error::CoreError;
 use crate::options::ConvertOptions;
 use crate::result::{ConvertResult, ProgressEvent, ProgressPhase};
 
+/// 把 PDF 第一页渲染为 PNG（200 dpi），用 pdfium-render。
+///
+/// V1 设计：zip 内 `\includegraphics{*.pdf}` 时，docx-writer 端只接受 PNG/JPG，
+/// 所以这里把 PDF 翻译成 PNG byte 注入 image_assets（同 key）。
+fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
+    use pdfium_render::prelude::Pdfium;
+    let pdfium = Pdfium::default();
+    let doc = pdfium.load_pdf_from_byte_slice(pdf_bytes, None).ok()?;
+    let page = doc.pages().get(0).ok()?;
+    let bitmap = page
+        .render_with_config(&pdfium_render::prelude::PdfRenderConfig::new().set_target_width(1600))
+        .ok()?;
+    let image = bitmap.as_image();
+    let buf: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> = image.into_rgba8();
+    let dyn_img = image::DynamicImage::ImageRgba8(buf);
+    let mut png_bytes: Vec<u8> = Vec::new();
+    dyn_img
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .ok()?;
+    Some(png_bytes)
+}
+
 /// 同步转换入口（V1 M1-M2）。
 ///
 /// 仅把 `main_tex` 文本装载到空 VFS；`\input{...}` 解析依赖调用方事先把
@@ -28,8 +50,13 @@ pub fn convert_sync(
     options: &ConvertOptions,
 ) -> Result<ConvertResult, CoreError> {
     let doc = parse_tex_to_doc(main_tex, source)?;
-    let docx = doc_docx_writer::pack_with_template(&doc, options.template_bytes.as_deref())
-        .map_err(|e| CoreError::Serialize(e.0))?;
+    let docx = doc_docx_writer::pack_with_page_setup(
+        &doc,
+        options.template_bytes.as_deref(),
+        None,
+        options.page_setup.as_ref(),
+    )
+    .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
         docx,
         warnings: vec![],
@@ -72,10 +99,11 @@ pub fn convert_dir(
         .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
 
     let doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
-    let docx = doc_docx_writer::pack_with_assets(
+    let docx = doc_docx_writer::pack_with_page_setup(
         &doc,
         options.template_bytes.as_deref(),
         Some(&image_assets),
+        options.page_setup.as_ref(),
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -132,20 +160,61 @@ pub fn convert_zip(
         vfs.insert(p, bytes.clone());
     }
 
-    // 收集 PNG/JPEG 图片资产
+    // 收集 PNG/JPEG 图片资产；PDF 自动渲染为 PNG 并入 image_assets（同 key）。
+    // V1 image_assets match：先存完整 VFS 路径作为 key，再额外存 `basename`
+    // 作 fallback（docx-writer 端 fig_key 通常是 `\includegraphics` 裸路径，如
+    // `fig1_system_overview.pdf`）。
     let mut image_assets = ImageAssets::new();
     for (p, bytes) in &entries {
         let p_lower = p.to_string_lossy().to_lowercase();
+        let p_str = p.to_string_lossy().to_string();
+        let basename = p
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_default();
         if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".jpeg") {
-            image_assets.insert(p.to_string_lossy().to_string(), bytes.clone());
+            image_assets.insert(p_str.clone(), bytes.clone());
+            if !basename.is_empty() && basename != p_str {
+                image_assets.insert(basename, bytes.clone());
+            }
+        } else if p_lower.ends_with(".pdf") {
+            if let Some(png) = render_pdf_to_png(bytes) {
+                image_assets.insert(p_str.clone(), png.clone());
+                if !basename.is_empty() && basename != p_str {
+                    // 把 basename 改成 PNG 后缀
+                    let png_basename = basename.trim_end_matches(".pdf").to_string() + ".png";
+                    image_assets.insert(png_basename, png);
+                }
+            }
         }
     }
+    eprintln!("[doc-core] zip entries scanned: {} (figures+tex)", entries.len());
+    eprintln!("[doc-core] has abstract: {}", entries.keys().any(|p| p.to_string_lossy().contains("00_abstract")));
 
     let doc = parse_tex_with_vfs(&main_norm, &source, &mut vfs)?;
-    let docx = doc_docx_writer::pack_with_assets(
+    eprintln!("[doc-core] doc has {} blocks", doc.blocks.len());
+    eprintln!(
+        "[doc-core] block kinds: {}",
+        doc.blocks
+            .iter()
+            .map(|b| match b {
+                doc_semantic_ast::Block::Heading { .. } => "H",
+                doc_semantic_ast::Block::Paragraph { .. } => "P",
+                doc_semantic_ast::Block::Figure { .. } => "F",
+                doc_semantic_ast::Block::Table { .. } => "T",
+                doc_semantic_ast::Block::List { .. } => "L",
+                doc_semantic_ast::Block::Equation { .. } => "E",
+                doc_semantic_ast::Block::Bibliography { .. } => "B",
+                doc_semantic_ast::Block::RawFallback { .. } => "R",
+            })
+            .collect::<Vec<_>>()
+            .join("")
+    );
+    let docx = doc_docx_writer::pack_with_page_setup(
         &doc,
         options.template_bytes.as_deref(),
         Some(&image_assets),
+        options.page_setup.as_ref(),
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {

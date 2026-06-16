@@ -3,9 +3,37 @@
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};
-use clap::Args;
+use clap::{Args, ValueEnum};
+use doc_core::{options::ConvertOptions, PageSetup};
 
-use doc_core::options::ConvertOptions;
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum PageSetupKind {
+    /// US Letter 12240×15840 twips（V1 默认）
+    Letter,
+    /// A4 11906×16838 twips
+    A4,
+    /// JOS 18.40cm × 26.00cm 模板（=10433×14742 twips + 567/850/850/850 margins + 1 col）
+    JosPaper3,
+}
+
+impl PageSetupKind {
+    pub fn to_page_setup(self) -> Option<PageSetup> {
+        match self {
+            PageSetupKind::Letter => None, // V1 默认；不传 page_setup
+            PageSetupKind::A4 => Some(PageSetup {
+                width_twips: 11906,
+                height_twips: 16838,
+                margin_top: None,
+                margin_right: None,
+                margin_bottom: None,
+                margin_left: None,
+                cols_space: None,
+                cols_num: None,
+            }),
+            PageSetupKind::JosPaper3 => Some(PageSetup::jos_paper3()),
+        }
+    }
+}
 
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
@@ -18,12 +46,16 @@ pub struct ConvertArgs {
     /// 输出 docx 路径
     #[arg(long)]
     pub out: PathBuf,
+    /// 页面设置：letter / a4 / jos-paper3
+    #[arg(long, value_enum, default_value_t = PageSetupKind::Letter)]
+    pub page_setup: PageSetupKind,
 }
 
 pub fn run_convert(a: ConvertArgs) -> Result<()> {
     let bytes = std::fs::read(&a.zip)
         .with_context(|| format!("读取 zip 失败：{}", a.zip.display()))?;
-    let options = ConvertOptions::default();
+    let mut options = ConvertOptions::default();
+    options.page_setup = a.page_setup.to_page_setup();
     let r = doc_core::convert_zip(&bytes, &a.main_tex, &options)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     if let Some(parent) = a.out.parent() {
@@ -48,6 +80,9 @@ pub struct BuildArgs {
     /// `--latex-main` 在 zip 内相对路径；缺省 = `--main-tex`
     #[arg(long)]
     pub latex_main: Option<String>,
+    /// 页面设置：letter / a4 / jos-paper3
+    #[arg(long, value_enum, default_value_t = PageSetupKind::Letter)]
+    pub page_setup: PageSetupKind,
 }
 
 pub fn run_build(a: BuildArgs) -> Result<()> {
@@ -64,10 +99,11 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
         zip: a.zip.clone(),
         main_tex: a.main_tex.clone(),
         out: docx.clone(),
+        page_setup: a.page_setup,
     };
     run_convert(convert_a)?;
 
-    // 2. tex → oracle PDF（独立 from workdir 准备）
+    // 2. tex → oracle PDF
     let tex_a = tex_compile::TexCompileArgs {
         zip: a.zip.clone(),
         main_tex: a.latex_main.clone().unwrap_or_else(|| a.main_tex.clone()),

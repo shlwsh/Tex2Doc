@@ -6,10 +6,12 @@
 
 pub mod model;
 pub mod packer;
+pub mod page_setup;
 pub mod serializer;
 pub mod styles;
 pub mod template;
 
-pub use packer::{pack, pack_with_assets, pack_with_template};
+pub use packer::{pack, pack_with_assets, pack_with_page_setup, pack_with_template};
+pub use page_setup::PageSetup;
 pub use serializer::serialize_document;
 pub use template::{merge_styles, parse_styles_xml, parse_template, TemplateStyles};
