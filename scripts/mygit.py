@@ -857,9 +857,13 @@ def main() -> None:
     text_files = [f for f in staged_names if f and not is_binary_artifact(f)]
     binary_files = [f for f in staged_names if f and is_binary_artifact(f)]
     stat = run_command("git diff --cached --stat", check=False) or ""
+
+    # 本地 Ollama 端（8B Q4 在 CPU 上推理较慢）应使用更短的 diff 输入，
+    # 以免主调用 timeout。截断阈值由 DIFF_PROMPT_MAX_CHARS 控制。
+    diff_max_chars = int(config.get("DIFF_PROMPT_MAX_CHARS", "4000"))
     diff_content = get_staged_diff_for_files(text_files)
-    if len(diff_content) > 15000:
-        diff_content = diff_content[:15000] + "\n... (Diff truncated)"
+    if len(diff_content) > diff_max_chars:
+        diff_content = diff_content[:diff_max_chars] + "\n... (Diff truncated)"
 
     use_ai, ai_reason = should_use_ai(status, config, ollama=ollama, dashscope_ready=dashscope_ready)
     commit_msg = ""
@@ -883,13 +887,21 @@ def main() -> None:
         for backend_label, backend_url, backend_model in backends:
             print(f"🤖 正在使用 {backend_label}（{backend_model}）生成提交信息...")
             try:
+                # 本地 Ollama 端偏好短回复；云端 DashScope 可保持 500
+                default_max_tokens = 200 if backend_label == "Ollama" else 500
+                max_tokens = int(
+                    config.get(
+                        "OLLAMA_MAX_TOKENS" if backend_label == "Ollama" else "DASHSCOPE_MAX_TOKENS",
+                        str(default_max_tokens),
+                    )
+                )
                 payload = {
                     "model": backend_model,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": user_prompt},
                     ],
-                    "max_tokens": 500,
+                    "max_tokens": max_tokens,
                     "temperature": 0.7,
                 }
                 session = requests.Session()

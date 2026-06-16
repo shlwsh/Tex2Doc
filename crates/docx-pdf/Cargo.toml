@@ -7,6 +7,24 @@ license.workspace     = true
 publish      = false
 description = "V2 PDF 流水线 · 路径 B：用 LibreOffice headless 把 docx 转 PDF"
 
+[features]
+default = ["libreoffice"]
+libreoffice = []
+word-com   = []   # 暂不实现，仅 feature gate 占位
+
 [dependencies]
+anyhow       = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true, features = ["process", "fs", "sync", "io-util", "rt-multi-thread", "macros", "time"] }
+tracing      = "0.1"
+which        = "6"
+async-trait  = "0.1"
+tempfile     = "3"
+lopdf        = "0.34"
+chrono       = { workspace = true }
+serde        = { workspace = true, features = ["derive"] }
+serde_json   = { workspace = true }
 
 [dev-dependencies]
+pretty_assertions = "1"
+tempfile         = "3"

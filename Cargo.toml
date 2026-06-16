@@ -60,6 +60,10 @@ clap     = { version = "4.5", features = ["derive"] }
 # M2 起 tex-facade 需要 process / fs / sync / io-util；union 在各 crate 自声明的 features
 tokio    = { version = "1.40", features = ["macros", "rt-multi-thread", "process", "fs", "sync", "io-util"] }
 
+# 跨 crate 公共依赖（M2+ 新增 crate 也会用到）
+chrono   = { version = "0.4", default-features = false, features = ["clock", "serde"] }
+lopdf    = "0.34"
+
 # 测试 / 基准
 insta      = { version = "1.40", features = ["yaml", "ron"] }
 proptest   = "1.4"

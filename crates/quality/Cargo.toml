@@ -7,6 +7,30 @@ license.workspace     = true
 publish      = false
 description = "V2 PDF 流水线 · 路径 C：结构 / 文本 / 视觉三层质量对比"
 
+[features]
+default = []
+ocr = ["dep:tesseract"]   # OCR 是可选，M4 末 spike 再开
+
 [dependencies]
+anyhow       = { workspace = true }
+thiserror    = { workspace = true }
+tokio        = { workspace = true, features = ["fs", "rt-multi-thread", "macros"] }
+serde        = { workspace = true, features = ["derive"] }
+serde_json   = { workspace = true }
+quick-xml    = { workspace = true }
+image        = { workspace = true }
+zip          = { workspace = true, default-features = false, features = ["deflate"] }
+lopdf        = { workspace = true }
+regex        = "1"
+tracing      = "0.1"
+chrono       = { workspace = true }
+
+# 新增
+pdfium-render = "0.8"   # 把 PDF 渲染为 PNG（视觉层）
+# 可选
+tesseract      = { version = "0.13", optional = true }   # OCR
 
 [dev-dependencies]
+pretty_assertions = "1"
+insta = { workspace = true }
+tempfile = "3"
