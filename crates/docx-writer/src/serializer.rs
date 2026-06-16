@@ -1,16 +1,14 @@
-//! AST → OOXML 元素序列化
+//! AST → OOXML 元素序列化（V2 重构）
 //!
-//! 支持的块（V1）：
-//! - Heading / Paragraph
-//! - List（itemize / enumerate）
-//! - Table（简单网格）
-//! - Figure（PNG/JPEG 嵌入 via base64 inline）
-//! - Equation（OMML `<m:oMath>`）
-//! - Bibliography
-//! - RawFallback
+//! 关键变化：
+//! - 序列化层现在能完整表达 `TextStyle::Bold/Italic/BoldItalic/Code/MathInline/Superscript/Subscript`
+//! - 算法/代码块使用 `JOSCode` 样式 + Courier 字体
+//! - 段落支持 `keep_next` / `keep_lines`（算法块、表格不跨页）
+//! - 公式块走 `JOSCode` 样式 + OMML
+//! - 21 个 JOS 样式由 `styles.rs` 单一来源生成
 
 use doc_mathml::{parse_latex_math, to_omml};
-use doc_semantic_ast::{Block, Document, TextStyle};
+use doc_semantic_ast::{Block, Document, TextRun, TextStyle};
 use doc_utils::ImageAssets;
 use image::GenericImageView;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
@@ -19,9 +17,32 @@ use quick_xml::Writer;
 use crate::model::{Paragraph, Run};
 use crate::page_setup::PageSetup;
 use crate::styles::{
-    STYLE_BODY, STYLE_CAPTION, STYLE_HEADING1, STYLE_HEADING2, STYLE_HEADING3, STYLE_LIST_BULLET,
-    STYLE_LIST_NUMBER, STYLE_TABLE_HEADER, STYLE_TITLE,
+    STYLE_BODY, STYLE_BODY_NO_INDENT, STYLE_CAPTION, STYLE_CODE, STYLE_HEADING1, STYLE_HEADING2,
+    STYLE_HEADING3, STYLE_LIST_BULLET, STYLE_LIST_NUMBER, STYLE_REFERENCE, STYLE_TABLE_TEXT,
 };
+
+/// 把 semantic-ast 的 `TextRun` 映射到 docx-writer 的 `Run`。
+///
+/// 规则：
+/// - `TextStyle::Plain` → Plain run（仍可被 bold/italic 字段 override）
+/// - `Bold / BoldItalic` → 对应 bold 字段
+/// - `Italic / MathInline` → italic 字段（MathInline 在 serializer 里走 OMML）
+/// - `Code` → 用 Courier New 字体 + 9pt
+/// - `Superscript / Subscript` → 由 serializer 输出 `<w:vertAlign>`
+fn from_text_run(r: &TextRun) -> Run {
+    Run {
+        text: r.text.clone(),
+        style_id: None,
+        style: r.style,
+        bold: matches!(r.style, TextStyle::Bold | TextStyle::BoldItalic),
+        italic: matches!(
+            r.style,
+            TextStyle::Italic | TextStyle::BoldItalic | TextStyle::MathInline
+        ),
+        font_ascii: None,
+        font_east: None,
+    }
+}
 
 /// 写出 `document.xml` 字节流。
 ///
@@ -81,7 +102,7 @@ pub fn serialize_document(
                     1 => STYLE_HEADING1,
                     2 => STYLE_HEADING2,
                     3 => STYLE_HEADING3,
-                    _ => STYLE_TITLE,
+                    _ => STYLE_HEADING1,
                 };
                 let display_text = match number {
                     Some(n) => format!("{} {}", n, text),
@@ -92,9 +113,15 @@ pub fn serialize_document(
                     runs: vec![Run {
                         text: display_text,
                         style_id: Some(style.to_string()),
+                        style: TextStyle::Bold,
                         bold: true,
                         italic: false,
+                        font_ascii: None,
+                        font_east: None,
                     }],
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
                 };
                 write_paragraph(&mut w, &para);
             }
@@ -113,22 +140,14 @@ pub fn serialize_document(
                 });
                 let para = Paragraph {
                     style_id: Some(if is_jos_ref {
-                        "JOSReference".to_string()
+                        STYLE_REFERENCE.to_string()
                     } else {
                         STYLE_BODY.to_string()
                     }),
-                    runs: runs
-                        .iter()
-                        .map(|r| Run {
-                            text: r.text.clone(),
-                            style_id: None,
-                            bold: matches!(r.style, TextStyle::Bold | TextStyle::BoldItalic),
-                            italic: matches!(
-                                r.style,
-                                TextStyle::Italic | TextStyle::BoldItalic | TextStyle::MathInline
-                            ),
-                        })
-                        .collect(),
+                    runs: runs.iter().map(from_text_run).collect(),
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
                 };
                 write_paragraph(&mut w, &para);
             }
@@ -156,12 +175,10 @@ pub fn serialize_document(
                     let text = summarize(sub);
                     let para = Paragraph {
                         style_id: Some(style.to_string()),
-                        runs: vec![Run {
-                            text,
-                            style_id: None,
-                            bold: false,
-                            italic: false,
-                        }],
+                        runs: vec![Run::plain(text)],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: false,
                     };
                     write_paragraph(&mut w, &para);
                 }
@@ -255,9 +272,15 @@ pub fn serialize_document(
                                     runs: vec![Run {
                                         text: cap_text,
                                         style_id: None,
+                                        style: TextStyle::Plain,
                                         bold: false,
                                         italic: true,
+                                        font_ascii: None,
+                                        font_east: None,
                                     }],
+                                    jc: None,
+                                    keep_next: false,
+                                    keep_lines: false,
                                 };
                                 write_paragraph(&mut w, &cap_para);
                             }
@@ -277,12 +300,18 @@ pub fn serialize_document(
                         }
                     ),
                     style_id: None,
+                    style: TextStyle::Plain,
                     bold: false,
                     italic: true,
+                    font_ascii: None,
+                    font_east: None,
                 }];
                 let para = Paragraph {
-                    style_id: Some(STYLE_BODY.to_string()),
+                    style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
                     runs,
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
                 };
                 write_paragraph(&mut w, &para);
                 if let Some(cap) = caption {
@@ -295,9 +324,15 @@ pub fn serialize_document(
                         runs: vec![Run {
                             text: cap_text,
                             style_id: None,
+                            style: TextStyle::Plain,
                             bold: false,
                             italic: true,
+                            font_ascii: None,
+                            font_east: None,
                         }],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: false,
                     };
                     write_paragraph(&mut w, &cap_para);
                 }
@@ -313,34 +348,44 @@ pub fn serialize_document(
                     runs: vec![Run {
                         text: "参考文献".into(),
                         style_id: Some(STYLE_HEADING2.to_string()),
+                        style: TextStyle::Bold,
                         bold: true,
                         italic: false,
+                        font_ascii: None,
+                        font_east: None,
                     }],
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
                 };
                 write_paragraph(&mut w, &para);
                 for e in entries {
                     let line = format!("[{}] {} ({})", e.key, e.title, e.year);
                     let para = Paragraph {
-                        style_id: Some(STYLE_BODY.to_string()),
-                        runs: vec![Run {
-                            text: line,
-                            style_id: None,
-                            bold: false,
-                            italic: false,
-                        }],
+                        style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+                        runs: vec![Run::plain(line)],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: false,
                     };
                     write_paragraph(&mut w, &para);
                 }
             }
             Block::RawFallback { text, .. } => {
                 let para = Paragraph {
-                    style_id: Some(STYLE_BODY.to_string()),
+                    style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
                     runs: vec![Run {
                         text: text.clone(),
                         style_id: None,
+                        style: TextStyle::Plain,
                         bold: false,
                         italic: false,
+                        font_ascii: None,
+                        font_east: None,
                     }],
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
                 };
                 write_paragraph(&mut w, &para);
             }
@@ -351,36 +396,51 @@ pub fn serialize_document(
                 number,
                 ..
             } => {
-                // 算法块：先写 "Algorithm N: caption" 标题，再写 I/O + 代码行
+                // 算法块：先写 "Algorithm N: caption" 标题（用 Caption 样式 + 居中），
+                // 再写 I/O + 代码行（都用 JOSCode 样式 + Courier New）。
+                // 关键：算法标题→第一行 IO 之间用 keep_next，避免分页切断。
                 let cap = format!(
                     "{}: {}",
                     number.as_deref().unwrap_or("Algorithm"),
                     caption.as_deref().unwrap_or("")
                 );
                 let para = Paragraph {
-                    style_id: Some(STYLE_HEADING2.to_string()),
+                    style_id: Some(STYLE_CAPTION.to_string()),
                     runs: vec![Run {
                         text: cap,
-                        style_id: Some(STYLE_HEADING2.to_string()),
+                        style_id: None,
+                        style: TextStyle::Bold,
                         bold: true,
                         italic: false,
+                        font_ascii: None,
+                        font_east: None,
                     }],
+                    jc: None,
+                    keep_next: true,
+                    keep_lines: true,
                 };
                 write_paragraph(&mut w, &para);
                 for (kind, content) in io {
                     let line = format!("{kind}: {content}");
                     let para = Paragraph {
-                        style_id: Some(STYLE_BODY.to_string()),
+                        style_id: Some(STYLE_CODE.to_string()),
                         runs: vec![Run {
                             text: line,
                             style_id: None,
+                            style: TextStyle::Code,
                             bold: false,
-                            italic: true,
+                            italic: false,
+                            font_ascii: None,
+                            font_east: None,
                         }],
+                        jc: None,
+                        keep_next: true,
+                        keep_lines: true,
                     };
                     write_paragraph(&mut w, &para);
                 }
-                for alg in lines {
+                let last = lines.len();
+                for (idx, alg) in lines.iter().enumerate() {
                     let indent_spaces = "  ".repeat(alg.indent as usize);
                     let comment = if alg.comment.is_empty() {
                         String::new()
@@ -388,14 +448,22 @@ pub fn serialize_document(
                         format!(" /* {} */", alg.comment)
                     };
                     let code = format!("{indent_spaces}{}{comment}", alg.code);
+                    let is_last = idx + 1 == last;
                     let para = Paragraph {
-                        style_id: Some(STYLE_BODY.to_string()),
+                        style_id: Some(STYLE_CODE.to_string()),
                         runs: vec![Run {
                             text: code,
-                            style_id: Some(STYLE_BODY.to_string()),
+                            style_id: None,
+                            style: TextStyle::Code,
                             bold: false,
                             italic: false,
+                            font_ascii: None,
+                            font_east: None,
                         }],
+                        jc: None,
+                        // 整块 keep_lines；除了最后一行，其余 keep_next。
+                        keep_next: !is_last,
+                        keep_lines: true,
                     };
                     write_paragraph(&mut w, &para);
                 }
@@ -604,32 +672,29 @@ fn write_table(
             w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
             let p = Paragraph {
-                style_id: if is_header {
-                    Some(STYLE_TABLE_HEADER.to_string())
+                style_id: Some(if is_header {
+                    STYLE_TABLE_TEXT.to_string()
                 } else {
-                    Some(STYLE_BODY.to_string())
-                },
+                    STYLE_TABLE_TEXT.to_string()
+                }),
                 runs: if cell.runs.is_empty() {
-                    vec![Run {
-                        text: String::new(),
-                        style_id: None,
-                        bold: false,
-                        italic: false,
-                    }]
+                    vec![Run::plain(String::new())]
                 } else {
+                    // 表格首行粗体（表头）；其余按 text style 走
                     cell.runs
                         .iter()
-                        .map(|r| Run {
-                            text: r.text.clone(),
-                            style_id: None,
-                            bold: matches!(r.style, TextStyle::Bold | TextStyle::BoldItalic),
-                            italic: matches!(
-                                r.style,
-                                TextStyle::Italic | TextStyle::BoldItalic | TextStyle::MathInline
-                            ),
+                        .map(|r| {
+                            let mut run = from_text_run(r);
+                            if is_header {
+                                run.bold = true;
+                            }
+                            run
                         })
                         .collect()
                 },
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
             };
             write_paragraph(w, &p);
             w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
@@ -649,9 +714,15 @@ fn write_table(
             runs: vec![Run {
                 text: cap_text,
                 style_id: None,
+                style: TextStyle::Plain,
                 bold: false,
                 italic: true,
+                font_ascii: None,
+                font_east: None,
             }],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
         };
         write_paragraph(w, &p);
     }
@@ -659,39 +730,116 @@ fn write_table(
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
     w.write_event(Event::Start(BytesStart::new("w:p"))).unwrap();
-    if let Some(s) = &p.style_id {
-        let ppr = BytesStart::new("w:pPr");
-        let mut pstyle = BytesStart::new("w:pStyle");
-        pstyle.push_attribute(("w:val", s.as_str()));
-        w.write_event(Event::Start(ppr)).unwrap();
-        w.write_event(Event::Empty(pstyle)).unwrap();
+
+    // pPr：style / jc / keepNext / keepLines
+    let need_ppr = p.style_id.is_some()
+        || p.jc.is_some()
+        || p.keep_next
+        || p.keep_lines;
+    if need_ppr {
+        w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+        if let Some(s) = &p.style_id {
+            let mut pstyle = BytesStart::new("w:pStyle");
+            pstyle.push_attribute(("w:val", s.as_str()));
+            w.write_event(Event::Empty(pstyle)).unwrap();
+        }
+        if let Some(j) = &p.jc {
+            let mut jc = BytesStart::new("w:jc");
+            jc.push_attribute(("w:val", j.as_str()));
+            w.write_event(Event::Empty(jc)).unwrap();
+        }
+        if p.keep_next {
+            w.write_event(Event::Empty(BytesStart::new("w:keepNext")))
+                .unwrap();
+        }
+        if p.keep_lines {
+            w.write_event(Event::Empty(BytesStart::new("w:keepLines")))
+                .unwrap();
+        }
         w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
     }
+
     for run in &p.runs {
-        w.write_event(Event::Start(BytesStart::new("w:r"))).unwrap();
-        if let Some(s) = &run.style_id {
-            let rpr = BytesStart::new("w:rPr");
-            let mut rstyle = BytesStart::new("w:rStyle");
-            rstyle.push_attribute(("w:val", s.as_str()));
-            w.write_event(Event::Start(rpr)).unwrap();
-            w.write_event(Event::Empty(rstyle)).unwrap();
-            w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
-        } else if run.bold || run.italic {
-            let rpr = BytesStart::new("w:rPr");
-            w.write_event(Event::Start(rpr)).unwrap();
-            if run.bold {
-                w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
-            }
-            if run.italic {
-                w.write_event(Event::Empty(BytesStart::new("w:i"))).unwrap();
-            }
-            w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
-        }
-        w.write_event(Event::Start(BytesStart::new("w:t"))).unwrap();
-        w.write_event(Event::Text(quick_xml::events::BytesText::new(&run.text)))
-            .unwrap();
-        w.write_event(Event::End(BytesEnd::new("w:t"))).unwrap();
-        w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
+        write_run(w, run);
     }
     w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
+}
+
+/// 写单个 `<w:r>`，根据 `Run.style` 产生正确的 `<w:rPr>`。
+fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
+    // 空 run 跳过（避免空 text 触发 Word 警告）
+    if run.text.is_empty() && run.style == TextStyle::Plain {
+        return;
+    }
+
+    w.write_event(Event::Start(BytesStart::new("w:r"))).unwrap();
+
+    // rPr 是否非空
+    let has_rpr = run.style_id.is_some()
+        || run.bold
+        || run.italic
+        || run.font_ascii.is_some()
+        || run.font_east.is_some()
+        || !matches!(run.style, TextStyle::Plain);
+    if has_rpr {
+        w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
+        if let Some(s) = &run.style_id {
+            let mut rstyle = BytesStart::new("w:rStyle");
+            rstyle.push_attribute(("w:val", s.as_str()));
+            w.write_event(Event::Empty(rstyle)).unwrap();
+        }
+        if run.font_ascii.is_some() || run.font_east.is_some() {
+            let mut rfonts = BytesStart::new("w:rFonts");
+            if let Some(a) = &run.font_ascii {
+                rfonts.push_attribute(("w:ascii", a.as_str()));
+                rfonts.push_attribute(("w:hAnsi", a.as_str()));
+                rfonts.push_attribute(("w:cs", a.as_str()));
+            }
+            if let Some(e) = &run.font_east {
+                rfonts.push_attribute(("w:eastAsia", e.as_str()));
+            }
+            w.write_event(Event::Empty(rfonts)).unwrap();
+        } else {
+            // Code 样式自动用 Courier New
+            if matches!(run.style, TextStyle::Code) {
+                let mut rfonts = BytesStart::new("w:rFonts");
+                rfonts.push_attribute(("w:ascii", "Courier New"));
+                rfonts.push_attribute(("w:hAnsi", "Courier New"));
+                rfonts.push_attribute(("w:eastAsia", "宋体"));
+                rfonts.push_attribute(("w:cs", "Courier New"));
+                w.write_event(Event::Empty(rfonts)).unwrap();
+            }
+        }
+        if run.bold {
+            w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
+            w.write_event(Event::Empty(BytesStart::new("w:bCs"))).unwrap();
+        }
+        if run.italic {
+            w.write_event(Event::Empty(BytesStart::new("w:i"))).unwrap();
+            w.write_event(Event::Empty(BytesStart::new("w:iCs"))).unwrap();
+        }
+        if matches!(run.style, TextStyle::Superscript) {
+            let mut va = BytesStart::new("w:vertAlign");
+            va.push_attribute(("w:val", "superscript"));
+            w.write_event(Event::Empty(va)).unwrap();
+        } else if matches!(run.style, TextStyle::Subscript) {
+            let mut va = BytesStart::new("w:vertAlign");
+            va.push_attribute(("w:val", "subscript"));
+            w.write_event(Event::Empty(va)).unwrap();
+        }
+        w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
+    }
+
+    // text：保留前后空格 + XML 转义
+    w.write_event(Event::Start(BytesStart::new("w:t"))).unwrap();
+    let mut t = BytesStart::new("w:t");
+    t.push_attribute(("xml:space", "preserve"));
+    // quick-xml 的 BytesText + Start 组合用 Text 事件
+    let _ = t; // 不需要单独的 start 标记
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(
+        &xml_escape(&run.text),
+    )))
+    .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:t"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
 }

@@ -1,210 +1,574 @@
-//! styles.xml 序列化（V1 默认样式表）
+//! JOS 2025 21-style 样式表（V2 重构版）
 //!
-//! 详见方案 §4.3.2 样式 ID 命名规范。
+//! 对应 `docs/to-docx/07-format-profiles.md` §7.5 表格。
+//! 单一来源：所有 21 个样式的 ID、字体、字号、缩进、行距都在这里。
+//!
+//! 风格选择：**手写字符串模板**——不借助 `style()` builder。
+//! 因为 21 个样式展开后共 ~120 行 XML，模板化反而难以阅读。
 
-use doc_utils::FontProbe;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 
-pub const STYLE_TITLE: &str = "Title";
-pub const STYLE_HEADING1: &str = "Heading1";
-pub const STYLE_HEADING2: &str = "Heading2";
-pub const STYLE_HEADING3: &str = "Heading3";
-pub const STYLE_BODY: &str = "BodyText";
+// ════════════════════════════════════════════════════════════════════
+//  21 个样式 ID 常量
+// ════════════════════════════════════════════════════════════════════
+
+pub const STYLE_NORMAL: &str = "Normal";
+pub const STYLE_MASTHEAD: &str = "JOSMasthead";
+pub const STYLE_TITLE_ZH: &str = "JOSTitleZh";
+pub const STYLE_AUTHOR_ZH: &str = "JOSAuthorZh";
+pub const STYLE_INSTITUTE_ZH: &str = "JOSInstituteZh";
+pub const STYLE_ABSTRACT_ZH: &str = "JOSAbstractZh";
+pub const STYLE_ABSTRACT_EN: &str = "JOSAbstractEn";
+pub const STYLE_KEYWORDS: &str = "JOSKeywords";
+pub const STYLE_CITATION: &str = "JOSCitation";
+pub const STYLE_ENGLISH_TITLE: &str = "JOSEnglishTitle";
+pub const STYLE_BODY: &str = "JOSBody";
+pub const STYLE_BODY_NO_INDENT: &str = "JOSBodyNoIndent";
+pub const STYLE_HEADING1: &str = "JOSHeading1";
+pub const STYLE_HEADING2: &str = "JOSHeading2";
+pub const STYLE_HEADING3: &str = "JOSHeading3";
+pub const STYLE_CAPTION: &str = "JOSCaption";
+pub const STYLE_IMAGE: &str = "JOSImage";
+pub const STYLE_TABLE_TEXT: &str = "JOSTableText";
+pub const STYLE_CODE: &str = "JOSCode";
+pub const STYLE_REFERENCE_HEADING: &str = "JOSReferenceHeading";
+pub const STYLE_REFERENCE: &str = "JOSReference";
+
+/// 简单 List 段落样式（V1 兼容）：保留 V1 的 list_bullet / list_number ID。
 pub const STYLE_LIST_BULLET: &str = "ListBullet";
 pub const STYLE_LIST_NUMBER: &str = "ListNumber";
-pub const STYLE_CAPTION: &str = "Caption";
 pub const STYLE_TABLE_HEADER: &str = "TableHeader";
-/// JOS 论文参考文献悬挂缩进样式
-pub const STYLE_JOS_REFERENCE: &str = "JOSReference";
 
-/// 写出 `styles.xml` 字节流。
+/// 写出 JOS 21-style `styles.xml` 字节流。
 pub fn write_styles() -> Vec<u8> {
     let mut w = Writer::new(Vec::new());
     w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
         .unwrap();
 
-    let mut styles = BytesStart::new("w:styles");
-    styles.push_attribute((
+    let mut root = BytesStart::new("w:styles");
+    root.push_attribute((
         "xmlns:w",
         "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
     ));
-    w.write_event(Event::Start(styles)).unwrap();
+    root.push_attribute((
+        "xmlns:r",
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships",
+    ));
+    w.write_event(Event::Start(root)).unwrap();
 
-    write_default(&mut w, STYLE_TITLE, "Title", "Calibri", 32, true);
-    write_default(&mut w, STYLE_HEADING1, "heading 1", "Calibri", 28, true);
-    write_default(&mut w, STYLE_HEADING2, "heading 2", "Calibri", 24, true);
-    write_default(&mut w, STYLE_HEADING3, "heading 3", "Calibri", 22, true);
-    write_default(&mut w, STYLE_BODY, "Normal", "Calibri", 22, false);
-    write_default(
+    // docDefaults
+    write_doc_defaults(&mut w);
+
+    // 1) Normal
+    write_style(
         &mut w,
-        STYLE_LIST_BULLET,
-        "List Bullet",
-        "Calibri",
-        22,
+        STYLE_NORMAL,
+        "Normal",
+        9.0,
+        "宋体",
+        "Times New Roman",
         false,
+        Some("both"),
+        None,
+        None,
+        None,
+        None,
+        Some(260),
     );
-    write_default(
+
+    // 2) JOSMasthead
+    write_style(
         &mut w,
-        STYLE_LIST_NUMBER,
-        "List Number",
-        "Calibri",
-        22,
+        STYLE_MASTHEAD,
+        "JOS masthead from sample body style 4",
+        7.5,
+        "宋体",
+        "Times New Roman",
         false,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(180),
     );
-    write_default(&mut w, STYLE_CAPTION, "Caption", "Calibri", 20, false);
-    write_default(
+
+    // 3) JOSTitleZh
+    write_style(
         &mut w,
-        STYLE_TABLE_HEADER,
-        "TableHeader",
-        "Calibri",
-        22,
+        STYLE_TITLE_ZH,
+        "JOS Chinese title from sample style 64",
+        14.0,
+        "黑体",
+        "Times New Roman",
         true,
+        Some("center"),
+        None,
+        None,
+        Some(0),
+        Some(120),
+        None,
     );
-    write_jos_reference(&mut w);
 
-    w.write_event(Event::End(BytesEnd::new("w:styles")))
-        .unwrap();
+    // 4) JOSAuthorZh
+    write_style(
+        &mut w,
+        STYLE_AUTHOR_ZH,
+        "JOS Chinese author from sample style 65",
+        12.0,
+        "仿宋_GB2312",
+        "Times New Roman",
+        false,
+        Some("center"),
+        None,
+        None,
+        Some(120),
+        Some(120),
+        None,
+    );
+
+    // 5) JOSInstituteZh
+    write_style(
+        &mut w,
+        STYLE_INSTITUTE_ZH,
+        "JOS institute from sample style 66",
+        8.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+        None,
+        None,
+        None,
+        None,
+        Some(220),
+    );
+
+    // 6) JOSAbstractZh
+    write_style(
+        &mut w,
+        STYLE_ABSTRACT_ZH,
+        "JOS abstract from sample style 117",
+        9.0,
+        "楷体_GB2312",
+        "Times New Roman",
+        false,
+        Some("both"),
+        None,
+        None,
+        None,
+        None,
+        Some(240),
+    );
+
+    // 7) JOSAbstractEn
+    write_style(
+        &mut w,
+        STYLE_ABSTRACT_EN,
+        "JOS English abstract from sample first page",
+        10.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("left"),
+        None,
+        None,
+        None,
+        None,
+        Some(240),
+    );
+
+    // 8) JOSKeywords  (left=430 + hanging=430)
+    write_style_with_ind(
+        &mut w,
+        STYLE_KEYWORDS,
+        "JOS keywords from sample style 118",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        None,
+        None,
+        Some(430),
+        Some(430),
+        None,
+        None,
+        Some(240),
+    );
+
+    // 9) JOSCitation
+    write_style(
+        &mut w,
+        STYLE_CITATION,
+        "JOS citation from sample style 121",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("both"),
+        None,
+        None,
+        None,
+        None,
+        Some(220),
+    );
+
+    // 10) JOSEnglishTitle
+    write_style(
+        &mut w,
+        STYLE_ENGLISH_TITLE,
+        "JOS English title from sample style 120",
+        12.0,
+        "黑体",
+        "Times New Roman",
+        true,
+        None,
+        None,
+        None,
+        Some(120),
+        Some(100),
+        None,
+    );
+
+    // 11) JOSBody (firstLine=420)
+    write_style(
+        &mut w,
+        STYLE_BODY,
+        "JOS body from sample style 145",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("both"),
+        Some(420),
+        None,
+        None,
+        None,
+        Some(260),
+    );
+
+    // 12) JOSBodyNoIndent
+    write_style(
+        &mut w,
+        STYLE_BODY_NO_INDENT,
+        "JOS body without first-line indent",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("both"),
+        None,
+        None,
+        None,
+        None,
+        Some(260),
+    );
+
+    // 13) JOSHeading1
+    write_style(
+        &mut w,
+        STYLE_HEADING1,
+        "JOS heading 1 from sample style 213",
+        10.5,
+        "黑体",
+        "Times New Roman",
+        true,
+        None,
+        None,
+        None,
+        Some(160),
+        Some(160),
+        None,
+    );
+
+    // 14) JOSHeading2
+    write_style(
+        &mut w,
+        STYLE_HEADING2,
+        "JOS heading 2 from sample style 215",
+        9.0,
+        "黑体",
+        "Times New Roman",
+        true,
+        None,
+        None,
+        None,
+        Some(25),
+        Some(25),
+        None,
+    );
+
+    // 15) JOSHeading3
+    write_style(
+        &mut w,
+        STYLE_HEADING3,
+        "JOS heading 3 from sample style 217",
+        9.0,
+        "黑体",
+        "Times New Roman",
+        true,
+        None,
+        None,
+        None,
+        Some(20),
+        Some(20),
+        None,
+    );
+
+    // 16) JOSCaption
+    write_style(
+        &mut w,
+        STYLE_CAPTION,
+        "JOS caption from sample figure/table captions",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+        None,
+        None,
+        None,
+        Some(120),
+        None,
+    );
+
+    // 17) JOSImage
+    write_style(
+        &mut w,
+        STYLE_IMAGE,
+        "JOS image paragraph with automatic line height",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+        None,
+        None,
+        Some(80),
+        Some(80),
+        None,
+    );
+
+    // 18) JOSTableText
+    write_style(
+        &mut w,
+        STYLE_TABLE_TEXT,
+        "JOS table text",
+        7.5,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+        None,
+        None,
+        None,
+        None,
+        Some(220),
+    );
+
+    // 19) JOSCode
+    write_style(
+        &mut w,
+        STYLE_CODE,
+        "JOS algorithm/code text",
+        8.0,
+        "宋体",
+        "Courier New",
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some(220),
+    );
+
+    // 20) JOSReferenceHeading
+    write_style(
+        &mut w,
+        STYLE_REFERENCE_HEADING,
+        "JOS reference heading from sample style 126",
+        9.0,
+        "黑体",
+        "Times New Roman",
+        true,
+        None,
+        None,
+        None,
+        Some(280),
+        None,
+        None,
+    );
+
+    // 21) JOSReference (left=420 + hanging=420)
+    write_style_with_ind(
+        &mut w,
+        STYLE_REFERENCE,
+        "JOS reference text from sample style 129",
+        7.5,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("both"),
+        None,
+        Some(420),
+        Some(420),
+        None,
+        None,
+        Some(260),
+    );
+
+    w.write_event(Event::End(BytesEnd::new("w:styles"))).unwrap();
     w.into_inner()
 }
 
-/// JOS 论文参考文献样式：悬挂缩进 420 twips（≈0.74cm），
-/// 西文 Times New Roman，中文宋体（SimSun），1.5 倍行距。
-fn write_jos_reference(w: &mut Writer<Vec<u8>>) {
-    let mut s = BytesStart::new("w:style");
-    s.push_attribute(("w:type", "paragraph"));
-    s.push_attribute(("w:styleId", STYLE_JOS_REFERENCE));
-    w.write_event(Event::Start(s.clone())).unwrap();
-
-    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
-    w.write_event(Event::Text(quick_xml::events::BytesText::new(
-        "JOS Reference",
-    )))
-    .unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
-    // w:basedOn 必须用 w:val 属性（不是文本节点）
-    let mut based_on = BytesStart::new("w:basedOn");
-    based_on.push_attribute(("w:val", STYLE_BODY));
-    w.write_event(Event::Empty(based_on)).unwrap();
-
-    // 段落属性：悬挂缩进 420 twips，左缩进 420 twips，1.5 倍行距
-    w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
-    let mut ind = BytesStart::new("w:ind");
-    ind.push_attribute(("w:left", "420"));
-    ind.push_attribute(("w:hanging", "420"));
-    w.write_event(Event::Empty(ind)).unwrap();
-    let mut sp = BytesStart::new("w:spacing");
-    sp.push_attribute(("w:line", "360"));
-    sp.push_attribute(("w:lineRule", "auto"));
-    w.write_event(Event::Empty(sp)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
-
-    // run 字体：西文 Times New Roman，中文宋体（self-closing）
+fn write_doc_defaults(w: &mut Writer<Vec<u8>>) {
+    w.write_event(Event::Start(BytesStart::new("w:docDefaults")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rPrDefault")))
+        .unwrap();
     w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
-    let mut rfonts = BytesStart::new("w:rFonts");
-    rfonts.push_attribute(("w:ascii", "Times New Roman"));
-    rfonts.push_attribute(("w:hAnsi", "Times New Roman"));
-    rfonts.push_attribute(("w:eastAsia", "SimSun"));
-    rfonts.push_attribute(("w:cs", "Times New Roman"));
-    w.write_event(Event::Empty(rfonts)).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rFonts"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rFonts"))).unwrap();
+    let mut sz = BytesStart::new("w:sz");
+    sz.push_attribute(("w:val", "18"));
+    w.write_event(Event::Empty(sz)).unwrap();
+    let mut szcs = BytesStart::new("w:szCs");
+    szcs.push_attribute(("w:val", "18"));
+    w.write_event(Event::Empty(szcs)).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
-
-    w.write_event(Event::End(BytesEnd::new("w:style"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rPrDefault")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:pPrDefault")))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:pPrDefault")))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:docDefaults")))
+        .unwrap();
 }
 
-fn write_default(
+/// 写出单个 `<w:style>`（带 firstLine / spacing / line / jc）。
+#[allow(clippy::too_many_arguments)]
+fn write_style(
     w: &mut Writer<Vec<u8>>,
     id: &str,
     name: &str,
-    font: &str,
-    size_half_pt: u32,
+    size_pt: f32,
+    east: &str,
+    ascii: &str,
     bold: bool,
+    jc: Option<&str>,
+    first_line: Option<u32>,
+    left: Option<u32>,
+    before: Option<u32>,
+    after: Option<u32>,
+    line: Option<u32>,
+) {
+    write_style_with_ind(
+        w, id, name, size_pt, east, ascii, bold, jc, first_line, left, None, before, after, line,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+fn write_style_with_ind(
+    w: &mut Writer<Vec<u8>>,
+    id: &str,
+    name: &str,
+    size_pt: f32,
+    east: &str,
+    ascii: &str,
+    bold: bool,
+    jc: Option<&str>,
+    first_line: Option<u32>,
+    left: Option<u32>,
+    hanging: Option<u32>,
+    before: Option<u32>,
+    after: Option<u32>,
+    line: Option<u32>,
 ) {
     let mut s = BytesStart::new("w:style");
     s.push_attribute(("w:type", "paragraph"));
     s.push_attribute(("w:styleId", id));
-    w.write_event(Event::Start(s.clone())).unwrap();
+    w.write_event(Event::Start(s)).unwrap();
 
-    w.write_event(Event::Start(BytesStart::new("w:name")))
-        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
     w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
 
-    let rpr = BytesStart::new("w:rPr");
+    // pPr
+    let has_ppr =
+        jc.is_some() || first_line.is_some() || left.is_some() || before.is_some() || after.is_some() || line.is_some();
+    if has_ppr {
+        w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+        if let Some(j) = jc {
+            let mut jc_e = BytesStart::new("w:jc");
+            jc_e.push_attribute(("w:val", j));
+            w.write_event(Event::Empty(jc_e)).unwrap();
+        }
+        let sp = build_spacing(before, after, line);
+        if !sp.is_empty() {
+            w.write_event(Event::Empty(sp)).unwrap();
+        }
+        let ind = build_ind(first_line, left, hanging);
+        if !ind.is_empty() {
+            w.write_event(Event::Empty(ind)).unwrap();
+        }
+        w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
+    }
+
+    // rPr
+    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
     let mut rfonts = BytesStart::new("w:rFonts");
-    rfonts.push_attribute(("w:ascii", font));
-    rfonts.push_attribute(("w:hAnsi", font));
-    w.write_event(Event::Start(rpr.clone())).unwrap();
-    w.write_event(Event::Start(rfonts)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:rFonts")))
-        .unwrap();
+    rfonts.push_attribute(("w:ascii", ascii));
+    rfonts.push_attribute(("w:hAnsi", ascii));
+    rfonts.push_attribute(("w:eastAsia", east));
+    rfonts.push_attribute(("w:cs", ascii));
+    w.write_event(Event::Empty(rfonts)).unwrap();
     if bold {
         w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
+        w.write_event(Event::Empty(BytesStart::new("w:bCs"))).unwrap();
     }
-    w.write_event(Event::Empty(BytesStart::new("w:szCs")))
-        .unwrap();
+    let half_pt = (size_pt * 2.0).round() as u32;
     let mut sz = BytesStart::new("w:sz");
-    sz.push_attribute(("w:val", size_half_pt.to_string().as_str()));
+    sz.push_attribute(("w:val", half_pt.to_string().as_str()));
     w.write_event(Event::Empty(sz)).unwrap();
+    let mut szcs = BytesStart::new("w:szCs");
+    szcs.push_attribute(("w:val", half_pt.to_string().as_str()));
+    w.write_event(Event::Empty(szcs)).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
 
     w.write_event(Event::End(BytesEnd::new("w:style"))).unwrap();
 }
 
-/// 根据字体探测结果修改 styles_xml 字节流。
-///
-/// 对于标记为 Embed 的字体，在样式中嵌入字体回退声明。
-/// 对于标记为 Fallback 的字体，将字体名替换为推荐字体。
-pub fn apply_font_probes(styles_xml: &mut Vec<u8>, probes: &[FontProbe]) {
-    if probes.is_empty() {
-        return;
+/// 构造 `<w:spacing>` 元素（self-closing）。
+fn build_spacing(before: Option<u32>, after: Option<u32>, line: Option<u32>) -> BytesStart<'static> {
+    let mut sp = BytesStart::new("w:spacing");
+    if let Some(b) = before {
+        sp.push_attribute(("w:before", b.to_string().as_str()));
     }
-    let xml_str = String::from_utf8_lossy(styles_xml).to_string();
-    let mut modified = xml_str;
-    for probe in probes {
-        if probe.needs_fallback() {
-            // 替换字体引用：将 w:ascii/w:hAnsi/w:eastAsia 等属性替换为 recommended
-            for attr in &["w:ascii", "w:hAnsi", "w:eastAsia", "w:cs"] {
-                let pattern = format!("{}=\"{}\"", attr, probe.name);
-                let replacement = format!("{}=\"{}\"", attr, probe.recommended);
-                if modified.contains(&pattern) {
-                    modified = modified.replace(&pattern, &replacement);
-                }
-            }
-        }
+    if let Some(a) = after {
+        sp.push_attribute(("w:after", a.to_string().as_str()));
     }
-    *styles_xml = modified.into_bytes();
+    if let Some(l) = line {
+        sp.push_attribute(("w:line", l.to_string().as_str()));
+        sp.push_attribute(("w:lineRule", "exact"));
+    }
+    sp
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use doc_utils::FontStatus;
-
-    #[test]
-    fn apply_font_probes_no_change_when_empty() {
-        let mut xml =
-            b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec();
-        apply_font_probes(&mut xml, &[]);
-        assert_eq!(
-            xml,
-            b"<w:styles><w:style w:type=\"paragraph\" w:styleId=\"BodyText\"/></w:styles>".to_vec()
-        );
+/// 构造 `<w:ind>` 元素（self-closing）。
+fn build_ind(first_line: Option<u32>, left: Option<u32>, hanging: Option<u32>) -> BytesStart<'static> {
+    let mut ind = BytesStart::new("w:ind");
+    if let Some(fl) = first_line {
+        ind.push_attribute(("w:firstLine", fl.to_string().as_str()));
     }
-
-    #[test]
-    fn apply_font_probes_fallback_replaces() {
-        let mut xml = b"<w:style w:type=\"paragraph\" w:styleId=\"Test\"><w:rPr><w:rFonts w:ascii=\"OldFont\" w:hAnsi=\"OldFont\"/></w:rPr></w:style>".to_vec();
-        let probe = FontProbe {
-            name: "OldFont".to_string(),
-            status: FontStatus::Fallback,
-            recommended: "SimSun".to_string(),
-            system_path: None,
-        };
-        apply_font_probes(&mut xml, &[probe]);
-        let s = String::from_utf8_lossy(&xml);
-        assert!(s.contains("SimSun"));
-        assert!(!s.contains("OldFont"));
+    if let Some(l) = left {
+        ind.push_attribute(("w:left", l.to_string().as_str()));
     }
+    if let Some(h) = hanging {
+        ind.push_attribute(("w:hanging", h.to_string().as_str()));
+    }
+    ind
 }
