@@ -1,0 +1,33 @@
+schema_version: "0.1"
+namespace: opc
+source:
+  type: international_standard
+  references:
+    - "ECMA-376"
+    - "ISO/IEC 29500"
+rules:
+  - id: opc.package.docx
+    kind: package
+    required_parts:
+      - "[Content_Types].xml"
+      - "_rels/.rels"
+      - "word/document.xml"
+      - "word/_rels/document.xml.rels"
+  - id: opc.relationship.office_document
+    kind: relationship
+    relationship_type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
+    target_part: "word/document.xml"
+  - id: opc.relationship.image
+    kind: relationship
+    relationship_type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    target_prefix: "media/"
+  - id: opc.content_type.png
+    kind: content_type
+    extension: png
+    content_type: image/png
+  - id: opc.content_type.jpeg
+    kind: content_type
+    extensions:
+      - jpg
+      - jpeg
+    content_type: image/jpeg

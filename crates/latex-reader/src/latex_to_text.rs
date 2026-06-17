@@ -233,7 +233,9 @@ pub fn parse_newcommands(text: &str) -> HashMap<String, String> {
                         continue;
                     }
                 }
-                while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n') {
+                while p < bytes.len()
+                    && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
+                {
                     p += 1;
                 }
                 if p >= bytes.len() || bytes[p] != b'{' {
@@ -372,34 +374,34 @@ pub fn extract_front_matter(
             .trim()
             .to_string()
     };
-    fm.abstract_zh = strip_pct(
+    fm.abstract_zh = normalize_extracted_text(&strip_pct(
         macros
             .get("\\AbstractContentZh")
             .or_else(|| macros.get("AbstractContentZh"))
             .cloned()
             .unwrap_or_default(),
-    );
-    fm.keywords_zh = strip_pct(
+    ));
+    fm.keywords_zh = normalize_extracted_text(&strip_pct(
         macros
             .get("\\KeywordsZh")
             .or_else(|| macros.get("KeywordsZh"))
             .cloned()
             .unwrap_or_default(),
-    );
-    fm.abstract_en = strip_pct(
+    ));
+    fm.abstract_en = normalize_extracted_text(&strip_pct(
         macros
             .get("\\AbstractContentEn")
             .or_else(|| macros.get("AbstractContentEn"))
             .cloned()
             .unwrap_or_default(),
-    );
-    fm.keywords_en = strip_pct(
+    ));
+    fm.keywords_en = normalize_extracted_text(&strip_pct(
         macros
             .get("\\KeywordsEn")
             .or_else(|| macros.get("KeywordsEn"))
             .cloned()
             .unwrap_or_default(),
-    );
+    ));
 
     // 英文标题 / 作者 / 机构
     let (title_en, authors_en, institute_en) = extract_english_front_matter(expanded_main);
@@ -428,8 +430,7 @@ pub fn extract_front_matter(
 fn command_arg_pure(text: &str, command: &str) -> Option<String> {
     crate::normalize::command_arg(text, command, 0).map(|h| {
         let cite: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
-        let label: std::collections::HashMap<String, String> =
-            std::collections::HashMap::new();
+        let label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
         let normalized = crate::normalize::latex_to_text(&h.inner, &cite, &label);
         normalized
             .runs
@@ -484,10 +485,7 @@ fn extract_english_front_matter(text: &str) -> (String, String, String) {
     while i < len {
         if bytes[i] == b'%' {
             // 注释行
-            let line_end = text[i..]
-                .find('\n')
-                .map(|p| i + p)
-                .unwrap_or(len);
+            let line_end = text[i..].find('\n').map(|p| i + p).unwrap_or(len);
             let line = &text[i..line_end];
             if start.is_none() && line.contains(start_marker) {
                 // 下一行
@@ -641,7 +639,8 @@ fn extract_author_bio(text: &str) -> Vec<String> {
                         // 跳过 "\\item" 这 5 个字符，落到下一个 char 起点
                         let advance_to = p + 5;
                         // binary_search_by_key 返回 Ok=精确匹配，Err=插入点（>=advance_to 的最小索引）
-                        let next_ci = match ci_pairs.binary_search_by_key(&advance_to, |&(i, _)| i) {
+                        let next_ci = match ci_pairs.binary_search_by_key(&advance_to, |&(i, _)| i)
+                        {
                             Ok(idx) => idx,
                             Err(idx) => idx,
                         };

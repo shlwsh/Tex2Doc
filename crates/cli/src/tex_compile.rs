@@ -69,16 +69,14 @@ pub async fn run(a: TexCompileArgs) -> Result<()> {
     if let Some(parent) = a.out.parent() {
         std::fs::create_dir_all(parent).ok();
     }
-    std::fs::copy(&pdf, &a.out)
-        .with_context(|| format!("拷到 {} 失败", a.out.display()))?;
+    std::fs::copy(&pdf, &a.out).with_context(|| format!("拷到 {} 失败", a.out.display()))?;
     tracing::info!("已写入 oracle PDF：{}", a.out.display());
     Ok(())
 }
 
 fn extract_zip(zip: &std::path::Path, outdir: &std::path::Path) -> Result<()> {
     use std::io::Read;
-    let bytes = std::fs::read(zip)
-        .with_context(|| format!("读 zip 失败：{}", zip.display()))?;
+    let bytes = std::fs::read(zip).with_context(|| format!("读 zip 失败：{}", zip.display()))?;
     let mut archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
         .map_err(|e| anyhow::anyhow!("zip 解析失败：{e}"))?;
     for i in 0..archive.len() {

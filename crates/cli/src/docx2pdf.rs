@@ -19,8 +19,8 @@ pub struct DocxToPdfArgs {
 
 pub async fn run(a: DocxToPdfArgs) -> Result<()> {
     std::fs::create_dir_all(&a.outdir).ok();
-    let engine = doc_docx_pdf::DocxToPdf::probe()
-        .map_err(|e| anyhow::anyhow!("docx-pdf 探测失败：{e}"))?;
+    let engine =
+        doc_docx_pdf::DocxToPdf::probe().map_err(|e| anyhow::anyhow!("docx-pdf 探测失败：{e}"))?;
     let run = engine
         .convert(&a.docx, &a.outdir)
         .await

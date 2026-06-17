@@ -1,0 +1,24 @@
+schema_version: "0.1"
+profile_id: jos-2025
+styles:
+  heading:
+    "1": JOSHeading1
+    "2": JOSHeading2
+    "3": JOSHeading3
+  body: JOSBody
+  body_no_indent: JOSBodyNoIndent
+  title_zh: JOSTitleZh
+  author_zh: JOSAuthorZh
+  institute_zh: JOSInstituteZh
+  abstract_zh: JOSAbstractZh
+  abstract_en: JOSAbstractEn
+  keywords: JOSKeywords
+  citation: JOSCitation
+  english_title: JOSEnglishTitle
+  figure: JOSImage
+  caption: JOSCaption
+  table: JOSTableText
+  algorithm: JOSCode
+  equation: JOSCode
+  reference_heading: JOSReferenceHeading
+  reference: JOSReference

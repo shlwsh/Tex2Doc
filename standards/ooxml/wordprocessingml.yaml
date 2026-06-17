@@ -1,0 +1,36 @@
+schema_version: "0.1"
+namespace: ooxml.wordprocessingml
+source:
+  type: international_standard
+  references:
+    - "ECMA-376"
+    - "ISO/IEC 29500"
+rules:
+  - id: ooxml.w_document
+    kind: element
+    element: "w:document"
+    required_child: "w:body"
+  - id: ooxml.w_p
+    kind: element
+    element: "w:p"
+    semantic: Paragraph
+  - id: ooxml.w_r
+    kind: element
+    element: "w:r"
+    semantic: Run
+  - id: ooxml.w_t
+    kind: element
+    element: "w:t"
+    semantic: Text
+  - id: ooxml.w_tbl
+    kind: element
+    element: "w:tbl"
+    semantic: Table
+  - id: ooxml.w_drawing
+    kind: element
+    element: "w:drawing"
+    semantic: Drawing
+  - id: ooxml.field.PAGE
+    kind: field_code
+    instr: " PAGE "
+    semantic: page_number

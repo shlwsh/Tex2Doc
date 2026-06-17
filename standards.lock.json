@@ -1,0 +1,65 @@
+{
+  "algorithm": "sha256",
+  "files": [
+    {
+      "bytes": 611,
+      "path": "profiles/jos-2025/overrides.yaml",
+      "sha256": "22d3b1f6d474ef1ad5e65043889d8db4ebbbc61fc2a7d7bc5e0a8bb157caae37"
+    },
+    {
+      "bytes": 791,
+      "path": "profiles/jos-2025/profile.yaml",
+      "sha256": "fd3c48fcd06250a2ca7ece4ec9421f1ca5892424b651698a22e02e36ed12f789"
+    },
+    {
+      "bytes": 564,
+      "path": "profiles/jos-2025/styles.yaml",
+      "sha256": "f0ed8e4c2141c1b773d5ed66ca74a0eae7280696685c44514c4b1bca83a8abc0"
+    },
+    {
+      "bytes": 1341,
+      "path": "standards/mappings/standard-ast-to-docx.yaml",
+      "sha256": "0830e020c5d418f38f7866231e724384c564fe27bf5127d2fc2b829d3ea91351"
+    },
+    {
+      "bytes": 930,
+      "path": "standards/ooxml/opc.yaml",
+      "sha256": "37bf25000c2f0a27204ea1a54f9ef71a0285a7e40b8ab413db328913901ff645"
+    },
+    {
+      "bytes": 739,
+      "path": "standards/ooxml/wordprocessingml.yaml",
+      "sha256": "733a4797e3373ec78ea9bd8881e1c6ee8b032ce2efe83f6e1111ff792d547115"
+    },
+    {
+      "bytes": 2185,
+      "path": "standards/tex/latex2e.yaml",
+      "sha256": "799f191ac1b32749be8d31ca4f0320051ee28882fd6c863b10e3731b75eadb50"
+    },
+    {
+      "bytes": 1649,
+      "path": "standards/tex/packages/algorithm2e.yaml",
+      "sha256": "9853c0418702b514126119646ba7661e3b0d541762f4d7b62ae64c04c5a68568"
+    },
+    {
+      "bytes": 456,
+      "path": "standards/tex/packages/booktabs.yaml",
+      "sha256": "171d32146bbf7910078117bd5f2a6f5e15f9a2d345f1bf7a6236b6bf11182008"
+    },
+    {
+      "bytes": 697,
+      "path": "standards/tex/packages/graphicx.yaml",
+      "sha256": "4cd393b4d2ee58df3feb897e49424d1a908ef6cb96f7898b15463356e6d8038f"
+    },
+    {
+      "bytes": 672,
+      "path": "standards/tex/packages/natbib.yaml",
+      "sha256": "be52debae83a4dccd6f61e480e39286427e9886fb87eb36017f19290bb8032f4"
+    }
+  ],
+  "schema_version": "0.1",
+  "scope": [
+    "standards",
+    "profiles"
+  ]
+}

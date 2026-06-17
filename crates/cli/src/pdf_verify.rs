@@ -46,8 +46,8 @@ pub async fn run(a: VerifyPdfArgs) -> Result<()> {
 
     // 2. 阈值
     let thresholds = if let Some(ref p) = a.thresholds {
-        let bytes = std::fs::read(p)
-            .with_context(|| format!("读阈值 JSON 失败：{}", p.display()))?;
+        let bytes =
+            std::fs::read(p).with_context(|| format!("读阈值 JSON 失败：{}", p.display()))?;
         serde_json::from_slice::<Thresholds>(&bytes)
             .with_context(|| format!("解析阈值 JSON 失败：{}", p.display()))?
     } else {
@@ -77,9 +77,7 @@ pub async fn run(a: VerifyPdfArgs) -> Result<()> {
 }
 
 async fn run_struct_text_only(q: &Quality, ctx: &QualityContext) -> Result<QualityReport> {
-    use doc_quality::{
-        compute_exit_code, markers, normalize::normalize, Layer, LayerResult,
-    };
+    use doc_quality::{compute_exit_code, markers, normalize::normalize, Layer, LayerResult};
     let s = q.run_layer(Layer::Structural, ctx).await?;
     let t = q.run_layer(Layer::Textual, ctx).await?;
     let v = LayerResult::new(Layer::Visual, vec![]);
@@ -93,11 +91,7 @@ async fn run_struct_text_only(q: &Quality, ctx: &QualityContext) -> Result<Quali
         passed,
         exit_code,
         layer_results: layers,
-        marker_coverage: markers::coverage(
-            &ctx.docx_text,
-            &ctx.oracle_text,
-            &ctx.rust_text,
-        ),
+        marker_coverage: markers::coverage(&ctx.docx_text, &ctx.oracle_text, &ctx.rust_text),
         docx_chars: normalize(&ctx.docx_text).chars().count(),
         rust_pdf_chars: normalize(&ctx.rust_text).chars().count(),
         oracle_pdf_chars: normalize(&ctx.oracle_text).chars().count(),

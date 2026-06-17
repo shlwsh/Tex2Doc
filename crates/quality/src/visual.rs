@@ -41,9 +41,7 @@ impl VisualRunner {
                         format!("failed: {e}"),
                         false,
                     )
-                    .with_note(
-                        "需要 PDFium；CI 上预装 `libpdfium-dev` 或 vendored 二进制。",
-                    )],
+                    .with_note("需要 PDFium；CI 上预装 `libpdfium-dev` 或 vendored 二进制。")],
                 ));
             }
         };
@@ -79,7 +77,11 @@ impl VisualRunner {
 
             if let Some(outdir) = &self.diff_outdir {
                 let _ = std::fs::create_dir_all(outdir);
-                let _ = make_diff_png(&oracle_pages[i], &rust_pages[i], &outdir.join(format!("page-{i:03}.png")));
+                let _ = make_diff_png(
+                    &oracle_pages[i],
+                    &rust_pages[i],
+                    &outdir.join(format!("page-{i:03}.png")),
+                );
             }
         }
 
@@ -131,8 +133,18 @@ pub fn ssim_score(a: &DynamicImage, b: &DynamicImage) -> f64 {
     let a_gray = a.to_luma8();
     let b_gray = b.to_luma8();
     let target = 256u32;
-    let a_small = image::imageops::resize(&a_gray, target, target, image::imageops::FilterType::Lanczos3);
-    let b_small = image::imageops::resize(&b_gray, target, target, image::imageops::FilterType::Lanczos3);
+    let a_small = image::imageops::resize(
+        &a_gray,
+        target,
+        target,
+        image::imageops::FilterType::Lanczos3,
+    );
+    let b_small = image::imageops::resize(
+        &b_gray,
+        target,
+        target,
+        image::imageops::FilterType::Lanczos3,
+    );
     ssim_gray(&a_small, &b_small)
 }
 
@@ -144,8 +156,16 @@ fn ssim_gray(a: &ImageBuffer<Luma<u8>, Vec<u8>>, b: &ImageBuffer<Luma<u8>, Vec<u
     }
     let ma: f64 = a.pixels().map(|p| p.0[0] as f64).sum::<f64>() / n;
     let mb: f64 = b.pixels().map(|p| p.0[0] as f64).sum::<f64>() / n;
-    let va: f64 = a.pixels().map(|p| (p.0[0] as f64 - ma).powi(2)).sum::<f64>() / n;
-    let vb: f64 = b.pixels().map(|p| (p.0[0] as f64 - mb).powi(2)).sum::<f64>() / n;
+    let va: f64 = a
+        .pixels()
+        .map(|p| (p.0[0] as f64 - ma).powi(2))
+        .sum::<f64>()
+        / n;
+    let vb: f64 = b
+        .pixels()
+        .map(|p| (p.0[0] as f64 - mb).powi(2))
+        .sum::<f64>()
+        / n;
     let cov: f64 = a
         .pixels()
         .zip(b.pixels())
@@ -179,7 +199,11 @@ pub fn mean_abs_diff(a: &DynamicImage, b: &DynamicImage) -> f64 {
 }
 
 /// 差异热图：差异 > 20 红色，> 5 黄色，其它原图。
-pub fn make_diff_png(a: &DynamicImage, b: &DynamicImage, out: &std::path::Path) -> Result<(), QualityError> {
+pub fn make_diff_png(
+    a: &DynamicImage,
+    b: &DynamicImage,
+    out: &std::path::Path,
+) -> Result<(), QualityError> {
     let aa = a.to_luma8();
     let bb = b.to_luma8();
     if aa.dimensions() != bb.dimensions() {

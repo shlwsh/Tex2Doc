@@ -1,0 +1,75 @@
+schema_version: "0.1"
+namespace: algorithm2e
+source:
+  type: package
+  package: algorithm2e
+rules:
+  - id: algorithm2e.algorithm
+    kind: environment
+    syntax:
+      begin: "\\begin{algorithm}"
+      end: "\\end{algorithm}"
+    semantic:
+      ast_kind: Algorithm
+    numbering:
+      counter: algorithm
+  - id: algorithm2e.KwIn
+    kind: command
+    syntax:
+      command: "\\KwIn"
+      arguments:
+        - name: text
+          kind: required_group
+    semantic:
+      algorithm_io: Input
+  - id: algorithm2e.KwOut
+    kind: command
+    syntax:
+      command: "\\KwOut"
+      arguments:
+        - name: text
+          kind: required_group
+    semantic:
+      algorithm_io: Output
+  - id: algorithm2e.ForEach
+    kind: command
+    syntax:
+      command: "\\ForEach"
+      arguments:
+        - name: condition
+          kind: required_group
+        - name: body
+          kind: required_group
+    semantic:
+      algorithm_keyword: ForEach
+      recursive_body: true
+  - id: algorithm2e.If
+    kind: command
+    syntax:
+      command: "\\If"
+      arguments:
+        - name: condition
+          kind: required_group
+        - name: body
+          kind: required_group
+    semantic:
+      algorithm_keyword: If
+      recursive_body: true
+  - id: algorithm2e.Return
+    kind: command
+    syntax:
+      command: "\\Return"
+      arguments:
+        - name: value
+          kind: required_group
+    semantic:
+      algorithm_keyword: Return
+  - id: algorithm2e.tcp_star
+    kind: command
+    syntax:
+      command: "\\tcp*"
+      arguments:
+        - name: comment
+          kind: required_group
+    semantic:
+      algorithm_comment: "$arg.comment"

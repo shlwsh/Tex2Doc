@@ -6,13 +6,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StructuralThresholds {
-    pub min_tables: u32, // 默认 5
-    pub expected_images: u32, // 默认 8
-    pub min_captions: u32, // 默认 6
-    pub min_char_ratio: f64, // 默认 0.75
-    pub expected_page_w: u32, // 默认 10433 twips
-    pub expected_page_h: u32, // 默认 14742 twips
-    pub max_pdf_size_bytes: u64, // 默认 5 MB
+    pub min_tables: u32,           // 默认 5
+    pub expected_images: u32,      // 默认 8
+    pub min_captions: u32,         // 默认 6
+    pub min_char_ratio: f64,       // 默认 0.75
+    pub expected_page_w: u32,      // 默认 10433 twips
+    pub expected_page_h: u32,      // 默认 14742 twips
+    pub max_pdf_size_bytes: u64,   // 默认 5 MB
     pub min_embedded_fonts: usize, // 默认 2
 }
 
@@ -33,9 +33,9 @@ impl Default for StructuralThresholds {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TextualThresholds {
-    pub min_char_ratio: f64,             // 默认 0.75
-    pub min_marker_coverage: f64,        // 默认 1.0 (22/22)
-    pub min_section_coverage: f64,       // 默认 1.0 (7/7)
+    pub min_char_ratio: f64,       // 默认 0.75
+    pub min_marker_coverage: f64,  // 默认 1.0 (22/22)
+    pub min_section_coverage: f64, // 默认 1.0 (7/7)
 }
 
 impl Default for TextualThresholds {
@@ -50,10 +50,10 @@ impl Default for TextualThresholds {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VisualThresholds {
-    pub min_ssim: f64,                   // 默认 0.95
-    pub max_pixel_diff: u8,              // 默认 3 (0-255)
-    pub min_ocr_similarity: f64,         // 默认 0.85 (feature=ocr 时)
-    pub dpi: u32,                        // 默认 150
+    pub min_ssim: f64,           // 默认 0.95
+    pub max_pixel_diff: u8,      // 默认 3 (0-255)
+    pub min_ocr_similarity: f64, // 默认 0.85 (feature=ocr 时)
+    pub dpi: u32,                // 默认 150
 }
 
 impl Default for VisualThresholds {

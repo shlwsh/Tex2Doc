@@ -1,0 +1,31 @@
+schema_version: "0.1"
+namespace: graphicx
+source:
+  type: package
+  package: graphicx
+rules:
+  - id: graphicx.graphicspath
+    kind: command
+    syntax:
+      command: "\\graphicspath"
+      arguments:
+        - name: paths
+          kind: required_group_list
+    semantic:
+      resource_field: graphics_paths
+  - id: graphicx.includegraphics
+    kind: command
+    syntax:
+      command: "\\includegraphics"
+      options:
+        kind: optional_bracket
+      arguments:
+        - name: path
+          kind: required_group
+    semantic:
+      resource_kind: Image
+      path: "$arg.path"
+      width: "$option.width"
+      scale: "$option.scale"
+    diagnostics:
+      on_missing_resource: error

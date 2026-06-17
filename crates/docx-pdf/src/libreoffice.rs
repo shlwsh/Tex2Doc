@@ -213,7 +213,10 @@ impl DocxToPdfBackend for LibreOfficeBackend {
         }
 
         // 3. 文件大小
-        let file_size = tokio::fs::metadata(&pdf).await.map(|m| m.len()).unwrap_or(0);
+        let file_size = tokio::fs::metadata(&pdf)
+            .await
+            .map(|m| m.len())
+            .unwrap_or(0);
 
         Ok(DocxToPdfRun {
             backend: BackendKind::LibreOffice,

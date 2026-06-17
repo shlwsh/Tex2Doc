@@ -70,8 +70,8 @@ fn normalize_alg_math(s: &str) -> String {
 /// 剥残留的 `\mathrm` `\mathbf` `\mathsf` `\mathsf*` 等。
 fn strip_remaining_math_macros(s: &str) -> String {
     let tokens = [
-        "mathrm", "mathbf", "mathsf", "mathsf*", "mathtt", "mathcal",
-        "mathit", "mathbb", "prem", "bmod",
+        "mathrm", "mathbf", "mathsf", "mathsf*", "mathtt", "mathcal", "mathit", "mathbb", "prem",
+        "bmod",
     ];
     let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
@@ -158,7 +158,7 @@ fn strip_cmd(s: &str, cmd: &str) -> String {
             && bytes[i + prefix.len()] == b'{'
         {
             let brace_pos = i + prefix.len(); // position of '{'
-            // 找配对的 }
+                                              // 找配对的 }
             let mut depth = 0i32;
             let mut j = brace_pos;
             while j < bytes.len() {
@@ -250,13 +250,7 @@ fn extract_brace_arg_inline(line: &str, cmd: &str) -> Option<String> {
 fn strip_algorithm_line_meta(line: LogicLine) -> LogicLine {
     let mut s = line.text;
     for cmd in [
-        "KwIn",
-        "KwOut",
-        "KwData",
-        "KwResult",
-        "KwBody",
-        "caption",
-        "label",
+        "KwIn", "KwOut", "KwData", "KwResult", "KwBody", "caption", "label",
     ] {
         s = strip_cmd(&s, cmd);
     }
@@ -296,7 +290,7 @@ pub fn parse_algorithm_rows(body: &str) -> Vec<AlgLine> {
                         guides,
                         end_guides,
                         code: format!("{kw} ({})", normalize_alg_code(&cond)),
-                        comment: line.comment.clone(),
+                        comment: normalize_alg_code(&line.comment),
                         keyword: Some(kw.clone()),
                     });
                     // 递归处理 body
@@ -341,7 +335,7 @@ pub fn parse_algorithm_rows(body: &str) -> Vec<AlgLine> {
                             .collect(),
                         end_guides: vec![],
                         code,
-                        comment: line.comment.clone(),
+                        comment: normalize_alg_code(&line.comment),
                         keyword: Some("Return".to_string()),
                     });
                     continue;
@@ -365,7 +359,7 @@ pub fn parse_algorithm_rows(body: &str) -> Vec<AlgLine> {
                 .collect(),
             end_guides: vec![],
             code,
-            comment: line.comment,
+            comment: normalize_alg_code(&line.comment),
             keyword: None,
         });
     }
@@ -616,5 +610,13 @@ mod tests {
         assert!(rows[0].comment.contains("test comment"));
         assert!(!rows[0].code.contains("\\tcp*"));
     }
-}
 
+    #[test]
+    fn parse_algorithm_comment_normalizes_math() {
+        let body = "A \\leftarrow TopK(H, K) \\tcp*{按 $w_p$ 降序取前 $K$ 项}";
+        let rows = parse_algorithm_rows(body);
+        assert!(rows[0].comment.contains("wp"), "got: {}", rows[0].comment);
+        assert!(!rows[0].comment.contains('_'), "got: {}", rows[0].comment);
+        assert!(!rows[0].comment.contains('$'), "got: {}", rows[0].comment);
+    }
+}

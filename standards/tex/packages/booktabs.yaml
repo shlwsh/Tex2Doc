@@ -1,0 +1,24 @@
+schema_version: "0.1"
+namespace: booktabs
+source:
+  type: package
+  package: booktabs
+rules:
+  - id: booktabs.toprule
+    kind: command
+    syntax:
+      command: "\\toprule"
+    semantic:
+      table_rule: top
+  - id: booktabs.midrule
+    kind: command
+    syntax:
+      command: "\\midrule"
+    semantic:
+      table_rule: mid
+  - id: booktabs.bottomrule
+    kind: command
+    syntax:
+      command: "\\bottomrule"
+    semantic:
+      table_rule: bottom

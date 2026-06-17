@@ -17,6 +17,9 @@ doc-tex-facade  = { path = "../tex-facade" }
 doc-docx-pdf    = { path = "../docx-pdf" }
 doc-quality     = { path = "../quality" }
 doc-docx-writer = { path = "../docx-writer" }
+doc-latex-reader = { path = "../latex-reader" }
+doc-semantic-ast = { path = "../semantic-ast" }
+doc-utils       = { path = "../utils" }
 
 clap     = { workspace = true }
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "process", "sync"] }
@@ -27,6 +30,7 @@ zip      = { workspace = true }
 tracing  = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tempfile = "3"
+blake3   = "1"
 
 [dev-dependencies]
 tempfile = "3"

@@ -1,0 +1,27 @@
+schema_version: "0.1"
+id: jos-2025
+name: "Journal of Software 2025 DOCX profile"
+extends:
+  standards:
+    - standards/tex/latex2e.yaml
+    - standards/tex/packages/natbib.yaml
+    - standards/tex/packages/graphicx.yaml
+    - standards/tex/packages/booktabs.yaml
+    - standards/tex/packages/algorithm2e.yaml
+    - standards/ooxml/opc.yaml
+    - standards/ooxml/wordprocessingml.yaml
+  mappings:
+    - standards/mappings/standard-ast-to-docx.yaml
+page_setup:
+  format_file: docs/format/jos_2025_docx_format_definitions.json
+front_matter:
+  title: "\\rjtitle"
+  authors: "\\rjauthor"
+  institute: "\\rjinfor"
+  running_header: "\\rjhead"
+  first_footer: "\\footnotetext"
+quality:
+  thresholds:
+    min_docx_pdf_char_ratio: 0.95
+    require_all_figures: true
+    require_no_raw_fallback: true

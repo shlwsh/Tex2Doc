@@ -13,25 +13,25 @@
 
 #![forbid(unsafe_code)]
 
+pub mod context;
+pub mod docx_diff;
 pub mod error;
 pub mod layer;
-pub mod report;
 pub mod markers;
 pub mod normalize;
-pub mod thresholds;
-pub mod textual;
+pub mod report;
 pub mod structural;
 pub mod structural_pdf;
+pub mod textual;
+pub mod thresholds;
 pub mod visual;
-pub mod context;
 
 pub use context::{Context, PdfMetaSnapshot};
+pub use docx_diff::{compare_docx, DocxDiffOptions, DocxDiffReport, DocxSnapshot};
 pub use error::QualityError;
 pub use layer::{Check, Layer, LayerResult, MarkerHit, QualityReport, Severity};
 pub use report::{write_json, write_markdown};
-pub use thresholds::{
-    StructuralThresholds, TextualThresholds, Thresholds, VisualThresholds,
-};
+pub use thresholds::{StructuralThresholds, TextualThresholds, Thresholds, VisualThresholds};
 pub use visual::VisualRunner;
 
 /// 当前 crate 版本（与 `Cargo.toml` 一致）。
@@ -91,7 +91,9 @@ impl Quality {
             marker_coverage: Vec::new(),
             docx_chars: crate::normalize::normalize(&ctx.docx_text).chars().count(),
             rust_pdf_chars: crate::normalize::normalize(&ctx.rust_text).chars().count(),
-            oracle_pdf_chars: crate::normalize::normalize(&ctx.oracle_text).chars().count(),
+            oracle_pdf_chars: crate::normalize::normalize(&ctx.oracle_text)
+                .chars()
+                .count(),
             char_ratio_docx_to_oracle: 0.0,
             char_ratio_rust_to_oracle: 0.0,
             paragraphs: ctx.docx_paragraphs,

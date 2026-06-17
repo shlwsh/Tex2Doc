@@ -7,10 +7,14 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod docx_render;
 pub mod span;
+pub mod standard;
 pub mod visit;
 
+pub use docx_render::*;
 pub use span::{SourceId, Span};
+pub use standard::*;
 
 /// 文档元数据（V2：包含 JOS 期刊投稿所需的全部 front matter）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -97,6 +101,13 @@ pub enum Block {
         is_block: bool,
         span: Span,
     },
+    /// Theorem-like environments such as theorem/proof/proposition.
+    TheoremLike {
+        kind: TheoremLikeKind,
+        title: Option<String>,
+        body: String,
+        span: Span,
+    },
     Bibliography {
         entries: Vec<BibEntry>,
     },
@@ -133,6 +144,33 @@ pub struct AlgLine {
     pub comment: String,
     /// 关键字标记：`ForEach` / `If` / `Return` / `For` / `While`
     pub keyword: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum TheoremLikeKind {
+    Theorem,
+    Proof,
+    Proposition,
+    Lemma,
+    Corollary,
+    Definition,
+    Remark,
+    Example,
+}
+
+impl TheoremLikeKind {
+    pub fn display_name(&self) -> &'static str {
+        match self {
+            Self::Theorem => "定理",
+            Self::Proof => "证明",
+            Self::Proposition => "命题",
+            Self::Lemma => "引理",
+            Self::Corollary => "推论",
+            Self::Definition => "定义",
+            Self::Remark => "注",
+            Self::Example => "例",
+        }
+    }
 }
 
 /// 表格行。

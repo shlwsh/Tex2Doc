@@ -22,6 +22,7 @@ TEX_SRC="${LATEX_DIR}/main-jos.tex"
 PDF_SRC="${LATEX_DIR}/main-jos.pdf"
 BBL_SRC="${LATEX_DIR}/main-jos.bbl"
 OUTPUT_DIR="${PAPER_ROOT}/output/to-docx"
+INPUT_MANIFEST="${LATEX_DIR}/.main-jos.inputs.sha256"
 
 check_deps() {
     local missing=()
@@ -32,6 +33,7 @@ check_deps() {
     command -v latexmk >/dev/null 2>&1 || missing+=("latexmk")
     command -v xelatex >/dev/null 2>&1 || missing+=("xelatex")
     command -v bibtex >/dev/null 2>&1 || missing+=("bibtex")
+    command -v sha256sum >/dev/null 2>&1 || missing+=("sha256sum")
 
     if ! python3 -c "from PIL import Image" 2>/dev/null; then
         missing+=("Pillow/PIL (used to read image dimensions)")
@@ -48,8 +50,32 @@ check_deps() {
     fi
 }
 
+write_input_manifest() {
+    (
+        cd "${ROOT}"
+        {
+            find "examples/paper3/latex" -type f \
+                \( -name '*.tex' -o -name '*.bib' -o -name '*.bst' -o -name '*.cls' -o -name '*.sty' \) \
+                -print
+            printf '%s\n' "docs/format/jos_2025_docx_format_definitions.json"
+        } | sort | while IFS= read -r path; do
+            sha256sum "${path}"
+        done
+    )
+}
+
+latex_inputs_unchanged() {
+    local tmp_manifest="$1"
+    [[ -f "${INPUT_MANIFEST}" ]] && cmp -s "${tmp_manifest}" "${INPUT_MANIFEST}"
+}
+
 ensure_latex_outputs() {
-    if [[ -f "${PDF_SRC}" && -f "${BBL_SRC}" && "${PDF_SRC}" -nt "${TEX_SRC}" && "${BBL_SRC}" -nt "${TEX_SRC}" ]]; then
+    local tmp_manifest
+    tmp_manifest="$(mktemp)"
+    trap 'rm -f "${tmp_manifest}"' RETURN
+    write_input_manifest >"${tmp_manifest}"
+
+    if [[ -f "${PDF_SRC}" && -f "${BBL_SRC}" ]] && latex_inputs_unchanged "${tmp_manifest}"; then
         echo "  - Reusing ${PDF_SRC} and ${BBL_SRC}"
         return
     fi
@@ -59,6 +85,8 @@ ensure_latex_outputs() {
         cd "${LATEX_DIR}"
         latexmk -xelatex -bibtex -interaction=nonstopmode -halt-on-error main-jos.tex
     )
+    cp "${tmp_manifest}" "${INPUT_MANIFEST}"
+    echo "  - Updated input manifest ${INPUT_MANIFEST}"
 }
 
 echo "=== Check dependencies and inputs ==="
@@ -81,9 +109,9 @@ else
 fi
 
 TS="$(date +%Y%m%d-%H%M%S)"
-DOCX_DST="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-${TS}.docx"
-REPORT_DST="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-${TS}-docx校验报告.md"
-REPORT_JSON="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-${TS}-docx校验报告.json"
+DOCX_DST="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-sh-${TS}.docx"
+REPORT_DST="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-sh-${TS}-docx校验报告.md"
+REPORT_JSON="${OUTPUT_DIR}/v${VERSION}-论文稿件-jos-sh-${TS}-docx校验报告.json"
 
 echo "=== Version: v${VERSION} @ ${TS} ==="
 echo "=== Generate DOCX ==="

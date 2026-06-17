@@ -86,7 +86,11 @@ pub struct LayerResult {
 impl LayerResult {
     pub fn new(layer: Layer, checks: Vec<Check>) -> Self {
         let passed = checks.iter().all(|c| c.passed);
-        Self { layer, passed, checks }
+        Self {
+            layer,
+            passed,
+            checks,
+        }
     }
 }
 

@@ -70,8 +70,8 @@ pub struct ConvertArgs {
 }
 
 pub fn run_convert(a: ConvertArgs) -> Result<()> {
-    let bytes = std::fs::read(&a.zip)
-        .with_context(|| format!("读取 zip 失败：{}", a.zip.display()))?;
+    let bytes =
+        std::fs::read(&a.zip).with_context(|| format!("读取 zip 失败：{}", a.zip.display()))?;
     let mut options = ConvertOptions::default();
     let mut ps = a.page_setup.to_page_setup();
     if let Some(ps_mut) = ps.as_mut() {
@@ -96,8 +96,8 @@ pub fn run_convert(a: ConvertArgs) -> Result<()> {
         }
     }
     options.page_setup = ps;
-    let r = doc_core::convert_zip(&bytes, &a.main_tex, &options)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let r =
+        doc_core::convert_zip(&bytes, &a.main_tex, &options).map_err(|e| anyhow::anyhow!("{e}"))?;
     if let Some(parent) = a.out.parent() {
         std::fs::create_dir_all(parent).ok();
     }
@@ -162,10 +162,7 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
             let ss = day_secs % 60;
             // 1970-01-01 + days
             let (y, m, d) = days_to_ymd(days);
-            format!(
-                "{:04}{:02}{:02}-{:02}{:02}{:02}",
-                y, m, d, hh, mm, ss
-            )
+            format!("{:04}{:02}{:02}-{:02}{:02}{:02}", y, m, d, hh, mm, ss)
         })
         .unwrap_or_else(|_| "00000000-000000".to_string());
     let base = format!("{stem}__v{pkg_version}__{now}");
@@ -209,7 +206,10 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
     };
     rt.block_on(docx2pdf::run(d2p))?;
     // 重命名 outdir/<docx-stem>.pdf → rust_pdf（统一命名约定）
-    let produced_pdf = a.outdir.join(format!("{}.pdf", docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")));
+    let produced_pdf = a.outdir.join(format!(
+        "{}.pdf",
+        docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")
+    ));
     if produced_pdf != rust_pdf && produced_pdf.exists() {
         std::fs::rename(&produced_pdf, &rust_pdf).ok();
     }
@@ -243,7 +243,20 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
         y += 1;
     }
     let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
-    let months = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let months = [
+        31u64,
+        if leap { 29 } else { 28 },
+        31,
+        30,
+        31,
+        30,
+        31,
+        31,
+        30,
+        31,
+        30,
+        31,
+    ];
     let mut m = 1u64;
     for &dm in &months {
         if remaining < dm {

@@ -1,0 +1,33 @@
+schema_version: "0.1"
+namespace: natbib
+source:
+  type: package
+  package: natbib
+rules:
+  - id: natbib.cite
+    kind: command
+    syntax:
+      commands:
+        - "\\cite"
+        - "\\citet"
+        - "\\citep"
+      arguments:
+        - name: keys
+          kind: required_group
+          split: comma
+    semantic:
+      inline_kind: Citation
+      keys: "$arg.keys"
+    diagnostics:
+      on_unresolved_key: error
+  - id: natbib.bibliography
+    kind: command
+    syntax:
+      command: "\\bibliography"
+      arguments:
+        - name: files
+          kind: required_group
+          split: comma
+    semantic:
+      ast_kind: Bibliography
+      files: "$arg.files"

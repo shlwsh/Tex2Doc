@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://tex2doc.local/schema/verify_jos_docx_report.schema.json",
+  "title": "verify_jos_docx.py JSON report",
+  "type": "object",
+  "required": [
+    "docx",
+    "pdf",
+    "passed",
+    "checks",
+    "marker_coverage",
+    "page_setup",
+    "figures",
+    "table_captions",
+    "table_borders",
+    "formulas",
+    "docx_chars",
+    "pdf_chars",
+    "char_ratio",
+    "paragraphs"
+  ],
+  "additionalProperties": true,
+  "properties": {
+    "docx": { "type": "string" },
+    "pdf": { "type": "string" },
+    "passed": { "type": "boolean" },
+    "checks": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/check" }
+    },
+    "marker_coverage": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/marker" }
+    },
+    "page_setup": {
+      "type": "object",
+      "required": ["paper_twips", "margins_twips", "columns"],
+      "additionalProperties": true
+    },
+    "figures": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/figure" }
+    },
+    "table_captions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "table_borders": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/table_border" }
+    },
+    "formulas": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/formula" }
+    },
+    "docx_chars": { "type": "integer", "minimum": 0 },
+    "pdf_chars": { "type": "integer", "minimum": 0 },
+    "char_ratio": { "type": "number", "minimum": 0 },
+    "paragraphs": { "type": "integer", "minimum": 0 }
+  },
+  "$defs": {
+    "check": {
+      "type": "object",
+      "required": ["name", "actual", "expected", "ok", "status"],
+      "additionalProperties": true,
+      "properties": {
+        "name": { "type": "string" },
+        "actual": {},
+        "expected": {},
+        "ok": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["通过", "失败"] }
+      }
+    },
+    "marker": {
+      "type": "object",
+      "required": ["marker", "in_docx", "in_pdf"],
+      "additionalProperties": true,
+      "properties": {
+        "marker": { "type": "string" },
+        "in_docx": { "type": "boolean" },
+        "in_pdf": { "type": "boolean" }
+      }
+    },
+    "figure": {
+      "type": "object",
+      "required": ["index", "paragraph", "style", "name", "cx_cm", "cy_cm", "caption"],
+      "additionalProperties": true
+    },
+    "table_border": {
+      "type": "object",
+      "required": ["index", "top", "bottom", "left", "right", "insideH", "insideV"],
+      "additionalProperties": true
+    },
+    "formula": {
+      "type": "object",
+      "required": ["paragraph", "text", "superscripts", "subscripts", "has_latex_residue"],
+      "additionalProperties": true,
+      "properties": {
+        "paragraph": { "type": "integer" },
+        "text": { "type": "string" },
+        "superscripts": { "type": "integer", "minimum": 0 },
+        "subscripts": { "type": "integer", "minimum": 0 },
+        "has_latex_residue": { "type": "boolean" }
+      }
+    }
+  }
+}

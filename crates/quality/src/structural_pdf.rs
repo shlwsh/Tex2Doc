@@ -84,10 +84,7 @@ pub fn extend(checks: &mut Vec<Check>, ctx: &Context, thr: &StructuralThresholds
         ctx.docx_paragraphs,
         &ctx.rust_pdf_meta,
     ));
-    checks.push(pdf_size_within(
-        &ctx.rust_pdf_meta,
-        thr.max_pdf_size_bytes,
-    ));
+    checks.push(pdf_size_within(&ctx.rust_pdf_meta, thr.max_pdf_size_bytes));
     checks.push(pdf_embedded_fonts_nonempty(
         &ctx.rust_pdf_meta,
         thr.min_embedded_fonts,

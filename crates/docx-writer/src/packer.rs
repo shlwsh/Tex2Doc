@@ -16,6 +16,7 @@ use crate::template::{merge_styles, parse_template, TemplateStyles};
 
 /// V2：header/footer 部件的字节内容。None 表示不写该 part。
 struct HeaderFooterParts {
+    masthead_header_xml: Option<String>,
     header_xml: Option<String>,
     footer_xml: Option<String>,
     first_header_xml: Option<String>,
@@ -32,6 +33,9 @@ struct HeaderFooterParts {
 /// 表示不写对应 part。
 fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
     fn body(template: &str, style_id: &str) -> String {
+        if style_id == "JOSHeader" {
+            return header_line_body(template);
+        }
         // 拆行：每行单独一个 paragraph；空行不写
         let mut para = String::new();
         para.push_str(&format!(
@@ -86,12 +90,64 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
             Some(wrap_footer(body(t, "Footer")))
         }
     });
+    let masthead_header_xml = Some(wrap_header(masthead_body()));
     HeaderFooterParts {
+        masthead_header_xml,
         header_xml,
         footer_xml,
         first_header_xml,
         first_footer_xml,
     }
+}
+
+fn header_line_body(text: &str) -> String {
+    let clean = text.lines().next().unwrap_or(text).trim();
+    let mut para = String::from(
+        r#"<w:p><w:pPr><w:pStyle w:val="JOSHeader"/><w:tabs><w:tab w:val="right" w:pos="9000"/></w:tabs></w:pPr>"#,
+    );
+    para.push_str(r#"<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:eastAsia="SimSun"/><w:sz w:val="18"/></w:rPr><w:t xml:space="preserve">"#);
+    para.push_str(&xml_escape_local(clean));
+    para.push_str("</w:t></w:r><w:r><w:tab/></w:r>");
+    render_runs(&mut para, "{{PAGE}}");
+    para.push_str("</w:p>");
+    para
+}
+
+fn masthead_body() -> String {
+    let rows = [
+        (
+            "软件学报 ISSN 1000-9825, CODEN RUXUEW",
+            "Journal of Software",
+        ),
+        (
+            "[doi: 10.13328/j.cnki.jos.000000]",
+            "© 中国科学院软件研究所版权所有.",
+        ),
+        (
+            "E-mail: jos@iscas.ac.cn  http://www.jos.org.cn",
+            "Tel: +86-10-62562563",
+        ),
+    ];
+    let mut out = String::new();
+    for (left, right) in rows {
+        out.push_str(
+            r#"<w:p><w:pPr><w:pStyle w:val="JOSHeader"/><w:tabs><w:tab w:val="right" w:pos="9000"/></w:tabs></w:pPr>"#,
+        );
+        out.push_str(r#"<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:eastAsia="SimSun"/><w:sz w:val="15"/></w:rPr><w:t xml:space="preserve">"#);
+        out.push_str(&xml_escape_local(left));
+        out.push_str("</w:t></w:r><w:r><w:tab/></w:r>");
+        out.push_str(r#"<w:r><w:rPr><w:rFonts w:ascii="Times New Roman" w:eastAsia="SimSun"/><w:sz w:val="15"/></w:rPr><w:t xml:space="preserve">"#);
+        out.push_str(&xml_escape_local(right));
+        out.push_str("</w:t></w:r></w:p>");
+    }
+    out
+}
+
+fn xml_escape_local(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
 }
 
 /// 把 `{{PAGE}}` / `{{NUMPAGES}}` 替换成对应 OOXML 字段，再把普通文本写成 w:r。
@@ -209,6 +265,7 @@ pub fn pack_with_page_setup(
     let parts = page_setup
         .map(|ps| build_header_footer(ps))
         .unwrap_or(HeaderFooterParts {
+            masthead_header_xml: None,
             header_xml: None,
             footer_xml: None,
             first_header_xml: None,
@@ -218,6 +275,7 @@ pub fn pack_with_page_setup(
     let has_f = parts.footer_xml.is_some();
     let has_fh = parts.first_header_xml.is_some();
     let has_ff = parts.first_footer_xml.is_some();
+    let has_mh = parts.masthead_header_xml.is_some();
     let has_any_hdr_ftr = has_h || has_f || has_fh || has_ff;
 
     // document.xml 内的 sectPr 必须在引用 rId 前知道，所以 document.xml
@@ -225,13 +283,7 @@ pub fn pack_with_page_setup(
     let mut embedded_images: Vec<EmbeddedImage> = Vec::new();
     let body_xml = serialize_document(doc, image_assets, page_setup, &mut embedded_images);
     let body_xml = if has_any_hdr_ftr {
-        inject_sectpr_refs(
-            &body_xml,
-            has_h,
-            has_f,
-            has_fh,
-            has_ff,
-        )
+        inject_sectpr_refs(&body_xml, has_h, has_f, has_fh, has_ff)
     } else {
         body_xml
     };
@@ -249,8 +301,13 @@ pub fn pack_with_page_setup(
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     // [Content_Types].xml：动态追加 header/footer Override
-    let content_types = build_content_types(has_h, has_f, has_fh, has_ff);
-    write_zip(&mut zip, "[Content_Types].xml", content_types.as_bytes(), opts)?;
+    let content_types = build_content_types(has_h, has_f, has_fh, has_ff, has_mh);
+    write_zip(
+        &mut zip,
+        "[Content_Types].xml",
+        content_types.as_bytes(),
+        opts,
+    )?;
     write_zip(&mut zip, "_rels/.rels", ROOT_RELS, opts)?;
     // document.xml.rels：动态追加 header/footer + 图片 relationship
     let doc_rels = build_doc_rels(has_h, has_f, has_fh, has_ff, &embedded_images);
@@ -280,6 +337,9 @@ pub fn pack_with_page_setup(
     }
     if let Some(f) = &parts.first_footer_xml {
         write_zip(&mut zip, "word/footer2.xml", f.as_bytes(), opts)?;
+    }
+    if let Some(h) = &parts.masthead_header_xml {
+        write_zip(&mut zip, "word/header0.xml", h.as_bytes(), opts)?;
     }
 
     let cursor = zip.finish().map_err(|e| DocxWriteError(e.to_string()))?;
@@ -311,24 +371,16 @@ fn inject_sectpr_refs(
         injection.push_str(r#"<w:titlePg/>"#);
     }
     if has_h {
-        injection.push_str(
-            r#"<w:headerReference w:type="default" r:id="rIdH1"/>"#,
-        );
+        injection.push_str(r#"<w:headerReference w:type="default" r:id="rIdH1"/>"#);
     }
     if has_f {
-        injection.push_str(
-            r#"<w:footerReference w:type="default" r:id="rIdF1"/>"#,
-        );
+        injection.push_str(r#"<w:footerReference w:type="default" r:id="rIdF1"/>"#);
     }
     if has_fh {
-        injection.push_str(
-            r#"<w:headerReference w:type="first" r:id="rIdH2"/>"#,
-        );
+        injection.push_str(r#"<w:headerReference w:type="first" r:id="rIdH2"/>"#);
     }
     if has_ff {
-        injection.push_str(
-            r#"<w:footerReference w:type="first" r:id="rIdF2"/>"#,
-        );
+        injection.push_str(r#"<w:footerReference w:type="first" r:id="rIdF2"/>"#);
     }
     let mut out = String::with_capacity(s.len() + injection.len());
     out.push_str(&s[..sectpr_end]);
@@ -343,6 +395,7 @@ fn build_content_types(
     has_f: bool,
     has_fh: bool,
     has_ff: bool,
+    has_mh: bool,
 ) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
@@ -373,6 +426,11 @@ fn build_content_types(
     if has_ff {
         s.push_str(
             "<Override PartName=\"/word/footer2.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml\"/>",
+        );
+    }
+    if has_mh {
+        s.push_str(
+            "<Override PartName=\"/word/header0.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml\"/>",
         );
     }
     s.push_str("</Types>");
@@ -523,7 +581,13 @@ mod tests {
         let mut f = r.by_name("word/footer1.xml").unwrap();
         let mut s = String::new();
         std::io::Read::read_to_string(&mut f, &mut s).unwrap();
-        assert!(s.contains("PAGE"), "footer1.xml must contain PAGE field: {s}");
-        assert!(s.contains("NUMPAGES"), "footer1.xml must contain NUMPAGES field: {s}");
+        assert!(
+            s.contains("PAGE"),
+            "footer1.xml must contain PAGE field: {s}"
+        );
+        assert!(
+            s.contains("NUMPAGES"),
+            "footer1.xml must contain NUMPAGES field: {s}"
+        );
     }
 }

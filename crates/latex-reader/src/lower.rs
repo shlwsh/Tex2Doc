@@ -12,7 +12,10 @@
 //! 7. **引用 / 链接**：`\href{url}{text}` / `\url{url}` / `\ref{label}` / `\nolinkurl{url}`。
 //! 8. **错误降级**：未匹配内容进入 `Block::RawFallback`（绝不 panic）。
 
-use doc_semantic_ast::{Block, Document, Span, TableCell, TableRow, TextRun, TextStyle};
+use doc_semantic_ast::{
+    Block, Document, SourceBundle, Span, StandardDocument, TableCell, TableRow, TextRun, TextStyle,
+    TheoremLikeKind,
+};
 use std::collections::HashMap;
 
 use crate::expand::{expand_macros_in, expand_macros_with_input, MacroMap};
@@ -153,6 +156,34 @@ pub fn lower_to_document(parse: &Parse, joined: Option<&JoinedStream>) -> Docume
     lower_with_macros(parse, joined, &mut owned)
 }
 
+/// 降级入口：使用外部给定的 cite map（通常来自 `.bbl` 的 `\bibitem` 顺序）。
+///
+/// 旧入口保留首次出现顺序编号；该入口用于 VFS/CLI 主链路，使 `\cite{key}` 与
+/// BibTeX 输出编号一致。
+pub fn lower_to_document_with_cite_map(
+    parse: &Parse,
+    joined: Option<&JoinedStream>,
+    cite_map: &HashMap<String, usize>,
+) -> Document {
+    let mut owned = MacroMap::new();
+    let mut numbering = NumberingState::default();
+    lower_with_macros_numbering_and_cites(parse, joined, &mut owned, &mut numbering, Some(cite_map))
+}
+
+/// 降级为标准文档 AST。
+///
+/// 该入口保留旧 [`Document`] 降级链路的行为，并在 reader 层完成
+/// `Document -> StandardDocument` 包装，便于 CLI / 质量工具统一消费标准 AST。
+pub fn lower_to_standard_document(
+    parse: &Parse,
+    joined: Option<&JoinedStream>,
+    source: SourceBundle,
+    profile_id: impl Into<String>,
+) -> StandardDocument {
+    let doc = lower_to_document(parse, joined);
+    StandardDocument::from_legacy_document(&doc, source, profile_id)
+}
+
 /// 共享宏表降级（外部可传入已收集的宏表）。
 pub fn lower_with_macros(
     parse: &Parse,
@@ -163,12 +194,34 @@ pub fn lower_with_macros(
     lower_with_macros_and_numbering(parse, joined, macros, &mut numbering)
 }
 
+/// 共享宏表降级为标准文档 AST。
+pub fn lower_with_macros_to_standard_document(
+    parse: &Parse,
+    joined: Option<&JoinedStream>,
+    macros: &mut MacroMap,
+    source: SourceBundle,
+    profile_id: impl Into<String>,
+) -> StandardDocument {
+    let doc = lower_with_macros(parse, joined, macros);
+    StandardDocument::from_legacy_document(&doc, source, profile_id)
+}
+
 /// 共享宏表 + 编号状态降级（内部使用，保留编号状态便于测试）。
 pub fn lower_with_macros_and_numbering(
     parse: &Parse,
     joined: Option<&JoinedStream>,
     macros: &mut MacroMap,
     numbering: &mut NumberingState,
+) -> Document {
+    lower_with_macros_numbering_and_cites(parse, joined, macros, numbering, None)
+}
+
+fn lower_with_macros_numbering_and_cites(
+    parse: &Parse,
+    joined: Option<&JoinedStream>,
+    macros: &mut MacroMap,
+    numbering: &mut NumberingState,
+    initial_cite_numbers: Option<&HashMap<String, usize>>,
 ) -> Document {
     let text = joined
         .map(|j| j.text.clone())
@@ -187,6 +240,7 @@ pub fn lower_with_macros_and_numbering(
     };
     // 第二步：跳过 preamble。
     let text = strip_preamble(&text);
+    let label_map = collect_label_map(&text);
     let mut doc = Document::new();
     let mut buffer = String::new();
     let mut buffer_start = 0u32;
@@ -194,14 +248,10 @@ pub fn lower_with_macros_and_numbering(
     let mut pos: usize = 0;
     let bytes = text.as_bytes();
     let len = bytes.len();
-    // Citation number tracking across the document
-    let mut cite_numbers: HashMap<String, usize> = HashMap::new();
-
-    let mut pos: usize = 0;
-    let bytes = text.as_bytes();
-    let len = bytes.len();
-    // Citation number tracking across the document
-    let mut cite_numbers: HashMap<String, usize> = HashMap::new();
+    // Citation number tracking across the document. When `.bbl` is available,
+    // seed this map with BibTeX order; otherwise fallback remains first-use order.
+    let mut cite_numbers: HashMap<String, usize> =
+        initial_cite_numbers.cloned().unwrap_or_default();
 
     while pos < len {
         if !text.is_char_boundary(pos) {
@@ -224,30 +274,33 @@ pub fn lower_with_macros_and_numbering(
 
         // 环境优先
         if let Some((name, body, end)) = scan_environment(text, pos) {
+            let body_resolved = replace_refs_in_latex(body, &label_map);
+            let body_for_lower = body_resolved.as_str();
             flush_paragraph(
                 &mut doc,
                 &mut buffer,
                 &mut buffer_start,
                 default_span,
                 macros,
+                &label_map,
             );
             // `flushleft` / `flushright` / `center` / `quote` / `quotation` / `verbatim`
             // 等"段落容器"环境内可能有**多段**内容（V1 折叠成首段导致次段丢失）。
             // 这里直接把 body 递归降级，把所有 sub blocks 全部 push 到 doc。
             // 对于 algorithm 环境，也走这条路但 lower_environment 会返回带编号的图块。
-    let multi_block_envs = [
-        "flushleft",
-        "flushright",
-        "center",
-        "quote",
-        "quotation",
-        "verbatim",
-    ];
-    if multi_block_envs.contains(&name) {
-        // V2：flushleft 包「中文/英文引用格式」/「英文标题/作者/机构」/「英文摘要/关键词」
-        //     全部已被提取到 doc.metadata.*，这里不再 push 任何 sub-block。
-        let already_extracted = name == "flushleft"
-            && (body.contains("中文引用格式")
+            let multi_block_envs = [
+                "flushleft",
+                "flushright",
+                "center",
+                "quote",
+                "quotation",
+                "verbatim",
+            ];
+            if multi_block_envs.contains(&name) {
+                // V2：flushleft 包「中文/英文引用格式」/「英文标题/作者/机构」/「英文摘要/关键词」
+                //     全部已被提取到 doc.metadata.*，这里不再 push 任何 sub-block。
+                let already_extracted = name == "flushleft"
+                    && (body.contains("中文引用格式")
                 || body.contains("英文引用格式")
                 || body.contains("English abstract")
                 || body.contains("Abstract:")
@@ -260,43 +313,30 @@ pub fn lower_with_macros_and_numbering(
                 || (body.contains("Abstract:") && body.contains("AbstractContentEn"))
                 // 英文关键词 flushleft：包含 Key words: + KeywordsEn
                 || (body.contains("Key words:") && body.contains("KeywordsEn")));
-        if !already_extracted {
-            let p = crate::parser::parse(body);
-            let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
-            for b in sub.blocks {
-                match b {
-                    Block::RawFallback { .. } => continue,
-                    Block::Equation { .. } => continue,
-                    other => doc.push(other),
+                if !already_extracted {
+                    let p = crate::parser::parse(body_for_lower);
+                    let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
+                    for b in sub.blocks {
+                        match b {
+                            Block::RawFallback { .. } => continue,
+                            Block::Equation { .. } => continue,
+                            other => doc.push(other),
+                        }
+                    }
                 }
-            }
-        }
-    } else if name == "rjabstract" {
-        // "摘 要" 标签用纯文本（不加 LaTeX 命令；normalizer 会处理其他残留）
-        doc.push(Block::Paragraph {
-            runs: vec![TextRun {
-                text: "摘  要".to_string(),
-                style: TextStyle::Bold,
-                span: default_span,
-            }],
-            span: default_span,
-        });
-        let blk = lower_environment(name, body, default_span, macros, numbering);
-        doc.push(blk);
-    } else if name == "rjkeywords" {
-        // "关键词" 标签
-        doc.push(Block::Paragraph {
-            runs: vec![TextRun {
-                text: "关键词".to_string(),
-                style: TextStyle::Bold,
-                span: default_span,
-            }],
-            span: default_span,
-        });
-        let blk = lower_environment(name, body, default_span, macros, numbering);
-        doc.push(blk);
-    } else {
-                let blk = lower_environment(name, body, default_span, macros, numbering);
+            } else if matches!(name, "rjabstract" | "rjkeywords") {
+                // JOS front matter has already been extracted into doc.metadata and is
+                // rendered by docx-writer before body blocks.
+            } else {
+                let blk = lower_environment(
+                    name,
+                    body_for_lower,
+                    default_span,
+                    macros,
+                    numbering,
+                    &mut cite_numbers,
+                    &label_map,
+                );
                 doc.push(blk);
             }
             pos = end;
@@ -313,6 +353,7 @@ pub fn lower_with_macros_and_numbering(
                 &mut buffer_start,
                 default_span,
                 macros,
+                &label_map,
             );
             doc.push(block);
             pos += consumed;
@@ -323,7 +364,14 @@ pub fn lower_with_macros_and_numbering(
         // （BibTeX 记录体由 \putbib（未处理）外接 references.bib 提供；V1 语义上
         // 只保证 "References" 标签出现在文档流中。）
         if text[pos..].starts_with("\\bibliography{") {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+                &label_map,
+            );
             doc.push(Block::Paragraph {
                 runs: vec![TextRun {
                     text: "References".to_string(),
@@ -338,34 +386,19 @@ pub fn lower_with_macros_and_numbering(
             continue;
         }
 
-        // \rjkeywords{keywords} → 显式输出"关键词"标签段 + 关键词内容段。
-        // 模板：\newcommand{\rjkeywords}[1]{\par\noindent\xiaowuhao {\hei 关键词:}\hspace{1em}{\kai#1}\par\vspace{0.4em}}
+        // \rjkeywords{keywords} 已抽取到 doc.metadata.keywords_zh，由 docx-writer
+        // 统一渲染；正文流中跳过，避免重复关键词段。
         if text[pos..].starts_with("\\rjkeywords{") {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+                &label_map,
+            );
             // 找匹配 `}`
             if let Some(end) = find_matching_brace(text, pos + "\\rjkeywords".len()) {
-                let body = &text[pos + "\\rjkeywords".len() + 1..pos + "\\rjkeywords".len() + 1 + end];
-            // 标签段
-            doc.push(Block::Paragraph {
-                runs: vec![TextRun {
-                    text: "关键词".to_string(),
-                    style: TextStyle::Bold,
-                    span: default_span,
-                }],
-                span: default_span,
-            });
-                // 关键词内容段
-                let stripped = strip_inline(body, &mut cite_numbers).trim().to_string();
-                if !stripped.is_empty() {
-                    doc.push(Block::Paragraph {
-                        runs: vec![TextRun {
-                            text: stripped,
-                            style: TextStyle::Plain,
-                            span: default_span,
-                        }],
-                        span: default_span,
-                    });
-                }
                 pos = pos + "\\rjkeywords".len() + 1 + end + 1;
                 continue;
             }
@@ -375,7 +408,14 @@ pub fn lower_with_macros_and_numbering(
         // 不在环境里，是裸 \noindent 段；这里按内容匹配生成对应的 label block。
         // 检查是否进入"附中文参考文献"或"作者简介"段
         if let Some(label_text) = detect_section_label(&text[pos..]) {
-            flush_paragraph(&mut doc, &mut buffer, &mut buffer_start, default_span, macros);
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+                &label_map,
+            );
             doc.push(Block::Paragraph {
                 runs: vec![TextRun {
                     text: label_text.to_string(),
@@ -399,6 +439,7 @@ pub fn lower_with_macros_and_numbering(
                 &mut buffer_start,
                 default_span,
                 macros,
+                &label_map,
             );
             pos += consumed;
             continue;
@@ -407,7 +448,7 @@ pub fn lower_with_macros_and_numbering(
         // 取一行
         let nl = text[pos..].find('\n').map(|n| pos + n + 1).unwrap_or(len);
         let line = &text[pos..nl];
-        let stripped = strip_inline(line, &mut cite_numbers);
+        let stripped = strip_inline(line, &mut cite_numbers, &label_map);
         let trimmed = stripped.trim();
 
         if trimmed.is_empty() {
@@ -417,6 +458,7 @@ pub fn lower_with_macros_and_numbering(
                 &mut buffer_start,
                 default_span,
                 macros,
+                &label_map,
             );
         } else {
             if buffer.is_empty() {
@@ -434,6 +476,7 @@ pub fn lower_with_macros_and_numbering(
         &mut buffer_start,
         default_span,
         macros,
+        &label_map,
     );
 
     // V2：填充 doc.metadata = FrontMatter（标题/作者/单位/中英文摘要/关键词/引用/页眉页脚）。
@@ -516,7 +559,9 @@ fn extract_citation_from_flushleft(text: &str) -> (String, String) {
     while let Some(open) = text[i..].find("\\begin{flushleft}") {
         let abs_open = i + open;
         // 找配对 \end{flushleft}
-        if let Some(close_rel) = text[abs_open + "\\begin{flushleft}".len()..].find("\\end{flushleft}") {
+        if let Some(close_rel) =
+            text[abs_open + "\\begin{flushleft}".len()..].find("\\end{flushleft}")
+        {
             let abs_close = abs_open + "\\begin{flushleft}".len() + close_rel;
             let body = &text[abs_open + "\\begin{flushleft}".len()..abs_close];
             if body.contains("中文引用格式") && citation_zh.is_empty() {
@@ -570,7 +615,12 @@ fn extract_citation_field(flushleft_body: &str, label: &str) -> Option<String> {
             continue;
         }
         // 跳过空白
-        if rest.chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+        if rest
+            .chars()
+            .next()
+            .map(|c| c.is_whitespace())
+            .unwrap_or(false)
+        {
             i += rest.chars().next().unwrap().len_utf8();
             continue;
         }
@@ -580,17 +630,16 @@ fn extract_citation_field(flushleft_body: &str, label: &str) -> Option<String> {
     if i < len && bytes[i] == b'{' {
         if let Some(end) = crate::normalize::find_matching_brace(after, i) {
             let inner = &after[i + 1..end];
-            let cite: std::collections::HashMap<String, usize> =
-                std::collections::HashMap::new();
+            let cite: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
             let label_map: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
-            let normalized =
-                crate::normalize::latex_to_text(inner, &cite, &label_map);
-            let joined: String =
-                normalized.runs.into_iter().map(|r| r.text).collect();
-            return Some(crate::normalize::collapse_whitespace_pub(&joined)
-                .trim()
-                .to_string());
+            let normalized = crate::normalize::latex_to_text(inner, &cite, &label_map);
+            let joined: String = normalized.runs.into_iter().map(|r| r.text).collect();
+            return Some(
+                crate::normalize::collapse_whitespace_pub(&joined)
+                    .trim()
+                    .to_string(),
+            );
         }
     }
     None
@@ -652,12 +701,116 @@ fn split_inline_math(text: &str) -> Vec<RunPart<'_>> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn collect_label_map(text: &str) -> HashMap<String, String> {
+    let mut labels = HashMap::new();
+    let mut figure_no = 0usize;
+    let mut table_no = 0usize;
+    let mut algorithm_no = 0usize;
+    let mut equation_no = 0usize;
+    let mut theorem_no = 0usize;
+    let mut proposition_no = 0usize;
+
+    let mut pos = 0usize;
+    while pos < text.len() {
+        if !text.is_char_boundary(pos) {
+            pos += 1;
+            continue;
+        }
+        if let Some((name, body, end)) = scan_environment(text, pos) {
+            let env_labels = extract_labels(body);
+            let number = if name.starts_with("figure") {
+                figure_no += 1;
+                Some(figure_no.to_string())
+            } else if name.starts_with("table") {
+                table_no += 1;
+                Some(table_no.to_string())
+            } else if name == "algorithm" || name == "algorithm*" {
+                algorithm_no += 1;
+                Some(algorithm_no.to_string())
+            } else if matches!(
+                name,
+                "equation" | "equation*" | "align" | "align*" | "gather"
+            ) {
+                equation_no += 1;
+                Some(format!("({equation_no})"))
+            } else if name == "theorem" {
+                theorem_no += 1;
+                Some(theorem_no.to_string())
+            } else if name == "proposition" {
+                proposition_no += 1;
+                Some(proposition_no.to_string())
+            } else {
+                None
+            };
+            if let Some(number) = number {
+                for label in env_labels {
+                    labels.insert(label, number.clone());
+                }
+            }
+            pos = end;
+            continue;
+        }
+        if let Some(ch) = text[pos..].chars().next() {
+            pos += ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    labels
+}
+
+fn extract_labels(text: &str) -> Vec<String> {
+    let mut labels = Vec::new();
+    let mut rest = text;
+    while let Some(offset) = rest.find("\\label") {
+        let after_cmd = &rest[offset + "\\label".len()..];
+        let after_ws = after_cmd.trim_start();
+        if let Some(stripped) = after_ws.strip_prefix('{') {
+            let body = format!("{{{stripped}");
+            if let Some(end) = find_matching_brace(&body, 0) {
+                labels.push(body[1..1 + end].trim().to_string());
+            }
+        }
+        rest = &after_cmd[after_cmd.len().min(1)..];
+    }
+    labels
+}
+
+fn replace_refs_in_latex(text: &str, label_map: &HashMap<String, String>) -> String {
+    if label_map.is_empty() || !text.contains("\\ref") {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut pos = 0usize;
+    while let Some(rel) = text[pos..].find("\\ref") {
+        let start = pos + rel;
+        out.push_str(&text[pos..start]);
+        let mut p = start + "\\ref".len();
+        while p < text.len() && text.as_bytes()[p].is_ascii_whitespace() {
+            p += 1;
+        }
+        if p < text.len() && text.as_bytes()[p] == b'{' {
+            if let Some(off) = find_matching_brace(text, p) {
+                let label = &text[p + 1..p + 1 + off];
+                out.push_str(label_map.get(label).map(String::as_str).unwrap_or(label));
+                pos = p + 1 + off + 1;
+                continue;
+            }
+        }
+        out.push_str("\\ref");
+        pos = start + "\\ref".len();
+    }
+    out.push_str(&text[pos..]);
+    out
+}
+
 fn flush_paragraph(
     doc: &mut Document,
     buffer: &mut String,
     start: &mut u32,
     span: Span,
     _macros: &mut MacroMap,
+    label_map: &HashMap<String, String>,
 ) {
     if buffer.trim().is_empty() {
         buffer.clear();
@@ -671,7 +824,6 @@ fn flush_paragraph(
     // 注意：inline math ($...$) 不再单独提取为 Block::Equation，
     // 直接作为 TextStyle::MathInline 留在段落中（适合中文学术文档）。
     let cite_map: HashMap<String, usize> = HashMap::new();
-    let label_map: HashMap<String, String> = HashMap::new();
     let normalized = crate::normalize::latex_to_text(&body, &cite_map, &label_map);
     let runs: Vec<TextRun> = normalized
         .runs
@@ -691,7 +843,10 @@ fn flush_paragraph(
     buffer.clear();
 }
 
-/// 跳过 ASCII 空白 / 注释。
+/// 跳过行内 ASCII 空白 / 注释内容。
+///
+/// 换行不能在这里吞掉：主循环依赖空行触发 `flush_paragraph`，
+/// 否则多个 LaTeX 段落会被合并成一个长段。
 fn skip_whitespace_and_comment(text: &str, mut pos: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let len = bytes.len();
@@ -701,7 +856,7 @@ fn skip_whitespace_and_comment(text: &str, mut pos: usize) -> Option<usize> {
             break;
         }
         let b = bytes[pos];
-        if b == b' ' || b == b'\t' || b == b'\n' || b == b'\r' {
+        if b == b' ' || b == b'\t' || b == b'\r' {
             pos += 1;
             moved = true;
             continue;
@@ -880,7 +1035,10 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
             let mut found = false;
             while i < bytes.len() {
                 match bytes[i] {
-                    b'[' => { depth += 1; i += 1; }
+                    b'[' => {
+                        depth += 1;
+                        i += 1;
+                    }
                     b']' => {
                         depth -= 1;
                         if depth == 0 {
@@ -897,7 +1055,9 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
                             break;
                         }
                     }
-                    _ => { i += 1; }
+                    _ => {
+                        i += 1;
+                    }
                 }
             }
             if !found {
@@ -923,10 +1083,7 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
 /// 形式为 `\noindent{\xiaowuhao\hei 附中文参考文献:}` 或带 `\textbf`。
 /// 返回 Some("附中文参考文献") 或 Some("作者简介") 或 None。
 fn detect_section_label(s: &str) -> Option<&'static str> {
-    const LABELS: &[&str] = &[
-        "附中文参考文献",
-        "作者简介",
-    ];
+    const LABELS: &[&str] = &["附中文参考文献", "作者简介"];
     let line_end = s.find('\n').unwrap_or(s.len());
     let line = &s[..line_end];
     for label in LABELS {
@@ -944,25 +1101,49 @@ fn lower_environment(
     span: Span,
     macros: &mut MacroMap,
     numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
 ) -> Block {
     match name {
-        "itemize" | "itemize*" => lower_list(body, false, span, macros, numbering),
-        "enumerate" | "enumerate*" => lower_list(body, true, span, macros, numbering),
+        "itemize" | "itemize*" => lower_list(
+            body,
+            false,
+            span,
+            macros,
+            numbering,
+            cite_numbers,
+            label_map,
+        ),
+        "enumerate" | "enumerate*" => {
+            lower_list(body, true, span, macros, numbering, cite_numbers, label_map)
+        }
         // description*: 发出 `\item` 标签作为段落，让 "附中文参考文献" / "作者简介" 等
         // 标签文字进 docx；items 内容走标准 list 降级。
-        "description" | "description*" => lower_description_with_label(body, span, macros, numbering),
+        "description" | "description*" => {
+            lower_description_with_label(body, span, macros, numbering, cite_numbers, label_map)
+        }
         // JOS 论文参考文献用 `\begin{list}{}{... \item[{[N]}] ... }`，
         // 视为无序 List，items 已有 `[N] —` 前缀（lower_list 中处理）。
-        "list" | "list*" => lower_list(body, false, span, macros, numbering),
-        "tabular" | "tabular*" | "array" => lower_table(body, span),
+        "list" | "list*" => lower_list(
+            body,
+            false,
+            span,
+            macros,
+            numbering,
+            cite_numbers,
+            label_map,
+        ),
+        "tabular" | "tabular*" | "array" => lower_table(body, span, cite_numbers, label_map),
         "figure" | "figure*" | "table" | "table*" | "algorithm" | "algorithm*" => {
-            lower_captioned_env(name, body, span, macros, numbering)
+            lower_captioned_env(name, body, span, macros, numbering, cite_numbers, label_map)
         }
         "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => Block::Equation {
             latex: body.trim().to_string(),
             is_block: true,
             span,
         },
+        "theorem" | "proof" | "proposition" | "lemma" | "corollary" | "definition" | "remark"
+        | "example" => lower_theorem_like(name, body, span),
         "document" => {
             // 直接递归降级 body
             let mut sub = Document::new();
@@ -993,6 +1174,34 @@ fn lower_environment(
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
         },
+    }
+}
+
+fn lower_theorem_like(name: &str, body: &str, span: Span) -> Block {
+    let kind = match name {
+        "proof" => TheoremLikeKind::Proof,
+        "proposition" => TheoremLikeKind::Proposition,
+        "lemma" => TheoremLikeKind::Lemma,
+        "corollary" => TheoremLikeKind::Corollary,
+        "definition" => TheoremLikeKind::Definition,
+        "remark" => TheoremLikeKind::Remark,
+        "example" => TheoremLikeKind::Example,
+        _ => TheoremLikeKind::Theorem,
+    };
+    let cite_map = HashMap::new();
+    let label_map = HashMap::new();
+    let cleaned = crate::normalize::latex_to_text(body, &cite_map, &label_map)
+        .join_plain()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    Block::TheoremLike {
+        kind,
+        title: None,
+        body: cleaned,
+        span,
     }
 }
 
@@ -1059,6 +1268,8 @@ fn lower_list(
     span: Span,
     macros: &mut MacroMap,
     numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
 ) -> Block {
     let mut items: Vec<Vec<Block>> = Vec::new();
     let mut current: Option<&str> = None;
@@ -1066,7 +1277,7 @@ fn lower_list(
         let s = line.trim_end_matches(&['\r', '\n'][..]);
         if s.trim_start().starts_with("\\item") {
             if let Some(buf) = current {
-                let blocks = lower_item_body(buf, span, macros, numbering);
+                let blocks = lower_item_body(buf, span, macros, numbering, cite_numbers, label_map);
                 items.push(blocks);
             }
             // \item[label]? 之后的内容
@@ -1095,7 +1306,14 @@ fn lower_list(
         }
     }
     if let Some(buf) = current {
-        items.push(lower_item_body(buf, span, macros, numbering));
+        items.push(lower_item_body(
+            buf,
+            span,
+            macros,
+            numbering,
+            cite_numbers,
+            label_map,
+        ));
     }
     Block::List {
         is_ordered,
@@ -1191,6 +1409,8 @@ fn lower_description_with_label(
     span: Span,
     macros: &mut MacroMap,
     numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
 ) -> Block {
     // Strip leading optional `[...]` argument (e.g., `[font=\normalfont,labelwidth=...]`).
     let body = strip_leading_optional_arg(body);
@@ -1214,14 +1434,16 @@ fn lower_description_with_label(
     } else {
         // 第一个非空行是 section label（如 `{\xiaowuhao\hei 附中文参考文献:}`）
         let label_text = extract_item_label_text(first_trimmed);
-        let label_clean = label_text.trim().trim_end_matches('}').trim_end_matches(':');
+        let label_clean = label_text
+            .trim()
+            .trim_end_matches('}')
+            .trim_end_matches(':');
         if !label_clean.is_empty() {
             section_label = Some(label_clean.to_string());
         }
         item_start = 1;
     }
 
-    let mut label_blocks: Vec<Block> = Vec::new();
     let mut list_items: Vec<Vec<Block>> = Vec::new();
     let mut current_body: Option<&str> = None;
 
@@ -1230,43 +1452,33 @@ fn lower_description_with_label(
         if s.trim_start().starts_with("\\item") {
             // 把前一个 \item 的 body 做成 list item
             if let Some(buf) = current_body.take() {
-                list_items.push(lower_item_body(buf, span, macros, numbering));
+                list_items.push(lower_item_body(
+                    buf,
+                    span,
+                    macros,
+                    numbering,
+                    cite_numbers,
+                    label_map,
+                ));
             }
 
             let after = s.trim_start().trim_start_matches("\\item").trim_start();
             // description 环境格式：`\item[{[5]}] 冯志勇…`
             if after.starts_with('[') {
                 if let Some((label_text, rest)) = extract_bracketed_label(after) {
-                    if !label_text.is_empty() {
-                        let label_clean = strip_label_formatting(&label_text);
-                        label_blocks.push(Block::Paragraph {
-                            runs: vec![TextRun {
-                                text: label_clean,
-                                style: TextStyle::Plain,
-                                span,
-                            }],
-                            span,
-                        });
-                    }
-                    current_body = Some(rest);
+                    let label_clean = strip_label_formatting(label_text);
+                    let item_text = if label_clean.is_empty() {
+                        rest.to_string()
+                    } else if rest.is_empty() {
+                        label_clean
+                    } else {
+                        format!("{label_clean} — {rest}")
+                    };
+                    current_body = Some(Box::leak(item_text.into_boxed_str()));
                     continue;
                 }
             }
             // `\item {\hei name}，title` 格式（作者简介）
-            if after.starts_with('{') {
-                let label_text = extract_item_label_text(after.trim());
-                let label_clean = label_text.trim().trim_end_matches('}').trim_end_matches(':');
-                if !label_clean.is_empty() {
-                    label_blocks.push(Block::Paragraph {
-                        runs: vec![TextRun {
-                            text: label_clean.to_string(),
-                            style: TextStyle::Plain,
-                            span,
-                        }],
-                        span,
-                    });
-                }
-            }
             current_body = Some(after);
         } else if current_body.is_some() {
             // 多行 item 内容
@@ -1278,35 +1490,39 @@ fn lower_description_with_label(
         }
     }
     if let Some(buf) = current_body.take() {
-        list_items.push(lower_item_body(buf, span, macros, numbering));
+        list_items.push(lower_item_body(
+            buf,
+            span,
+            macros,
+            numbering,
+            cite_numbers,
+            label_map,
+        ));
     }
 
-    // 先 push section label（如有）
+    if !list_items.is_empty() {
+        return Block::List {
+            is_ordered: false,
+            items: list_items,
+            span,
+        };
+    }
+
     if let Some(label) = section_label {
-        label_blocks.insert(0, Block::Paragraph {
+        return Block::Paragraph {
             runs: vec![TextRun {
                 text: label,
                 style: TextStyle::Plain,
                 span,
             }],
             span,
-        });
+        };
     }
 
-    // 如果有 list items，发出一个 List block
-    if !list_items.is_empty() {
-        label_blocks.push(Block::List {
-            is_ordered: false,
-            items: list_items,
-            span,
-        });
-    }
-
-    // 返回第一个块
-    label_blocks.into_iter().next().unwrap_or(Block::RawFallback {
+    Block::RawFallback {
         text: body.to_string(),
         span,
-    })
+    }
 }
 
 /// 从 `\item` 行的内容中提取 label 文字。
@@ -1460,7 +1676,10 @@ fn strip_leading_optional_arg(body: &str) -> &str {
     let mut depth = 1;
     while i < bytes.len() {
         match bytes[i] {
-            b'[' => { depth += 1; i += 1; }
+            b'[' => {
+                depth += 1;
+                i += 1;
+            }
             b']' => {
                 depth -= 1;
                 if depth == 0 {
@@ -1479,14 +1698,24 @@ fn strip_leading_optional_arg(body: &str) -> &str {
                 let mut j = i + 1;
                 while j < bytes.len() && d > 0 {
                     match bytes[j] {
-                        b'{' => { d += 1; j += 1; }
-                        b'}' => { d -= 1; j += 1; }
-                        _ => { j += 1; }
+                        b'{' => {
+                            d += 1;
+                            j += 1;
+                        }
+                        b'}' => {
+                            d -= 1;
+                            j += 1;
+                        }
+                        _ => {
+                            j += 1;
+                        }
                     }
                 }
                 i = j;
             }
-            _ => { i += 1; }
+            _ => {
+                i += 1;
+            }
         }
     }
     body
@@ -1497,13 +1726,16 @@ fn lower_item_body(
     span: Span,
     macros: &mut MacroMap,
     numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
 ) -> Vec<Block> {
-    let stripped = strip_inline(buf, &mut HashMap::new());
+    let stripped = strip_inline(buf, cite_numbers, label_map);
     if stripped.trim().is_empty() {
         return Vec::new();
     }
     let p = crate::parser::parse(buf);
-    let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
+    let sub =
+        lower_with_macros_numbering_and_cites(&p, None, macros, numbering, Some(cite_numbers));
     let mut out = sub.blocks;
     if out.is_empty() {
         out.push(Block::Paragraph {
@@ -1522,7 +1754,12 @@ fn lower_item_body(
 ///
 /// 形如：`{c|c|c}` 列规范 + 主体 `\hline / & / \\\hline / \multicolumn{n}{...}{...}`。
 /// 支持单元格内嵌套 `\begin{tabular}...\end{tabular}`（递归降级为文本占位）。
-fn lower_table(body: &str, span: Span) -> Block {
+fn lower_table(
+    body: &str,
+    span: Span,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
+) -> Block {
     // 主体可能被 `\\` 分行
     let rows_text: Vec<&str> = body.split("\\\\").collect();
     let mut rows: Vec<TableRow> = Vec::new();
@@ -1604,7 +1841,7 @@ fn lower_table(body: &str, span: Span) -> Block {
             // First split by & to get the cell text, then check for \multicolumn
             let raw_for_multicolumn = c.trim();
 
-            let raw = strip_inline(c, &mut HashMap::new())
+            let raw = strip_inline(c, cite_numbers, label_map)
                 .replace("\\hline", "")
                 .trim()
                 .to_string();
@@ -1612,9 +1849,8 @@ fn lower_table(body: &str, span: Span) -> Block {
             // Check for \multicolumn{n}{spec}{text} - must be at START of cell content
             if let Some((n, cell_text)) = parse_multicolumn(raw_for_multicolumn) {
                 // V2：把 cell_text 也走 normalizer
-                let cite_map: HashMap<String, usize> = HashMap::new();
-                let label_map: HashMap<String, String> = HashMap::new();
-                let normalized = crate::normalize::latex_to_text(&cell_text, &cite_map, &label_map);
+                let normalized =
+                    crate::normalize::latex_to_text(&cell_text, cite_numbers, label_map);
                 let runs: Vec<TextRun> = if normalized.runs.is_empty() {
                     vec![TextRun {
                         text: cell_text,
@@ -1652,7 +1888,7 @@ fn lower_table(body: &str, span: Span) -> Block {
             }
             // 嵌套表格检测
             let cell_runs = if let Some((nested_body, _)) = extract_nested_tabulary(&raw) {
-                let nested_table = lower_table(nested_body, span);
+                let nested_table = lower_table(nested_body, span, cite_numbers, label_map);
                 if let Block::Table { rows: nr, .. } = nested_table {
                     // 扁平化嵌套表格为首行文本
                     let first_row = nr
@@ -1677,9 +1913,7 @@ fn lower_table(body: &str, span: Span) -> Block {
                     }]
                 } else {
                     // 退化路径：normalizer 处理 raw
-                    let cite_map: HashMap<String, usize> = HashMap::new();
-                    let label_map: HashMap<String, String> = HashMap::new();
-                    let normalized = crate::normalize::latex_to_text(&raw, &cite_map, &label_map);
+                    let normalized = crate::normalize::latex_to_text(&raw, cite_numbers, label_map);
                     if normalized.runs.is_empty() {
                         vec![TextRun {
                             text: raw.clone(),
@@ -1701,9 +1935,7 @@ fn lower_table(body: &str, span: Span) -> Block {
             } else {
                 // V2 接入：把 cell 文本走 latex_to_text normalizer
                 // 否则 \textbf / \textit / $math$ 等会原文泄漏。
-                let cite_map: HashMap<String, usize> = HashMap::new();
-                let label_map: HashMap<String, String> = HashMap::new();
-                let normalized = crate::normalize::latex_to_text(&raw, &cite_map, &label_map);
+                let normalized = crate::normalize::latex_to_text(&raw, cite_numbers, label_map);
                 let cell_runs: Vec<TextRun> = normalized
                     .runs
                     .into_iter()
@@ -1734,9 +1966,7 @@ fn lower_table(body: &str, span: Span) -> Block {
     }
     if rows.is_empty() {
         // 兜底：单行单列 + 原文（走 normalizer）
-        let cite_map: HashMap<String, usize> = HashMap::new();
-        let label_map: HashMap<String, String> = HashMap::new();
-        let normalized = crate::normalize::latex_to_text(body, &cite_map, &label_map);
+        let normalized = crate::normalize::latex_to_text(body, cite_numbers, label_map);
         let runs: Vec<TextRun> = if normalized.runs.is_empty() {
             vec![TextRun {
                 text: body.to_string(),
@@ -1855,6 +2085,22 @@ fn extract_nested_tabulary(text: &str) -> Option<(&str, &str)> {
     Some((inner, rest.trim()))
 }
 
+fn extract_tabular_body(body: &str) -> Option<&str> {
+    let mut search_from = 0;
+    while let Some(relative) = body[search_from..].find("\\begin{") {
+        let pos = search_from + relative;
+        if let Some((name, inner, after_end)) = scan_environment(body, pos) {
+            if matches!(name, "tabular" | "tabular*" | "array") {
+                return Some(inner);
+            }
+            search_from = after_end.max(pos + 1);
+        } else {
+            search_from = pos + "\\begin{".len();
+        }
+    }
+    None
+}
+
 /// `\caption{...}` 在 figure/table 环境中，或 algorithm 环境。
 fn lower_captioned_env(
     name: &str,
@@ -1862,6 +2108,8 @@ fn lower_captioned_env(
     span: Span,
     _macros: &mut MacroMap,
     numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
 ) -> Block {
     // algorithm 环境：发出 "算法 N" 标题段 + AlgLine 序列。
     if name == "algorithm" || name == "algorithm*" {
@@ -1869,7 +2117,7 @@ fn lower_captioned_env(
         let num = numbering.next_algorithm();
         let (io, cap_from_io, label_from_io) = crate::algorithm::extract_algorithm_io(body);
         let cap = caption_text.or(cap_from_io).unwrap_or_default();
-        let cap_normalized = normalize_caption(&cap);
+        let cap_normalized = normalize_caption(&cap, cite_numbers, label_map);
         let _label_final = _label;
         let _ = label_from_io;
         let rows = crate::algorithm::parse_algorithm_rows(body);
@@ -1887,7 +2135,9 @@ fn lower_captioned_env(
     }
 
     let (img, caption) = extract_includegraphics_and_caption(body);
-    let caption_normalized = caption.as_deref().map(normalize_caption);
+    let caption_normalized = caption
+        .as_deref()
+        .map(|cap| normalize_caption(cap, cite_numbers, label_map));
     if name.starts_with("figure") {
         Block::Figure {
             path: img.unwrap_or_default(),
@@ -1897,7 +2147,8 @@ fn lower_captioned_env(
             span,
         }
     } else {
-        let mut table = lower_table(body, span);
+        let table_body = extract_tabular_body(body).unwrap_or(body);
+        let mut table = lower_table(table_body, span, cite_numbers, label_map);
         if let Block::Table {
             caption: c,
             number: n,
@@ -1913,9 +2164,12 @@ fn lower_captioned_env(
 
 /// 把 caption 文本（可能是 raw LaTeX）走一遍 `latex_to_text`，
 /// 输出 join_plain 字符串（保留 \\textbf 已经被处理过的内容）。
-fn normalize_caption(text: &str) -> String {
-    let (cite, label) = (HashMap::new(), HashMap::new());
-    let n = crate::normalize::latex_to_text(text, &cite, &label);
+fn normalize_caption(
+    text: &str,
+    cite_numbers: &HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
+) -> String {
+    let n = crate::normalize::latex_to_text(text, cite_numbers, label_map);
     let mut out = String::new();
     for r in n.runs {
         out.push_str(&r.text);
@@ -2042,7 +2296,11 @@ fn find_matching_brace(s: &str, pos: usize) -> Option<usize> {
 /// `cite_numbers` is used to track citation keys and assign sequential numbers.
 /// It is passed from `lower_with_macros` so that `\cite{key}` in paragraphs
 /// is replaced with `[n]` where n is the citation number across the whole document.
-fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String {
+fn strip_inline(
+    line: &str,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
+) -> String {
     let mut out = String::with_capacity(line.len());
     let bytes = line.as_bytes();
     let mut i = 0;
@@ -2068,8 +2326,8 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             i += 1;
             continue;
         }
-            if c == b'\\' {
-                let cmd_start = i + 1;
+        if c == b'\\' {
+            let cmd_start = i + 1;
             let mut j = cmd_start;
             if j < bytes.len() && bytes[j] == b'\\' {
                 // 探测 `\\\\` (四个反斜杠) 形式：
@@ -2087,12 +2345,13 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                 i = j + 1;
                 continue;
             }
-            // 命令名：alpha / @ / 单字符转义（\% \$ \& \# \_ \{ \}）
+            // 命令名：alpha / @ / 单字符转义（\% \$ \& \# \_ \{ \} \,）
             // 对单字符转义（不在 alpha 集中），j 必须至少推进 1 步，
             // 否则 cmd 会是空串，"cmd.len() == 1" 判断永远不成立。
             if j < bytes.len() {
                 let b = bytes[j];
-                let is_escape_char = matches!(b, b'%' | b'$' | b'&' | b'#' | b'_' | b'{' | b'}');
+                let is_escape_char =
+                    matches!(b, b'%' | b'$' | b'&' | b'#' | b'_' | b'{' | b'}' | b',');
                 if is_escape_char {
                     j += 1;
                 } else {
@@ -2102,7 +2361,7 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                 }
             }
             let cmd = &line[cmd_start..j];
-            // 通用 LaTeX 转义：\% \$ \& \# \_ \{ \}  → 保留为转义形式
+            // 通用 LaTeX 转义：\% \$ \& \# \_ \{ \} \, → 保留为转义形式
             // （即 `\%` 写成两个字符 `\` + `%`），让下游 latex_to_text 的
             // strip_comments 能正确识别 `\%` 为字面 %（奇数个 `\`）。
             if cmd.len() == 1 {
@@ -2115,6 +2374,7 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                     b'_' => Some("_"),
                     b'{' => Some("{"),
                     b'}' => Some("}"),
+                    b',' => Some(","),
                     _ => None,
                 };
                 if let Some(s) = literal {
@@ -2166,21 +2426,22 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                         .map(|s| s.trim())
                         .filter(|s| !s.is_empty())
                         .collect();
-                    let nums: Vec<String> = keys
+                    let nums: Vec<usize> = keys
                         .iter()
                         .map(|k| {
                             let next = cite_numbers.len() + 1;
-                            let n = *cite_numbers.entry(k.to_string()).or_insert(next);
-                            n.to_string()
+                            *cite_numbers.entry(k.to_string()).or_insert(next)
                         })
                         .collect();
-                    out.push_str(&format!("[{}]", nums.join(",")));
+                    out.push_str(&format!("[{}]", crate::normalize::compress_numbers(nums)));
                     // Skip remaining optional {...} args
                     let mut p = k + 1 + off + 1;
+                    let mut skipped_space_after_arg = false;
                     loop {
                         while p < bytes.len()
                             && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
                         {
+                            skipped_space_after_arg = true;
                             p += 1;
                         }
                         if p < bytes.len() && bytes[p] == b'{' {
@@ -2193,6 +2454,12 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                             break;
                         }
                     }
+                    push_space_if_source_had_visible_gap(
+                        &mut out,
+                        skipped_space_after_arg,
+                        line,
+                        p,
+                    );
                     i = p;
                     continue;
                 }
@@ -2202,25 +2469,28 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
             // \href{url}{text} → emit text
             // \url{url} / \nolinkurl{url} → emit URL
             // \label → skip (no text content)
-            if matches!(
-                cmd,
-                "ref" | "footnote" | "label"
-            ) && has_arg
-            {
+            if matches!(cmd, "ref" | "footnote" | "label") && has_arg {
                 if let Some(off) = find_matching_brace(line, k) {
                     // \ref{label} → emit the label text (e.g., "alg:attention" → no visible text,
                     // but \ref{tab:foo} → emit "表 N" — V1: emit label text for discoverability)
                     if cmd == "ref" {
                         let label_start = k + 1;
                         let label_text = &line[label_start..label_start + off];
-                        out.push_str(label_text);
+                        out.push_str(
+                            label_map
+                                .get(label_text)
+                                .map(String::as_str)
+                                .unwrap_or(label_text),
+                        );
                     }
                     // \label / \footnote: skip
                     let mut p = k + 1 + off + 1;
+                    let mut skipped_space_after_arg = false;
                     loop {
                         while p < bytes.len()
                             && (bytes[p] == b' ' || bytes[p] == b'\t' || bytes[p] == b'\n')
                         {
+                            skipped_space_after_arg = true;
                             p += 1;
                         }
                         if p < bytes.len() && bytes[p] == b'{' {
@@ -2232,6 +2502,14 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
                         } else {
                             break;
                         }
+                    }
+                    if cmd == "ref" {
+                        push_space_if_source_had_visible_gap(
+                            &mut out,
+                            skipped_space_after_arg,
+                            line,
+                            p,
+                        );
                     }
                     i = p;
                     continue;
@@ -2448,6 +2726,43 @@ fn strip_inline(line: &str, cite_numbers: &mut HashMap<String, usize>) -> String
     out
 }
 
+fn push_space_if_source_had_visible_gap(
+    out: &mut String,
+    skipped_space_after_arg: bool,
+    line: &str,
+    next_pos: usize,
+) {
+    if !skipped_space_after_arg || out.ends_with(char::is_whitespace) {
+        return;
+    }
+    let Some(next) = line[next_pos..].chars().next() else {
+        return;
+    };
+    if matches!(
+        next,
+        ',' | '.'
+            | ';'
+            | ':'
+            | '!'
+            | '?'
+            | ')'
+            | ']'
+            | '}'
+            | '，'
+            | '。'
+            | '；'
+            | '：'
+            | '！'
+            | '？'
+            | '）'
+            | '】'
+            | '、'
+    ) {
+        return;
+    }
+    out.push(' ');
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2460,6 +2775,75 @@ mod tests {
         let doc = lower_to_document(&p, None);
         assert!(matches!(doc.blocks[0], Block::Heading { level: 1, .. }));
         assert!(matches!(doc.blocks[1], Block::Paragraph { .. }));
+    }
+
+    #[test]
+    fn lower_theorem_like_environments() {
+        let src = "\\begin{theorem}[Bound]\\label{t:a}\nBody $x$.\n\\end{theorem}\n\\begin{proof}\nProof text.\n\\end{proof}\n\\begin{proposition}\nProp text.\n\\end{proposition}\n";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        assert_eq!(doc.blocks.len(), 3);
+        assert!(matches!(
+            &doc.blocks[0],
+            Block::TheoremLike {
+                kind: TheoremLikeKind::Theorem,
+                body,
+                ..
+            } if body.contains("Body x.")
+        ));
+        assert!(matches!(
+            &doc.blocks[1],
+            Block::TheoremLike {
+                kind: TheoremLikeKind::Proof,
+                body,
+                ..
+            } if body == "Proof text."
+        ));
+        assert!(matches!(
+            &doc.blocks[2],
+            Block::TheoremLike {
+                kind: TheoremLikeKind::Proposition,
+                body,
+                ..
+            } if body == "Prop text."
+        ));
+    }
+
+    #[test]
+    fn lower_theorem_like_normalizes_math() {
+        let src = "\\begin{theorem}\nFor $\\mathrm{Score}(u,t)\\in[0,1]$ and $\\alpha_i+\\lambda=1$.\n\\end{theorem}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::TheoremLike { body, .. } => {
+                assert!(body.contains("Score"));
+                assert!(body.contains("α"));
+                assert!(body.contains("λ"));
+                assert!(!body.contains("\\mathrm"));
+                assert!(!body.contains("\\alpha"));
+                assert!(!body.contains("\\lambda"));
+                assert!(!body.contains('_'));
+            }
+            _ => panic!("expected theorem-like"),
+        }
+    }
+
+    #[test]
+    fn lower_to_standard_document_entrypoint() {
+        let src = "\\section{Intro}\n\nHello.";
+        let p = parse(src);
+        let standard = lower_to_standard_document(
+            &p,
+            None,
+            SourceBundle {
+                main_path: "main.tex".to_string(),
+                files: vec![],
+            },
+            "jos-2025",
+        );
+        assert_eq!(standard.profile.id, "jos-2025");
+        assert_eq!(standard.blocks.len(), 2);
+        assert_eq!(standard.blocks[0].kind_name(), "heading");
     }
 
     #[test]
@@ -2482,6 +2866,41 @@ mod tests {
     }
 
     #[test]
+    fn lower_blank_line_splits_paragraphs() {
+        let src = "\\section{Intro}\n\nfirst paragraph\n\nsecond paragraph";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        let para_count = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Paragraph { .. }))
+            .count();
+
+        assert_eq!(para_count, 2);
+    }
+
+    #[test]
+    fn lower_jos_front_matter_commands_do_not_duplicate_body_blocks() {
+        let src = "\\begin{rjabstract}\n摘要正文\n\\end{rjabstract}\n\\rjkeywords{关键词}\n\\section{Intro}\n正文";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        let text = doc
+            .blocks
+            .iter()
+            .filter_map(|b| match b {
+                Block::Paragraph { runs, .. } => {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(!text.contains("摘  要"));
+        assert!(!text.contains("关键词"));
+    }
+
+    #[test]
     fn lower_itemize() {
         let src = "\\begin{itemize}\n\\item alpha\n\\item beta\n\\end{itemize}";
         let p = parse(src);
@@ -2492,6 +2911,37 @@ mod tests {
             } => {
                 assert!(!is_ordered);
                 assert_eq!(items.len(), 2);
+            }
+            _ => panic!("expected list"),
+        }
+    }
+
+    #[test]
+    fn lower_description_keeps_reference_labels_in_items() {
+        let src = "\\begin{description}[font=\\normalfont]\n\\item[{[5]}] 冯志勇. 题名.\n\\item[{[6]}] 吴化尧. 题名.\n\\end{description}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::List { items, .. } => {
+                assert_eq!(items.len(), 2);
+                let item_text = |blocks: &[Block]| -> String {
+                    blocks
+                        .iter()
+                        .filter_map(|b| match b {
+                            Block::Paragraph { runs, .. } => {
+                                Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                            }
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                        .join(" ")
+                };
+                let first = item_text(&items[0]);
+                let second = item_text(&items[1]);
+                assert!(first.contains("[5]"));
+                assert!(first.contains("冯志勇"));
+                assert!(second.contains("[6]"));
+                assert!(second.contains("吴化尧"));
             }
             _ => panic!("expected list"),
         }
@@ -2784,7 +3234,7 @@ mod tests {
 
     #[test]
     fn lower_cite_comma_separated() {
-        // \cite{key1,key2} → [n1,n2]
+        // \cite{key1,key2} → [n1-n2]
         let src = "See \\cite{smith2020,jones2019} for details.";
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
@@ -2801,8 +3251,8 @@ mod tests {
             })
             .collect();
         assert!(
-            text.contains("[1,2]") || (text.contains("[1]") && text.contains("[2]")),
-            "expected comma-separated cite numbers, got: {}",
+            text.contains("[1-2]") || (text.contains("[1]") && text.contains("[2]")),
+            "expected compressed cite numbers, got: {}",
             text
         );
     }
@@ -2831,6 +3281,166 @@ mod tests {
             "got: {}",
             text
         );
+    }
+
+    #[test]
+    fn lower_cite_uses_external_bbl_order_and_superscript_runs() {
+        let src = "See \\cite{smith2020,jones2019} for details.";
+        let p = parse(src);
+        let mut cite_map = HashMap::new();
+        cite_map.insert("smith2020".to_string(), 5);
+        cite_map.insert("jones2019".to_string(), 2);
+        let doc = lower_to_document_with_cite_map(&p, None, &cite_map);
+        let runs = doc
+            .blocks
+            .iter()
+            .find_map(|b| {
+                if let Block::Paragraph { runs, .. } = b {
+                    Some(runs)
+                } else {
+                    None
+                }
+            })
+            .expect("paragraph runs");
+        let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+        assert!(
+            text.contains("[2,5]"),
+            "expected bbl-numbered cite keys, got: {text}"
+        );
+        assert!(
+            runs.iter()
+                .any(|r| r.text == "[2,5]" && r.style == TextStyle::Superscript),
+            "expected citation run to be superscript, got: {runs:?}"
+        );
+    }
+
+    #[test]
+    fn strip_inline_preserves_explicit_space_after_cite() {
+        let mut cite_map = HashMap::from([("qi2023loggpt".to_string(), 32usize)]);
+        let label_map = HashMap::new();
+
+        let spaced = strip_inline(
+            "LogGPT\\cite{qi2023loggpt} 利用 GPT 模型",
+            &mut cite_map,
+            &label_map,
+        );
+        assert!(
+            spaced.contains("[32] 利用"),
+            "expected explicit source space after cite, got: {spaced}"
+        );
+
+        let punct = strip_inline(
+            "LogGPT\\cite{qi2023loggpt}, then",
+            &mut cite_map,
+            &label_map,
+        );
+        assert!(
+            punct.contains("[32], then"),
+            "expected no extra space before punctuation, got: {punct}"
+        );
+    }
+
+    #[test]
+    fn strip_inline_preserves_explicit_space_after_ref() {
+        let mut cite_map = HashMap::new();
+        let label_map = HashMap::from([("tab:related_compare".to_string(), "1".to_string())]);
+        let text = strip_inline(
+            "表~\\ref{tab:related_compare} 从策略输入维度对比。",
+            &mut cite_map,
+            &label_map,
+        );
+
+        assert!(
+            text.contains("~1 从"),
+            "expected explicit source space after ref, got: {text}"
+        );
+    }
+
+    #[test]
+    fn lower_table_cite_uses_external_bbl_order() {
+        let src = "\\begin{table}\n\\begin{tabular}{cc}\n\
+方案 & OTel 尾部采样\\cite{otel} \\\\\n\
+\\end{tabular}\n\\end{table}";
+        let p = parse(src);
+        let cite_map = HashMap::from([("otel".to_string(), 18usize)]);
+        let doc = lower_to_document_with_cite_map(&p, None, &cite_map);
+        let text: String = doc
+            .blocks
+            .iter()
+            .flat_map(|b| {
+                if let Block::Table { rows, .. } = b {
+                    rows.iter()
+                        .flat_map(|row| &row.cells)
+                        .flat_map(|cell| &cell.runs)
+                        .map(|run| run.text.as_str())
+                        .collect::<Vec<_>>()
+                } else {
+                    Vec::new()
+                }
+            })
+            .collect();
+        assert!(
+            text.contains("[18]"),
+            "expected bbl cite in table, got: {text}"
+        );
+        assert!(
+            !text.contains("[1]"),
+            "table cite fell back to local order: {text}"
+        );
+    }
+
+    #[test]
+    fn lower_ref_replaces_labels_from_collect_pass() {
+        let src = "见图~\\ref{fig:a}，式~\\ref{eq:e}。\n\n\
+\\begin{figure}\n\\includegraphics{x.png}\n\\caption{A}\\label{fig:a}\n\\end{figure}\n\n\
+\\begin{equation}\nx=1\\label{eq:e}\n\\end{equation}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        let text: String = doc
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                if let Block::Paragraph { runs, .. } = b {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(text.contains("图 1"), "expected figure ref, got: {text}");
+        assert!(
+            text.contains("式 (1)"),
+            "expected equation ref, got: {text}"
+        );
+        assert!(!text.contains("fig:a"), "figure label leaked: {text}");
+        assert!(!text.contains("eq:e"), "equation label leaked: {text}");
+    }
+
+    #[test]
+    fn lower_thin_space_unit_does_not_leave_comma() {
+        let src = "实验持续 180\\,s，全量间隔 400\\,ms。";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        let text: String = doc
+            .blocks
+            .iter()
+            .filter_map(|b| {
+                if let Block::Paragraph { runs, .. } = b {
+                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        assert!(
+            text.contains("180 s"),
+            "expected thin space unit, got: {text}"
+        );
+        assert!(
+            text.contains("400 ms"),
+            "expected thin space unit, got: {text}"
+        );
+        assert!(!text.contains("180,s"), "thin space became comma: {text}");
     }
 
     #[test]
@@ -2904,6 +3514,19 @@ mod tests {
             from_meta,
             from_blocks
         );
+    }
+
+    #[test]
+    fn lower_front_matter_abstract_normalizes_math() {
+        let src = "\\newcommand{\\AbstractContentZh}{减量 $25.9\\% \\pm 0.9\\%$，权重 $\\gamma+\\delta$。}";
+        let p = parse(src);
+        let mut macros = crate::expand::MacroMap::new();
+        let doc = lower_with_macros(&p, None, &mut macros);
+        let abstract_text = doc.metadata.abstract_text.unwrap_or_default();
+        assert!(abstract_text.contains("±"), "got: {abstract_text}");
+        assert!(abstract_text.contains("γ+δ"), "got: {abstract_text}");
+        assert!(!abstract_text.contains("\\pm"), "got: {abstract_text}");
+        assert!(!abstract_text.contains("\\gamma"), "got: {abstract_text}");
     }
 
     #[test]
@@ -3123,5 +3746,52 @@ mod tests {
             .collect();
         assert_eq!(tbls[0], Some("表 1".to_string()));
         assert_eq!(tbls[1], Some("表 2".to_string()));
+    }
+
+    #[test]
+    fn lower_table_extracts_inner_tabular_from_wrappers() {
+        let src = "\\begin{table}[H]\n  \\centering\n  \\small\n  \\caption{技术选型}\\label{tab:tech}\n  \\begin{tabular*}{\\textwidth}{@{\\extracolsep{\\fill}}ll}\n    \\toprule\n    模块 & 技术 \\\\\n    \\midrule\n    Agent & Go 1.22 \\\\\n    \\bottomrule\n  \\end{tabular*}\n\\end{table}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::Table {
+                rows,
+                caption,
+                number,
+                ..
+            } => {
+                assert_eq!(caption.as_deref(), Some("技术选型"));
+                assert_eq!(number.as_deref(), Some("表 1"));
+                let flattened = rows
+                    .iter()
+                    .flat_map(|row| &row.cells)
+                    .flat_map(|cell| &cell.runs)
+                    .map(|run| run.text.as_str())
+                    .collect::<String>();
+                assert!(flattened.contains("模块"));
+                assert!(flattened.contains("Go 1.22"));
+                assert!(!flattened.contains("tab:tech"));
+                assert!(!flattened.contains("extracolsep"));
+                assert!(!flattened.contains("textwidth"));
+                assert!(!flattened.contains("caption"));
+            }
+            _ => panic!("expected table"),
+        }
+    }
+
+    #[test]
+    fn lower_table_extracts_tabular_inside_resizebox() {
+        let src = "\\begin{table}[H]\n\\caption{对比}\\label{tab:cmp}\n\\resizebox{\\textwidth}{!}{%\n\\begin{tabular}{ll}\nA & B \\\\\nC & D \\\\\n\\end{tabular}%\n}\n\\end{table}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::Table { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].cells.len(), 2);
+                assert_eq!(rows[0].cells[0].runs[0].text, "A");
+                assert_eq!(rows[0].cells[1].runs[0].text, "B");
+            }
+            _ => panic!("expected table"),
+        }
     }
 }

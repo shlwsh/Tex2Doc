@@ -38,7 +38,11 @@ fn paper3_front_matter_smoke() {
 
     // 2. parse_bbl
     let (cite_map, refs) = parse_bbl(&bbl);
-    eprintln!("---- bbl cite_map size = {}, refs = {} ----", cite_map.len(), refs.len());
+    eprintln!(
+        "---- bbl cite_map size = {}, refs = {} ----",
+        cite_map.len(),
+        refs.len()
+    );
     for (i, r) in refs.iter().take(3).enumerate() {
         eprintln!("  [{}] key={} text.len={}", i + 1, r.key, r.text.len());
     }
@@ -46,8 +50,8 @@ fn paper3_front_matter_smoke() {
     // 3. extract_front_matter
     let mut vfs = VirtualFs::new();
     vfs.mount_dir(Path::new(latex_dir)).expect("mount");
-    let graph = doc_latex_reader::IncludeGraph::build(&vfs, Path::new("main-jos.tex"))
-        .expect("graph");
+    let graph =
+        doc_latex_reader::IncludeGraph::build(&vfs, Path::new("main-jos.tex")).expect("graph");
     let joined = graph.join(&vfs).expect("join");
     let expanded_main = &joined.text;
 
@@ -56,12 +60,18 @@ fn paper3_front_matter_smoke() {
     eprintln!("title_zh      = {}", fm.title_zh);
     eprintln!("authors_zh    = {}", fm.authors_zh);
     eprintln!("institute     = {:?}", fm.institute_lines);
-    eprintln!("abstract_zh   = {}", fm.abstract_zh.chars().take(80).collect::<String>());
+    eprintln!(
+        "abstract_zh   = {}",
+        fm.abstract_zh.chars().take(80).collect::<String>()
+    );
     eprintln!("keywords_zh   = {}", fm.keywords_zh);
     eprintln!("title_en      = {}", fm.title_en);
     eprintln!("authors_en    = {}", fm.authors_en);
     eprintln!("institute_en  = {}", fm.institute_en);
-    eprintln!("abstract_en   = {}", fm.abstract_en.chars().take(80).collect::<String>());
+    eprintln!(
+        "abstract_en   = {}",
+        fm.abstract_en.chars().take(80).collect::<String>()
+    );
     eprintln!("keywords_en   = {}", fm.keywords_en);
     eprintln!("running_header= {}", fm.running_header);
     eprintln!("author_bio    = {} items", fm.author_bio.len());

@@ -623,12 +623,16 @@ name = "doc-engine"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "blake3",
  "clap",
  "doc-core",
  "doc-docx-pdf",
  "doc-docx-writer",
+ "doc-latex-reader",
  "doc-quality",
+ "doc-semantic-ast",
  "doc-tex-facade",
+ "doc-utils",
  "serde",
  "serde_json",
  "tempfile",

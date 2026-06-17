@@ -212,8 +212,7 @@ pub fn expand_macros_with_input(
                     if let Some(content) = resolve_vfs_file(vfs, file_body) {
                         // Recursively expand this file's content (collect macros but don't emit yet)
                         let sub_macros = &mut MacroMap::new();
-                        let sub_text =
-                            expand_macros_in_impl(&content, sub_macros);
+                        let sub_text = expand_macros_in_impl(&content, sub_macros);
                         // Merge sub_macros into main macros
                         macros.extend(std::mem::take(&mut sub_macros.defs));
                         // Append expanded sub-text
@@ -252,10 +251,7 @@ pub fn expand_macros_with_input(
 /// 3. 相对 base_dir 的路径
 fn resolve_vfs_file(vfs: &doc_utils::VirtualFs, target: &str) -> Option<String> {
     // Try original + with .tex
-    let candidates = vec![
-        target.to_string(),
-        format!("{}.tex", target),
-    ];
+    let candidates = vec![target.to_string(), format!("{}.tex", target)];
     for cand in candidates {
         if let Ok(bytes) = vfs.read(&cand) {
             if let Ok(s) = std::str::from_utf8(bytes) {
@@ -337,7 +333,9 @@ fn parse_definition_end(text: &str, pos: usize, macros: &mut MacroMap) -> Option
             i += 1;
             continue;
         }
-        if b == b'{' { depth += 1; }
+        if b == b'{' {
+            depth += 1;
+        }
         if b == b'}' {
             depth -= 1;
             if depth == 0 {

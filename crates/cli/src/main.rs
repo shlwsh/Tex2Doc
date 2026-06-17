@@ -10,17 +10,24 @@
 //! - `verify-pdf`      — V2 路径 C（结构 / 文本 / 视觉 三层质量对比 + 报告）
 //! - `build`           — 一键串联：tex-compile → doc-core convert → docx-to-pdf → verify-pdf
 
+mod ast_dump;
 mod cmd;
-mod pdf_verify;
-mod tex_compile;
 mod docx2pdf;
+mod docx_diff;
+mod pdf_verify;
+mod render_dump;
+mod tex_compile;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(name = "doc-engine", version, about = "Doc-engine CLI (V2 Tex2Doc engine)")]
+#[command(
+    name = "doc-engine",
+    version,
+    about = "Doc-engine CLI (V2 Tex2Doc engine)"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -38,6 +45,12 @@ enum Cmd {
     VerifyPdf(pdf_verify::VerifyPdfArgs),
     /// 一键：tex-compile → convert → docx-to-pdf → verify-pdf
     Build(cmd::BuildArgs),
+    /// 输出标准文档 AST（Markdown/JSON），用于人工核验 TeX 结构提炼结果
+    AstDump(ast_dump::AstDumpArgs),
+    /// 输出 DOCX 渲染树（Markdown/JSON），用于核验 AST 到 OOXML 的映射
+    RenderDump(render_dump::RenderDumpArgs),
+    /// 对比两个 DOCX 的内容、段落样式、run 格式与规范化 OOXML hash
+    DocxDiff(docx_diff::DocxDiffArgs),
 }
 
 fn main() -> Result<()> {
@@ -53,5 +66,8 @@ fn main() -> Result<()> {
         Cmd::DocxToPdf(a) => tokio::runtime::Runtime::new()?.block_on(docx2pdf::run(a)),
         Cmd::VerifyPdf(a) => tokio::runtime::Runtime::new()?.block_on(pdf_verify::run(a)),
         Cmd::Build(a) => cmd::run_build(a),
+        Cmd::AstDump(a) => ast_dump::run(a),
+        Cmd::RenderDump(a) => render_dump::run(a),
+        Cmd::DocxDiff(a) => docx_diff::run(a),
     }
 }

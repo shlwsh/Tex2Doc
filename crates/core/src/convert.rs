@@ -10,8 +10,10 @@
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use doc_latex_reader::{lower_to_document, parse_tex, IncludeGraph};
-use doc_semantic_ast::Document;
+use doc_latex_reader::{
+    lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_tex, IncludeGraph,
+};
+use doc_semantic_ast::{Block, Document, Span, TextRun, TextStyle};
 use doc_utils::{ImageAssets, VirtualFs};
 
 use crate::error::CoreError;
@@ -23,27 +25,15 @@ use crate::result::{ConvertResult, ProgressEvent, ProgressPhase};
 /// 把 `石 洪 雷 等:网关流量驱动的微服务定向日志采集框架`
 /// 缩短为「石 等:网关流量驱动的微服务定向日志采集框架」（不超过 50 字符）。
 fn shorten_running_header(rh: &str) -> String {
-    // Oracle 风格：rjhead 在 LaTeX 中虽然很长（"石 洪 雷 等:网关流量驱动的微服务定向日志采集框架"），
-    // 但渲染时仅取到 "等" 即止（fancyhdr LO 短边放不下全文）。
-    // 这里截断为 "石 洪 雷 等" 形式，避免页眉折行 3+ 次导致 PDF 总页数膨胀。
-    let clean = rh.trim();
-    if let Some(byte_pos) = clean.find("等") {
-        let chars_before: usize = clean[..byte_pos].chars().count();
-        let prefix: String = clean.chars().take(chars_before + 1).collect();
-        return prefix.trim().to_string();
-    }
-    let char_count = clean.chars().count();
-    if char_count > 50 {
-        return clean.chars().take(20).collect::<String>().trim_end().to_string();
-    }
-    clean.to_string()
+    rh.trim().to_string()
 }
 
 /// V1 设计：zip 内 `\includegraphics{*.pdf}` 时，docx-writer 端只接受 PNG/JPG，
 /// 所以这里把 PDF 翻译成 PNG byte 注入 image_assets（同 key）。
 fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
     use pdfium_render::prelude::Pdfium;
-    let pdfium = Pdfium::default();
+    let bindings = Pdfium::bind_to_system_library().ok()?;
+    let pdfium = Pdfium::new(bindings);
     let doc = pdfium.load_pdf_from_byte_slice(pdf_bytes, None).ok()?;
     let page = doc.pages().get(0).ok()?;
     let bitmap = page
@@ -54,9 +44,61 @@ fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
     let dyn_img = image::DynamicImage::ImageRgba8(buf);
     let mut png_bytes: Vec<u8> = Vec::new();
     dyn_img
-        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .write_to(
+            &mut std::io::Cursor::new(&mut png_bytes),
+            image::ImageFormat::Png,
+        )
         .ok()?;
     Some(png_bytes)
+}
+
+fn insert_image_asset_aliases(image_assets: &mut ImageAssets, path: &Path, bytes: Vec<u8>) {
+    let path_key = path.to_string_lossy().replace('\\', "/");
+    image_assets.insert(path_key.clone(), bytes.clone());
+    if let Some(basename) = path.file_name().and_then(|n| n.to_str()) {
+        if basename != path_key {
+            image_assets.insert(basename.to_string(), bytes);
+        }
+    }
+}
+
+fn png_basename_for_pdf(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|s| s.to_str())
+        .map(|stem| format!("{stem}.png"))
+}
+
+fn collect_image_assets_from_dir(dir: &Path, image_assets: &mut ImageAssets) {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(current) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&current) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+
+            let p_lower = path.to_string_lossy().to_lowercase();
+            if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".jpeg")
+            {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    insert_image_asset_aliases(image_assets, &path, bytes);
+                }
+            } else if p_lower.ends_with(".pdf") {
+                if let Ok(bytes) = std::fs::read(&path) {
+                    if let Some(png) = render_pdf_to_png(&bytes) {
+                        insert_image_asset_aliases(image_assets, &path, png.clone());
+                        if let Some(png_basename) = png_basename_for_pdf(&path) {
+                            image_assets.insert(png_basename, png);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// 同步转换入口（V1 M1-M2）。
@@ -96,16 +138,29 @@ pub fn convert_dir(
     vfs.mount_dir(project_root)
         .map_err(|e| CoreError::Io(e.to_string()))?;
 
-    // Collect PNG/JPEG image assets from VFS
+    // Collect image assets from VFS. Directory conversion must mirror zip conversion:
+    // paper3 stores figures as PDF, while docx-writer embeds raster bytes.
     let mut image_assets = ImageAssets::new();
     for path in vfs.paths() {
         let p_str = path.to_string_lossy();
         let p_lower = p_str.to_lowercase();
         if p_lower.ends_with(".png") || p_lower.ends_with(".jpg") || p_lower.ends_with(".jpeg") {
             if let Ok(bytes) = vfs.read(path) {
-                image_assets.insert(p_str.to_string(), bytes.to_vec());
+                insert_image_asset_aliases(&mut image_assets, path, bytes.to_vec());
+            }
+        } else if p_lower.ends_with(".pdf") {
+            if let Ok(bytes) = vfs.read(path) {
+                if let Some(png) = render_pdf_to_png(bytes) {
+                    insert_image_asset_aliases(&mut image_assets, path, png.clone());
+                    if let Some(png_basename) = png_basename_for_pdf(path) {
+                        image_assets.insert(png_basename, png);
+                    }
+                }
             }
         }
+    }
+    if let Some(parent) = project_root.parent() {
+        collect_image_assets_from_dir(&parent.join("figures"), &mut image_assets);
     }
 
     let main_rel = relative_to_root(project_root, main_tex)?;
@@ -117,14 +172,17 @@ pub fn convert_dir(
     let source = String::from_utf8(source_bytes)
         .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
 
-    let mut doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
+    let doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
     // V2：把 doc.metadata.running_header / first_footer_text 自动回填到
     // page_setup 的 header_text / first_footer_text（仅当 caller 没显式传）。
     let mut ps_owned: Option<doc_docx_writer::PageSetup> = None;
     {
         let meta = &doc.metadata;
         let mut changed = false;
-        let mut ps_eff = options.page_setup.clone().unwrap_or_default();
+        let mut ps_eff = options
+            .page_setup
+            .clone()
+            .unwrap_or_else(doc_docx_writer::PageSetup::jos_paper3);
         if ps_eff.header_text.is_none() {
             if let Some(rh) = &meta.running_header {
                 if !rh.is_empty() {
@@ -142,13 +200,7 @@ pub fn convert_dir(
             }
         }
         if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
-            let first_h = "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
-                           Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
-                           © 中国科学院软件研究所版权所有.\n\
-                           E-mail: jos@iscas.ac.cn\n\
-                           http://www.jos.org.cn\n\
-                           Tel: +86-10-62562563"
-                .to_string();
+            let first_h = "Journal of Software 软件学报".to_string();
             ps_eff.first_header_text = Some(first_h);
             changed = true;
         }
@@ -258,7 +310,9 @@ pub fn convert_zip(
     );
     tracing::debug!(
         "[doc-core] has abstract: {}",
-        entries.keys().any(|p| p.to_string_lossy().contains("00_abstract"))
+        entries
+            .keys()
+            .any(|p| p.to_string_lossy().contains("00_abstract"))
     );
     tracing::debug!(
         "[doc-core] parsed_doc has {} blocks",
@@ -276,6 +330,7 @@ pub fn convert_zip(
                 doc_semantic_ast::Block::Table { .. } => "T",
                 doc_semantic_ast::Block::List { .. } => "L",
                 doc_semantic_ast::Block::Equation { .. } => "E",
+                doc_semantic_ast::Block::TheoremLike { .. } => "M",
                 doc_semantic_ast::Block::Bibliography { .. } => "B",
                 doc_semantic_ast::Block::Algorithm { .. } => "A",
                 doc_semantic_ast::Block::RawFallback { .. } => "R",
@@ -283,14 +338,17 @@ pub fn convert_zip(
             .collect::<Vec<_>>()
             .join("")
     );
-    let mut doc = parsed_doc;
+    let doc = parsed_doc;
     // V2：把 doc.metadata.running_header / first_footer_text 自动回填到
     // page_setup 的 header_text / first_footer_text（仅当 caller 没显式传）。
     let mut ps_owned: Option<doc_docx_writer::PageSetup> = None;
     {
         let meta = &doc.metadata;
         let mut changed = false;
-        let mut ps_eff = options.page_setup.clone().unwrap_or_default();
+        let mut ps_eff = options
+            .page_setup
+            .clone()
+            .unwrap_or_else(doc_docx_writer::PageSetup::jos_paper3);
         if ps_eff.header_text.is_none() {
             if let Some(rh) = &meta.running_header {
                 if !rh.is_empty() {
@@ -308,13 +366,7 @@ pub fn convert_zip(
             }
         }
         if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
-            let first_h = "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
-                           Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
-                           © 中国科学院软件研究所版权所有.\n\
-                           E-mail: jos@iscas.ac.cn\n\
-                           http://www.jos.org.cn\n\
-                           Tel: +86-10-62562563"
-                .to_string();
+            let first_h = "Journal of Software 软件学报".to_string();
             ps_eff.first_header_text = Some(first_h);
             changed = true;
         }
@@ -383,7 +435,59 @@ fn parse_tex_with_vfs(
     let graph = IncludeGraph::build(vfs, Path::new(main_tex))?;
     let joined = graph.join(vfs)?;
     let parse = parse_tex(&joined.text);
+    let bbl_path = Path::new(main_tex).with_extension("bbl");
+    if let Ok(bytes) = vfs.read(&bbl_path) {
+        if let Ok(raw_bbl) = std::str::from_utf8(bytes) {
+            let (cite_map, refs) = parse_bbl(raw_bbl);
+            if !cite_map.is_empty() {
+                let mut doc = lower_to_document_with_cite_map(&parse, Some(&joined), &cite_map);
+                append_bibliography_paragraphs(&mut doc, &refs);
+                return Ok(doc);
+            }
+        }
+    }
     Ok(lower_to_document(&parse, Some(&joined)))
+}
+
+fn append_bibliography_paragraphs(
+    doc: &mut Document,
+    refs: &[doc_latex_reader::latex_to_text::BibItem],
+) {
+    if refs.is_empty() {
+        return;
+    }
+    let blocks = refs
+        .iter()
+        .enumerate()
+        .map(|(idx, item)| Block::Paragraph {
+            runs: vec![TextRun {
+                text: format!("[{}] {}", idx + 1, item.text),
+                style: TextStyle::Plain,
+                span: Span::default(),
+            }],
+            span: Span::default(),
+        })
+        .collect::<Vec<_>>();
+
+    let insert_at = doc
+        .blocks
+        .iter()
+        .position(|block| match block {
+            Block::Paragraph { runs, .. } => {
+                runs.iter()
+                    .map(|r| r.text.as_str())
+                    .collect::<String>()
+                    .trim()
+                    == "References"
+            }
+            _ => false,
+        })
+        .map(|idx| idx + 1)
+        .unwrap_or(doc.blocks.len());
+
+    for (offset, block) in blocks.into_iter().enumerate() {
+        doc.blocks.insert(insert_at + offset, block);
+    }
 }
 
 fn relative_to_root(root: &Path, p: &Path) -> Result<PathBuf, CoreError> {

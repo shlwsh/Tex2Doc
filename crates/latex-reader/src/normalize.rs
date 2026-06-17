@@ -87,7 +87,10 @@ pub fn latex_to_text(
     s = replace_inline_math(&s);
     // 10. \footnote{...} → "（注：内容）"
     s = replace_command_arg(&s, "footnote", |inner| {
-        format!("（注：{}）", latex_to_text(inner, cite_map, label_map).join_plain())
+        format!(
+            "（注：{}）",
+            latex_to_text(inner, cite_map, label_map).join_plain()
+        )
     });
     // 11. 文本装饰命令：\textbf/\textit/\emph/\url/\nolinkurl/\texttt/\mathrm/\rjrare
     // V2：用 sentinel（\u{0001}B/\u{0001}I/\u{0001}T）包裹，split_runs_with_sup_sub 之后
@@ -416,7 +419,11 @@ pub fn replace_command_arg<F: Fn(&str) -> String>(text: &str, command: &str, f: 
 
 fn replace_cite(text: &str, cite_map: &HashMap<String, usize>) -> String {
     replace_command_arg(text, "cite", |inner| {
-        let keys: Vec<&str> = inner.split(',').map(str::trim).filter(|s| !s.is_empty()).collect();
+        let keys: Vec<&str> = inner
+            .split(',')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .collect();
         let numbers: Vec<usize> = keys
             .iter()
             .filter_map(|k| cite_map.get(*k).copied())
@@ -430,7 +437,10 @@ fn replace_cite(text: &str, cite_map: &HashMap<String, usize>) -> String {
 
 fn replace_ref(text: &str, label_map: &HashMap<String, String>) -> String {
     replace_command_arg(text, "ref", |inner| {
-        label_map.get(inner).cloned().unwrap_or_else(|| "??".to_string())
+        label_map
+            .get(inner)
+            .cloned()
+            .unwrap_or_else(|| "??".to_string())
     })
 }
 
@@ -546,7 +556,10 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\,", " ");
     s = s.replace('~', " ");
     // 2. \mathrm/\textbf/\textit 内的内容原样保留
-    for cmd in ["mathrm", "textbf", "textit", "text", "mathbf", "mathit"] {
+    for cmd in [
+        "mathrm", "textbf", "textit", "text", "mathbf", "mathit", "mathcal", "mathbb", "mathsf",
+        "mathtt",
+    ] {
         s = replace_command_arg(&s, cmd, |inner| inner.to_string());
     }
     // 3. 标准符号替换（Unicode 化，源仍是纯 ASCII，s.replace 安全）
@@ -563,8 +576,21 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\emptyset", "\u{2205}");
     s = s.replace("\\alpha", "\u{03B1}");
     s = s.replace("\\beta", "\u{03B2}");
+    s = s.replace("\\gamma", "\u{03B3}");
+    s = s.replace("\\delta", "\u{03B4}");
+    s = s.replace("\\epsilon", "\u{03B5}");
+    s = s.replace("\\varepsilon", "\u{03B5}");
+    s = s.replace("\\lambda", "\u{03BB}");
+    s = s.replace("\\theta", "\u{03B8}");
+    s = s.replace("\\mu", "\u{03BC}");
+    s = s.replace("\\pi", "\u{03C0}");
     s = s.replace("\\rho", "\u{03C1}");
+    s = s.replace("\\sigma", "\u{03C3}");
+    s = s.replace("\\tau", "\u{03C4}");
+    s = s.replace("\\phi", "\u{03C6}");
+    s = s.replace("\\varphi", "\u{03C6}");
     s = s.replace("\\xi", "\u{03BE}");
+    s = s.replace("\\omega", "\u{03C9}");
     s = s.replace("\\ldots", "\u{2026}");
     s = s.replace("\\dots", "\u{2026}");
     s = s.replace("\\in", "\u{2208}");
@@ -651,7 +677,9 @@ fn strip_balanced_braces(text: &str) -> String {
 fn strip_math_command_names(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
-    let exceptions = ["log", "min", "max", "exp", "sin", "cos", "tan", "ln", "gcd", "mod"];
+    let exceptions = [
+        "log", "min", "max", "exp", "sin", "cos", "tan", "ln", "gcd", "mod",
+    ];
     while i < text.len() {
         // 关键：扫描 UTF-8 多字节字符串时必须以 char 边界为单位
         if !text.is_char_boundary(i) {
@@ -668,7 +696,9 @@ fn strip_math_command_names(text: &str) -> String {
             if name_len > 0 {
                 let name = &rest[..name_len];
                 if exceptions.contains(&name) {
-                    out.push('\\');
+                    if math_function_needs_leading_space(&out) {
+                        out.push(' ');
+                    }
                     out.push_str(name);
                 } else {
                     // 普通命令：保留字母
@@ -686,6 +716,12 @@ fn strip_math_command_names(text: &str) -> String {
         }
     }
     out
+}
+
+fn math_function_needs_leading_space(out: &str) -> bool {
+    out.chars()
+        .next_back()
+        .is_some_and(|ch| ch.is_ascii_alphanumeric() || matches!(ch, ')' | ']' | '}'))
 }
 
 // ─── helper：item[label] / item 去除 ────────────────────────────────────────
@@ -933,7 +969,9 @@ pub fn split_runs_with_sup_sub(
             if i + 1 < len && text.is_char_boundary(i + 1) {
                 let style_char = text[i + 1..].chars().next().unwrap();
                 // 找匹配的 sentinel+style（end marker）
-                let end_marker: String = std::iter::once(0x01 as char).chain(std::iter::once(style_char)).collect();
+                let end_marker: String = std::iter::once(0x01 as char)
+                    .chain(std::iter::once(style_char))
+                    .collect();
                 if let Some(end_pos) = text[i + 2..].find(&end_marker) {
                     let end_abs = i + 2 + end_pos;
                     flush(&mut buf, &mut runs);
@@ -943,11 +981,12 @@ pub fn split_runs_with_sup_sub(
                         'I' => TextStyle::Italic,
                         'E' => TextStyle::Italic, // \emph 渲染为 italic
                         'T' => TextStyle::Code,
-                        'M' => TextStyle::Plain,   // \mathrm 视为 plain
+                        'M' => TextStyle::Plain, // \mathrm 视为 plain
                         _ => TextStyle::Plain,
                     };
                     // 内部可能含 sub/sup，进一步 split
-                    let inner_runs = split_runs_with_sup_sub(inner, enable_superscript, enable_subscript);
+                    let inner_runs =
+                        split_runs_with_sup_sub(inner, enable_superscript, enable_subscript);
                     for mut r in inner_runs.runs {
                         r.style = combine_styles(r.style, target_style);
                         runs.push(r);
@@ -1015,6 +1054,22 @@ pub fn split_runs_with_sup_sub(
                 }
             } else {
                 let ch = bytes[i + 1];
+                if ch.is_ascii_alphabetic() {
+                    let mut end = i + 1;
+                    while end < len && bytes[end].is_ascii_alphanumeric() {
+                        end += 1;
+                    }
+                    let word = &text[i + 1..end];
+                    if matches!(word, "max" | "min") {
+                        flush(&mut buf, &mut runs);
+                        runs.push(NormalizedRun {
+                            text: word.to_string(),
+                            style: TextStyle::Subscript,
+                        });
+                        i = end;
+                        continue;
+                    }
+                }
                 if ch.is_ascii_alphanumeric() {
                     // V2 启发式：若下标候选字符后紧跟另一个 ASCII 字母/数字，
                     // 这通常是 snake_case 代码（`network_mode`），不是下标。
@@ -1165,6 +1220,31 @@ mod tests {
     }
 
     #[test]
+    fn clean_math_common_greek_and_fonts() {
+        let out = clean_math("\\mathrm{Score}+\\gamma+\\delta+\\lambda+\\theta+\\mathcal{H}");
+        assert_eq!(out, "Score+γ+δ+λ+θ+H");
+    }
+
+    #[test]
+    fn clean_math_function_keeps_space_after_variable() {
+        let out = clean_math("O(N\\log N)+O(N+M\\log M)+O(M\\log K)");
+        assert_eq!(out, "O(N log N)+O(N+M log M)+O(M log K)");
+    }
+
+    #[test]
+    fn latex_to_text_math_function_subscript() {
+        let (cite, label) = empty();
+        let n = latex_to_text("$d_{\\max}+d_0$", &cite, &label);
+        let plain = n.join_plain();
+        assert_eq!(plain, "dmax+d0");
+        assert!(!plain.contains('_'), "got: {plain}");
+        assert!(n
+            .runs
+            .iter()
+            .any(|r| r.text == "max" && r.style == TextStyle::Subscript));
+    }
+
+    #[test]
     fn latex_to_text_cite() {
         let (mut cite, label) = empty();
         cite.insert("a".into(), 1);
@@ -1190,7 +1270,10 @@ mod tests {
         // `\\{` 是 LaTeX 对字面 `{` 的转义，clean_math 保留其语义 → 输出含 `{` `}`
         // `_1` 在 `split_runs_with_sup_sub` 阶段切为下标 run，"_" 自身是分隔符
         // 不出现在 plain 文本中。
-        assert!(n.runs.iter().any(|r| r.text == "1" && r.style == TextStyle::Subscript));
+        assert!(n
+            .runs
+            .iter()
+            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
         let plain = n.join_plain();
         assert!(plain.contains("L={l"), "got: {plain}");
         assert!(!plain.contains("\\"), "leaked backslash: {plain}");
@@ -1264,7 +1347,13 @@ mod tests {
     #[test]
     fn split_runs_sub() {
         let n = split_runs_with_sup_sub("l_1 and ^{10}", true, true);
-        assert!(n.runs.iter().any(|r| r.text == "1" && r.style == TextStyle::Subscript));
-        assert!(n.runs.iter().any(|r| r.text == "10" && r.style == TextStyle::Superscript));
+        assert!(n
+            .runs
+            .iter()
+            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
+        assert!(n
+            .runs
+            .iter()
+            .any(|r| r.text == "10" && r.style == TextStyle::Superscript));
     }
 }

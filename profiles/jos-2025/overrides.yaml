@@ -1,0 +1,22 @@
+schema_version: "0.1"
+profile_id: jos-2025
+overrides:
+  - id: jos-2025.figure.keep-with-caption
+    applies_to: map.figure.docx
+    fields:
+      keep_next: true
+      keep_lines: true
+  - id: jos-2025.table.open-horizontal-borders
+    applies_to: map.table.docx
+    fields:
+      left_border: nil
+      right_border: nil
+      inside_vertical: single
+      cant_split_rows: true
+  - id: jos-2025.algorithm.fixed-layout-table
+    applies_to: map.algorithm.docx
+    fields:
+      render_as: fixed_layout_table
+      include_line_numbers: true
+      include_comment_column: true
+      include_indent_guides: true

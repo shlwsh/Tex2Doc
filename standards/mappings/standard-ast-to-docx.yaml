@@ -1,0 +1,47 @@
+schema_version: "0.1"
+target_format: docx
+rules:
+  - id: map.heading.docx
+    source_ast_kind: Heading
+    target_render_node: Paragraph
+    style_from_profile: heading_by_level
+    validation:
+      required_text: true
+  - id: map.paragraph.docx
+    source_ast_kind: Paragraph
+    target_render_node: Paragraph
+    style_from_profile: body
+  - id: map.citation.docx
+    source_inline_kind: Citation
+    target_render_node: Run
+    run_properties:
+      vertical_align: superscript
+  - id: map.crossref.docx
+    source_inline_kind: CrossRef
+    target_render_node: Run
+  - id: map.figure.docx
+    source_ast_kind: Figure
+    target_render_node: Drawing
+    relationship_rule: opc.relationship.image
+    style_from_profile: figure
+    validation:
+      require_media: true
+      require_caption: true
+  - id: map.table.docx
+    source_ast_kind: Table
+    target_render_node: Table
+    style_from_profile: table
+  - id: map.algorithm.docx
+    source_ast_kind: Algorithm
+    target_render_node: Table
+    style_from_profile: algorithm
+    validation:
+      require_line_numbers: true
+  - id: map.equation.docx
+    source_ast_kind: Equation
+    target_render_node: MathOrCode
+    style_from_profile: equation
+  - id: map.bibliography.docx
+    source_ast_kind: Bibliography
+    target_render_node: ParagraphList
+    style_from_profile: reference

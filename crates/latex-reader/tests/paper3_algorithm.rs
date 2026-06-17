@@ -15,8 +15,8 @@ fn paper3_algorithms() {
     let latex_dir = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/paper3/latex");
     let mut vfs = VirtualFs::new();
     vfs.mount_dir(Path::new(latex_dir)).expect("mount");
-    let graph = doc_latex_reader::IncludeGraph::build(&vfs, Path::new("main-jos.tex"))
-        .expect("graph");
+    let graph =
+        doc_latex_reader::IncludeGraph::build(&vfs, Path::new("main-jos.tex")).expect("graph");
     let joined = graph.join(&vfs).expect("join");
     let parse = doc_latex_reader::parse_tex(&joined.text);
     let doc = doc_latex_reader::lower_to_document(&parse, Some(&joined));

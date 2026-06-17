@@ -1,5 +1,5 @@
 //! 端到端验证：把 `examples/paper3/latex/main-jos.tex` 转为 docx 并落到
-//! `examples/paper3/output/main-jos.docx`。
+//! `examples/paper3/output/main-jos-rust.docx`。
 //!
 //! 运行方式：
 //! ```text
@@ -13,7 +13,6 @@ use std::path::PathBuf;
 use std::time::Instant;
 
 use doc_core::{convert_dir, ConvertOptions};
-use doc_docx_writer::pack;
 use doc_latex_reader::{lower_to_document, parse_tex, IncludeGraph};
 use doc_semantic_ast::Block;
 use doc_utils::VirtualFs;
@@ -60,6 +59,27 @@ fn paper3_main_jos_to_docx() {
             "docx 包内未找到 {needle:?}"
         );
     }
+    let mut docx_zip =
+        zip::ZipArchive::new(std::io::Cursor::new(&result.docx)).expect("docx zip 可打开");
+    let media_count = docx_zip
+        .file_names()
+        .filter(|name| name.starts_with("word/media/"))
+        .count();
+    assert_eq!(media_count, 10, "paper3 应嵌入 10 张 figure 图片");
+    let rels = {
+        let mut rels_file = docx_zip
+            .by_name("word/_rels/document.xml.rels")
+            .expect("document.xml.rels 存在");
+        let mut s = String::new();
+        use std::io::Read;
+        rels_file.read_to_string(&mut s).expect("读取 rels");
+        s
+    };
+    assert_eq!(
+        rels.matches("relationships/image").count(),
+        10,
+        "paper3 应生成 10 个图片 relationship"
+    );
 
     // ===== 结构性 + 内容性断言：把"乱码"做成可回归的硬性检查 =====
     let mut vfs = VirtualFs::new();
@@ -69,53 +89,6 @@ fn paper3_main_jos_to_docx() {
     let joined = graph.join(&vfs).expect("include join");
     let parse = parse_tex(&joined.text);
     let doc = lower_to_document(&parse, Some(&joined));
-    // V2：和 convert_dir 路径完全对齐——rebuild 同源 page_setup (含 metadata 回填)
-    //     再 pack_with_page_setup。
-    let mut page_setup = opts.page_setup.clone().unwrap_or_default();
-    {
-        let meta = &doc.metadata;
-        if page_setup.header_text.is_none() {
-            if let Some(rh) = &meta.running_header {
-                if !rh.is_empty() {
-                    page_setup.header_text = Some(rh.clone());
-                }
-            }
-        }
-        if page_setup.first_footer_text.is_none() {
-            if let Some(ff) = &meta.first_footer_text {
-                if !ff.is_empty() {
-                    page_setup.first_footer_text = Some(ff.clone());
-                }
-            }
-        }
-        if page_setup.first_header_text.is_none() && page_setup.header_text.is_some() {
-            page_setup.first_header_text = Some(
-                "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
-                 Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
-                 © 中国科学院软件研究所版权所有.\n\
-                 E-mail: jos@iscas.ac.cn\n\
-                 http://www.jos.org.cn\n\
-                 Tel: +86-10-62562563"
-                    .to_string(),
-            );
-        }
-        if page_setup.footer_text.is_none() {
-            page_setup.footer_text = Some("— {{PAGE}} —".to_string());
-        }
-    }
-    let docx_bytes_v2 = doc_docx_writer::pack_with_page_setup(
-        &doc,
-        opts.template_bytes.as_deref(),
-        None,
-        Some(&page_setup),
-    )
-    .expect("pack v2");
-
-    // 重新组装后的 docx 应当与原结果一致（同一源代码的两次转换等价）
-    // V0.2 调试：两次 pack 的 zip 元数据顺序/时间戳可能不同，仅做合理范围校验
-    let _docx_check = (&docx_bytes_v2, &result.docx);
-    let diff = (docx_bytes_v2.len() as i64 - result.docx.len() as i64).abs();
-    assert!(diff < 200, "两次 pack 字节数差异过大: {diff}");
 
     // 1) 块统计
     let mut para_count = 0usize;
@@ -131,7 +104,10 @@ fn paper3_main_jos_to_docx() {
                 para_count += 1;
                 // 调试：dump 每个 paragraph 的 plain text
                 let text: String = runs.iter().map(|r| r.text.clone()).collect();
-                eprintln!("  [P{para_count:3}] {}", text.chars().take(80).collect::<String>());
+                eprintln!(
+                    "  [P{para_count:3}] {}",
+                    text.chars().take(80).collect::<String>()
+                );
             }
             Block::List { .. } => list_count += 1,
             Block::Equation { .. } => eq_count += 1,
@@ -140,7 +116,12 @@ fn paper3_main_jos_to_docx() {
                 eprintln!("  [FIG] path={path:?}");
             }
             Block::Table { .. } => tbl_count += 1,
-            Block::Heading { text, number, level, .. } => {
+            Block::Heading {
+                text,
+                number,
+                level,
+                ..
+            } => {
                 heading_count += 1;
                 if let Some(n) = number {
                     eprintln!("  [H{level}] {n} {text}");
@@ -283,7 +264,7 @@ fn paper3_main_jos_to_docx() {
     }
 
     std::fs::create_dir_all(&out_dir).expect("创建输出目录失败");
-    let out_file = out_dir.join("main-jos.docx");
+    let out_file = out_dir.join("main-jos-rust.docx");
     std::fs::write(&out_file, &result.docx).expect("写出 docx 失败");
 
     let size = result.docx.len();

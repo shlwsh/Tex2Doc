@@ -161,22 +161,13 @@ pub struct JoinedStream {
 }
 
 impl IncludeGraph {
-    /// 按拓扑序拼接所有源文件为单流。
+    /// 按主文件中的 `\input` / `\include` 位置原位展开为单流。
     pub fn join(&self, vfs: &VirtualFs) -> DocResult<JoinedStream> {
-        let order = self.topo_order()?;
         let mut text = String::new();
         let mut map = Vec::new();
-        for id in order {
-            let path = &self.sources[id.0 as usize];
-            let body = vfs.read(path)?;
-            let s = std::str::from_utf8(body)
-                .map_err(|e| DocError::InvalidPath(format!("非 UTF-8 {}: {e}", path.display())))?;
-            text.push_str(s);
-            for _ in 0..s.len() {
-                map.push(id);
-            }
-            text.push('\n');
-            map.push(id);
+        if let Some(main) = self.sources.first() {
+            let mut stack = Vec::new();
+            self.append_file_inline(vfs, main, &mut stack, &mut text, &mut map)?;
         }
         Ok(JoinedStream {
             text,
@@ -184,6 +175,116 @@ impl IncludeGraph {
             vfs: vfs.clone(),
         })
     }
+
+    fn append_file_inline(
+        &self,
+        vfs: &VirtualFs,
+        path: &Path,
+        stack: &mut Vec<PathBuf>,
+        text: &mut String,
+        map: &mut Vec<SourceId>,
+    ) -> DocResult<()> {
+        let path = normalize(path);
+        if stack.contains(&path) {
+            return Err(IncludeError::Cycle(stack.clone()).into());
+        }
+        let id = *self
+            .by_path
+            .get(&path)
+            .ok_or_else(|| IncludeError::NotFound(path.clone()))?;
+        stack.push(path.clone());
+
+        let body = vfs.read(&path)?;
+        let s = std::str::from_utf8(body)
+            .map_err(|e| DocError::InvalidPath(format!("非 UTF-8 {}: {e}", path.display())))?;
+        let mut cursor = 0usize;
+        while let Some(inc) = find_next_file_include(s, cursor) {
+            push_text_with_source(text, map, id, &s[cursor..inc.start]);
+
+            let mut resolver = PathResolver::new();
+            resolver.base_dir = path.parent().map(Path::to_path_buf);
+            resolver.graphics_paths = self.graphics_paths.clone();
+            let Some(hit) = resolver.resolve(vfs, &inc.target) else {
+                return Err(IncludeError::NotFound(PathBuf::from(&inc.target)).into());
+            };
+            self.append_file_inline(vfs, &hit, stack, text, map)?;
+            cursor = inc.end;
+        }
+        push_text_with_source(text, map, id, &s[cursor..]);
+        stack.pop();
+        Ok(())
+    }
+}
+
+struct IncludeCommand {
+    start: usize,
+    end: usize,
+    target: String,
+}
+
+fn push_text_with_source(text: &mut String, map: &mut Vec<SourceId>, id: SourceId, chunk: &str) {
+    text.push_str(chunk);
+    for _ in 0..chunk.len() {
+        map.push(id);
+    }
+}
+
+fn find_next_file_include(text: &str, from: usize) -> Option<IncludeCommand> {
+    let bytes = text.as_bytes();
+    let mut i = from;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+        let cmd_start = i + 1;
+        let mut j = cmd_start;
+        while j < bytes.len() && (bytes[j].is_ascii_alphabetic() || bytes[j] == b'@') {
+            j += 1;
+        }
+        if j == cmd_start {
+            i += 1;
+            continue;
+        }
+        let cmd = &text[cmd_start..j];
+        if !matches!(cmd, "include" | "input" | "subfile") {
+            i = j;
+            continue;
+        }
+        let mut k = j;
+        while k < bytes.len() && (bytes[k] == b' ' || bytes[k] == b'\t') {
+            k += 1;
+        }
+        if k >= bytes.len() || bytes[k] != b'{' {
+            i = j;
+            continue;
+        }
+        let mut depth = 1i32;
+        let body_start = k + 1;
+        let mut m = body_start;
+        while m < bytes.len() && depth > 0 {
+            match bytes[m] {
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                _ => {}
+            }
+            m += 1;
+        }
+        if depth != 0 {
+            return None;
+        }
+        return Some(IncludeCommand {
+            start: i,
+            end: m + 1,
+            target: text[body_start..m].to_string(),
+        });
+    }
+    None
 }
 
 fn normalize(p: &Path) -> PathBuf {
@@ -277,6 +378,22 @@ mod tests {
         assert_eq!(g.sources.len(), 2);
         let order = g.topo_order().unwrap();
         assert_eq!(order.len(), 2);
+    }
+
+    #[test]
+    fn join_inlines_inputs_at_source_position() {
+        let mut vfs = VirtualFs::new();
+        vfs.insert(
+            "main.tex",
+            b"before\n\\input{sections/sub.tex}\nafter".to_vec(),
+        );
+        vfs.insert("sections/sub.tex", b"middle".to_vec());
+        let g = IncludeGraph::build(&vfs, std::path::Path::new("main.tex")).unwrap();
+        let joined = g.join(&vfs).unwrap();
+
+        assert!(joined.text.contains("before\nmiddle\nafter"));
+        assert!(!joined.text.contains("\\input"));
+        assert_eq!(joined.text.len(), joined.source_map.len());
     }
 
     #[test]

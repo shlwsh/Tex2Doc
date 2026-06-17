@@ -11,12 +11,27 @@ use crate::normalize::normalize;
 /// 与 `docs/to-docx/08-verification.md §8.4` 一致的 22 marker。
 pub const MARKERS: &[&str] = &[
     "网关流量驱动的微服务定向日志采集框架", // 标题
-    "\\textbf{摘  要}", "\\textbf{关键词}", "Abstract", "Key words",  // 摘要标签（\textbf 保留）
-    "1 引言", "2 相关工作", "3 系统总体设计", "4 关键算法",         // 章节
-    "5 系统实现", "6 实验与分析", "7 结束语",
-    "表 1", "表 5", "图 1", "图 8", "算法 1",                       // 表/图/算法
-    "References", "\\textbf{附中文参考文献}", "\\textbf{作者简介}",    // 参考/简介（\textbf 保留）
-    "shihonglei0042@link.tyut.edu.cn", "zh_juanjuan@126.com",        // 邮箱
+    "\\textbf{摘  要}",
+    "\\textbf{关键词}",
+    "Abstract",
+    "Key words", // 摘要标签（\textbf 保留）
+    "1 引言",
+    "2 相关工作",
+    "3 系统总体设计",
+    "4 关键算法", // 章节
+    "5 系统实现",
+    "6 实验与分析",
+    "7 结束语",
+    "表 1",
+    "表 5",
+    "图 1",
+    "图 8",
+    "算法 1", // 表/图/算法
+    "References",
+    "\\textbf{附中文参考文献}",
+    "\\textbf{作者简介}", // 参考/简介（\textbf 保留）
+    "shihonglei0042@link.tyut.edu.cn",
+    "zh_juanjuan@126.com", // 邮箱
 ];
 
 /// 在三处同时检测 marker 命中。
@@ -51,6 +66,8 @@ mod tests {
         let rust = docx;
         let hits = coverage(docx, oracle, rust);
         assert_eq!(hits.len(), MARKERS.len());
-        assert!(hits.iter().all(|h| h.in_docx && h.in_oracle_pdf && h.in_rust_pdf));
+        assert!(hits
+            .iter()
+            .all(|h| h.in_docx && h.in_oracle_pdf && h.in_rust_pdf));
     }
 }

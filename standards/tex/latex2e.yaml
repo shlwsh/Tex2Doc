@@ -1,0 +1,102 @@
+schema_version: "0.1"
+namespace: latex2e
+source:
+  type: de_facto_standard
+  references:
+    - "LaTeX: A Document Preparation System"
+    - "LaTeX2e kernel documentation"
+rules:
+  - id: latex2e.section
+    kind: command
+    syntax:
+      command: "\\section"
+      arguments:
+        - name: title
+          kind: required_group
+    semantic:
+      ast_kind: Heading
+      fields:
+        level: 1
+        title: "$arg.title"
+    numbering:
+      counter: section
+    diagnostics:
+      on_unclosed_group: error
+  - id: latex2e.subsection
+    kind: command
+    syntax:
+      command: "\\subsection"
+      arguments:
+        - name: title
+          kind: required_group
+    semantic:
+      ast_kind: Heading
+      fields:
+        level: 2
+        title: "$arg.title"
+    numbering:
+      counter: subsection
+    diagnostics:
+      on_unclosed_group: error
+  - id: latex2e.subsubsection
+    kind: command
+    syntax:
+      command: "\\subsubsection"
+      arguments:
+        - name: title
+          kind: required_group
+    semantic:
+      ast_kind: Heading
+      fields:
+        level: 3
+        title: "$arg.title"
+    numbering:
+      counter: subsubsection
+    diagnostics:
+      on_unclosed_group: error
+  - id: latex2e.caption
+    kind: command
+    syntax:
+      command: "\\caption"
+      arguments:
+        - name: text
+          kind: required_group
+    semantic:
+      ast_field: caption
+      text: "$arg.text"
+    diagnostics:
+      on_outside_float: warning
+  - id: latex2e.label
+    kind: command
+    syntax:
+      command: "\\label"
+      arguments:
+        - name: key
+          kind: required_group
+    semantic:
+      ast_field: label
+      key: "$arg.key"
+    diagnostics:
+      on_duplicate: error
+  - id: latex2e.ref
+    kind: command
+    syntax:
+      command: "\\ref"
+      arguments:
+        - name: key
+          kind: required_group
+    semantic:
+      inline_kind: CrossRef
+      key: "$arg.key"
+    diagnostics:
+      on_unresolved: error
+  - id: latex2e.equation
+    kind: environment
+    syntax:
+      begin: "\\begin{equation}"
+      end: "\\end{equation}"
+    semantic:
+      ast_kind: Equation
+      numbered: true
+    numbering:
+      counter: equation

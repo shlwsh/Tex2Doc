@@ -56,7 +56,9 @@ impl Runner {
 
         // 字符比例 (docx / oracle)
         let dc = crate::normalize::normalize(&ctx.docx_text).chars().count();
-        let oc = crate::normalize::normalize(&ctx.oracle_text).chars().count();
+        let oc = crate::normalize::normalize(&ctx.oracle_text)
+            .chars()
+            .count();
         let ratio = if oc == 0 { 0.0 } else { dc as f64 / oc as f64 };
         checks.push(Check::new(
             "DOCX/PDF 字符比例 (#29)",
@@ -116,7 +118,11 @@ fn local_eq(actual: &[u8], local: &[u8], nsm: &[(&[u8], &[u8])]) -> bool {
         }
     }
     for (ns, _) in nsm {
-        let prefixed = format!("{}:{}", String::from_utf8_lossy(ns), String::from_utf8_lossy(local));
+        let prefixed = format!(
+            "{}:{}",
+            String::from_utf8_lossy(ns),
+            String::from_utf8_lossy(local)
+        );
         if actual == prefixed.as_bytes() {
             return true;
         }
@@ -126,7 +132,10 @@ fn local_eq(actual: &[u8], local: &[u8], nsm: &[(&[u8], &[u8])]) -> bool {
 
 fn check_tables(doc_xml: &str, thr: &StructuralThresholds) -> Result<Check, QualityError> {
     let mut r = Reader::from_str(doc_xml);
-    let nsm: &[(&[u8], &[u8])] = &[(b"w", b"http://schemas.openxmlformats.org/wordprocessingml/2006/main")];
+    let nsm: &[(&[u8], &[u8])] = &[(
+        b"w",
+        b"http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    )];
     let n = quick_count(&mut r, b"tbl", nsm);
     Ok(Check::new(
         "表格对象数 (#1)",
@@ -139,7 +148,10 @@ fn check_tables(doc_xml: &str, thr: &StructuralThresholds) -> Result<Check, Qual
 
 fn check_images(doc_xml: &str, thr: &StructuralThresholds) -> Result<Check, QualityError> {
     let mut r = Reader::from_str(doc_xml);
-    let nsm: &[(&[u8], &[u8])] = &[(b"w", b"http://schemas.openxmlformats.org/wordprocessingml/2006/main")];
+    let nsm: &[(&[u8], &[u8])] = &[(
+        b"w",
+        b"http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    )];
     let n = quick_count(&mut r, b"drawing", nsm);
     Ok(Check::new(
         "图片数 (#2)",
@@ -182,8 +194,14 @@ fn check_page_size(doc_xml: &str, thr: &StructuralThresholds) -> Result<Check, Q
     let vals = extract_sectpr_attr(doc_xml, "pgSz", &["w", "h"]);
     let w = vals.first().cloned().unwrap_or_default();
     let h = vals.get(1).cloned().unwrap_or_default();
-    let w_ok = w.parse::<u32>().map(|x| x == thr.expected_page_w).unwrap_or(false);
-    let h_ok = h.parse::<u32>().map(|x| x == thr.expected_page_h).unwrap_or(false);
+    let w_ok = w
+        .parse::<u32>()
+        .map(|x| x == thr.expected_page_w)
+        .unwrap_or(false);
+    let h_ok = h
+        .parse::<u32>()
+        .map(|x| x == thr.expected_page_h)
+        .unwrap_or(false);
     Ok(Check::new(
         "页面尺寸 (#30)",
         Severity::Critical,

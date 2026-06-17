@@ -1,9 +1,9 @@
+use doc_latex_reader::IncludeGraph;
 use doc_latex_reader::{expand::MacroMap, lower_with_macros, parse_tex};
 use doc_semantic_ast::{Block, Document};
 use doc_utils::VirtualFs;
-use std::path::Path;
 use std::fs;
-use doc_latex_reader::IncludeGraph;
+use std::path::Path;
 
 fn blocks_to_text(doc: &Document) -> String {
     let mut text = String::new();
@@ -38,10 +38,23 @@ fn paper3_main_jos_via_include_graph() {
     let doc = lower_with_macros(&parse, Some(&joined), &mut macros);
     let text = blocks_to_text(&doc);
     let snippet: String = text.chars().take(800).collect();
-    fs::write(concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/paper3/build/test-output.txt"), &snippet).ok();
+    fs::write(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../examples/paper3/build/test-output.txt"
+        ),
+        &snippet,
+    )
+    .ok();
     eprintln!("---- DOC BLOCKS (first 800) ----\n{}", &snippet);
     // 找 "In microservice" 或 "Gateway-Traffic" 周围
-    for needle in ["In microservice", "Gateway-Traffic", "Abstract", "shihonglei", "References"] {
+    for needle in [
+        "In microservice",
+        "Gateway-Traffic",
+        "Abstract",
+        "shihonglei",
+        "References",
+    ] {
         if let Some(idx) = text.find(needle) {
             // idx 是字节偏移；调整 s/e 到 char 边界
             let s = {

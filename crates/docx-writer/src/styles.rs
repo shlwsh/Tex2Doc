@@ -456,7 +456,8 @@ pub fn write_styles() -> Vec<u8> {
         Some("center"),
     );
 
-    w.write_event(Event::End(BytesEnd::new("w:styles"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:styles")))
+        .unwrap();
     w.into_inner()
 }
 
@@ -465,9 +466,12 @@ fn write_doc_defaults(w: &mut Writer<Vec<u8>>) {
         .unwrap();
     w.write_event(Event::Start(BytesStart::new("w:rPrDefault")))
         .unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:rFonts"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:rFonts"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rPr")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rFonts")))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rFonts")))
+        .unwrap();
     let mut sz = BytesStart::new("w:sz");
     sz.push_attribute(("w:val", "18"));
     w.write_event(Event::Empty(sz)).unwrap();
@@ -525,7 +529,8 @@ fn write_builtin_paragraph_style(
     s.push_attribute(("w:styleId", id));
     w.write_event(Event::Start(s)).unwrap();
 
-    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:name")))
+        .unwrap();
     w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
@@ -534,7 +539,8 @@ fn write_builtin_paragraph_style(
     w.write_event(Event::Empty(based)).unwrap();
 
     if jc.is_some() {
-        w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+        w.write_event(Event::Start(BytesStart::new("w:pPr")))
+            .unwrap();
         if let Some(j) = jc {
             let mut jc_el = BytesStart::new("w:jc");
             jc_el.push_attribute(("w:val", j));
@@ -543,7 +549,8 @@ fn write_builtin_paragraph_style(
         w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
     }
 
-    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rPr")))
+        .unwrap();
     let mut rf = BytesStart::new("w:rFonts");
     rf.push_attribute(("w:ascii", ascii));
     rf.push_attribute(("w:eastAsia", east));
@@ -551,7 +558,8 @@ fn write_builtin_paragraph_style(
     w.write_event(Event::Empty(rf)).unwrap();
     if bold {
         w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
-        w.write_event(Event::Empty(BytesStart::new("w:bCs"))).unwrap();
+        w.write_event(Event::Empty(BytesStart::new("w:bCs")))
+            .unwrap();
     }
     let sz_val = (size_pt * 2.0).round() as u32;
     let mut sz = BytesStart::new("w:sz");
@@ -586,16 +594,22 @@ fn write_style_with_ind(
     s.push_attribute(("w:styleId", id));
     w.write_event(Event::Start(s)).unwrap();
 
-    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:name")))
+        .unwrap();
     w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
 
     // pPr
-    let has_ppr =
-        jc.is_some() || first_line.is_some() || left.is_some() || before.is_some() || after.is_some() || line.is_some();
+    let has_ppr = jc.is_some()
+        || first_line.is_some()
+        || left.is_some()
+        || before.is_some()
+        || after.is_some()
+        || line.is_some();
     if has_ppr {
-        w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+        w.write_event(Event::Start(BytesStart::new("w:pPr")))
+            .unwrap();
         if let Some(j) = jc {
             let mut jc_e = BytesStart::new("w:jc");
             jc_e.push_attribute(("w:val", j));
@@ -613,7 +627,8 @@ fn write_style_with_ind(
     }
 
     // rPr
-    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:rPr")))
+        .unwrap();
     let mut rfonts = BytesStart::new("w:rFonts");
     rfonts.push_attribute(("w:ascii", ascii));
     rfonts.push_attribute(("w:hAnsi", ascii));
@@ -622,7 +637,8 @@ fn write_style_with_ind(
     w.write_event(Event::Empty(rfonts)).unwrap();
     if bold {
         w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
-        w.write_event(Event::Empty(BytesStart::new("w:bCs"))).unwrap();
+        w.write_event(Event::Empty(BytesStart::new("w:bCs")))
+            .unwrap();
     }
     let half_pt = (size_pt * 2.0).round() as u32;
     let mut sz = BytesStart::new("w:sz");
@@ -637,7 +653,11 @@ fn write_style_with_ind(
 }
 
 /// 构造 `<w:spacing>` 元素（self-closing）。
-fn build_spacing(before: Option<u32>, after: Option<u32>, line: Option<u32>) -> BytesStart<'static> {
+fn build_spacing(
+    before: Option<u32>,
+    after: Option<u32>,
+    line: Option<u32>,
+) -> BytesStart<'static> {
     let mut sp = BytesStart::new("w:spacing");
     if let Some(b) = before {
         sp.push_attribute(("w:before", b.to_string().as_str()));
@@ -653,7 +673,11 @@ fn build_spacing(before: Option<u32>, after: Option<u32>, line: Option<u32>) -> 
 }
 
 /// 构造 `<w:ind>` 元素（self-closing）。
-fn build_ind(first_line: Option<u32>, left: Option<u32>, hanging: Option<u32>) -> BytesStart<'static> {
+fn build_ind(
+    first_line: Option<u32>,
+    left: Option<u32>,
+    hanging: Option<u32>,
+) -> BytesStart<'static> {
     let mut ind = BytesStart::new("w:ind");
     if let Some(fl) = first_line {
         ind.push_attribute(("w:firstLine", fl.to_string().as_str()));

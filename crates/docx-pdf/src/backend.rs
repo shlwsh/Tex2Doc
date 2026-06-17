@@ -108,21 +108,21 @@ impl DocxToPdf {
         if backends.is_empty() {
             return Err(crate::error::PdfError::NoBackend.into());
         }
-            Ok(Self {
-                backends,
-                config: Config::default(),
-                sem: tokio::sync::Mutex::new(()),
-            })
-        }
+        Ok(Self {
+            backends,
+            config: Config::default(),
+            sem: tokio::sync::Mutex::new(()),
+        })
+    }
 
-        /// 显式指定单个后端。
-        pub fn with_backend(b: Arc<dyn DocxToPdfBackend>) -> Self {
-            Self {
-                backends: vec![b],
-                config: Config::default(),
-                sem: tokio::sync::Mutex::new(()),
-            }
+    /// 显式指定单个后端。
+    pub fn with_backend(b: Arc<dyn DocxToPdfBackend>) -> Self {
+        Self {
+            backends: vec![b],
+            config: Config::default(),
+            sem: tokio::sync::Mutex::new(()),
         }
+    }
 
     /// 链式设置 Config。
     pub fn with_config(mut self, c: Config) -> Self {
@@ -176,10 +176,12 @@ impl DocxToPdf {
                 }
                 Err(_) => {
                     tracing::warn!(attempt, "docx-pdf 超时");
-                    last_err = Some(crate::error::PdfError::Timeout {
-                        timeout_secs: cfg.timeout.as_secs(),
-                    }
-                    .into());
+                    last_err = Some(
+                        crate::error::PdfError::Timeout {
+                            timeout_secs: cfg.timeout.as_secs(),
+                        }
+                        .into(),
+                    );
                 }
             }
         }
