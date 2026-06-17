@@ -338,27 +338,68 @@ pub fn extract_front_matter(
     fm.title_zh = command_arg_pure(main_tex, "rjtitle").unwrap_or_default();
     fm.authors_zh = command_arg_pure(main_tex, "rjauthor").unwrap_or_default();
     let infor = command_arg_pure(main_tex, "rjinfor").unwrap_or_default();
-    fm.institute_lines = infor
-        .split("\\\\")
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-        .collect();
+    // V2：latex_to_text 把 `\\` 替换为空格，所以按 "通讯" 关键字分两行
+    // 兼容两种格式：`\\` 分行 / 原始换行 / "通讯作者" 作为行 2 起点
+    let lines: Vec<String> = if infor.contains("通讯作者") {
+        // 形如 "(太原理工大学...) 通讯作者: 石洪雷, E-mail: ..."
+        // 按 "通讯作者" 拆：第一段是单位 + 地址，第二段是通讯信息
+        let mut iter = infor.splitn(2, "通讯作者");
+        let first = iter.next().unwrap_or("").trim().to_string();
+        let second = iter.next().unwrap_or("");
+        let second = format!("通讯作者{}", second.trim());
+        vec![first, second]
+            .into_iter()
+            .filter(|s| !s.is_empty())
+            .collect()
+    } else {
+        infor
+            .split('\n')
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect()
+    };
+    fm.institute_lines = lines;
     fm.category = command_arg_pure(main_tex, "rjcategory").unwrap_or_default();
     fm.running_header = command_arg_pure(main_tex, "rjhead").unwrap_or_default();
     fm.first_footer_text = extract_footnotetext(main_tex);
 
-    // 摘要 / 关键词
-    fm.abstract_zh = macros
-        .get("AbstractContentZh")
-        .cloned()
-        .unwrap_or_default();
-    fm.keywords_zh = macros.get("KeywordsZh").cloned().unwrap_or_default();
-    fm.abstract_en = macros
-        .get("AbstractContentEn")
-        .cloned()
-        .unwrap_or_default();
-    fm.keywords_en = macros.get("KeywordsEn").cloned().unwrap_or_default();
+    // 摘要 / 关键词（先 strip 掉 AbstractContentZh 末尾的 LaTeX 注释 %）
+    let strip_pct = |s: String| -> String {
+        s.trim()
+            .trim_start_matches('%')
+            .trim_end_matches('%')
+            .trim()
+            .to_string()
+    };
+    fm.abstract_zh = strip_pct(
+        macros
+            .get("\\AbstractContentZh")
+            .or_else(|| macros.get("AbstractContentZh"))
+            .cloned()
+            .unwrap_or_default(),
+    );
+    fm.keywords_zh = strip_pct(
+        macros
+            .get("\\KeywordsZh")
+            .or_else(|| macros.get("KeywordsZh"))
+            .cloned()
+            .unwrap_or_default(),
+    );
+    fm.abstract_en = strip_pct(
+        macros
+            .get("\\AbstractContentEn")
+            .or_else(|| macros.get("AbstractContentEn"))
+            .cloned()
+            .unwrap_or_default(),
+    );
+    fm.keywords_en = strip_pct(
+        macros
+            .get("\\KeywordsEn")
+            .or_else(|| macros.get("KeywordsEn"))
+            .cloned()
+            .unwrap_or_default(),
+    );
 
     // 英文标题 / 作者 / 机构
     let (title_en, authors_en, institute_en) = extract_english_front_matter(expanded_main);
@@ -380,8 +421,22 @@ pub fn extract_front_matter(
     fm
 }
 
+/// 从 `\foo{...}` 抽出 inner，并做基础 normalize（剥宏、剥花括号外的空白）。
+///
+/// V2：调用 `latex_to_text` 完整管线，确保 `\hspace{1em}` `\textbf{}` `$math$`
+/// 等都被处理（cite/label 用空 map 即可）。
 fn command_arg_pure(text: &str, command: &str) -> Option<String> {
-    crate::normalize::command_arg(text, command, 0).map(|h| h.inner)
+    crate::normalize::command_arg(text, command, 0).map(|h| {
+        let cite: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+        let label: std::collections::HashMap<String, String> =
+            std::collections::HashMap::new();
+        let normalized = crate::normalize::latex_to_text(&h.inner, &cite, &label);
+        normalized
+            .runs
+            .into_iter()
+            .map(|r| r.text)
+            .collect::<String>()
+    })
 }
 
 /// 提取 `\footnotetext{...}` 第一处。
@@ -403,6 +458,17 @@ fn extract_footnotetext(text: &str) -> String {
 ///   终点 = 下一个 `% ---- 英文摘要` 注释之前
 ///
 /// 区间内：
+/// 归一化抽取出来的 front matter 文本：剥宏、合并空白、剥 \hspace/\textbf 等。
+fn normalize_extracted_text(s: &str) -> String {
+    let cite: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+    let label: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    let normalized = crate::normalize::latex_to_text(s, &cite, &label);
+    let joined: String = normalized.runs.into_iter().map(|r| r.text).collect();
+    crate::normalize::collapse_whitespace_pub(&joined)
+        .trim()
+        .to_string()
+}
+
 ///   title_en   = \textbf{...}
 ///   authors_en = \vspace{...}{... \xiaowuhao ...} 的内层
 ///   institute_en = 第一个匹配 `( ... China ... )` 的小括号整体
@@ -479,9 +545,24 @@ fn extract_english_front_matter(text: &str) -> (String, String, String) {
             }
         }
         if authors_en.is_empty() {
-            // 兜底：首个 \xiaowuhao{...}
-            if let Some(hit) = crate::normalize::command_arg(rest, "xiaowuhao", 0) {
-                authors_en = hit.inner;
+            // 兜底：找 \xiaowuhao 所在的最外层 {...}，取 inner 文本
+            // 适配 {\xiaowuhao\nSHI Hong-Lei, ~ZHAO Juan-Juan} 模式
+            if let Some(xpos) = rest.find("\\xiaowuhao") {
+                // 向前找最近的 `{`（一定是包含 \xiaowuhao 的 {xxx}）
+                if let Some(open_rel) = rest[..xpos].rfind('{') {
+                    let open = open_rel;
+                    if let Some(close) = crate::normalize::find_matching_brace(rest, open) {
+                        let inner = &rest[open + 1..close];
+                        // 剥掉前导 \xiaowuhao 宏名
+                        let stripped = if let Some(stripped_pos) = inner.find("\\xiaowuhao") {
+                            inner[stripped_pos + "\\xiaowuhao".len()..]
+                                .trim_start_matches(|c: char| c.is_whitespace())
+                        } else {
+                            inner
+                        };
+                        authors_en = stripped.to_string();
+                    }
+                }
             }
         }
     }
@@ -514,7 +595,13 @@ fn extract_english_front_matter(text: &str) -> (String, String, String) {
         }
     }
 
-    (title_en, authors_en, institute_en)
+    // V2：对三个字段统一走 normalize_extracted_text
+    //     去除 ~ (不间断空格)、\fontsize{...}\selectfont、\song 等残留。
+    (
+        normalize_extracted_text(&title_en),
+        normalize_extracted_text(&authors_en),
+        normalize_extracted_text(&institute_en),
+    )
 }
 
 /// 抽取 `\begin{list}…\end{list}` 内的 `\item`。

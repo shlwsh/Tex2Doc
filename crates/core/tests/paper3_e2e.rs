@@ -140,6 +140,28 @@ fn paper3_main_jos_to_docx() {
         }
     }
 
+    // V2：把 metadata 也并入 all_text（标题/作者/摘要等）
+    if let Some(t) = &doc.metadata.title {
+        all_text.push_str(t);
+        all_text.push('\n');
+    }
+    for a in &doc.metadata.authors {
+        all_text.push_str(a);
+        all_text.push('\n');
+    }
+    if let Some(abs) = &doc.metadata.abstract_text {
+        all_text.push_str(abs);
+        all_text.push('\n');
+    }
+    for k in &doc.metadata.keywords {
+        all_text.push_str(k);
+        all_text.push('\n');
+    }
+    if let Some(cz) = &doc.metadata.citation_zh {
+        all_text.push_str(cz);
+        all_text.push('\n');
+    }
+
     // 中文摘要关键短语（从 00_abstract.tex 拷贝出来防漂移）
     assert!(
         all_text.contains("微服务架构下"),

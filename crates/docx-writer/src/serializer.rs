@@ -377,22 +377,28 @@ pub fn serialize_document(
                 }
             }
             Block::RawFallback { text, .. } => {
-                let para = Paragraph {
-                    style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
-                    runs: vec![Run {
-                        text: text.clone(),
-                        style_id: None,
-                        style: TextStyle::Plain,
-                        bold: false,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    }],
-                    jc: None,
-                    keep_next: false,
-                    keep_lines: false,
-                };
-                write_paragraph(&mut w, &para);
+                // V2：空 RawFallback（来自 rjabstract/rjkeywords 等已提取到 metadata 的
+                //     front matter 容器）直接跳过，不写出空段落。
+                if text.is_empty() {
+                    // 跳过
+                } else {
+                    let para = Paragraph {
+                        style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+                        runs: vec![Run {
+                            text: text.clone(),
+                            style_id: None,
+                            style: TextStyle::Plain,
+                            bold: false,
+                            italic: false,
+                            font_ascii: None,
+                            font_east: None,
+                        }],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: false,
+                    };
+                    write_paragraph(&mut w, &para);
+                }
             }
             Block::Algorithm {
                 lines,

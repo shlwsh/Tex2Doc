@@ -233,13 +233,23 @@ pub fn lower_with_macros_and_numbering(
         "verbatim",
     ];
     if multi_block_envs.contains(&name) {
-        let p = crate::parser::parse(body);
-        let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
-        for b in sub.blocks {
-            match b {
-                Block::RawFallback { .. } => continue,
-                Block::Equation { .. } => continue,
-                other => doc.push(other),
+        // V2：flushleft 包 "中文引用格式:" / "英文引用格式:" 已被提取到
+        //     doc.metadata.citation_zh/en（由 lower_to_document 主循环后的步骤做），
+        //     这里不再 push 任何 sub-block 到 doc。
+        if !(name == "flushleft"
+            && (body.contains("中文引用格式")
+                || body.contains("英文引用格式")
+                || body.contains("English abstract")
+                || body.contains("Abstract:")))
+        {
+            let p = crate::parser::parse(body);
+            let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
+            for b in sub.blocks {
+                match b {
+                    Block::RawFallback { .. } => continue,
+                    Block::Equation { .. } => continue,
+                    other => doc.push(other),
+                }
             }
         }
     } else if name == "rjabstract" {
@@ -464,7 +474,107 @@ pub fn lower_with_macros_and_numbering(
     doc.metadata.running_header = Some(fm.running_header).filter(|s| !s.is_empty());
     doc.metadata.first_footer_text = Some(fm.first_footer_text).filter(|s| !s.is_empty());
 
+    // V2：从 flushleft 里直接抽取中文/英文引用格式（如果上面 extract_front_matter 没拿到）
+    let text_for_cite = strip_preamble(&parse.source);
+    let (cz, ce) = extract_citation_from_flushleft(&text_for_cite);
+    if doc.metadata.citation_zh.is_none() && !cz.is_empty() {
+        doc.metadata.citation_zh = Some(cz);
+    }
+    if doc.metadata.citation_en.is_none() && !ce.is_empty() {
+        doc.metadata.citation_en = Some(ce);
+    }
+
     doc
+}
+
+/// 从 \begin{flushleft}…中文引用格式:…{xxx}\n…英文引用格式:…{yyy}…\end{flushleft}
+/// 抽取中英文引用格式文本（剥掉宏、剥 \hspace{1em}）。
+fn extract_citation_from_flushleft(text: &str) -> (String, String) {
+    let mut citation_zh = String::new();
+    let mut citation_en = String::new();
+    // 找所有 \begin{flushleft}…\end{flushleft} 块
+    let mut i = 0;
+    while let Some(open) = text[i..].find("\\begin{flushleft}") {
+        let abs_open = i + open;
+        // 找配对 \end{flushleft}
+        if let Some(close_rel) = text[abs_open + "\\begin{flushleft}".len()..].find("\\end{flushleft}") {
+            let abs_close = abs_open + "\\begin{flushleft}".len() + close_rel;
+            let body = &text[abs_open + "\\begin{flushleft}".len()..abs_close];
+            if body.contains("中文引用格式") && citation_zh.is_empty() {
+                if let Some(c) = extract_citation_field(body, "中文引用格式:") {
+                    citation_zh = c;
+                }
+            }
+            if body.contains("英文引用格式") && citation_en.is_empty() {
+                if let Some(c) = extract_citation_field(body, "英文引用格式:") {
+                    citation_en = c;
+                }
+            }
+            i = abs_close + "\\end{flushleft}".len();
+        } else {
+            break;
+        }
+    }
+    (citation_zh, citation_en)
+}
+
+/// 抽取 `{\hei <label>:}\hspace{1em}{\kai <text>}` 中 <text>，并走 latex_to_text 归一化。
+fn extract_citation_field(flushleft_body: &str, label: &str) -> Option<String> {
+    let pos = flushleft_body.find(label)?;
+    let after = &flushleft_body[pos + label.len()..];
+    let bytes = after.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    // 跳过 `}` + 水平空白宏（\hspace{1em} / \quad / \qquad）
+    // 注：label 通常出现在 `{\hei <label>:}` 内部，所以 pos 之后先遇到 `}`。
+    while i < len {
+        if !after.is_char_boundary(i) {
+            i += 1;
+            continue;
+        }
+        let rest = &after[i..];
+        // 跳过 `}`
+        if rest.starts_with('}') {
+            i += 1;
+            continue;
+        }
+        // 跳过 \hspace{...} / \quad / \qquad
+        if rest.starts_with("\\hspace{")
+            || rest.starts_with("\\quad")
+            || rest.starts_with("\\qquad")
+        {
+            if let Some(close_rel) = rest.find('}') {
+                i += close_rel + 1;
+            } else {
+                break;
+            }
+            continue;
+        }
+        // 跳过空白
+        if rest.chars().next().map(|c| c.is_whitespace()).unwrap_or(false) {
+            i += rest.chars().next().unwrap().len_utf8();
+            continue;
+        }
+        break;
+    }
+    // 现在 i 指向 {\kai <text>} 的开头的 `{`
+    if i < len && bytes[i] == b'{' {
+        if let Some(end) = crate::normalize::find_matching_brace(after, i) {
+            let inner = &after[i + 1..end];
+            let cite: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
+            let label_map: std::collections::HashMap<String, String> =
+                std::collections::HashMap::new();
+            let normalized =
+                crate::normalize::latex_to_text(inner, &cite, &label_map);
+            let joined: String =
+                normalized.runs.into_iter().map(|r| r.text).collect();
+            return Some(crate::normalize::collapse_whitespace_pub(&joined)
+                .trim()
+                .to_string());
+        }
+    }
+    None
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -851,9 +961,15 @@ fn lower_environment(
         // 段落容器类环境：递归降级为段落序列，折叠为第一个非空块。
         // （rjthesis / ctexart 模板里大量使用这类「无视觉变化」的语义容器。）
         // 注意：flushleft/flushright/center/quote/quotation/verbatim 已由主循环直接处理。
-        "minipage" | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor"
-        | "rjinfor" | "rjmaketitle" => lower_paragraph_container(body, span, macros, numbering),
-        "rjabstract" => lower_abstract_paragraph(body, span, macros, numbering),
+        // V2：rjkeywords / rjcategory / rjhead / rjtitle / rjauthor / rjinfor / rjmaketitle /
+        //     rjabstract 的内容已被 lower_to_document 提取到 doc.metadata，
+        //     这里返回空 RawFallback 避免重复输出。
+        "minipage" => lower_paragraph_container(body, span, macros, numbering),
+        "rjabstract" | "rjkeywords" | "rjcategory" | "rjhead" | "rjtitle" | "rjauthor"
+        | "rjinfor" | "rjmaketitle" => Block::RawFallback {
+            text: String::new(),
+            span,
+        },
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
@@ -2750,7 +2866,9 @@ mod tests {
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        let text: String = doc
+        // V2：摘要正文统一在 metadata.abstract_text 中，blocks 里不再冗余 push。
+        let from_meta = doc.metadata.abstract_text.clone().unwrap_or_default();
+        let from_blocks: String = doc
             .blocks
             .iter()
             .filter_map(|b| match b {
@@ -2760,10 +2878,12 @@ mod tests {
                 _ => None,
             })
             .collect();
+        let combined = format!("{from_meta}\n{from_blocks}");
         assert!(
-            text.contains("微服务架构下"),
-            "Chinese abstract text missing: {}",
-            text
+            combined.contains("微服务架构下"),
+            "Chinese abstract text missing: meta='{}' blocks='{}'",
+            from_meta,
+            from_blocks
         );
     }
 
