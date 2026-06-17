@@ -20,7 +20,7 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, Parser)]
-#[command(name = "doc-engine", version, about = "Doc-engine CLI (V1 + V2 PDF pipeline)")]
+#[command(name = "doc-engine", version, about = "Doc-engine CLI (V2 Tex2Doc engine)")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

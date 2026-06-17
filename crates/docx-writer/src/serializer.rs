@@ -23,6 +23,18 @@ use crate::styles::{
     STYLE_REFERENCE, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
 };
 
+/// 一张已嵌入的图片：packer 阶段把它写到 `word/media/imageN.<ext>` 并生成 rel。
+///
+/// `fig_id` 来自 serializer 内的 fig 计数器（与 `r:embed` 编号对齐）。
+/// `ext` 是不带点的小写扩展名（png / jpg / jpeg）。
+/// `bytes` 是原始文件内容。
+#[derive(Debug, Clone)]
+pub struct EmbeddedImage {
+    pub fig_id: u32,
+    pub ext: String,
+    pub bytes: Vec<u8>,
+}
+
 /// 把 semantic-ast 的 `TextRun` 映射到 docx-writer 的 `Run`。
 ///
 /// 规则：
@@ -56,6 +68,7 @@ pub fn serialize_document(
     doc: &Document,
     image_assets: Option<&ImageAssets>,
     page_setup: Option<&PageSetup>,
+    embedded_images: &mut Vec<EmbeddedImage>,
 ) -> Vec<u8> {
     let mut w = Writer::new(Vec::new());
     w.write_event(Event::Decl(BytesDecl::new("1.0", Some("UTF-8"), None)))
@@ -76,7 +89,7 @@ pub fn serialize_document(
     ));
     root.push_attribute((
         "xmlns:wp",
-        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing/inline",
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     ));
     root.push_attribute((
         "xmlns:a",
@@ -227,29 +240,64 @@ pub fn serialize_document(
                             .or_else(|| assets.get(basename))
                             .or_else(|| assets.get(png_basename.as_str()));
                         if let Some(bytes) = bytes_opt {
-                            // 探测格式
-                            let ext = if bytes.len() >= 8
-                                && bytes[0] == 0x89
-                                && bytes[1] == b'P'
-                                && bytes[2] == b'N'
-                                && bytes[3] == b'G'
-                            {
-                                "png"
+                            // 将图片统一转换为 JPEG（RGBA 先转 RGB）再嵌入；
+                            // JPEG 在 OOXML 中兼容性更好（soffice/LibreOffice 渲染更稳定）。
+                            let rgb_jpg = {
+                                use image::{ImageReader, ImageBuffer, Rgb, RgbImage, GenericImageView};
+                                if let Ok(img) = ImageReader::new(std::io::Cursor::new(bytes))
+                                    .with_guessed_format()
+                                    .map(|r| r.decode())
+                                {
+                                    if let Ok(img) = img {
+                                        let rgb: RgbImage = img.to_rgb8();
+                                        let mut buf = std::io::Cursor::new(Vec::new());
+                                        if rgb.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok() {
+                                            Some(buf.into_inner())
+                                        } else {
+                                            None
+                                        }
+                                    } else {
+                                        None
+                                    }
+                                } else {
+                                    None
+                                }
+                            };
+                            let (ext, final_bytes) = if let Some(jpg) = rgb_jpg {
+                                ("jpg".to_string(), jpg)
                             } else {
-                                "jpg"
+                                // 回退原格式（PNG）
+                                let ext = if bytes.len() >= 8
+                                    && bytes[0] == 0x89
+                                    && bytes[1] == b'P'
+                                    && bytes[2] == b'N'
+                                    && bytes[3] == b'G'
+                                {
+                                    "png"
+                                } else {
+                                    "jpg"
+                                };
+                                (ext.to_string(), bytes.to_vec())
                             };
                             let media_name = format!("image{}.{}", fig_id, ext);
 
                             // 计算图片尺寸（EMU：914400 = 1 英寸）
-                            let (cx, cy) = calc_image_emu(bytes, 4572000, 3429000);
+                            let (cx, cy) = calc_image_emu(&final_bytes, 4572000, 3429000);
 
-                            // base64 编码
-                            use base64::{engine::general_purpose::STANDARD, Engine};
-                            let b64 = STANDARD.encode(bytes);
+                            // 记录到 embedded_images 让 packer 把字节写入 word/media/ 并生成 rel
+                            embedded_images.push(EmbeddedImage {
+                                fig_id,
+                                ext,
+                                bytes: final_bytes,
+                            });
 
-                            // 组装 inline drawing XML
+                            // 组装 inline drawing XML（使用 r:embed 引用 rIdImg{fig_id}）
+                            // 关键修复：
+                            // 1. <wp:cNvGraphicFramePr> + <a:graphicFrameLocks> 是 soffice 正确渲染的必要条件
+                            // 2. xmlns:a / xmlns:pic 必须声明在 wp:inline 上（即使 w:document 已声明，
+                            //    soffice 24.x 严格按「首次声明优先」处理 inline XML 片段）
                             let drawing = format!(
-                                r#"<w:drawing><wp:inline dist="0"><wp:extent cx="{}" cy="{}"/><wp:docPr id="{}" name="Picture {}" descr="{}"/><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{}" name="{}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip><w:binData w:name="word/media/{}">{}</w:binData></a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"#,
+                                r#"<w:drawing><wp:inline xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" dist="0"><wp:extent cx="{}" cy="{}"/><wp:docPr id="{}" name="Picture {}" descr="{}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{}" name="{}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg{}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"#,
                                 cx,
                                 cy,
                                 fig_id,
@@ -257,8 +305,7 @@ pub fn serialize_document(
                                 xml_escape(fig_key),
                                 fig_id,
                                 xml_escape(&media_name),
-                                xml_escape(&format!("word/media/{}", media_name)),
-                                b64,
+                                fig_id,
                                 cx,
                                 cy
                             );
@@ -543,19 +590,34 @@ pub fn serialize_document(
 }
 
 /// 从图片字节计算 EMU 尺寸（最大宽度 5 英寸 = 4572000 EMU，保持宽高比）。
-fn calc_image_emu(bytes: &[u8], max_cx: u64, default_cy: u64) -> (u64, u64) {
+/// 计算图片在 docx 内显示的 EMU 尺寸（914400 EMU = 1 英寸）。
+///
+/// `bytes`：图片原始字节（PNG / JPEG）。
+/// `max_cx_emu`：水平方向最大允许 EMU（默认 4572000 = 5 英寸）。
+/// `default_cy_emu`：解析失败时的回退高度 EMU。
+///
+/// 算法：以 96 DPI 为基准（OOXML 渲染常用），将原始像素换算成 EMU。
+/// 等比缩放保证 `cx <= max_cx_emu`。
+fn calc_image_emu(bytes: &[u8], max_cx_emu: u64, default_cy_emu: u64) -> (u64, u64) {
+    const EMU_PER_INCH: u64 = 914_400;
+    const ASSUMED_DPI: u32 = 96;
     if let Ok(img) = image::load_from_memory(bytes) {
         let (w, h) = img.dimensions();
-        let scale = if w as u64 > max_cx {
-            max_cx as f64 / w as f64
+        if w == 0 || h == 0 {
+            return (max_cx_emu, default_cy_emu);
+        }
+        // 像素 → 96DPI EMU
+        let cx_emu = (w as u64) * EMU_PER_INCH / ASSUMED_DPI as u64;
+        let scale = if cx_emu > max_cx_emu {
+            max_cx_emu as f64 / cx_emu as f64
         } else {
             1.0
         };
-        let cx = (w as f64 * scale) as u64;
-        let cy = (h as f64 * scale) as u64;
+        let cx = ((cx_emu as f64) * scale) as u64;
+        let cy = ((cx_emu as f64) * scale * (h as f64 / w as f64)) as u64;
         (cx.max(1), cy.max(1))
     } else {
-        (max_cx, default_cy)
+        (max_cx_emu, default_cy_emu)
     }
 }
 
@@ -639,9 +701,10 @@ fn write_table(
         .unwrap();
     w.write_event(Event::Start(BytesStart::new("w:tblW")))
         .unwrap();
+    let total_w: i64 = 9000i64; // 6.25 inches — 适合 A4 双栏
     let mut w_attr = BytesStart::new("w:w");
-    w_attr.push_attribute(("w:w", "0"));
-    w_attr.push_attribute(("w:type", "auto"));
+    w_attr.push_attribute(("w:w", total_w.to_string().as_str()));
+    w_attr.push_attribute(("w:type", "dxa"));
     w.write_event(Event::Empty(w_attr)).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:tblW"))).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:tblBorders")))
@@ -661,9 +724,12 @@ fn write_table(
     let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
     w.write_event(Event::Start(BytesStart::new("w:tblGrid")))
         .unwrap();
+    // V2：均分表格宽度（避免某些 cell 被挤到 1 字符宽导致 wrap）
+    let col_w: i64 = total_w / ncols.max(1) as i64;
+    let col_w_str = col_w.to_string();
     for _ in 0..ncols {
         let mut gc = BytesStart::new("w:gridCol");
-        gc.push_attribute(("w:w", "2000"));
+        gc.push_attribute(("w:w", col_w_str.as_str()));
         w.write_event(Event::Empty(gc)).unwrap();
     }
     w.write_event(Event::End(BytesEnd::new("w:tblGrid")))
@@ -915,13 +981,16 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
 
     // ── 中文作者 ──
     if !meta.authors.is_empty() {
+        let mut runs: Vec<Run> = Vec::new();
+        for (i, a) in meta.authors.iter().enumerate() {
+            if i > 0 {
+                runs.push(Run::plain(", ".to_string()));
+            }
+            runs.push(Run::plain(a.clone()));
+        }
         let p = Paragraph {
             style_id: Some(STYLE_AUTHOR_ZH.to_string()),
-            runs: meta
-                .authors
-                .iter()
-                .map(|a| Run::plain(a.clone()))
-                .collect(),
+            runs,
             jc: Some("center".into()),
             keep_next: false,
             keep_lines: false,
@@ -1092,13 +1161,16 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
 
     // ── 英文作者 ──
     if !meta.authors_en.is_empty() {
+        let mut runs: Vec<Run> = Vec::new();
+        for (i, a) in meta.authors_en.iter().enumerate() {
+            if i > 0 {
+                runs.push(Run::plain(", ".to_string()));
+            }
+            runs.push(Run::plain(a.clone()));
+        }
         let p = Paragraph {
             style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
-            runs: meta
-                .authors_en
-                .iter()
-                .map(|a| Run::plain(a.clone()))
-                .collect(),
+            runs,
             jc: Some("center".into()),
             keep_next: false,
             keep_lines: false,

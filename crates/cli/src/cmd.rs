@@ -140,11 +140,43 @@ pub struct BuildArgs {
 pub fn run_build(a: BuildArgs) -> Result<()> {
     use crate::{docx2pdf, pdf_verify, tex_compile};
     std::fs::create_dir_all(&a.outdir).ok();
-    let docx = a.outdir.join("out.docx");
-    let oracle_pdf = a.outdir.join("out.oracle.pdf");
-    let rust_pdf = a.outdir.join("out.pdf");
-    let report_md = a.outdir.join("quality-report.md");
-    let report_json = a.outdir.join("quality-report.json");
+
+    // ── 生成带版本号 + 时间戳的统一文件名 ──
+    // 格式：<main_tex-stem>__v<version>__<yyyymmdd-hhmmss>
+    let pkg_version = env!("CARGO_PKG_VERSION");
+    let stem = std::path::Path::new(&a.main_tex)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("doc")
+        .to_string();
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| {
+            let secs = d.as_secs();
+            // UTC+8 (CST) 简单换算
+            let secs_cst = secs + 8 * 3600;
+            let days = secs_cst / 86400;
+            let day_secs = secs_cst % 86400;
+            let hh = day_secs / 3600;
+            let mm = (day_secs % 3600) / 60;
+            let ss = day_secs % 60;
+            // 1970-01-01 + days
+            let (y, m, d) = days_to_ymd(days);
+            format!(
+                "{:04}{:02}{:02}-{:02}{:02}{:02}",
+                y, m, d, hh, mm, ss
+            )
+        })
+        .unwrap_or_else(|_| "00000000-000000".to_string());
+    let base = format!("{stem}__v{pkg_version}__{now}");
+
+    let docx = a.outdir.join(format!("{base}.docx"));
+    let oracle_pdf = a.outdir.join(format!("{base}.oracle.pdf"));
+    let rust_pdf = a.outdir.join(format!("{base}.pdf"));
+    let report_md = a.outdir.join(format!("{base}.quality-report.md"));
+    let report_json = a.outdir.join(format!("{base}.quality-report.json"));
+
+    tracing::info!("output basename: {base}");
 
     // 1. zip → docx
     let convert_a = ConvertArgs {
@@ -176,6 +208,11 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
         outdir: a.outdir.clone(),
     };
     rt.block_on(docx2pdf::run(d2p))?;
+    // 重命名 outdir/<docx-stem>.pdf → rust_pdf（统一命名约定）
+    let produced_pdf = a.outdir.join(format!("{}.pdf", docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")));
+    if produced_pdf != rust_pdf && produced_pdf.exists() {
+        std::fs::rename(&produced_pdf, &rust_pdf).ok();
+    }
 
     // 4. 验证
     let v = pdf_verify::VerifyPdfArgs {
@@ -190,4 +227,30 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
     };
     rt.block_on(pdf_verify::run(v))?;
     Ok(())
+}
+
+/// 把自 1970-01-01 起的天数换算为 (year, month, day)（公历）。
+fn days_to_ymd(days: u64) -> (u64, u64, u64) {
+    let mut y = 1970u64;
+    let mut remaining = days;
+    loop {
+        let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+        let dy = if leap { 366 } else { 365 };
+        if remaining < dy {
+            break;
+        }
+        remaining -= dy;
+        y += 1;
+    }
+    let leap = (y % 4 == 0 && y % 100 != 0) || y % 400 == 0;
+    let months = [31u64, if leap { 29 } else { 28 }, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+    let mut m = 1u64;
+    for &dm in &months {
+        if remaining < dm {
+            return (y, m, remaining + 1);
+        }
+        remaining -= dm;
+        m += 1;
+    }
+    (y, 12, 31)
 }

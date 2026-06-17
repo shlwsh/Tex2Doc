@@ -20,10 +20,11 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 PAPER3_DIR="$ROOT/examples/paper3"
 ZIP="$PAPER3_DIR/upload_full.zip"
-DOCX="$PAPER3_DIR/output/main-jos-via-doc-engine.pdf.cmp.docx"  # 新生成（避免覆盖原 V1.5 输出）
+STAMP=$(date +%Y%m%d-%H%M%S)
+DOCX="$PAPER3_DIR/output/main-jos-via-doc-engine__v0.2.0__${STAMP}.docx"
 DOCX_OUT_DIR="$PAPER3_DIR/output"
 ORACLE_PDF="$PAPER3_DIR/output/main-jos-oracle.pdf"
-V2_PDF="$PAPER3_DIR/output/main-jos-v2.pdf"
+V2_PDF="$PAPER3_DIR/output/main-jos-v2__v0.2.0__${STAMP}.pdf"
 ORACLE_TXT="$PAPER3_DIR/output/.cmp-oracle.txt"
 V2_TXT="$PAPER3_DIR/output/.cmp-v2.txt"
 TMP_DIR="$(mktemp -d)"
@@ -76,9 +77,12 @@ if [[ $DO_PDF -eq 1 ]]; then
     echo "── soffice docx→pdf ──"
     rm -f "$V2_PDF"
     "$DOCX_TOOL" docx-to-pdf --docx "$DOCX" --outdir "$DOCX_OUT_DIR" 2>&1 | tail -2
-    # doc-engine 把输出写成同名的 .pdf，可能叫 main-jos-via-doc-engine.pdf.cmp.pdf
-    if [[ ! -f "$V2_PDF" && -f "$DOCX_OUT_DIR/main-jos-via-doc-engine.pdf.cmp.pdf" ]]; then
-        mv "$DOCX_OUT_DIR/main-jos-via-doc-engine.pdf.cmp.pdf" "$V2_PDF"
+    # doc-engine 把输出写成同名的 .pdf（与 docx 同 stem）
+    if [[ ! -f "$V2_PDF" ]]; then
+        PRODUCED_PDF="$DOCX_OUT_DIR/$(basename "${DOCX%.docx}").pdf"
+        if [[ -f "$PRODUCED_PDF" ]]; then
+            mv "$PRODUCED_PDF" "$V2_PDF"
+        fi
     fi
     [[ -f "$V2_PDF" ]] || { echo "❌ PDF not generated" >&2; exit 3; }
 fi

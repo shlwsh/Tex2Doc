@@ -10,7 +10,7 @@ use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
 use crate::page_setup::PageSetup;
-use crate::serializer::serialize_document;
+use crate::serializer::{serialize_document, EmbeddedImage};
 use crate::styles::write_styles;
 use crate::template::{merge_styles, parse_template, TemplateStyles};
 
@@ -222,7 +222,8 @@ pub fn pack_with_page_setup(
 
     // document.xml 内的 sectPr 必须在引用 rId 前知道，所以 document.xml
     // 改由 packer 内联拼接：先调 serialize_document 拿到 body，再 append sectPr。
-    let body_xml = serialize_document(doc, image_assets, page_setup);
+    let mut embedded_images: Vec<EmbeddedImage> = Vec::new();
+    let body_xml = serialize_document(doc, image_assets, page_setup, &mut embedded_images);
     let body_xml = if has_any_hdr_ftr {
         inject_sectpr_refs(
             &body_xml,
@@ -251,8 +252,8 @@ pub fn pack_with_page_setup(
     let content_types = build_content_types(has_h, has_f, has_fh, has_ff);
     write_zip(&mut zip, "[Content_Types].xml", content_types.as_bytes(), opts)?;
     write_zip(&mut zip, "_rels/.rels", ROOT_RELS, opts)?;
-    // document.xml.rels：动态追加 header/footer relationship
-    let doc_rels = build_doc_rels(has_h, has_f, has_fh, has_ff);
+    // document.xml.rels：动态追加 header/footer + 图片 relationship
+    let doc_rels = build_doc_rels(has_h, has_f, has_fh, has_ff, &embedded_images);
     write_zip(
         &mut zip,
         "word/_rels/document.xml.rels",
@@ -261,6 +262,12 @@ pub fn pack_with_page_setup(
     )?;
     write_zip(&mut zip, "word/document.xml", &body_xml, opts)?;
     write_zip(&mut zip, "word/styles.xml", &styles_xml, opts)?;
+
+    // 真正把图片字节写入 word/media/，让 soffice/Word 能正确解析 r:embed
+    for img in &embedded_images {
+        let path = format!("word/media/image{}.{}", img.fig_id, img.ext.to_lowercase());
+        write_zip(&mut zip, &path, &img.bytes, opts)?;
+    }
 
     if let Some(h) = &parts.header_xml {
         write_zip(&mut zip, "word/header1.xml", h.as_bytes(), opts)?;
@@ -375,11 +382,13 @@ fn build_content_types(
 /// 构造 word/_rels/document.xml.rels（必须包含 rId1→styles，可选追加 header/footer）。
 ///
 /// 使用 `rIdH1`/`rIdF1`/`rIdH2`/`rIdF2` 作为 part id，与 `inject_sectpr_refs` 对应。
+/// 图片的 rId 形如 `rIdImgN`，由调用方传入已嵌入的图片清单。
 fn build_doc_rels(
     has_h: bool,
     has_f: bool,
     has_fh: bool,
     has_ff: bool,
+    embedded_images: &[EmbeddedImage],
 ) -> String {
     let mut s = String::from(
         "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\
@@ -405,6 +414,19 @@ fn build_doc_rels(
         s.push_str(
             "<Relationship Id=\"rIdF2\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer\" Target=\"footer2.xml\"/>",
         );
+    }
+    // 图片关系：每个 embedded_image 生成 rIdImg{fig_id} → media/image{fig_id}.{ext}
+    for img in embedded_images {
+        let ext_lower = img.ext.to_lowercase();
+        let ctype = match ext_lower.as_str() {
+            "jpg" | "jpeg" => "image/jpeg",
+            _ => "image/png", // 默认 png（避免未知格式挂在主 rels）
+        };
+        s.push_str(&format!(
+            "<Relationship Id=\"rIdImg{}\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/image\" Target=\"media/image{}.{}\"/>",
+            img.fig_id, img.fig_id, ext_lower
+        ));
+        let _ = ctype; // ctype 信息在 [Content_Types].xml 中以 Default Extension 形式处理
     }
     s.push_str("</Relationships>");
     s

@@ -20,6 +20,25 @@ use crate::result::{ConvertResult, ProgressEvent, ProgressPhase};
 
 /// 把 PDF 第一页渲染为 PNG（200 dpi），用 pdfium-render。
 ///
+/// 把 `石 洪 雷 等:网关流量驱动的微服务定向日志采集框架`
+/// 缩短为「石 等:网关流量驱动的微服务定向日志采集框架」（不超过 50 字符）。
+fn shorten_running_header(rh: &str) -> String {
+    // Oracle 风格：rjhead 在 LaTeX 中虽然很长（"石 洪 雷 等:网关流量驱动的微服务定向日志采集框架"），
+    // 但渲染时仅取到 "等" 即止（fancyhdr LO 短边放不下全文）。
+    // 这里截断为 "石 洪 雷 等" 形式，避免页眉折行 3+ 次导致 PDF 总页数膨胀。
+    let clean = rh.trim();
+    if let Some(byte_pos) = clean.find("等") {
+        let chars_before: usize = clean[..byte_pos].chars().count();
+        let prefix: String = clean.chars().take(chars_before + 1).collect();
+        return prefix.trim().to_string();
+    }
+    let char_count = clean.chars().count();
+    if char_count > 50 {
+        return clean.chars().take(20).collect::<String>().trim_end().to_string();
+    }
+    clean.to_string()
+}
+
 /// V1 设计：zip 内 `\includegraphics{*.pdf}` 时，docx-writer 端只接受 PNG/JPG，
 /// 所以这里把 PDF 翻译成 PNG byte 注入 image_assets（同 key）。
 fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
@@ -109,7 +128,7 @@ pub fn convert_dir(
         if ps_eff.header_text.is_none() {
             if let Some(rh) = &meta.running_header {
                 if !rh.is_empty() {
-                    ps_eff.header_text = Some(rh.clone());
+                    ps_eff.header_text = Some(shorten_running_header(rh));
                     changed = true;
                 }
             }
@@ -275,7 +294,7 @@ pub fn convert_zip(
         if ps_eff.header_text.is_none() {
             if let Some(rh) = &meta.running_header {
                 if !rh.is_empty() {
-                    ps_eff.header_text = Some(rh.clone());
+                    ps_eff.header_text = Some(shorten_running_header(rh));
                     changed = true;
                 }
             }

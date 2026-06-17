@@ -77,21 +77,28 @@ fn try_top_level_command(
 
     for (prefix, handler) in prefixes {
         if let Some(rest) = s.strip_prefix(prefix) {
-            let trimmed = rest.trim();
-            if trimmed.strip_prefix('{').is_some() {
-                if let Some(end) = find_matching_brace(trimmed, 0) {
-                    // end = 内部内容长度（ASCII-safe 情况下 = trimmed[1..end+1].len()）。
-                    // slice [1..end+1] 包含完整内部。consumed = prefix + leading-whitespace + `{` + end + `}`
+            // 跳过命令后的 leading 空白（\subsection 后常见 \n 或空格）
+            let lead = rest
+                .as_bytes()
+                .iter()
+                .take_while(|b| matches!(b, b' ' | b'\t' | b'\n' | b'\r'))
+                .count();
+            let after_lead = &rest[lead..];
+            if after_lead.strip_prefix('{').is_some() {
+                if let Some(end) = find_matching_brace(after_lead, 0) {
+                    // end = 内部内容长度（ASCII-safe 情况下 = after_lead[1..end+1].len()）。
+                    // slice [1..end+1] 包含完整内部。
                     let slice_end = end + 1;
-                    if slice_end > trimmed.len() || !trimmed.is_char_boundary(slice_end) {
+                    if slice_end > after_lead.len() || !after_lead.is_char_boundary(slice_end) {
                         return None;
                     }
-                    let inner = &trimmed[1..slice_end];
-                    let consumed = prefix.len() + (rest.len() - trimmed.len()) + end + 2;
+                    let inner = &after_lead[1..slice_end];
+                    // consumed = prefix + leading_ws + `{` + end + `}`
+                    let consumed = prefix.len() + lead + end + 2;
                     return Some((consumed, handler(inner, span, numbering)));
                 }
             }
-            return Some((prefix.len(), handler("", span, numbering)));
+            return Some((prefix.len() + lead, handler("", span, numbering)));
         }
     }
     None
@@ -169,8 +176,12 @@ pub fn lower_with_macros_and_numbering(
     // 第一步：VFS感知的宏展开。
     // 处理 \input{file} 递归，把子文件的 \newcommand 引入宏表，
     // 再对全文做宏展开，使 \AbstractContentZh 等环境内宏正确展开。
+    // 重要：当 `joined` 已提供（来自 IncludeGraph::join），`text` 已经包含
+    // 全部 \input 后的内容，**不能再走 expand_macros_with_input 重新展开**，
+    // 否则会触发重复 include（每段正文会重复 2 份，导致 docx 页数翻倍）。
     let text = if let Some(j) = joined {
-        expand_macros_with_input(j, &j.vfs, macros)
+        // 走纯宏展开（不重新处理 \input，避免与已 join 过的内容重复）
+        expand_macros_in(&j.text, macros)
     } else {
         expand_macros_in(&text, macros)
     };
@@ -233,15 +244,23 @@ pub fn lower_with_macros_and_numbering(
         "verbatim",
     ];
     if multi_block_envs.contains(&name) {
-        // V2：flushleft 包 "中文引用格式:" / "英文引用格式:" 已被提取到
-        //     doc.metadata.citation_zh/en（由 lower_to_document 主循环后的步骤做），
-        //     这里不再 push 任何 sub-block 到 doc。
-        if !(name == "flushleft"
+        // V2：flushleft 包「中文/英文引用格式」/「英文标题/作者/机构」/「英文摘要/关键词」
+        //     全部已被提取到 doc.metadata.*，这里不再 push 任何 sub-block。
+        let already_extracted = name == "flushleft"
             && (body.contains("中文引用格式")
                 || body.contains("英文引用格式")
                 || body.contains("English abstract")
-                || body.contains("Abstract:")))
-        {
+                || body.contains("Abstract:")
+                // 英文标题/作者/机构 flushleft：包含 \wuhao\textbf{...} 英文标题
+                // + \xiaowuhao 英文作者行 + \fontsize{7.5pt}{12pt} 英文单位行
+                || (body.contains("\\wuhao")
+                    && body.contains("\\textbf")
+                    && (body.contains("Hong-Lei") || body.contains("SHI")))
+                // 英文摘要 flushleft：包含 Abstract: + AbstractContentEn
+                || (body.contains("Abstract:") && body.contains("AbstractContentEn"))
+                // 英文关键词 flushleft：包含 Key words: + KeywordsEn
+                || (body.contains("Key words:") && body.contains("KeywordsEn")));
+        if !already_extracted {
             let p = crate::parser::parse(body);
             let sub = lower_with_macros_and_numbering(&p, None, macros, numbering);
             for b in sub.blocks {
@@ -2884,6 +2903,34 @@ mod tests {
             "Chinese abstract text missing: meta='{}' blocks='{}'",
             from_meta,
             from_blocks
+        );
+    }
+
+    #[test]
+    fn lower_english_front_matter() {
+        // 验证 rjenglish body 中的英文作者/单位不漏 \fontsize
+        let src = "\\begin{rjabstract}{\\fontsize{7.5pt}{12pt}\\selectfont\\song \
+                    \\begin{rjenglish}\
+                    {\\wuhao\\textbf{Gateway-Traffic-Driven}}\
+                    \\end{rjenglish}\
+                    }\\end{rjabstract}";
+        let p = parse(src);
+        let mut macros = crate::expand::MacroMap::new();
+        let doc = lower_with_macros(&p, None, &mut macros);
+        let all_blocks: String = doc
+            .blocks
+            .iter()
+            .map(|b| match b {
+                Block::Paragraph { runs, .. } => {
+                    runs.iter().map(|r| r.text.as_str()).collect::<String>()
+                }
+                Block::RawFallback { text, .. } => text.clone(),
+                _ => String::new(),
+            })
+            .collect();
+        assert!(
+            !all_blocks.contains("fontsize"),
+            "fontsize should not leak: {all_blocks}"
         );
     }
 
