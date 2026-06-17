@@ -98,12 +98,56 @@ pub fn convert_dir(
     let source = String::from_utf8(source_bytes)
         .map_err(|e| CoreError::Parse(format!("主文件非 UTF-8：{e}")))?;
 
-    let doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
+    let mut doc = parse_tex_with_vfs(&main_posix, &source, &mut vfs)?;
+    // V2：把 doc.metadata.running_header / first_footer_text 自动回填到
+    // page_setup 的 header_text / first_footer_text（仅当 caller 没显式传）。
+    let mut ps_owned: Option<doc_docx_writer::PageSetup> = None;
+    {
+        let meta = &doc.metadata;
+        let mut changed = false;
+        let mut ps_eff = options.page_setup.clone().unwrap_or_default();
+        if ps_eff.header_text.is_none() {
+            if let Some(rh) = &meta.running_header {
+                if !rh.is_empty() {
+                    ps_eff.header_text = Some(rh.clone());
+                    changed = true;
+                }
+            }
+        }
+        if ps_eff.first_footer_text.is_none() {
+            if let Some(ff) = &meta.first_footer_text {
+                if !ff.is_empty() {
+                    ps_eff.first_footer_text = Some(ff.clone());
+                    changed = true;
+                }
+            }
+        }
+        if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
+            let first_h = "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
+                           Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
+                           © 中国科学院软件研究所版权所有.\n\
+                           E-mail: jos@iscas.ac.cn\n\
+                           http://www.jos.org.cn\n\
+                           Tel: +86-10-62562563"
+                .to_string();
+            ps_eff.first_header_text = Some(first_h);
+            changed = true;
+        }
+        // V2：默认页脚带 PAGE 字段（caller 没显式给的话自动加）。
+        if ps_eff.footer_text.is_none() {
+            ps_eff.footer_text = Some("— {{PAGE}} —".to_string());
+            changed = true;
+        }
+        if changed {
+            ps_owned = Some(ps_eff);
+        }
+    }
+    let ps_ref = ps_owned.as_ref().or(options.page_setup.as_ref());
     let docx = doc_docx_writer::pack_with_page_setup(
         &doc,
         options.template_bytes.as_deref(),
         Some(&image_assets),
-        options.page_setup.as_ref(),
+        ps_ref,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -220,11 +264,56 @@ pub fn convert_zip(
             .collect::<Vec<_>>()
             .join("")
     );
+    let mut doc = parsed_doc;
+    // V2：把 doc.metadata.running_header / first_footer_text 自动回填到
+    // page_setup 的 header_text / first_footer_text（仅当 caller 没显式传）。
+    let mut ps_owned: Option<doc_docx_writer::PageSetup> = None;
+    {
+        let meta = &doc.metadata;
+        let mut changed = false;
+        let mut ps_eff = options.page_setup.clone().unwrap_or_default();
+        if ps_eff.header_text.is_none() {
+            if let Some(rh) = &meta.running_header {
+                if !rh.is_empty() {
+                    ps_eff.header_text = Some(rh.clone());
+                    changed = true;
+                }
+            }
+        }
+        if ps_eff.first_footer_text.is_none() {
+            if let Some(ff) = &meta.first_footer_text {
+                if !ff.is_empty() {
+                    ps_eff.first_footer_text = Some(ff.clone());
+                    changed = true;
+                }
+            }
+        }
+        if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
+            let first_h = "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
+                           Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
+                           © 中国科学院软件研究所版权所有.\n\
+                           E-mail: jos@iscas.ac.cn\n\
+                           http://www.jos.org.cn\n\
+                           Tel: +86-10-62562563"
+                .to_string();
+            ps_eff.first_header_text = Some(first_h);
+            changed = true;
+        }
+        // V2：默认页脚带 PAGE 字段（caller 没显式给的话自动加）。
+        if ps_eff.footer_text.is_none() {
+            ps_eff.footer_text = Some("— {{PAGE}} —".to_string());
+            changed = true;
+        }
+        if changed {
+            ps_owned = Some(ps_eff);
+        }
+    }
+    let ps_ref = ps_owned.as_ref().or(options.page_setup.as_ref());
     let docx = doc_docx_writer::pack_with_page_setup(
-        &parsed_doc,
+        &doc,
         options.template_bytes.as_deref(),
         Some(&image_assets),
-        options.page_setup.as_ref(),
+        ps_ref,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {

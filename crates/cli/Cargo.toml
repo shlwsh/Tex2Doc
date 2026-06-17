@@ -16,6 +16,7 @@ doc-core        = { path = "../core" }
 doc-tex-facade  = { path = "../tex-facade" }
 doc-docx-pdf    = { path = "../docx-pdf" }
 doc-quality     = { path = "../quality" }
+doc-docx-writer = { path = "../docx-writer" }
 
 clap     = { workspace = true }
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "process", "sync"] }

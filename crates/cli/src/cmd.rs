@@ -31,6 +31,10 @@ impl PageSetupKind {
                 margin_footer: None,
                 cols_space: None,
                 cols_num: None,
+                header_text: None,
+                footer_text: None,
+                first_header_text: None,
+                first_footer_text: None,
             }),
             PageSetupKind::JosPaper3 => Some(PageSetup::jos_paper3()),
         }
@@ -51,13 +55,47 @@ pub struct ConvertArgs {
     /// 页面设置：letter / a4 / jos-paper3
     #[arg(long, value_enum, default_value_t = PageSetupKind::Letter)]
     pub page_setup: PageSetupKind,
+    /// V2：自定义页眉文本（支持多行 \\n + 占位符 `{{PAGE}}` / `{{NUMPAGES}}`）
+    #[arg(long)]
+    pub header_text: Option<String>,
+    /// V2：自定义页脚文本（占位符同 header_text）
+    #[arg(long)]
+    pub footer_text: Option<String>,
+    /// V2：首页页眉（覆盖 header_text）
+    #[arg(long)]
+    pub first_header_text: Option<String>,
+    /// V2：首页页脚（覆盖 footer_text）
+    #[arg(long)]
+    pub first_footer_text: Option<String>,
 }
 
 pub fn run_convert(a: ConvertArgs) -> Result<()> {
     let bytes = std::fs::read(&a.zip)
         .with_context(|| format!("读取 zip 失败：{}", a.zip.display()))?;
     let mut options = ConvertOptions::default();
-    options.page_setup = a.page_setup.to_page_setup();
+    let mut ps = a.page_setup.to_page_setup();
+    if let Some(ps_mut) = ps.as_mut() {
+        ps_mut.header_text = a.header_text.clone();
+        ps_mut.footer_text = a.footer_text.clone();
+        ps_mut.first_header_text = a.first_header_text.clone();
+        ps_mut.first_footer_text = a.first_footer_text.clone();
+    } else {
+        // 即便 page_setup 选 Letter（None），也允许自定义 header/footer：
+        // 这里把 header/footer 套到 default() 上。
+        if a.header_text.is_some()
+            || a.footer_text.is_some()
+            || a.first_header_text.is_some()
+            || a.first_footer_text.is_some()
+        {
+            let mut ps2 = doc_docx_writer::PageSetup::default();
+            ps2.header_text = a.header_text.clone();
+            ps2.footer_text = a.footer_text.clone();
+            ps2.first_header_text = a.first_header_text.clone();
+            ps2.first_footer_text = a.first_footer_text.clone();
+            ps = Some(ps2);
+        }
+    }
+    options.page_setup = ps;
     let r = doc_core::convert_zip(&bytes, &a.main_tex, &options)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     if let Some(parent) = a.out.parent() {
@@ -85,6 +123,18 @@ pub struct BuildArgs {
     /// 页面设置：letter / a4 / jos-paper3
     #[arg(long, value_enum, default_value_t = PageSetupKind::Letter)]
     pub page_setup: PageSetupKind,
+    /// V2：自定义页眉文本
+    #[arg(long)]
+    pub header_text: Option<String>,
+    /// V2：自定义页脚文本
+    #[arg(long)]
+    pub footer_text: Option<String>,
+    /// V2：首页页眉
+    #[arg(long)]
+    pub first_header_text: Option<String>,
+    /// V2：首页页脚
+    #[arg(long)]
+    pub first_footer_text: Option<String>,
 }
 
 pub fn run_build(a: BuildArgs) -> Result<()> {
@@ -102,6 +152,10 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
         main_tex: a.main_tex.clone(),
         out: docx.clone(),
         page_setup: a.page_setup,
+        header_text: a.header_text.clone(),
+        footer_text: a.footer_text.clone(),
+        first_header_text: a.first_header_text.clone(),
+        first_footer_text: a.first_footer_text.clone(),
     };
     run_convert(convert_a)?;
 

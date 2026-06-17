@@ -69,7 +69,47 @@ fn paper3_main_jos_to_docx() {
     let joined = graph.join(&vfs).expect("include join");
     let parse = parse_tex(&joined.text);
     let doc = lower_to_document(&parse, Some(&joined));
-    let docx_bytes_v2 = pack(&doc).expect("pack v2");
+    // V2：和 convert_dir 路径完全对齐——rebuild 同源 page_setup (含 metadata 回填)
+    //     再 pack_with_page_setup。
+    let mut page_setup = opts.page_setup.clone().unwrap_or_default();
+    {
+        let meta = &doc.metadata;
+        if page_setup.header_text.is_none() {
+            if let Some(rh) = &meta.running_header {
+                if !rh.is_empty() {
+                    page_setup.header_text = Some(rh.clone());
+                }
+            }
+        }
+        if page_setup.first_footer_text.is_none() {
+            if let Some(ff) = &meta.first_footer_text {
+                if !ff.is_empty() {
+                    page_setup.first_footer_text = Some(ff.clone());
+                }
+            }
+        }
+        if page_setup.first_header_text.is_none() && page_setup.header_text.is_some() {
+            page_setup.first_header_text = Some(
+                "软件学报 ISSN 1000-9825, CODEN RUXUEW\n\
+                 Journal of Software, [doi: 10.13328/j.cnki.jos.000000]\n\
+                 © 中国科学院软件研究所版权所有.\n\
+                 E-mail: jos@iscas.ac.cn\n\
+                 http://www.jos.org.cn\n\
+                 Tel: +86-10-62562563"
+                    .to_string(),
+            );
+        }
+        if page_setup.footer_text.is_none() {
+            page_setup.footer_text = Some("— {{PAGE}} —".to_string());
+        }
+    }
+    let docx_bytes_v2 = doc_docx_writer::pack_with_page_setup(
+        &doc,
+        opts.template_bytes.as_deref(),
+        None,
+        Some(&page_setup),
+    )
+    .expect("pack v2");
 
     // 重新组装后的 docx 应当与原结果一致（同一源代码的两次转换等价）
     assert_eq!(docx_bytes_v2, result.docx, "两次转换结果不一致");

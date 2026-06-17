@@ -419,6 +419,43 @@ pub fn write_styles() -> Vec<u8> {
         Some(260),
     );
 
+    // 22) Header — V2 通用页眉样式（居中、宋体 + 西文 Times New Roman、9pt）。
+    //     必须先于 header1.xml 里 `<w:pStyle w:val="Header"/>` 出现。
+    write_builtin_paragraph_style(
+        &mut w,
+        "Header",
+        "header",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+    );
+
+    // 23) Footer — V2 通用页脚样式（居中、宋体、9pt）。
+    write_builtin_paragraph_style(
+        &mut w,
+        "Footer",
+        "footer",
+        9.0,
+        "宋体",
+        "Times New Roman",
+        false,
+        Some("center"),
+    );
+
+    // 24) JOSHeader — 软件学报风格页眉（楷体 9pt，居中，first page 默认）
+    write_builtin_paragraph_style(
+        &mut w,
+        "JOSHeader",
+        "JOS header (kai 9pt centered)",
+        9.0,
+        "楷体",
+        "Times New Roman",
+        false,
+        Some("center"),
+    );
+
     w.write_event(Event::End(BytesEnd::new("w:styles"))).unwrap();
     w.into_inner()
 }
@@ -468,6 +505,63 @@ fn write_style(
     write_style_with_ind(
         w, id, name, size_pt, east, ascii, bold, jc, first_line, left, None, before, after, line,
     );
+}
+
+/// 写一个 OOXML 内置 paragraph style（type="paragraph"）。
+/// 用于 `Header` / `Footer` 这类保留 id；不输出 spacing/ind（最小可用）。
+#[allow(clippy::too_many_arguments)]
+fn write_builtin_paragraph_style(
+    w: &mut Writer<Vec<u8>>,
+    id: &str,
+    name: &str,
+    size_pt: f32,
+    east: &str,
+    ascii: &str,
+    bold: bool,
+    jc: Option<&str>,
+) {
+    let mut s = BytesStart::new("w:style");
+    s.push_attribute(("w:type", "paragraph"));
+    s.push_attribute(("w:styleId", id));
+    w.write_event(Event::Start(s)).unwrap();
+
+    w.write_event(Event::Start(BytesStart::new("w:name"))).unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(name)))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:name"))).unwrap();
+    let mut based = BytesStart::new("w:basedOn");
+    based.push_attribute(("w:val", STYLE_NORMAL));
+    w.write_event(Event::Empty(based)).unwrap();
+
+    if jc.is_some() {
+        w.write_event(Event::Start(BytesStart::new("w:pPr"))).unwrap();
+        if let Some(j) = jc {
+            let mut jc_el = BytesStart::new("w:jc");
+            jc_el.push_attribute(("w:val", j));
+            w.write_event(Event::Empty(jc_el)).unwrap();
+        }
+        w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
+    }
+
+    w.write_event(Event::Start(BytesStart::new("w:rPr"))).unwrap();
+    let mut rf = BytesStart::new("w:rFonts");
+    rf.push_attribute(("w:ascii", ascii));
+    rf.push_attribute(("w:eastAsia", east));
+    rf.push_attribute(("w:hAnsi", ascii));
+    w.write_event(Event::Empty(rf)).unwrap();
+    if bold {
+        w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
+        w.write_event(Event::Empty(BytesStart::new("w:bCs"))).unwrap();
+    }
+    let sz_val = (size_pt * 2.0).round() as u32;
+    let mut sz = BytesStart::new("w:sz");
+    sz.push_attribute(("w:val", sz_val.to_string().as_str()));
+    w.write_event(Event::Empty(sz)).unwrap();
+    let mut szcs = BytesStart::new("w:szCs");
+    szcs.push_attribute(("w:val", sz_val.to_string().as_str()));
+    w.write_event(Event::Empty(szcs)).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:style"))).unwrap();
 }
 
 #[allow(clippy::too_many_arguments)]

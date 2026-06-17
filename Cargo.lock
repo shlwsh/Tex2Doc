@@ -626,6 +626,7 @@ dependencies = [
  "clap",
  "doc-core",
  "doc-docx-pdf",
+ "doc-docx-writer",
  "doc-quality",
  "doc-tex-facade",
  "serde",

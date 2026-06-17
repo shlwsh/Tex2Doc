@@ -24,6 +24,17 @@ pub struct PageSetup {
     /// 分栏（cols space / num）。缺省 = 1 栏 + 720 twips 间距。
     pub cols_space: Option<u32>,
     pub cols_num: Option<u32>,
+    /// V2：自定义页眉文本（None 或空 → 不输出 header part）。
+    /// JOS 风格：单侧奇偶页可写两套；为简化 V2 仅支持 default header。
+    pub header_text: Option<String>,
+    /// V2：自定义页脚文本（None 或空 → 不输出 footer part）。
+    /// 模板中支持 `{{PAGE}}` / `{{NUMPAGES}}` 占位符，会被替换为 PAGE/NUMPAGES 字段。
+    pub footer_text: Option<String>,
+    /// V2：首页页眉（first_page_header）专用文本。覆盖 header_text。
+    /// JOS 模板首页 masthead 由 \rjmaketitle 排入正文，所以首页页眉通常留空。
+    pub first_header_text: Option<String>,
+    /// V2：首页页脚（first_page_footer）专用文本。覆盖 footer_text。
+    pub first_footer_text: Option<String>,
 }
 
 impl Default for PageSetup {
@@ -40,6 +51,10 @@ impl Default for PageSetup {
             margin_footer: None,
             cols_space: None,
             cols_num: None,
+            header_text: None,
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: None,
         }
     }
 }
@@ -61,6 +76,10 @@ impl PageSetup {
             margin_footer: Some(1260), // 2.22 cm
             cols_space: Some(720),
             cols_num: Some(1),
+            header_text: None,
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: None,
         }
     }
 }
