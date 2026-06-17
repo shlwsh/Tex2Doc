@@ -18,3 +18,22 @@
 从 AIOps 生态的角度看，本文的工作补充了标准化框架中数据采集前端的能力。从日志故障诊断链路来看，本文降低了后端解析、异常检测和根因定位的输入规模。
 
 未来工作按优先级排列：近期将在 Kubernetes 环境开展 64 节点云原生实测，并补充 Top-$K$ 参数敏感性分析；中期将引入 DeathStarBench、Alibaba 生产迹等真实微服务负载，验证长尾分布下的覆盖率，同时构建成本量化模型，把入库降幅转化为实际的成本节约估算；远期将探索与 OpenTelemetry 追踪上下文、eBPF 应用日志挂钩的集成，以及推进 gRPC TLS、多租户策略隔离和关注清单 JSON 规范的开源与标准化。
+
+\appendix
+\section{DSB-Lite 部署细节}
+\label{app:dsb-deploy}
+
+\subsection{服务清单}
+DSB-Lite 保留 DeathStarBench Social Network 原 12 个微服务中的 7 个核心服务：user-service、post-service、social-graph-service、media-service、url-shorten-service、user-mention-service、home-timeline-service；并加入 1 个可选的 post-timeline-service（资源紧张时可移除）。剥离的 5 个服务（text-service、unique-id-service、compose-post-service、user-timeline-service 等）均为长尾端点或工具服务，对 DASM 决策逻辑无影响。
+
+\subsection{数据层适配}
+原版 DSB Social Network 使用 MongoDB（持久化）+ Memcached（缓存）。DSB-Lite 将两者统一替换为 Redis 单实例：MongoDB 的 Collection 操作（find/insert）映射为 Redis Hash；Memcached 的 get/set 映射为 Redis String + TTL。代码改动约 150 行（每个服务约 20 行），主要在 DAO 层。
+
+\subsection{部署脚本}
+本机原生部署，详见 \texttt{deploy/deathstarbench/host\_native/}：
+\begin{itemize}
+\item \texttt{start\_services.sh}：启动 Redis + 8 个 Flask 微服务
+\item \texttt{stop\_services.sh}：停止所有服务
+\item \texttt{start\_gateway.sh}：启动 OpenResty/nginx 网关（端口 8080）
+\item 总占用内存约 800 MB（含 Redis），远低于 3.5 GB 预算
+\end{itemize}

@@ -2,13 +2,19 @@
 \section{相关工作}
 
 \subsection{集中式日志栈}
-ELK/EFK 以 Elasticsearch 为核心，检索能力强，但索引成本高昂。多项综述指出，大规模系统的日志在采集、传输、存储、解析和查询各阶段都会带来显著开销\cite{liao2016logs,limingshu2019logmgmt,he2020logsurvey,chen2020loganomaly}。为降低这些开销，已有研究提出日志压缩、模式挖掘、模板解析、云端低成本存储和离线数据集构建等方法\cite{liu2019logzip,zhu2020loghub,wei2023cloudlogstorage,khan2022logtemplate}。不过，这些工作大多聚焦于日志入库之后的压缩与治理，前提是日志已被全量采集到中心端。本文关注的则是日志进入中心\textbf{之前}的\textbf{采集前端定向减量}。
+ELK/EFK 以 Elasticsearch 为核心，检索能力强，但索引成本高昂。多项综述指出，大规模系统的日志在采集、传输、存储、解析和查询各阶段都会带来显著开销\cite{liao2016logs,limingshu2019logmgmt,he2020logsurvey,chen2020loganomaly}。为降低这些开销，已有研究提出日志压缩、模式挖掘、模板解析、云端低成本存储和离线数据集构建等方法\cite{liu2019logzip,zhu2020loghub,wei2023cloudlogstorage,khan2022logtemplate}。这些工作大多聚焦于日志入库之后的压缩与治理，前提是日志已被全量采集到中心端。本文关注的则是日志进入中心\textbf{之前}的\textbf{采集前端定向减量}。
 
 \subsection{采样与追踪关联}
 OpenTelemetry 尾部采样依赖分布式追踪上下文，在请求完成后决定是否保留相关 span 或日志\cite{otel_tail}。追踪、指标和日志三类遥测数据在微服务排障中往往需要联合分析\cite{usman2022observability,maruf2022telemetry,moreschini2023microai}。国内研究围绕分布式追踪、调用链存储、服务依赖发现和微服务故障检测等方向展开\cite{yang2020tracingsurvey,huang2023javatrace,you2021tracelogstorage,yuqingyang2022trace,zhang2024servicedep,wanglu2023microfault}。在根因定位方面，已有工作从轨迹监测、拓扑依赖、多源信号和方法体系等角度推进后端分析\cite{wang2017tracefault,wu2020microrca,zhang2023multimodal,wang2024rca}。和上述工作不同，本文不以已完整采集的 trace/log 数据为前提，而是利用网关 access log 动态生成 URL 模式清单，在 Sidecar 层就决定哪些应用日志需要上传。
 
+\subsection{OpenTelemetry 采样生态}
+OpenTelemetry Collector 的 Tail Sampling Processor 支持基于延迟、状态码、属性等条件的尾部采样，但其决策粒度为 trace span 而非应用日志\cite{otel_tail}。Adaptive Sampling（如 Jaeger 的自适应采样策略）根据服务吞吐量动态调整采样率，减少低价值追踪数据，但同样作用于追踪维度\cite{sridharan2018distributed}。Collector 的 Filter Processor 可按日志级别或资源属性做静态过滤，但不具备基于流量统计动态生成 URL 模式的能力。本文与 OTel 采样生态的核心区别在于：OTel 侧重于追踪（Trace）维度的采样决策，本文聚焦于日志（Log）维度的内容驱动定向减量，二者在可观测性数据链路中处于互补位置。
+
+\subsection{LLM 与深度学习日志分析}
+大语言模型和 Transformer 架构在日志分析领域进展较快。LogGPT\cite{qi2023loggpt} 利用 GPT 模型进行日志异常检测，无需人工标注即可实现高精度异常识别。LILAC\cite{jiang2024lilac} 提出利用 LLM 进行日志解析，通过上下文学习将非结构化日志转换为结构化模板。LogFormer\cite{guo2024logformer} 使用 Transformer 架构进行日志模板挖掘，在多个公开数据集上取得较优性能。上述工作均属于日志理解（Log Understanding）层面——以已采集的日志为输入，进行解析、异常检测或根因定位。本文定位为采集前端的轻量级定向减量，目标是在日志进入分析系统之前就大幅降低数据规模，二者互补而非竞争。实际部署中，DASM 驱动的定向采集可以为 LLM 日志分析提供更高质量、更低噪声的输入数据。
+
 \subsection{边缘采集与可靠传输}
-边缘计算和云原生场景对采集组件提出了严苛要求：在低带宽、低资源或中心暂时不可达时，组件需保持有界退化\cite{varghese2022edge,usman2022observability,liu2017microcontainer}。同时，Service Mesh 研究表明 Sidecar 自身也会引入额外延迟和资源消耗\cite{zhu2023sidecar,soldani2023ebpf}，采集逻辑必须严格控制 CPU、内存和网络占用。基于这些约束，本文在 Sidecar 中引入固定上限缓存块与压力感知退避机制，辅以 BoltDB 本地兜底，确保节点侧采集在资源受限条件下依然可控。
+边缘计算和云原生场景对采集组件提出了严苛要求：在低带宽、低资源或中心暂时不可达时，组件需保持有界退化\cite{varghese2022edge,usman2022observability,liu2017microcontainer}。Service Mesh 研究也表明 Sidecar 自身会引入额外延迟和资源消耗\cite{zhu2023sidecar,soldani2023ebpf}，采集逻辑必须严格控制 CPU、内存和网络占用。基于这些约束，本文在 Sidecar 中引入固定上限缓存块与压力感知退避机制，辅以 BoltDB 本地兜底，确保节点侧采集在资源受限条件下依然可控。
 
 \subsection{AIOps 实践与标准化}
 包航宇等\cite{bao2023aiops}基于大规模企业调研，总结了智能运维的实践现状，并提出了 AIOps-OSA 能力建设框架。后续研究也表明，生产系统需要将运行时数据、自动化分析和工程治理打通成闭环\cite{cheng2023aiops,diaz2023mlopsaiops,moreschini2023microai}。本文聚焦其中\textbf{数据采集能力}的前端减量环节：借助网关流量驱动的关注清单，从源头降低进入日志平台和后续分析模块的数据规模。
@@ -20,7 +26,7 @@ OpenTelemetry 尾部采样依赖分布式追踪上下文，在请求完成后决
 微服务架构涉及服务拆分、持续工程治理与运行时配置管理等多个方面\cite{ding2020decomposition,jia2021loggingdecision,jamshidi2018microservices,seshagiri2022sok}。容器编排和微服务设计模式为 Sidecar 部署提供了基础设施支撑\cite{burns2016patterns,burns2016borg,richardson2018microservices}。鉴于此，本文在实验中明确区分了三类证据：原型集群实测、基于真实分布的多进程模拟验证，以及生产级证据。在基线选取上，本文将 Promtail 静态过滤作为同负载模拟基线，将 OpenTelemetry 和 eBPF 列为后续端到端部署基线。
 
 \subsection{新兴采集技术与最接近先例}
-eBPF 技术使内核级日志与事件采集成为可能\cite{soldani2023ebpf,yang2023nahida}。然而，eBPF 侧重\textbf{基础设施级}事件，对\textbf{应用级}日志的定向采集支持有限，且缺乏网关流量驱动的动态策略源。OpenTelemetry 尾部采样以\textbf{分布式追踪 span} 为单位做取舍，与本文以\textbf{URL 模式}为粒度的应用日志定向过滤构成互补关系。
+eBPF 技术使内核级日志与事件采集成为可能\cite{soldani2023ebpf,yang2023nahida}。eBPF 侧重\textbf{基础设施级}事件，对\textbf{应用级}日志的定向采集支持有限，且缺乏网关流量驱动的动态策略源。OpenTelemetry 尾部采样以\textbf{分布式追踪 span} 为单位做取舍，与本文以\textbf{URL 模式}为粒度的应用日志定向过滤构成互补关系。
 
 与本文最接近的工业实践有三类。其一，Envoy 代理的 AccessLog 过滤器支持按路由或状态码配置日志输出策略，但仅作用于代理自身的 access log，无法驱动下游微服务的应用日志采集。其二，Kong API 网关的 File-log/TCP-log 插件可按路由启用日志记录，但属于静态配置，不具备基于流量统计动态生成 URL 模式的能力。其三，OpenResty 生态的 \texttt{lua-resty-logger-socket} 等模块实现了 Lua 层的动态日志控制，但策略局限于网关节点自身，未形成跨节点的采集闭环。
 
@@ -54,3 +60,7 @@ eBPF 技术使内核级日志与事件采集成为可能\cite{soldani2023ebpf,ya
 
 \vspace{0.3em}
 \noindent{\small $^*$八节点、180\,s、$n{=}3$；全量基线发射频率（400\,ms）高于定向模式（2\,s），降幅为策略过滤与源配置联合效果；基于真实分布的多进程同频模拟表明，策略过滤独立降幅为 67.8\%（§6.3）。}
+
+\subsubsection{OpenTelemetry 采样生态}
+\label{sec:otel-sampling}
+OpenTelemetry 生态提供了多种采样策略：Tail Sampling Processor（基于 trace 错误率/延迟的后置概率采样）、Adaptive Sampling（Uber Jaeger 的自适应采样）、Collector Filter Processor（基于属性的预过滤）。本文与 OTel 采样策略的核心区别在于：\textbf{OTel 侧重于追踪（Trace）维度的后置采样决策，本文聚焦于日志（Log）维度的内容驱动定向减量}——基于 URL 模式与异常特征的 DASM 评分，决策延迟 ms 级，且保证高价值端点 100\% 保留。工程对比详见 §6.4。

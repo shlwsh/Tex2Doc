@@ -4,7 +4,7 @@
 \subsection{架构概述}
 本文框架采用\textbf{三层协同定向采集架构}，由两个核心角色组成：\textbf{日志节点采集器（Agent）}和\textbf{日志中心（Center）}。Agent 有两种部署形态——网关节点实例和微服务节点实例。网关实例通过 OpenResty Lua 采集 HTTP 流量日志，微服务实例负责采集应用访问日志。Center 的职责包括：接收 Agent 上传的日志、生成关注清单、下发规则、执行二次过滤，最终将结果写入 Loki。总体架构见图~\ref{fig:arch}。
 
-从能力边界来看，整个框架可以分为三层：\textbf{网关预筛选、节点定向采集、中心二次过滤}，如表~\ref{tab:framework_layers} 所示。三层分别负责运行时流量感知、本地日志减量和中心入库控制，每层的输入输出都可以独立审计，也方便与 AIOps 平台的数据采集能力对接。
+从能力边界看，整个框架可分为三层：\textbf{网关预筛选、节点定向采集、中心二次过滤}，如表~\ref{tab:framework_layers} 所示。三层分别负责运行时流量感知、本地日志减量和中心入库控制，每层的输入输出都可以独立审计，也方便与 AIOps 平台的数据采集能力对接。
 \begin{table}[H]
   \centering
   \small
@@ -38,3 +38,13 @@
 
 \subsection{部署模式}
 \textbf{Sidecar 模式}：Agent 与业务容器共享网络命名空间（\texttt{network\_mode: service:*}），适用于 Kubernetes 或 Docker Compose 环境。\textbf{混合开发模式}：基础设施跑在容器里，Center 和 Agent 在本地调试。原型部署在 WSL2 上，网关映射端口 8088（避开 Windows IIS 占用的 80 端口）。
+
+\subsection{复杂度分析}
+设集群节点数为 $N$，URL 模式数为 $M$（实测约 20），Top-K 大小为 $K$（默认 7），历史窗口数为 $W$（默认 3）。本方法的关键复杂度如下：
+
+\begin{itemize}
+\item \textbf{时间复杂度}：清单生成 $O(M \log K)$ per node；Center 聚合 $O(N \cdot M \cdot \log K)$；在 1000 节点规模下理论耗时 $< 50$\,ms（实测 8 节点 2.3\,ms）。
+\item \textbf{空间复杂度}：$O(N \cdot W \cdot M)$，与节点数线性相关；1000 节点 $\times 20$ 模式 $\times 3$ 窗口 $\times 64$\,B $\approx 3.7$\,MB，完全可承载于单机内存。
+\item \textbf{通信复杂度}：Agent $\to$ Center 增量同步 $O(M)$ per node，$O(N \cdot M)$ 总通信量；1000 节点场景约 $\sim 2$\,MB/s，远低于 1\,Gbps 网络。
+\item \textbf{Center 水平扩展}：通过 URL 前缀分片（sharding by URL prefix），单 Center 可承载约 1000 节点；10000 节点仅需 10 个 Center 实例。
+\end{itemize}
