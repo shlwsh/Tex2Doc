@@ -822,25 +822,33 @@ def main() -> None:
     model = config.get("DASHSCOPE_MODEL", "").strip()
     github_token = config.get("GITHUB_TOKEN") or config.get("GH_TOKEN")
 
-    # 探测本地 Ollama（OpenAI 兼容端点）
-    ollama = detect_ollama(config)
-    dashscope_ready = bool(api_key and api_key not in PLACEHOLDER_API_KEYS and base_url and model)
+    # 默认暂停 AI 摘要生成，除非明确强制使用
+    if config.get("MYGIT_FORCE_AI") != "1" and "MYGIT_NO_AI" not in config:
+        config["MYGIT_NO_AI"] = "1"
 
-    if ollama is None and not dashscope_ready:
-        print("❌ 错误: 未找到可用的 AI 后端")
-        print("   - 本地 Ollama 未运行或未安装 gemma4:e4b")
-        print("   - 云端 DashScope 缺少 DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL / DASHSCOPE_MODEL")
-        print("   - 或设 MYGIT_NO_AI=1 走纯规则模式")
-        sys.exit(1)
+    if config.get("MYGIT_NO_AI") == "1" or config.get("MYGIT_FAST_RULES") == "1":
+        ollama = None
+        dashscope_ready = False
+    else:
+        # 探测本地 Ollama（OpenAI 兼容端点）
+        ollama = detect_ollama(config)
+        dashscope_ready = bool(api_key and api_key not in PLACEHOLDER_API_KEYS and base_url and model)
 
-    if ollama is not None:
-        ollama_base, ollama_model = ollama
-        print(f"🦙 检测到本地 Ollama：{ollama_base} · model={ollama_model}（优先使用）")
-        print("⏳ 正在预热本地模型（首次加载约 10-30s）...")
-        warmup_ollama(ollama_base, ollama_model)
-        print("✅ Ollama 预热完成")
-    elif dashscope_ready:
-        print(f"☁️  使用云端 DashScope：{base_url} · model={model}")
+        if ollama is None and not dashscope_ready:
+            print("❌ 错误: 未找到可用的 AI 后端")
+            print("   - 本地 Ollama 未运行或未安装 gemma4:e4b")
+            print("   - 云端 DashScope 缺少 DASHSCOPE_API_KEY / DASHSCOPE_BASE_URL / DASHSCOPE_MODEL")
+            print("   - 或设 MYGIT_NO_AI=1 走纯规则模式")
+            sys.exit(1)
+
+        if ollama is not None:
+            ollama_base, ollama_model = ollama
+            print(f"🦙 检测到本地 Ollama：{ollama_base} · model={ollama_model}（优先使用）")
+            print("⏳ 正在预热本地模型（首次加载约 10-30s）...")
+            warmup_ollama(ollama_base, ollama_model)
+            print("✅ Ollama 预热完成")
+        elif dashscope_ready:
+            print(f"☁️  使用云端 DashScope：{base_url} · model={model}")
 
     proxy_url = resolve_proxy(config)
     if proxy_url:
