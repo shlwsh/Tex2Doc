@@ -264,7 +264,15 @@ fn paper3_main_jos_to_docx() {
     }
 
     std::fs::create_dir_all(&out_dir).expect("创建输出目录失败");
-    let out_file = out_dir.join("main-jos-rust.docx");
+    // v12: 优先用 DOCX 环境变量指定输出路径,否则回退到默认路径
+    let out_file = if let Ok(env_path) = std::env::var("DOCX") {
+        PathBuf::from(env_path)
+    } else {
+        out_dir.join("main-jos-rust.docx")
+    };
+    if let Some(parent) = out_file.parent() {
+        std::fs::create_dir_all(parent).expect("创建 DOCX 父目录失败");
+    }
     std::fs::write(&out_file, &result.docx).expect("写出 docx 失败");
 
     let size = result.docx.len();

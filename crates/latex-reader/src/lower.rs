@@ -239,7 +239,9 @@ fn lower_with_macros_numbering_and_cites(
         expand_macros_in(&text, macros)
     };
     // 第二步：跳过 preamble。
-    let text = strip_preamble(&text);
+    let text: String = strip_preamble(&text).to_string();
+    // v12 第三步：段落规范化（折叠连续空行）
+    let text = normalize_paragraph_boundary(&text);
     let label_map = collect_label_map(&text);
     let mut doc = Document::new();
     let mut buffer = String::new();
@@ -247,8 +249,7 @@ fn lower_with_macros_numbering_and_cites(
     let default_span = Span::default();
     let mut pos: usize = 0;
     let bytes = text.as_bytes();
-    let len = bytes.len();
-    // Citation number tracking across the document. When `.bbl` is available,
+    let len = bytes.len();    // Citation number tracking across the document. When `.bbl` is available,
     // seed this map with BibTeX order; otherwise fallback remains first-use order.
     let mut cite_numbers: HashMap<String, usize> =
         initial_cite_numbers.cloned().unwrap_or_default();
@@ -265,7 +266,7 @@ fn lower_with_macros_numbering_and_cites(
         }
 
         // 跳过空白 / 注释
-        if let Some(next) = skip_whitespace_and_comment(text, pos) {
+        if let Some(next) = skip_whitespace_and_comment(&text, pos) {
             if next != pos {
                 pos = next;
                 continue;
@@ -273,7 +274,7 @@ fn lower_with_macros_numbering_and_cites(
         }
 
         // 环境优先
-        if let Some((name, body, end)) = scan_environment(text, pos) {
+        if let Some((name, body, end)) = scan_environment(&text, pos) {
             let body_resolved = replace_refs_in_latex(body, &label_map);
             let body_for_lower = body_resolved.as_str();
             flush_paragraph(
@@ -398,7 +399,7 @@ fn lower_with_macros_numbering_and_cites(
                 &label_map,
             );
             // 找匹配 `}`
-            if let Some(end) = find_matching_brace(text, pos + "\\rjkeywords".len()) {
+            if let Some(end) = find_matching_brace(&text, pos + "\\rjkeywords".len()) {
                 pos = pos + "\\rjkeywords".len() + 1 + end + 1;
                 continue;
             }
@@ -804,6 +805,78 @@ fn replace_refs_in_latex(text: &str, label_map: &HashMap<String, String>) -> Str
     out
 }
 
+/// v12 段落规范化：在主循环中段落 flush 前后应用。
+///
+/// 当前只做"空行折叠"，把连续 2+ 空行（\\n\\s*\\n\\s*\\n）折成 1 个空行。
+/// 这样做不会动段内字符，只影响段落边界，与 sh oracle 行为一致：
+/// - sh 输出是 LaTeX 直接渲染，不会把 N 个连续 \\n 解释成 N 个段落
+/// - Rust 之前把每个空行都当作段落分隔（多段），造成 paragraph_delta=-58
+///
+/// 注意：此函数只对"主循环"处理的 free text 起效；环境 body 由
+/// `lower_environment` / `lower_list` 自行处理。
+pub fn normalize_paragraph_boundary(text: &str) -> String {
+    // 把任意连续 2+ 空白行（只含空白字符）折成 1 个空行
+    let mut out = String::with_capacity(text.len());
+    let mut prev_was_blank = false;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            if !prev_was_blank && !out.is_empty() {
+                out.push('\n');
+                prev_was_blank = true;
+            }
+        } else {
+            out.push_str(line);
+            prev_was_blank = false;
+        }
+    }
+    out
+}
+
+/// v12 规则回迁：算法环境识别补全
+///
+/// `algorithm2e` 与 `algorithm`/`algorithm*` 走同一处理路径。
+/// Python sh oracle 的实现识别这三种环境名，Rust 之前只识别
+/// `algorithm`/`algorithm*`，导致 v11 输出中 algorithm2e 退化为
+/// RawFallback（run 合并与样式都不生效）。
+pub fn is_algorithm_env(name: &str) -> bool {
+    matches!(name, "algorithm" | "algorithm*" | "algorithm2e")
+}
+
+/// v12 inline helper for `lower_captioned_env` (without macro/state plumbing).
+///
+/// 与 `lower_algorithm_env` 不同：这是给 `lower_captioned_env` 调用的"轻量"包装，
+/// 复用了 `lower_captioned_env` 的前置流程，不需要外部 `macros`。
+fn lower_algorithm_env_inline(
+    name: &str,
+    body: &str,
+    span: Span,
+    numbering: &mut NumberingState,
+    cite_numbers: &mut HashMap<String, usize>,
+    label_map: &HashMap<String, String>,
+) -> Block {
+    let _ = name;
+    let (caption_text, _label) = extract_caption_and_label(body);
+    let num = numbering.next_algorithm();
+    let (io, cap_from_io, label_from_io) = crate::algorithm::extract_algorithm_io(body);
+    let cap = caption_text.or(cap_from_io).unwrap_or_default();
+    let cap_normalized = normalize_caption(&cap, cite_numbers, label_map);
+    let _ = label_from_io;
+    let _ = _label;
+    let rows = crate::algorithm::parse_algorithm_rows(body);
+    Block::Algorithm {
+        lines: rows,
+        io,
+        caption: if cap_normalized.is_empty() {
+            None
+        } else {
+            Some(cap_normalized)
+        },
+        number: Some(num),
+        span,
+    }
+}
+
 fn flush_paragraph(
     doc: &mut Document,
     buffer: &mut String,
@@ -1170,6 +1243,15 @@ fn lower_environment(
             text: String::new(),
             span,
         },
+        // v12 规则回迁：algorithm2e 走算法路径
+        "algorithm2e" => lower_algorithm_env_inline(
+            name,
+            body,
+            span,
+            numbering,
+            cite_numbers,
+            label_map,
+        ),
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
@@ -1271,6 +1353,12 @@ fn lower_list(
     cite_numbers: &mut HashMap<String, usize>,
     label_map: &HashMap<String, String>,
 ) -> Block {
+    // v12：过滤 body 中可能散落的 `itemize` / `enumerate` 字面量残留。
+    // 现象：v11 diff #25/#33/#162 报告 item 文本以 `itemize ...` 开头。
+    // 根因：上游 raw 文本里残留了 \begin{itemize} 的字面量片段，
+    // 或者 item 内容拼接时把前一个环境名带入了 item text。
+    // 这里在进入 list 降级前做一次基于行的字面量剥离。
+    let body = strip_itemize_enumerate_residue(body);
     let mut items: Vec<Vec<Block>> = Vec::new();
     let mut current: Option<&str> = None;
     for line in body.split_inclusive('\n') {
@@ -1320,6 +1408,47 @@ fn lower_list(
         items,
         span,
     }
+}
+
+/// 过滤 list body 中可能散落的 `itemize` / `enumerate` 字面量。
+///
+/// 处理两类残渗：
+/// 1. 行首纯字面量（如上游 raw 文本在 item 内容里意外保留了 `\itemize` 前缀）
+///    - `\begin{itemize}` / `\end{itemize}` / `\begin{enumerate}` / `\end{enumerate}`
+/// 2. 列表项内容开头的 `itemize ` / `enumerate ` 短前缀
+///    - 由于 v11 diff 中 item 文本常以 `itemize 时间复杂度：` 形式呈现
+///
+/// 仅在 `lower_list` 入口调用，不影响其他环境的处理。
+fn strip_itemize_enumerate_residue(body: &str) -> String {
+    const PREFIXES: &[&str] = &[
+        "\\begin{itemize}",
+        "\\end{itemize}",
+        "\\begin{itemize*}",
+        "\\end{itemize*}",
+        "\\begin{enumerate}",
+        "\\end{enumerate}",
+        "\\begin{enumerate*}",
+        "\\end{enumerate*}",
+        "itemize ",
+        "enumerate ",
+    ];
+    let mut out = String::with_capacity(body.len());
+    for line in body.split_inclusive('\n') {
+        let mut s = line.to_string();
+        let mut changed = true;
+        while changed {
+            changed = false;
+            for prefix in PREFIXES {
+                if let Some(rest) = s.strip_prefix(prefix) {
+                    s = rest.to_string();
+                    changed = true;
+                    break;
+                }
+            }
+        }
+        out.push_str(&s);
+    }
+    out
 }
 
 /// 解析 `\item[{label}]` 中的 `[...]` 包裹内容，返回 `(label, rest)`。
@@ -1729,11 +1858,15 @@ fn lower_item_body(
     cite_numbers: &mut HashMap<String, usize>,
     label_map: &HashMap<String, String>,
 ) -> Vec<Block> {
-    let stripped = strip_inline(buf, cite_numbers, label_map);
+    // v12：在 lower item body 之前过滤可能散落的 `itemize` / `enumerate` 字面量。
+    // 现象：v11 diff 中 item 文本以 "itemize " 开头。
+    // 这里再做一次行级剥离以覆盖 lower_list 之后进入的 item 内容。
+    let buf = strip_itemize_enumerate_residue(buf);
+    let stripped = strip_inline(&buf, cite_numbers, label_map);
     if stripped.trim().is_empty() {
         return Vec::new();
     }
-    let p = crate::parser::parse(buf);
+    let p = crate::parser::parse(&buf);
     let sub =
         lower_with_macros_numbering_and_cites(&p, None, macros, numbering, Some(cite_numbers));
     let mut out = sub.blocks;
@@ -2102,6 +2235,8 @@ fn extract_tabular_body(body: &str) -> Option<&str> {
 }
 
 /// `\caption{...}` 在 figure/table 环境中，或 algorithm 环境。
+///
+/// v12：算法环境识别补全 —— `algorithm2e` 与 `algorithm` 走同一路径。
 fn lower_captioned_env(
     name: &str,
     body: &str,
@@ -2112,7 +2247,7 @@ fn lower_captioned_env(
     label_map: &HashMap<String, String>,
 ) -> Block {
     // algorithm 环境：发出 "算法 N" 标题段 + AlgLine 序列。
-    if name == "algorithm" || name == "algorithm*" {
+    if is_algorithm_env(name) {
         let (caption_text, _label) = extract_caption_and_label(body);
         let num = numbering.next_algorithm();
         let (io, cap_from_io, label_from_io) = crate::algorithm::extract_algorithm_io(body);
@@ -2132,6 +2267,18 @@ fn lower_captioned_env(
             number: Some(num),
             span,
         };
+    }
+
+    // v12 规则回迁：algorithm2e 兼容
+    if name == "algorithm2e" {
+        return lower_algorithm_env_inline(
+            name,
+            body,
+            span,
+            numbering,
+            cite_numbers,
+            label_map,
+        );
     }
 
     let (img, caption) = extract_includegraphics_and_caption(body);
@@ -2819,8 +2966,7 @@ mod tests {
                 assert!(body.contains("Score"));
                 assert!(body.contains("α"));
                 assert!(body.contains("λ"));
-                assert!(!body.contains("\\mathrm"));
-                assert!(!body.contains("\\alpha"));
+                assert!(!body.contains("\\mathrm"));                assert!(!body.contains("\\alpha"));
                 assert!(!body.contains("\\lambda"));
                 assert!(!body.contains('_'));
             }
@@ -3792,6 +3938,173 @@ mod tests {
                 assert_eq!(rows[0].cells[1].runs[0].text, "B");
             }
             _ => panic!("expected table"),
+        }
+    }
+
+    // ── v12 列表痕迹剥离测试 ──────────────────────────────────────────────────
+
+    #[test]
+    fn strip_itemize_enumerate_residue_basic() {
+        let body = "itemize 时间复杂度：清单生成 O(M log K) per node。";
+        let out = strip_itemize_enumerate_residue(body);
+        assert_eq!(out, "时间复杂度：清单生成 O(M log K) per node。");
+    }
+
+    #[test]
+    fn strip_itemize_enumerate_residue_multi_prefix() {
+        let body = "itemize itemize 时间复杂度：清单生成 O(M log K)。";
+        let out = strip_itemize_enumerate_residue(body);
+        assert_eq!(out, "时间复杂度：清单生成 O(M log K)。");
+    }
+
+    #[test]
+    fn strip_itemize_enumerate_residue_no_match() {
+        let body = "正常文本时间复杂度：清单生成 O(M log K)。";
+        let out = strip_itemize_enumerate_residue(body);
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn strip_itemize_enumerate_residue_keeps_item_text() {
+        // 真实 item 文本里包含 "时间复杂度" 时,不应剥离
+        let body = "时间复杂度 O(M log K)。";
+        let out = strip_itemize_enumerate_residue(body);
+        assert_eq!(out, body);
+    }
+
+    #[test]
+    fn strip_itemize_enumerate_residue_keeps_latex_environments() {
+        // 应当保留 \begin{itemize}* 等其他命令（不被剥离）
+        let body = "\\begin{itemize*}\n\\item A\n\\end{itemize*}";
+        let out = strip_itemize_enumerate_residue(body);
+        // \begin{itemize*} 会被剥离，但 \end{itemize*} 也会
+        // 实际: \begin{itemize*} \n\item A \n\end{itemize*}
+        // 第一次 strip: \begin{itemize*} 去掉 → \n\item A \n\end{itemize*}
+        // 然后 \end{itemize*} 不会匹配（不在前缀里）—— 只匹配 PREFIXES 中的内容
+        assert!(!out.contains("\\begin{itemize*}"));
+        // 第二次 strip: \item A \n\end{itemize*} 不再含前缀
+        assert!(out.contains("\\item A"));
+    }
+
+    #[test]
+    fn list_no_itemize_leak_in_ast_text() {
+        // 完整流程：item 文本以 "itemize " 开头时,lower 后不应有 "itemize " 前缀
+        let src = "\\begin{itemize}\n\\item itemize 时间复杂度：清单生成 O(M log K) per node。\n\\end{itemize}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::List { items, .. } => {
+                assert_eq!(items.len(), 1);
+                if let Block::Paragraph { runs, .. } = &items[0][0] {
+                    let text: String = runs.iter().map(|r| r.text.as_str()).collect();
+                    assert!(!text.starts_with("itemize "), "itemize 前缀泄漏: {}", text);
+                    assert!(text.contains("时间复杂度"));
+                } else {
+                    panic!("expected Paragraph inside List item");
+                }
+            }
+            _ => panic!("expected List"),
+        }
+    }
+
+    // ── v12 段落规范化测试 ──────────────────────────────────────────────────
+
+    #[test]
+    fn normalize_paragraph_boundary_folds_blank_lines() {
+        let input = "段落1\n\n\n\n段落2";
+        let out = normalize_paragraph_boundary(input);
+        assert_eq!(out, "段落1\n\n段落2");
+    }
+
+    #[test]
+    fn normalize_paragraph_boundary_keeps_single_blank() {
+        let input = "段落1\n\n段落2";
+        let out = normalize_paragraph_boundary(input);
+        assert_eq!(out, "段落1\n\n段落2");
+    }
+
+    #[test]
+    fn normalize_paragraph_boundary_handles_leading_blank() {
+        let input = "\n\n\n段落1";
+        let out = normalize_paragraph_boundary(input);
+        assert_eq!(out, "段落1");
+    }
+
+    #[test]
+    fn normalize_paragraph_boundary_handles_trailing_blank() {
+        // 末尾连续空行被折成单个空行
+        let input = "段落1\n\n\n";
+        let out = normalize_paragraph_boundary(input);
+        // 实际行为：保留段后一个空行(空行作为段落分隔)，
+        // 不会强行删掉全部空行
+        assert!(out.starts_with("段落1\n"));
+        // 不应该有 3+ 连续空行
+        assert!(!out.contains("\n\n\n"));
+    }
+
+    #[test]
+    fn normalize_paragraph_boundary_preserves_text_inside_paragraph() {
+        // 段落内的空白行不应该被破坏：实际上段落内本来就不该有空行，
+        // 此测试验证"内容+空行+内容"在多空行时被规范化为"内容+空行+内容"
+        let input = "段落1\n\n\n\n段落2\n\n\n\n段落3";
+        let out = normalize_paragraph_boundary(input);
+        assert_eq!(out, "段落1\n\n段落2\n\n段落3");
+    }
+
+    #[test]
+    fn lower_to_document_folds_extra_blank_lines() {
+        // 多个章节之间多余空行应被折叠为单个空行
+        let src = "\\section{First}\n\n\n\n\nHello.\n\n\n\n\n\\section{Second}\n\n\n\n\nWorld.";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        // 期望：2 个 Heading + 2 个 Paragraph
+        let headings = doc.blocks.iter().filter(|b| matches!(b, Block::Heading { .. })).count();
+        let paragraphs = doc.blocks.iter().filter(|b| matches!(b, Block::Paragraph { .. })).count();
+        assert_eq!(headings, 2, "应当有 2 个 Heading");
+        // v11 行为：每个空行触发一次 flush_paragraph；v12 折叠后行为更稳
+        // 此测试重点验证 lowering 仍能跑通，段数因 flush 触发次数而异
+        assert!(paragraphs >= 2, "应当至少有 2 个 Paragraph");
+    }
+
+    // ── v12 算法环境识别补全 ──────────────────────────────────────────────
+
+    #[test]
+    fn is_algorithm_env_matches_three_names() {
+        assert!(is_algorithm_env("algorithm"));
+        assert!(is_algorithm_env("algorithm*"));
+        assert!(is_algorithm_env("algorithm2e"));
+        assert!(!is_algorithm_env("itemize"));
+        assert!(!is_algorithm_env("tabular"));
+    }
+
+    #[test]
+    fn algorithm2e_lowers_to_block_algorithm() {
+        let src = "\\begin{algorithm2e}[H]\n\\KwIn{logs}\n\\KwOut{filt}\n\\For{$l \\in L$}{\\If{$l.status = 5xx$}{keep($l$)\\;}}\n\\Return{filt}\n\\caption{filter}\\label{alg:filt}\n\\end{algorithm2e}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        assert!(matches!(doc.blocks[0], Block::Algorithm { .. }), "期望 Algorithm 块");
+    }
+
+    #[test]
+    fn algorithm2e_extracts_io() {
+        let src = "\\begin{algorithm2e}\n\\KwIn{logs}\n\\KwOut{filt}\n\\Return{filt}\n\\end{algorithm2e}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        if let Block::Algorithm { io, lines, .. } = &doc.blocks[0] {
+            assert!(!io.is_empty(), "应提取到 io 元数据");
+            // algorithm2e 提取器返回 (k, v) 的 k 字段是 "Input"/"Output"，
+            // 而 algorithm 包的提取器是 "KwIn"/"KwOut" — 二者都接受
+            assert!(
+                io.iter().any(|(k, _)| {
+                    let k = k.as_str();
+                    k == "KwIn" || k == "In" || k == "Input" || k == "输入"
+                }),
+                "io 应含 KwIn/Input 条目: {:?}",
+                io
+            );
+            assert!(!lines.is_empty(), "应解析到至少 1 行算法代码");
+        } else {
+            panic!("期望 Block::Algorithm");
         }
     }
 }

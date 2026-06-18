@@ -555,6 +555,11 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\{", "\u{FFF0}").replace("\\}", "\u{FFF1}");
     s = s.replace("\\,", " ");
     s = s.replace('~', " ");
+    // v13.1 P3: \mathcal{X} → Script X (U+210B ℋ, U+1D49C 𝒜, etc.)
+    // 必须在 \mathcal 剥外壳前替换
+    s = s.replace("\\mathcal{H}", "\u{210B}");
+    s = s.replace("\\mathcal{L}", "\u{2112}");
+    s = s.replace("\\mathcal{P}", "\u{2118}");
     // 2. \mathrm/\textbf/\textit 内的内容原样保留
     for cmd in [
         "mathrm", "textbf", "textit", "text", "mathbf", "mathit", "mathcal", "mathbb", "mathsf",
@@ -652,6 +657,17 @@ fn strip_balanced_braces(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut i = 0;
     while i < bytes.len() {
+        // v13.1 P1: 跳过 ^{...} 和 _{...} 模式, 不剥外层 {}
+        if (bytes[i] == b'^' || bytes[i] == b'_')
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'{'
+        {
+            if let Some(end) = find_matching_brace(text, i + 1) {
+                out.push_str(&text[i..=end]);
+                i = end + 1;
+                continue;
+            }
+        }
         if bytes[i] == b'{' && (i == 0 || bytes[i - 1] != b'\\') {
             // 找匹配 `}`，要求内部不嵌套 `{}`（prev 已被剥过）
             if let Some(end) = find_matching_brace(text, i) {
@@ -1222,7 +1238,8 @@ mod tests {
     #[test]
     fn clean_math_common_greek_and_fonts() {
         let out = clean_math("\\mathrm{Score}+\\gamma+\\delta+\\lambda+\\theta+\\mathcal{H}");
-        assert_eq!(out, "Score+γ+δ+λ+θ+H");
+        // v13.1 P3: \mathcal{H} 现在映射为 ℋ (U+210B) 而非 H
+        assert_eq!(out, "Score+γ+δ+λ+θ+\u{210B}");
     }
 
     #[test]
@@ -1355,5 +1372,21 @@ mod tests {
             .runs
             .iter()
             .any(|r| r.text == "10" && r.style == TextStyle::Superscript));
+    }
+
+    // v13.1 P1 regression: clean_math 不应剥 ^{...} _{...} 的外层 {}
+    #[test]
+    fn clean_math_preserves_sup_sub_braces() {
+        // 关键回归: ^{**} 之前被 clean_math 剥成 ^**^** 然后切成 sup+plain+sup+plain
+        // 现在 strip_balanced_braces 跳过 ^{...} 模式, 保持 ^{**} 完整让 split_runs 切为 sup
+        let n = split_runs_with_sup_sub("5.06e-03$^{**}$", true, false);
+        // 期望 2 个 run: plain "5.06e-03" + sup "**" (不要把 ** 拆开)
+        let sup_runs: Vec<&str> = n
+            .runs
+            .iter()
+            .filter(|r| r.style == TextStyle::Superscript)
+            .map(|r| r.text.as_str())
+            .collect();
+        assert_eq!(sup_runs, vec!["**"], "** must stay as one sup run, not split");
     }
 }

@@ -14,13 +14,13 @@ use image::GenericImageView;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
 use quick_xml::Writer;
 
-use crate::model::{Paragraph, Run};
+use crate::model::{merge_adjacent_runs, Paragraph, Run};
 use crate::page_setup::PageSetup;
 use crate::styles::{
     STYLE_ABSTRACT_EN, STYLE_ABSTRACT_ZH, STYLE_AUTHOR_ZH, STYLE_BODY, STYLE_BODY_NO_INDENT,
     STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
-    STYLE_HEADING3, STYLE_IMAGE, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS, STYLE_LIST_BULLET,
-    STYLE_LIST_NUMBER, STYLE_REFERENCE, STYLE_REFERENCE_HEADING, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
+    STYLE_HEADING3, STYLE_IMAGE, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS, STYLE_REFERENCE,
+    STYLE_REFERENCE_HEADING, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
 };
 
 /// 一张已嵌入的图片：packer 阶段把它写到 `word/media/imageN.<ext>` 并生成 rel。
@@ -127,17 +127,11 @@ pub fn serialize_document(
                     Some(n) => format!("{} {}", n, text),
                     None => text.clone(),
                 };
+                // v13 P1/P2: 不再把 paragraph style 复制到 run.style_id,
+                // 也不再强制 bold: true (sh oracle 由 paragraph style 提供 bold)
                 let para = Paragraph {
                     style_id: Some(style.to_string()),
-                    runs: vec![Run {
-                        text: display_text,
-                        style_id: Some(style.to_string()),
-                        style: TextStyle::Bold,
-                        bold: true,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    }],
+                    runs: vec![Run::plain(display_text)],
                     jc: None,
                     keep_next: false,
                     keep_lines: false,
@@ -186,18 +180,55 @@ pub fn serialize_document(
                         && s.chars().any(|c| c.is_ascii_digit())
                         && (s.contains('—') || s.contains("--"))
                 });
+                // v13 P0: 仿 sh oracle 行为——itemize/enumerate 全部用
+                // JOSBody 样式 + 手写序号"1. …"。之前用 ListBullet/ListNumber
+                // 与 sh 完全错位，导致 v12 段 #147-#159 大量 deleted/inserted。
                 let style = if is_jos_ref {
                     "JOSReference"
-                } else if *is_ordered {
-                    STYLE_LIST_NUMBER
                 } else {
-                    STYLE_LIST_BULLET
+                    STYLE_BODY
                 };
-                for sub in items.iter() {
+                for (idx, sub) in items.iter().enumerate() {
+                    // v12 保留子结构：当 item 只有一个 Paragraph 块时直接用其 runs
+                    if sub.len() == 1 {
+                        if let Block::Paragraph { runs, .. } = &sub[0] {
+                            let mut docx_runs: Vec<Run> =
+                                runs.iter().map(from_text_run).collect();
+                            // v13: 手写序号作为前缀 plain run
+                            if !is_jos_ref {
+                                let prefix = if *is_ordered {
+                                    format!("{}. ", idx + 1)
+                                } else {
+                                    "• ".to_string()
+                                };
+                                docx_runs.insert(0, Run::plain(prefix));
+                            }
+                            let para = Paragraph {
+                                style_id: Some(style.to_string()),
+                                runs: merge_adjacent_runs(docx_runs),
+                                jc: None,
+                                keep_next: false,
+                                keep_lines: false,
+                            };
+                            write_paragraph(&mut w, &para);
+                            continue;
+                        }
+                    }
+                    // 多个块或非 Paragraph 块：拼接 summarize 文本为单 run 段落
                     let text = summarize(sub);
+                    let runs = if is_jos_ref {
+                        vec![Run::plain(text)]
+                    } else {
+                        let prefix = if *is_ordered {
+                            format!("{}. ", idx + 1)
+                        } else {
+                            "• ".to_string()
+                        };
+                        vec![Run::plain(prefix + &text)]
+                    };
                     let para = Paragraph {
                         style_id: Some(style.to_string()),
-                        runs: vec![Run::plain(text)],
+                        runs: merge_adjacent_runs(runs),
                         jc: None,
                         keep_next: false,
                         keep_lines: false,
@@ -1071,21 +1102,23 @@ fn write_algorithm_cell(
     w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
     let para = Paragraph {
-        style_id: Some(STYLE_CODE.to_string()),
+        // v13 P7: algorithm cell 不再用 STYLE_CODE + Courier New,
+        // 改为空样式 + sz=18 + Times New Roman/宋体（与 sh 一致）
+        style_id: None,
         runs: vec![Run {
             text: text.to_string(),
             style_id: None,
-            style: TextStyle::Code,
+            style: TextStyle::Plain,
             bold,
             italic: false,
-            font_ascii: None,
-            font_east: None,
+            font_ascii: Some("Times New Roman".to_string()),
+            font_east: Some("宋体".to_string()),
         }],
         jc: jc.map(str::to_string),
         keep_next: false,
         keep_lines: true,
     };
-    write_paragraph(w, &para);
+    write_paragraph_with_opts(w, &para, true, 18);
     w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
 }
 
@@ -1100,17 +1133,11 @@ fn write_table(
             Some(n) => format!("{} {}", n, cap),
             None => cap.to_string(),
         };
+        // v13 P6: 不再在 run 上加 italic:true,
+        // JOSCaption 样式自身在 pPr/rPr 中提供 italic
         let p = Paragraph {
             style_id: Some(STYLE_CAPTION.to_string()),
-            runs: vec![Run {
-                text: cap_text,
-                style_id: None,
-                style: TextStyle::Plain,
-                bold: false,
-                italic: true,
-                font_ascii: None,
-                font_east: None,
-            }],
+            runs: vec![Run::plain(cap_text)],
             jc: Some("center".to_string()),
             keep_next: true,
             keep_lines: true,
@@ -1212,14 +1239,14 @@ fn write_table(
                 runs: if cell.runs.is_empty() {
                     vec![Run::plain(String::new())]
                 } else {
-                    // 表格首行粗体（表头）；其余按 text style 走
+                    // v13.1 P2: cell run 应用 collapse_cjk_internal_spaces 清理
+                    // CJK-标点 (如 *) 之间的空格
                     cell.runs
                         .iter()
                         .map(|r| {
                             let mut run = from_text_run(r);
-                            run.style_id = Some(STYLE_TABLE_TEXT.to_string());
-                            run.font_ascii = Some("Times New Roman".to_string());
-                            run.font_east = Some("宋体".to_string());
+                            run.text = collapse_cjk_internal_spaces(&run.text);
+                            // v13.1 P2': data cell 不强制 run.bold=false (保持原 style, 避免丢失 sup 等)
                             run.bold = is_header;
                             run.italic = false;
                             run
@@ -1230,7 +1257,7 @@ fn write_table(
                 keep_next: false,
                 keep_lines: false,
             };
-            write_paragraph(w, &p);
+            write_paragraph_with_opts(w, &p, true, 15);
             w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
         }
         w.write_event(Event::End(BytesEnd::new("w:tr"))).unwrap();
@@ -1240,6 +1267,27 @@ fn write_table(
 }
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
+    write_paragraph_with_opts(w, p, false, 0)
+}
+
+/// v13 P1/P7: 增加 force_table_cell_font + cell_font_half_points 参数。
+/// table cell 内部用 force_table_cell_font=true 让 write_run 自动获得字体；
+/// cell_font_half_points > 0 时替代默认 15 (e.g. algorithm cell 用 18)。
+fn write_paragraph_with_opts(
+    w: &mut Writer<Vec<u8>>,
+    p: &Paragraph,
+    force_table_cell_font: bool,
+    cell_font_half_points: u16,
+) {
+    // v12 run 规范化：在写出前对段落内 runs 做相邻同格式合并。
+    let runs = merge_adjacent_runs(p.runs.clone());
+    let p = Paragraph {
+        style_id: p.style_id.clone(),
+        jc: p.jc.clone(),
+        runs,
+        keep_next: p.keep_next,
+        keep_lines: p.keep_lines,
+    };
     w.write_event(Event::Start(BytesStart::new("w:p"))).unwrap();
 
     // pPr：style / jc / keepNext / keepLines
@@ -1269,13 +1317,23 @@ fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
     }
 
     for run in &p.runs {
-        write_run(w, run);
+        write_run(w, run, force_table_cell_font, cell_font_half_points);
     }
     w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
 }
 
 /// 写单个 `<w:r>`，根据 `Run.style` 产生正确的 `<w:rPr>`。
-fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
+///
+/// v13: `force_table_cell_font` + `cell_font_half_points`
+/// - 普通 table cell: `force_table_cell_font=true, half_points=15` (Times/宋体 + 15)
+/// - algorithm cell: `force_table_cell_font=true, half_points=18`
+/// - 普通段: `force_table_cell_font=false, half_points=0`
+fn write_run(
+    w: &mut Writer<Vec<u8>>,
+    run: &Run,
+    force_table_cell_font: bool,
+    cell_font_half_points: u16,
+) {
     // 空 run 跳过（避免空 text 触发 Word 警告）
     if run.text.is_empty() && run.style == TextStyle::Plain {
         return;
@@ -1289,6 +1347,7 @@ fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
         || run.italic
         || run.font_ascii.is_some()
         || run.font_east.is_some()
+        || force_table_cell_font
         || !matches!(run.style, TextStyle::Plain);
     if has_rpr {
         w.write_event(Event::Start(BytesStart::new("w:rPr")))
@@ -1309,16 +1368,22 @@ fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
                 rfonts.push_attribute(("w:eastAsia", e.as_str()));
             }
             w.write_event(Event::Empty(rfonts)).unwrap();
-        } else {
+        } else if force_table_cell_font {
+            // v13 P1: cell run 默认 sz=15 + Times New Roman/宋体
+            let mut rfonts = BytesStart::new("w:rFonts");
+            rfonts.push_attribute(("w:ascii", "Times New Roman"));
+            rfonts.push_attribute(("w:hAnsi", "Times New Roman"));
+            rfonts.push_attribute(("w:cs", "Times New Roman"));
+            rfonts.push_attribute(("w:eastAsia", "宋体"));
+            w.write_event(Event::Empty(rfonts)).unwrap();
+        } else if matches!(run.style, TextStyle::Code) {
             // Code 样式自动用 Courier New
-            if matches!(run.style, TextStyle::Code) {
-                let mut rfonts = BytesStart::new("w:rFonts");
-                rfonts.push_attribute(("w:ascii", "Courier New"));
-                rfonts.push_attribute(("w:hAnsi", "Courier New"));
-                rfonts.push_attribute(("w:eastAsia", "宋体"));
-                rfonts.push_attribute(("w:cs", "Courier New"));
-                w.write_event(Event::Empty(rfonts)).unwrap();
-            }
+            let mut rfonts = BytesStart::new("w:rFonts");
+            rfonts.push_attribute(("w:ascii", "Courier New"));
+            rfonts.push_attribute(("w:hAnsi", "Courier New"));
+            rfonts.push_attribute(("w:eastAsia", "宋体"));
+            rfonts.push_attribute(("w:cs", "Courier New"));
+            w.write_event(Event::Empty(rfonts)).unwrap();
         }
         if run.bold {
             w.write_event(Event::Empty(BytesStart::new("w:b"))).unwrap();
@@ -1339,12 +1404,14 @@ fn write_run(w: &mut Writer<Vec<u8>>, run: &Run) {
             va.push_attribute(("w:val", "subscript"));
             w.write_event(Event::Empty(va)).unwrap();
         }
-        if run.style_id.as_deref() == Some(STYLE_TABLE_TEXT) {
+        // v13 P1/P7: cell run 的 sz 由 cell_font_half_points 提供
+        if force_table_cell_font && cell_font_half_points > 0 {
+            let sz_str = cell_font_half_points.to_string();
             let mut sz = BytesStart::new("w:sz");
-            sz.push_attribute(("w:val", "15"));
+            sz.push_attribute(("w:val", sz_str.as_str()));
             w.write_event(Event::Empty(sz)).unwrap();
             let mut sz_cs = BytesStart::new("w:szCs");
-            sz_cs.push_attribute(("w:val", "15"));
+            sz_cs.push_attribute(("w:val", sz_str.as_str()));
             w.write_event(Event::Empty(sz_cs)).unwrap();
         }
         w.write_event(Event::End(BytesEnd::new("w:rPr"))).unwrap();
@@ -1377,15 +1444,53 @@ fn split_first_http_url(text: &str) -> (&str, Option<&str>) {
 fn collapse_cjk_internal_spaces(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
-    for (idx, ch) in chars.iter().enumerate() {
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
         if ch.is_whitespace() {
-            let prev = idx.checked_sub(1).and_then(|i| chars.get(i)).copied();
-            let next = chars.get(idx + 1).copied();
-            if prev.map_or(false, is_cjk_char) && next.map_or(false, is_cjk_char) {
+            let prev = if i > 0 { Some(chars[i - 1]) } else { None };
+            let next = chars.get(i + 1).copied();
+            // v13.1 P2: 清理以下模式
+            // (a) CJK-非字母 (CJK-CJK / CJK-标点)
+            // (b) 非字母-非字母 (标点-标点)
+            // (c) CJK-CJK 字母
+            let left_collapse = prev.map_or(false, |p| {
+                is_cjk_char(p) || (!p.is_alphanumeric() && !p.is_whitespace())
+            });
+            let right_collapse = next.map_or(false, |n| {
+                is_cjk_char(n) || (!n.is_alphanumeric() && !n.is_whitespace())
+            });
+            if left_collapse && right_collapse {
+                i += 1;
                 continue;
             }
         }
-        out.push(*ch);
+        out.push(ch);
+        i += 1;
+    }
+    // v13.1 P2 尾步: 去掉 "字母+空格+尾标点" 模式中的空格 (e.g. "CPU *" → "CPU*")
+    let trimmed = strip_trailing_space_before_punct(&out);
+    trimmed
+}
+
+/// 去除形如 "字母/数字+空格+尾标点" 的多余空格。
+/// 仅在标点是 footnote 类符号 (* † ‡ § ¶ #) 时启用,避免误清 "0.05% CPU" 这种 % 与 C 之间合法的空格。
+fn strip_trailing_space_before_punct(s: &str) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch.is_whitespace() && i + 1 < chars.len() {
+            let next = chars[i + 1];
+            if matches!(next, '*' | '†' | '‡' | '§' | '¶' | '#') {
+                // 跳过空格
+                i += 1;
+                continue;
+            }
+        }
+        out.push(ch);
+        i += 1;
     }
     out
 }
@@ -1423,15 +1528,8 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     if let Some(title) = &meta.title {
         let p = Paragraph {
             style_id: Some(STYLE_TITLE_ZH.to_string()),
-            runs: vec![Run {
-                text: title.clone(),
-                style_id: None,
-                style: TextStyle::Bold,
-                bold: true,
-                italic: false,
-                font_ascii: None,
-                font_east: None,
-            }],
+            // v13 P2: 不再在 run 上加 bold:true,JOSTitleZh 样式内部已含 bold
+            runs: vec![Run::plain(title.clone())],
             jc: Some("center".into()),
             keep_next: false,
             keep_lines: true,
@@ -1473,18 +1571,12 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     // ── 中文摘要（标签 + 正文，同段）──
     if let Some(abstract_zh) = &meta.abstract_text {
         if !abstract_zh.is_empty() {
+            // v13 P2: label "摘   要: " 不再 bold:true,
+            // JOSAbstractZh 样式内部不要求 inline bold
             let p = Paragraph {
                 style_id: Some(STYLE_ABSTRACT_ZH.to_string()),
                 runs: vec![
-                    Run {
-                        text: "摘   要: ".to_string(),
-                        style_id: None,
-                        style: TextStyle::Bold,
-                        bold: true,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    },
+                    Run::plain("摘   要: ".to_string()),
                     Run::plain(abstract_zh.clone()),
                 ],
                 jc: None,
@@ -1500,16 +1592,9 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         let joined = meta.keywords.join("; ");
         let p = Paragraph {
             style_id: Some(STYLE_KEYWORDS.to_string()),
+            // v13 P2: label "关键词: " 不再 bold:true
             runs: vec![
-                Run {
-                    text: "关键词: ".to_string(),
-                    style_id: None,
-                    style: TextStyle::Bold,
-                    bold: true,
-                    italic: false,
-                    font_ascii: None,
-                    font_east: None,
-                },
+                Run::plain("关键词: ".to_string()),
                 Run::plain(joined),
             ],
             jc: None,
@@ -1523,16 +1608,9 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     if let Some(cat) = &meta.category {
         let p = Paragraph {
             style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
+            // v13 P2: label 不再 bold:true
             runs: vec![
-                Run {
-                    text: "中图法分类号: ".to_string(),
-                    style_id: None,
-                    style: TextStyle::Bold,
-                    bold: true,
-                    italic: false,
-                    font_ascii: None,
-                    font_east: None,
-                },
+                Run::plain("中图法分类号: ".to_string()),
                 Run::plain(cat.clone()),
             ],
             jc: None,
@@ -1548,16 +1626,9 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
             let (citation, url) = split_first_http_url(cz);
             let p = Paragraph {
                 style_id: Some(STYLE_CITATION.to_string()),
+                // v13 P2: label 不再 bold:true
                 runs: vec![
-                    Run {
-                        text: "中文引用格式: ".to_string(),
-                        style_id: None,
-                        style: TextStyle::Bold,
-                        bold: true,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    },
+                    Run::plain("中文引用格式: ".to_string()),
                     Run::plain(citation.to_string()),
                 ],
                 jc: None,
@@ -1584,16 +1655,9 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
             let (citation, url) = split_first_http_url(ce);
             let p = Paragraph {
                 style_id: Some(STYLE_CITATION.to_string()),
+                // v13 P2: label 不再 bold:true
                 runs: vec![
-                    Run {
-                        text: "英文引用格式: ".to_string(),
-                        style_id: None,
-                        style: TextStyle::Bold,
-                        bold: true,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    },
+                    Run::plain("英文引用格式: ".to_string()),
                     Run::plain(citation.to_string()),
                 ],
                 jc: None,
@@ -1618,15 +1682,8 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     if let Some(title_en) = &meta.title_en {
         let p = Paragraph {
             style_id: Some(STYLE_ENGLISH_TITLE.to_string()),
-            runs: vec![Run {
-                text: title_en.clone(),
-                style_id: None,
-                style: TextStyle::Bold,
-                bold: true,
-                italic: false,
-                font_ascii: None,
-                font_east: None,
-            }],
+            // v13 P2: 不再 bold:true,JOSEnglishTitle 样式内部已含 bold
+            runs: vec![Run::plain(title_en.clone())],
             jc: None,
             keep_next: false,
             keep_lines: true,
@@ -1675,18 +1732,11 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     // ── 英文摘要（标签 + 正文，同段）──
     if let Some(abstract_en) = &meta.abstract_en {
         if !abstract_en.is_empty() {
+            // v13 P2: label "Abstract:" 不再 bold:true
             let p = Paragraph {
                 style_id: Some(STYLE_ABSTRACT_EN.to_string()),
                 runs: vec![
-                    Run {
-                        text: "Abstract:   ".to_string(),
-                        style_id: None,
-                        style: TextStyle::Bold,
-                        bold: true,
-                        italic: false,
-                        font_ascii: None,
-                        font_east: None,
-                    },
+                    Run::plain("Abstract:   ".to_string()),
                     Run::plain(abstract_en.clone()),
                 ],
                 jc: None,
@@ -1702,16 +1752,9 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         let joined = meta.keywords_en.join("; ");
         let p = Paragraph {
             style_id: Some(STYLE_KEYWORDS.to_string()),
+            // v13 P2: label "Key words: " 不再 bold:true
             runs: vec![
-                Run {
-                    text: "Key words: ".to_string(),
-                    style_id: None,
-                    style: TextStyle::Bold,
-                    bold: true,
-                    italic: false,
-                    font_ascii: None,
-                    font_east: None,
-                },
+                Run::plain("Key words: ".to_string()),
                 Run::plain(joined),
             ],
             jc: None,
@@ -1735,6 +1778,21 @@ mod tests {
         assert_eq!(
             collapse_cjk_internal_spaces("（太原理工大学，山西 太原 030024）"),
             "（太原理工大学，山西太原 030024）"
+        );
+    }
+
+    // v13.1 P2: CJK-标点(*) 之间的空格也应清理
+    #[test]
+    fn cjk_to_punct_spaces_are_collapsed() {
+        // "条 *" → "条*"
+        assert_eq!(
+            collapse_cjk_internal_spaces("72 vs 4388 条 *"),
+            "72 vs 4388 条*"
+        );
+        // "0.05% CPU *" — CPU 与 * 之间的空格保留 (字母-标点 不动)
+        assert_eq!(
+            collapse_cjk_internal_spaces("0.05% CPU *"),
+            "0.05% CPU*"
         );
     }
 

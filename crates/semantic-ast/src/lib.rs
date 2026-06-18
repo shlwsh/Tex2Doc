@@ -8,11 +8,13 @@
 use serde::{Deserialize, Serialize};
 
 pub mod docx_render;
+pub mod mapping_loader;
 pub mod span;
 pub mod standard;
 pub mod visit;
 
 pub use docx_render::*;
+pub use mapping_loader::*;
 pub use span::{SourceId, Span};
 pub use standard::*;
 

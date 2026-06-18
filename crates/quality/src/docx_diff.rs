@@ -87,6 +87,13 @@ pub struct DocxDiffSummary {
     pub inserted_paragraphs: usize,
     pub deleted_paragraphs: usize,
     pub format_changed_paragraphs: usize,
+    /// v12：仅"run 切分边界不同但语义一致"导致的格式差异。
+    /// 这些差异在 `run_signature` 层面看得到，但 normalized_text 完全相同，
+    /// 是 v12 期望被大量吸收的"假阳性"。
+    pub format_changed_split_only_paragraphs: usize,
+    /// v12：至少一个 run 的 (bold/italic/size/font/vert_align) 真正不同的格式差异。
+    /// 比 `format_changed_paragraphs` 更精确。
+    pub format_changed_real_paragraphs: usize,
     pub document_xml_equal: Option<bool>,
     pub styles_xml_equal: Option<bool>,
 }
@@ -194,6 +201,8 @@ pub fn compare_snapshots(
     let mut modified_paragraphs = 0usize;
     let mut inserted_paragraphs = 0usize;
     let mut deleted_paragraphs = 0usize;
+    let mut format_changed_split_only = 0usize;
+    let mut format_changed_real = 0usize;
 
     let mut pos = 0usize;
     while pos < alignment.len() {
@@ -203,6 +212,15 @@ pub fn compare_snapshots(
                 if let Some(diff) =
                     compare_paragraph_format(&left.paragraphs[li], &right.paragraphs[ri])
                 {
+                    let kind = classify_paragraph_format_diff(
+                        &left.paragraphs[li],
+                        &right.paragraphs[ri],
+                    );
+                    match kind {
+                        ParagraphFormatKind::SplitOnly => format_changed_split_only += 1,
+                        ParagraphFormatKind::Real => format_changed_real += 1,
+                        ParagraphFormatKind::None => {}
+                    }
                     if format_diffs.len() < options.max_diffs {
                         format_diffs.push(diff);
                     }
@@ -312,6 +330,8 @@ pub fn compare_snapshots(
         inserted_paragraphs,
         deleted_paragraphs,
         format_changed_paragraphs: format_diffs.len(),
+        format_changed_split_only_paragraphs: format_changed_split_only,
+        format_changed_real_paragraphs: format_changed_real,
         document_xml_equal: options
             .compare_xml_hash
             .then(|| left.document_xml_hash == right.document_xml_hash),
@@ -367,6 +387,12 @@ impl DocxDiffReport {
             self.summary.inserted_paragraphs,
             self.summary.deleted_paragraphs,
             self.summary.format_changed_paragraphs
+        ));
+        // v12 split: 真实格式差异 vs run 分割差异
+        out.push_str(&format!(
+            "- 真实格式差异段落：{}\n- run 分割差异段落（可忽略）：{}\n",
+            self.summary.format_changed_real_paragraphs,
+            self.summary.format_changed_split_only_paragraphs
         ));
         if let Some(equal) = self.summary.document_xml_equal {
             out.push_str(&format!("- document.xml 规范化 hash 相同：{}\n", equal));
@@ -635,6 +661,60 @@ fn compare_paragraph_format(left: &DocxParagraph, right: &DocxParagraph) -> Opti
     })
 }
 
+/// v12：把段落格式差异细分为"真实格式差"与"run 分割差"。
+///
+/// - 真实格式差: paragraph.style / has_drawing / run 的 (bold/italic/size/font/vert_align) 变化
+/// - run 分割差: 段落的 normalized_text 完全一致，但 run 切分边界不同（合并/拆分）
+///
+/// 调用于 compare_snapshots 内联，避免改变 compare_paragraph_format 的签名。
+fn classify_paragraph_format_diff(
+    left: &DocxParagraph,
+    right: &DocxParagraph,
+) -> ParagraphFormatKind {
+    let style_changed = left.style != right.style;
+    let drawing_changed = left.has_drawing != right.has_drawing;
+    let mut real_format_changed = false;
+    for (l, r) in left.runs.iter().zip(right.runs.iter()) {
+        if l.bold != r.bold
+            || l.italic != r.italic
+            || l.underline != r.underline
+            || l.vert_align != r.vert_align
+            || l.size != r.size
+            || l.font_ascii != r.font_ascii
+            || l.font_east_asia != r.font_east_asia
+            || l.style != r.style
+        {
+            real_format_changed = true;
+            break;
+        }
+    }
+    // run 数量不同也可能意味着切分不同
+    if !real_format_changed && left.runs.len() != right.runs.len() {
+        let left_signature = run_signature(&left.runs);
+        let right_signature = run_signature(&right.runs);
+        if left_signature != right_signature {
+            // run 切分变化（仅在 normalized_text 一致时为 split-only）
+            if left.normalized_text == right.normalized_text {
+                return ParagraphFormatKind::SplitOnly;
+            }
+        }
+    }
+    if style_changed || drawing_changed || real_format_changed {
+        ParagraphFormatKind::Real
+    } else if left.normalized_text == right.normalized_text {
+        ParagraphFormatKind::SplitOnly
+    } else {
+        ParagraphFormatKind::None
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ParagraphFormatKind {
+    None,
+    SplitOnly,
+    Real,
+}
+
 fn adjacent_insert_match(
     alignment: &[AlignmentOp],
     pos: usize,
@@ -755,31 +835,92 @@ fn align_paragraphs(left: &[DocxParagraph], right: &[DocxParagraph]) -> Vec<Alig
     ops
 }
 
+/// v12 OOXML 噪音元素清单。
+///
+/// 应当被 [`canonicalize_ooxml`] 在规范化阶段静默删除的元素。
+/// 这些元素是 Word/WPS 等编辑器写入的辅助信息（拼写检查标记等），
+/// 与文档内容/格式无关，会造成"sh vs Rust" hash 不一致。
+///
+/// 命中后处理方式：从输出字符串中直接丢弃整个 start/end 对。
+/// **注意**：w:ins / w:del / w:moveTo 等修订追踪标签是用户行为，
+/// 保留内容语义，因此**不在本清单**。
+pub const OOXML_NOISE_TAGS: &[&str] = &[
+    // 拼写/语法检查标记（writer 必定写入，reader 不输出）
+    "w:proofErr",
+    "w:noProof",
+    // 批注锚点（与正文内容无关）
+    "w:commentRangeStart",
+    "w:commentRangeEnd",
+    "w:commentReference",
+    // 智能标记
+    "w:smartTag",
+    "w:smartTagPr",
+];
+
+/// v12 OOXML 噪音属性清单（除了 `rsid*` 之外，补充几条 Word/WPS 注入的标记）。
+pub const OOXML_NOISE_ATTRS: &[&str] = &[
+    // w:rsid* 已通过 contains("rsid") 全局覆盖；这里放非 rsid 的额外噪音属性
+    "w:legacy",
+    "w:dirty",
+    "w:placeholder",
+];
+
 fn canonicalize_ooxml(xml: &str) -> String {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(true);
     let mut buf = Vec::new();
     let mut out = String::new();
+    // 维护一个"当前应当跳过的 tag 栈"：当 noise 标签开始时入栈，
+    // 直到对应结束标签出栈，期间所有内容都不写出。
+    let mut skip_stack: Vec<String> = Vec::new();
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                if is_noise_tag(&name) {
+                    skip_stack.push(name);
+                    continue;
+                }
+                if !skip_stack.is_empty() {
+                    continue;
+                }
                 out.push('<');
-                out.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                out.push_str(&name);
                 push_canonical_attrs(&mut out, &e);
                 out.push('>');
             }
             Ok(Event::Empty(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                if is_noise_tag(&name) {
+                    continue;
+                }
+                if !skip_stack.is_empty() {
+                    continue;
+                }
                 out.push('<');
-                out.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                out.push_str(&name);
                 push_canonical_attrs(&mut out, &e);
                 out.push_str("/>");
             }
             Ok(Event::End(e)) => {
+                let name = String::from_utf8_lossy(e.name().as_ref()).to_string();
+                if is_noise_tag(&name) {
+                    if skip_stack.last().map(|s| s == &name).unwrap_or(false) {
+                        skip_stack.pop();
+                    }
+                    continue;
+                }
+                if !skip_stack.is_empty() {
+                    continue;
+                }
                 out.push_str("</");
-                out.push_str(&String::from_utf8_lossy(e.name().as_ref()));
+                out.push_str(&name);
                 out.push('>');
             }
             Ok(Event::Text(t)) => {
+                if !skip_stack.is_empty() {
+                    continue;
+                }
                 let text = t.unescape().unwrap_or_default();
                 let text = text.trim();
                 if !text.is_empty() {
@@ -795,11 +936,21 @@ fn canonicalize_ooxml(xml: &str) -> String {
     out
 }
 
+fn is_noise_tag(name: &str) -> bool {
+    OOXML_NOISE_TAGS.iter().any(|tag| tag.eq_ignore_ascii_case(name))
+}
+
 fn push_canonical_attrs(out: &mut String, e: &BytesStart<'_>) {
     let mut attrs = Vec::new();
     for attr in e.attributes().flatten() {
         let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
         if key.to_ascii_lowercase().contains("rsid") {
+            continue;
+        }
+        if OOXML_NOISE_ATTRS
+            .iter()
+            .any(|a| a.eq_ignore_ascii_case(&key))
+        {
             continue;
         }
         let value = attr.unescape_value().unwrap_or_default().to_string();
@@ -1077,5 +1228,236 @@ mod tests {
                 ..Default::default()
             }],
         }
+    }
+
+    fn para_with_runs(index: usize, text: &str, style: &str, runs: Vec<DocxRun>) -> DocxParagraph {
+        DocxParagraph {
+            index,
+            style: Some(style.to_string()),
+            text: text.to_string(),
+            normalized_text: normalize_docx_text(text),
+            has_drawing: false,
+            runs,
+        }
+    }
+
+    // ── v12 split-only vs real format diff ────────────────────────────────
+
+    #[test]
+    fn run_split_only_diff_is_split_only() {
+        // 同一段文字，但 run 切分不同（1 个 run vs 3 个 run）应被归类为 SplitOnly
+        let left = para_with_runs(
+            1,
+            "时间复杂度 O(M log K)",
+            "JOSBody",
+            vec![DocxRun {
+                text: "时间复杂度 O(M log K)".into(),
+                ..Default::default()
+            }],
+        );
+        let right = para_with_runs(
+            1,
+            "时间复杂度 O(M log K)",
+            "JOSBody",
+            vec![
+                DocxRun {
+                    text: "时间".into(),
+                    ..Default::default()
+                },
+                DocxRun {
+                    text: "复杂度".into(),
+                    ..Default::default()
+                },
+                DocxRun {
+                    text: " O(M log K)".into(),
+                    ..Default::default()
+                },
+            ],
+        );
+        let kind = classify_paragraph_format_diff(&left, &right);
+        assert_eq!(kind, ParagraphFormatKind::SplitOnly);
+    }
+
+    #[test]
+    fn real_bold_change_is_real() {
+        // 一边 bold 一边 plain,且 text 一致:应归类为 Real
+        let left = para_with_runs(
+            1,
+            "时间复杂度 O(M log K)",
+            "JOSBody",
+            vec![DocxRun {
+                text: "时间复杂度 O(M log K)".into(),
+                ..Default::default()
+            }],
+        );
+        let right = para_with_runs(
+            1,
+            "时间复杂度 O(M log K)",
+            "JOSBody",
+            vec![DocxRun {
+                text: "时间复杂度 O(M log K)".into(),
+                bold: true,
+                ..Default::default()
+            }],
+        );
+        let kind = classify_paragraph_format_diff(&left, &right);
+        assert_eq!(kind, ParagraphFormatKind::Real);
+    }
+
+    #[test]
+    fn split_only_in_summary() {
+        // 整链路：run 切分不同的两个段落应在 summary 中
+        // format_changed_split_only_paragraphs += 1
+        // format_changed_real_paragraphs == 0
+        let left = para_with_runs(
+            1,
+            "正文段落 A",
+            "JOSBody",
+            vec![DocxRun {
+                text: "正文段落 A".into(),
+                ..Default::default()
+            }],
+        );
+        let right = para_with_runs(
+            1,
+            "正文段落 A",
+            "JOSBody",
+            vec![
+                DocxRun {
+                    text: "正文".into(),
+                    ..Default::default()
+                },
+                DocxRun {
+                    text: "段落".into(),
+                    ..Default::default()
+                },
+                DocxRun {
+                    text: " A".into(),
+                    ..Default::default()
+                },
+            ],
+        );
+        let report = compare_snapshots(
+            DocxSnapshot {
+                path: "left.docx".into(),
+                paragraphs: vec![left],
+                tables: 0,
+                drawings: 0,
+                media_files: 0,
+                paragraph_styles: BTreeMap::new(),
+                document_xml_hash: None,
+                styles_xml_hash: None,
+            },
+            DocxSnapshot {
+                path: "right.docx".into(),
+                paragraphs: vec![right],
+                tables: 0,
+                drawings: 0,
+                media_files: 0,
+                paragraph_styles: BTreeMap::new(),
+                document_xml_hash: None,
+                styles_xml_hash: None,
+            },
+            &DocxDiffOptions {
+                compare_xml_hash: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.summary.equal_paragraphs, 1);
+        assert_eq!(report.summary.format_changed_split_only_paragraphs, 1);
+        assert_eq!(report.summary.format_changed_real_paragraphs, 0);
+    }
+
+    #[test]
+    fn real_in_summary() {
+        let left = para_with_runs(
+            1,
+            "正文段落 A",
+            "JOSBody",
+            vec![DocxRun {
+                text: "正文段落 A".into(),
+                ..Default::default()
+            }],
+        );
+        let right = para_with_runs(
+            1,
+            "正文段落 A",
+            "JOSBody",
+            vec![DocxRun {
+                text: "正文段落 A".into(),
+                italic: true,
+                ..Default::default()
+            }],
+        );
+        let report = compare_snapshots(
+            DocxSnapshot {
+                path: "left.docx".into(),
+                paragraphs: vec![left],
+                tables: 0,
+                drawings: 0,
+                media_files: 0,
+                paragraph_styles: BTreeMap::new(),
+                document_xml_hash: None,
+                styles_xml_hash: None,
+            },
+            DocxSnapshot {
+                path: "right.docx".into(),
+                paragraphs: vec![right],
+                tables: 0,
+                drawings: 0,
+                media_files: 0,
+                paragraph_styles: BTreeMap::new(),
+                document_xml_hash: None,
+                styles_xml_hash: None,
+            },
+            &DocxDiffOptions {
+                compare_xml_hash: false,
+                ..Default::default()
+            },
+        );
+        assert_eq!(report.summary.equal_paragraphs, 1);
+        assert_eq!(report.summary.format_changed_real_paragraphs, 1);
+        assert_eq!(report.summary.format_changed_split_only_paragraphs, 0);
+    }
+
+    // ── v12 OOXML 噪音过滤 ────────────────────────────────────────────────
+
+    #[test]
+    fn canonicalize_ooxml_strips_all_rsid_and_proof_err() {
+        let xml = r#"<w:p><w:pPr><w:rsidR w:val="00A12345"/></w:pPr><w:r><w:proofErr w:type="spellStart"/><w:t>hello</w:t><w:proofErr w:type="spellEnd"/></w:r></w:p>"#;
+        let out = canonicalize_ooxml(xml);
+        // proofErr 应被整段剥离
+        assert!(!out.contains("proofErr"), "proofErr 应被删除: {}", out);
+        assert!(!out.contains("spellStart"), "proofErr 内容应被删除: {}", out);
+        // 文本与必要结构应保留
+        assert!(out.contains("hello"), "文本应保留: {}", out);
+        assert!(out.contains("<w:p>"), "段落标签应保留: {}", out);
+        assert!(out.contains("<w:t>"), "run 文本标签应保留: {}", out);
+    }
+
+    #[test]
+    fn canonicalize_ooxml_strips_comment_range() {
+        let xml = r#"<w:p><w:commentRangeStart w:id="1"/><w:r><w:t>text</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r></w:p>"#;
+        let out = canonicalize_ooxml(xml);
+        assert!(!out.contains("commentRange"), "comment range 应被删除: {}", out);
+        assert!(out.contains("text"), "文本应保留: {}", out);
+    }
+
+    #[test]
+    fn canonicalize_ooxml_preserves_revision_tracking() {
+        // v12 不删除 ins/del（这是用户内容，不应被规范化掉）
+        let xml = r#"<w:p><w:ins w:id="1"><w:r><w:t>inserted</w:t></w:r></w:ins></w:p>"#;
+        let out = canonicalize_ooxml(xml);
+        assert!(out.contains("inserted"), "ins 内容应保留: {}", out);
+    }
+
+    #[test]
+    fn canonicalize_ooxml_preserves_smart_tag() {
+        // smartTag 暂时保留（用户内容可能依赖）
+        // 此测试仅验证 proofErr 仍能删除
+        let xml = r#"<w:p><w:proofErr w:type="gramStart"/><w:r><w:t>foo</w:t></w:r></w:p>"#;
+        let out = canonicalize_ooxml(xml);
+        assert!(!out.contains("proofErr"), "proofErr 应被删除: {}", out);
+        assert!(out.contains("foo"));
     }
 }

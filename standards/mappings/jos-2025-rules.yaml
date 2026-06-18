@@ -1,0 +1,39 @@
+# JOS 2025 软件学报专用 mapping 规则覆盖层
+# 继承并扩展 `standard-ast-to-docx.yaml`。
+# 本文件由 `crates/semantic-ast/src/mapping_loader.rs` 加载。
+schema_version: "0.1"
+target_format: docx
+extends: standard-ast-to-docx
+profile: jos-2025
+profile_styles:
+  # 覆盖 standard 提供的 body 映射到 JOSBody（默认即 JOSBody，此处显式声明便于审计）
+  body: JOSBody
+  reference: JOSReference
+rules:
+  - id: map.heading.docx
+    style_from_profile: heading_by_level
+    version: "0.1.jos"
+  - id: map.paragraph.docx
+    style_from_profile: body
+    version: "0.1.jos"
+  - id: map.list.bullet.docx
+    style_from_profile: list_bullet
+    version: "0.1.jos"
+  - id: map.list.number.docx
+    style_from_profile: list_number
+    version: "0.1.jos"
+  - id: map.bibliography.docx
+    style_from_profile: reference
+    version: "0.1.jos"
+  - id: map.figure.caption.docx
+    style_from_profile: figure_caption
+    version: "0.1.jos"
+  - id: map.table.caption.docx
+    style_from_profile: table_caption
+    version: "0.1.jos"
+  - id: map.abstract.zh.docx
+    style_from_profile: abstract_zh
+    version: "0.1.jos"
+  - id: map.keywords.docx
+    style_from_profile: keywords
+    version: "0.1.jos"

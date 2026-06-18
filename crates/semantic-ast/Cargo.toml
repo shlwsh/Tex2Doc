@@ -10,3 +10,5 @@ description = "Doc-engine 核心语义块模型（长期资产）"
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = "0.9"
+thiserror = { workspace = true }

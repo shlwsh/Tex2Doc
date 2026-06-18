@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # End-to-end paper3 regression: DOCX + AST dump + render dump + verify + traceability report.
+#
+# v12: 接受 VERSION 环境变量作为产物前缀,默认 v12-<timestamp>。
+# 用法: VERSION=v12-20260618-070000 ./scripts/paper3_regression.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+VERSION="${VERSION:-v12-$(date +%Y%m%d-%H%M%S)}"
 OUT="${ROOT}/examples/paper3/output"
-DOCX="${OUT}/main-jos-rust.docx"
+TO_DOCX_DIR="${OUT}/to-docx"
+VERIFY_DIR="${ROOT}/docs/verify"
+DOCX="${TO_DOCX_DIR}/${VERSION}-论文稿件-jos-rust.docx"
 PDF="${ROOT}/examples/paper3/latex/main-jos.pdf"
-AST_JSON="${OUT}/main-jos.ast.json"
-AST_MD="${OUT}/main-jos.ast.md"
-RENDER_JSON="${OUT}/main-jos.render.json"
-RENDER_MD="${OUT}/main-jos.render.md"
-VERIFY_MD="${OUT}/main-jos.verify.md"
-VERIFY_JSON="${OUT}/main-jos.verify.json"
-TRACE_MD="${OUT}/main-jos.traceability.md"
-TRACE_JSON="${OUT}/main-jos.traceability.json"
+AST_JSON="${OUT}/${VERSION}-main-jos.ast.json"
+AST_MD="${OUT}/${VERSION}-main-jos.ast.md"
+RENDER_JSON="${OUT}/${VERSION}-main-jos.render.json"
+RENDER_MD="${OUT}/${VERSION}-main-jos.render.md"
+VERIFY_MD="${VERIFY_DIR}/${VERSION}-docx-compare.md"
+VERIFY_JSON="${VERIFY_DIR}/${VERSION}-docx-compare.json"
+PER_TABLE_MD="${VERIFY_DIR}/${VERSION}-逐项对比表.md"
+TRACE_MD="${OUT}/${VERSION}-main-jos.traceability.md"
+TRACE_JSON="${OUT}/${VERSION}-main-jos.traceability.json"
 
-mkdir -p "${OUT}"
+mkdir -p "${OUT}" "${TO_DOCX_DIR}" "${VERIFY_DIR}"
 
-echo "=== Build Rust DOCX fixture ==="
-cargo test -p doc-core --test paper3_e2e paper3_main_jos_to_docx -- --nocapture
+echo "=== Build Rust DOCX fixture (version=${VERSION}) ==="
+DOCX_ENV="${DOCX}" cargo test -p doc-core --test paper3_e2e paper3_main_jos_to_docx -- --nocapture
 
 echo "=== Dump Standard AST ==="
 cargo run -p doc-engine -- ast-dump \
