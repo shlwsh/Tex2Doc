@@ -493,11 +493,7 @@ fn lower_with_macros_numbering_and_cites(
     doc.metadata.authors = if fm.authors_zh.is_empty() {
         Vec::new()
     } else {
-        fm.authors_zh
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        vec![fm.authors_zh.clone()]
     };
     doc.metadata.institute_lines = fm.institute_lines.clone();
     doc.metadata.abstract_text = Some(fm.abstract_zh.clone()).filter(|s| !s.is_empty());
@@ -515,11 +511,7 @@ fn lower_with_macros_numbering_and_cites(
     doc.metadata.authors_en = if fm.authors_en.is_empty() {
         Vec::new()
     } else {
-        fm.authors_en
-            .split(',')
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect()
+        vec![fm.authors_en.clone()]
     };
     doc.metadata.institute_en = Some(fm.institute_en).filter(|s| !s.is_empty());
     doc.metadata.abstract_en = Some(fm.abstract_en).filter(|s| !s.is_empty());
@@ -536,6 +528,7 @@ fn lower_with_macros_numbering_and_cites(
     doc.metadata.citation_en = Some(fm.citation_en).filter(|s| !s.is_empty());
     doc.metadata.running_header = Some(fm.running_header).filter(|s| !s.is_empty());
     doc.metadata.first_footer_text = Some(fm.first_footer_text).filter(|s| !s.is_empty());
+    doc.metadata.author_bio = fm.author_bio.clone();
 
     // V2：从 flushleft 里直接抽取中文/英文引用格式（如果上面 extract_front_matter 没拿到）
     let text_for_cite = strip_preamble(&parse.source);
@@ -1386,6 +1379,15 @@ fn lower_list(
             let item_content = strip_item_braces_and_formatting(after.trim());
             current = Some(Box::leak(item_content.into_boxed_str()));
         } else if current.is_some() {
+            if s.trim().is_empty() {
+                // v13.2.2 R2.1: 空行 = 段落边界
+                if let Some(buf) = current.take() {
+                    items.push(lower_item_body(
+                        buf, span, macros, numbering, cite_numbers, label_map,
+                    ));
+                }
+                continue;
+            }
             let buf = current.unwrap();
             let mut owned = String::from(buf);
             owned.push('\n');
@@ -1897,6 +1899,20 @@ fn lower_table(
     let rows_text: Vec<&str> = body.split("\\\\").collect();
     let mut rows: Vec<TableRow> = Vec::new();
     for row in rows_text {
+        // v13.2.2 R4: 过滤 phantom 行（\bottomrule 等单独成行 → 1 个空 cell）
+        let cells_probe: Vec<&str> = row.split('&').collect();
+        if cells_probe.len() == 1 {
+            let t = cells_probe[0].trim();
+            if t.is_empty()
+                || matches!(t, "\\bottomrule" | "\\toprule" | "\\midrule" | "\\hline")
+                || t.starts_with("\\bottomrule")
+                || t.starts_with("\\toprule")
+                || t.starts_with("\\midrule")
+            {
+                continue;
+            }
+        }
+
         // Check for \rowcolor at start of row
         let mut current_row_color: Option<String> = None;
         let mut row_text = row;
@@ -4105,6 +4121,52 @@ mod tests {
             assert!(!lines.is_empty(), "应解析到至少 1 行算法代码");
         } else {
             panic!("期望 Block::Algorithm");
+        }
+    }
+
+    #[test]
+    fn itemize_with_blank_line_separates_items() {
+        let src = r"\begin{itemize}
+\item first item
+
+\item second item
+\end{itemize}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        if let Block::List { items, .. } = &doc.blocks[0] {
+            assert_eq!(items.len(), 2, "空行应切分为 2 个 item");
+        } else {
+            panic!("期望 Block::List");
+        }
+    }
+
+    #[test]
+    fn phantom_row_filtered() {
+        let src = r"\begin{tabular}{c|c}
+A & B \\
+\bottomrule
+\end{tabular}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        if let Block::Table { rows, .. } = &doc.blocks[0] {
+            assert_eq!(rows.len(), 1, "phantom 行应被过滤");
+        } else {
+            panic!("期望 Block::Table");
+        }
+    }
+
+    #[test]
+    fn normal_row_preserved() {
+        let src = r"\begin{tabular}{c|c}
+A & B \\
+C & D
+\end{tabular}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        if let Block::Table { rows, .. } = &doc.blocks[0] {
+            assert_eq!(rows.len(), 2);
+        } else {
+            panic!("期望 Block::Table");
         }
     }
 }

@@ -35,6 +35,8 @@ impl PageSetupKind {
                 footer_text: None,
                 first_header_text: None,
                 first_footer_text: None,
+                even_header_text: None,
+                first_footer_indent_twips: None,
             }),
             PageSetupKind::JosPaper3 => Some(PageSetup::jos_paper3()),
         }
@@ -167,26 +169,38 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
         .unwrap_or_else(|_| "00000000-000000".to_string());
     let base = format!("{stem}__v{pkg_version}__{now}");
 
-    let docx = a.outdir.join(format!("{base}.docx"));
+    let sh_docx = a.outdir.join(format!("{base}-sh.docx"));
+    let rust_docx = a.outdir.join(format!("{base}-rust.docx"));
     let oracle_pdf = a.outdir.join(format!("{base}.oracle.pdf"));
-    let rust_pdf = a.outdir.join(format!("{base}.pdf"));
+    let rust_pdf = a.outdir.join(format!("{base}-rust.pdf"));
     let report_md = a.outdir.join(format!("{base}.quality-report.md"));
     let report_json = a.outdir.join(format!("{base}.quality-report.json"));
 
     tracing::info!("output basename: {base}");
+    tracing::info!("sh docx: {}", sh_docx.display());
+    tracing::info!("rust docx: {}", rust_docx.display());
 
-    // 1. zip → docx
-    let convert_a = ConvertArgs {
+    // 1. zip → docx（sh / rust 同步输出）
+    run_convert(ConvertArgs {
         zip: a.zip.clone(),
         main_tex: a.main_tex.clone(),
-        out: docx.clone(),
+        out: sh_docx.clone(),
+        page_setup: PageSetupKind::Letter,
+        header_text: None,
+        footer_text: None,
+        first_header_text: None,
+        first_footer_text: None,
+    })?;
+    run_convert(ConvertArgs {
+        zip: a.zip.clone(),
+        main_tex: a.main_tex.clone(),
+        out: rust_docx.clone(),
         page_setup: a.page_setup,
         header_text: a.header_text.clone(),
         footer_text: a.footer_text.clone(),
         first_header_text: a.first_header_text.clone(),
         first_footer_text: a.first_footer_text.clone(),
-    };
-    run_convert(convert_a)?;
+    })?;
 
     // 2. tex → oracle PDF
     let tex_a = tex_compile::TexCompileArgs {
@@ -199,24 +213,23 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
     let rt = tokio::runtime::Runtime::new()?;
     rt.block_on(tex_compile::run(tex_a))?;
 
-    // 3. docx → PDF
+    // 3. docx → PDF（以 rust 版本为准）
     let d2p = docx2pdf::DocxToPdfArgs {
-        docx: docx.clone(),
+        docx: rust_docx.clone(),
         outdir: a.outdir.clone(),
     };
     rt.block_on(docx2pdf::run(d2p))?;
-    // 重命名 outdir/<docx-stem>.pdf → rust_pdf（统一命名约定）
     let produced_pdf = a.outdir.join(format!(
         "{}.pdf",
-        docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")
+        rust_docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")
     ));
     if produced_pdf != rust_pdf && produced_pdf.exists() {
         std::fs::rename(&produced_pdf, &rust_pdf).ok();
     }
 
-    // 4. 验证
+    // 4. 验证（rust DOCX vs PDF）
     let v = pdf_verify::VerifyPdfArgs {
-        docx: docx.clone(),
+        docx: rust_docx.clone(),
         rust_pdf: rust_pdf.clone(),
         oracle_pdf: oracle_pdf.clone(),
         report: report_md,

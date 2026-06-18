@@ -4,11 +4,10 @@
 //! - 序列化层现在能完整表达 `TextStyle::Bold/Italic/BoldItalic/Code/MathInline/Superscript/Subscript`
 //! - 算法/代码块使用 `JOSCode` 样式 + Courier 字体
 //! - 段落支持 `keep_next` / `keep_lines`（算法块、表格不跨页）
-//! - 公式块走 `JOSCode` 样式 + OMML
+//! - 公式块走 `JOSCode` 居中纯文本（对齐 sh `clean_math`，非 OMML）
 //! - 21 个 JOS 样式由 `styles.rs` 单一来源生成
 
-use doc_mathml::{parse_latex_math, to_omml};
-use doc_semantic_ast::{AlgLine, Block, Document, TextRun, TextStyle};
+use doc_semantic_ast::{AlgLine, Block, Document, Span, TextRun, TextStyle, TheoremLikeKind};
 use doc_utils::ImageAssets;
 use image::GenericImageView;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
@@ -109,7 +108,8 @@ pub fn serialize_document(
     // V2：先写 front matter（中文标题 / 作者 / 单位 / 摘要 / 关键词 / 引用 / 英文标题块）
     write_front_matter(&mut w, &doc.metadata);
 
-    for block in &doc.blocks {
+    let body_blocks = coalesce_theorem_like_blocks(&doc.blocks);
+    for block in &body_blocks {
         match block {
             Block::Heading {
                 level,
@@ -144,6 +144,10 @@ pub fn serialize_document(
                 if matches!(paragraph_text, "{" | "}") {
                     continue;
                 }
+                // v13.2.5 R6: metadata 已含作者简介时跳过正文中的重复标题
+                if paragraph_text == "作者简介" && !doc.metadata.author_bio.is_empty() {
+                    continue;
+                }
                 // 启发：参考文献样式 — 段落以 `[数字]` 开头时用 JOSReference
                 // （悬挂缩进，西文 Times New Roman，中文宋体）。
                 // 这样在 paper3 这类「顶层 \item 不在 list env 内」的
@@ -174,12 +178,7 @@ pub fn serialize_document(
                 // JOS 参考文献模式：item 文本含 `[N] —` 形式
                 // （来自 `\item[{[N]}]`，lower_list 加了 `{` 包装）。
                 // 使用 `JOSReference` 样式（悬挂缩进 + Times New Roman + SimSun）。
-                let is_jos_ref = items.iter().any(|sub| {
-                    let s = summarize(sub);
-                    s.contains('[')
-                        && s.chars().any(|c| c.is_ascii_digit())
-                        && (s.contains('—') || s.contains("--"))
-                });
+                let is_jos_ref = is_jos_reference_list(items);
                 // v13 P0: 仿 sh oracle 行为——itemize/enumerate 全部用
                 // JOSBody 样式 + 手写序号"1. …"。之前用 ListBullet/ListNumber
                 // 与 sh 完全错位，导致 v12 段 #147-#159 大量 deleted/inserted。
@@ -188,6 +187,22 @@ pub fn serialize_document(
                 } else {
                     STYLE_BODY
                 };
+                // v13.2.7: sh 将 itemize 留在 chunk 内，latex_to_text 后合并为单段
+                // （前缀 "itemize " + 各项空格拼接）；enumerate 仍逐 item 独立段。
+                if !is_jos_ref && !*is_ordered {
+                    let merged = itemize_merged_text(items);
+                    if merged.len() > "itemize ".len() {
+                        let para = Paragraph {
+                            style_id: Some(style.to_string()),
+                            runs: vec![Run::plain(merged)],
+                            jc: None,
+                            keep_next: false,
+                            keep_lines: false,
+                        };
+                        write_paragraph(&mut w, &para);
+                    }
+                    continue;
+                }
                 for (idx, sub) in items.iter().enumerate() {
                     // v12 保留子结构：当 item 只有一个 Paragraph 块时直接用其 runs
                     if sub.len() == 1 {
@@ -360,15 +375,7 @@ pub fn serialize_document(
                                 };
                                 let cap_para = Paragraph {
                                     style_id: Some(STYLE_CAPTION.to_string()),
-                                    runs: vec![Run {
-                                        text: cap_text,
-                                        style_id: None,
-                                        style: TextStyle::Plain,
-                                        bold: false,
-                                        italic: true,
-                                        font_ascii: None,
-                                        font_east: None,
-                                    }],
+                                    runs: vec![Run::plain(cap_text)],
                                     jc: None,
                                     keep_next: false,
                                     keep_lines: true,
@@ -412,15 +419,7 @@ pub fn serialize_document(
                     };
                     let cap_para = Paragraph {
                         style_id: Some(STYLE_CAPTION.to_string()),
-                        runs: vec![Run {
-                            text: cap_text,
-                            style_id: None,
-                            style: TextStyle::Plain,
-                            bold: false,
-                            italic: true,
-                            font_ascii: None,
-                            font_east: None,
-                        }],
+                        runs: vec![Run::plain(cap_text)],
                         jc: None,
                         keep_next: false,
                         keep_lines: false,
@@ -436,27 +435,18 @@ pub fn serialize_document(
                 }
                 write_equation(&mut w, latex, *is_block, equation_counter);
             }
-            Block::TheoremLike {
-                kind, title, body, ..
-            } => {
-                let title_suffix = title
-                    .as_ref()
-                    .map(|title| format!("（{title}）"))
-                    .unwrap_or_default();
+            Block::TheoremLike { kind, body, .. } => {
+                let text = if body.starts_with("theorem")
+                    || body.starts_with("proposition")
+                    || body.starts_with("lemma")
+                {
+                    body.clone()
+                } else {
+                    format_theorem_like_sh(kind, body)
+                };
                 let para = Paragraph {
-                    style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
-                    runs: vec![
-                        Run {
-                            text: format!("{}{} ", kind.display_name(), title_suffix),
-                            style_id: None,
-                            style: TextStyle::Bold,
-                            bold: true,
-                            italic: false,
-                            font_ascii: None,
-                            font_east: None,
-                        },
-                        Run::plain(body.clone()),
-                    ],
+                    style_id: Some(STYLE_BODY.to_string()),
+                    runs: vec![Run::plain(text)],
                     jc: None,
                     keep_next: false,
                     keep_lines: false,
@@ -523,10 +513,23 @@ pub fn serialize_document(
                 number,
                 ..
             } => {
-                write_algorithm_table(&mut w, lines, io, caption.as_deref(), number.as_deref());
+                let text_width = page_setup
+                    .map(|ps| ps.text_width_twips())
+                    .unwrap_or_else(|| PageSetup::jos_paper3().text_width_twips());
+                write_algorithm_table(
+                    &mut w,
+                    lines,
+                    io,
+                    caption.as_deref(),
+                    number.as_deref(),
+                    text_width,
+                );
             }
         }
     }
+
+    // v13.2.5 R6: 作者简介（文档末尾，参考文献之后）
+    write_author_bio(&mut w, &doc.metadata);
 
     let sect = BytesStart::new("w:sectPr");
     w.write_event(Event::Start(sect)).unwrap();
@@ -656,47 +659,184 @@ fn write_drawing_paragraph(w: &mut Writer<Vec<u8>>, drawing: &str) {
 }
 
 fn write_equation(w: &mut Writer<Vec<u8>>, latex: &str, is_block: bool, number: u32) {
-    if is_block {
-        let mut runs = formula_runs(latex);
-        runs.push(Run {
-            text: format!("({number})"),
-            style_id: None,
-            style: TextStyle::Plain,
-            bold: false,
-            italic: false,
-            font_ascii: None,
-            font_east: None,
-        });
+    if !is_block {
+        let display = clean_equation_display_oracle(latex);
         let para = Paragraph {
-            style_id: Some(STYLE_CODE.to_string()),
-            runs,
-            jc: Some("center".to_string()),
+            style_id: Some(STYLE_BODY.to_string()),
+            runs: equation_jos_runs(&display),
+            jc: None,
             keep_next: false,
-            keep_lines: true,
+            keep_lines: false,
         };
         write_paragraph(w, &para);
+        return;
     }
+    let normalized = latex.replace("\\\\", " ").replace('\n', " ");
+    let display = clean_equation_display_oracle(&normalized);
+    let mut runs = equation_jos_runs(&display);
+    runs.push(equation_jos_run(&format!("    ({number})"), false));
+    let para = Paragraph {
+        style_id: Some(STYLE_CODE.to_string()),
+        runs,
+        jc: Some("center".to_string()),
+        keep_next: false,
+        keep_lines: true,
+    };
+    write_paragraph(w, &para);
+}
 
-    w.write_event(Event::Start(BytesStart::new("w:p"))).unwrap();
-    if is_block {
-        let ppr = BytesStart::new("w:pPr");
-        let mut jc = BytesStart::new("w:jc");
-        jc.push_attribute(("w:val", "center"));
-        w.write_event(Event::Start(ppr.clone())).unwrap();
-        w.write_event(Event::Empty(jc)).unwrap();
-        w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
+/// 对齐 build_jos_docx.py `clean_math`（块级公式走 JOSCode 纯文本，非 OMML）。
+fn clean_equation_display_oracle(text: &str) -> String {
+    const LBRACE: char = '\u{FFF0}';
+    const RBRACE: char = '\u{FFF1}';
+    let mut s = strip_latex_command_arg(text, "label");
+    s = s.replace("\\{", &LBRACE.to_string());
+    s = s.replace("\\}", &RBRACE.to_string());
+    s = s.replace("\\,", " ");
+    s = s.replace('~', " ");
+    for cmd in ["mathrm", "textbf", "textit"] {
+        s = unwrap_latex_command_arg(&s, cmd);
     }
-    let expr = parse_latex_math(latex);
-    let omml = to_omml(&expr);
-    let omml_str = String::from_utf8_lossy(&omml);
-    if let Some(start) = omml_str.find("<m:oMath") {
-        if let Some(end) = omml_str[start..].find("</m:oMath>") {
-            let inner = &omml_str[start..start + end + "</m:oMath>".len()];
-            use std::io::Write;
-            let _ = w.get_mut().write_all(inner.as_bytes());
+    for (from, to) in [
+        ("\\pm", "±"),
+        ("\\%", "%"),
+        ("\\rightarrow", "→"),
+        ("\\leftarrow", "←"),
+        ("\\infty", "∞"),
+        ("\\leq", "≤"),
+        ("\\geq", "≥"),
+        ("\\ll", "≪"),
+        ("\\times", "×"),
+        ("\\cdot", "·"),
+        ("\\emptyset", "∅"),
+        ("\\alpha", "α"),
+        ("\\beta", "β"),
+        ("\\rho", "ρ"),
+        ("\\xi", "ξ"),
+        ("\\ldots", "…"),
+        ("\\log", " log "),
+        ("\\min", "min"),
+        ("\\max", "max"),
+        ("\\in", "∈"),
+        ("\\!", ""),
+        ("\\sum", "sum"),
+        ("\\exp", "exp"),
+        ("\\bigl", ""),
+        ("\\bigr", ""),
+        ("\\left", ""),
+        ("\\right", ""),
+    ] {
+        s = s.replace(from, to);
+    }
+    for _ in 0..6 {
+        s = strip_one_brace_level(&s);
+    }
+    s = strip_latex_command_names(&s);
+    s = s.replace(LBRACE, "{").replace(RBRACE, "}");
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn strip_one_brace_level(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if s.as_bytes()[i] == b'{' {
+            if let Some((inner, next)) = read_braced_content(s, i) {
+                out.push_str(&inner);
+                i = next;
+                continue;
+            }
         }
+        let ch = s[i..].chars().next().unwrap_or_default();
+        out.push(ch);
+        i += ch.len_utf8();
     }
-    w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
+    out
+}
+
+fn read_braced_content(s: &str, open: usize) -> Option<(String, usize)> {
+    if s.as_bytes().get(open) != Some(&b'{') {
+        return None;
+    }
+    let (inner, next) = read_script_arg(s, open);
+    Some((inner, next))
+}
+
+fn strip_latex_command_names(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut i = 0;
+    while i < s.len() {
+        if s.as_bytes()[i] == b'\\' {
+            let start = i + 1;
+            let mut end = start;
+            while end < s.len() {
+                let ch = s[end..].chars().next().unwrap_or_default();
+                if ch.is_ascii_alphabetic() {
+                    end += ch.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            if end > start {
+                out.push_str(&s[start..end]);
+                i = end;
+                continue;
+            }
+        }
+        let ch = s[i..].chars().next().unwrap_or_default();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+fn equation_jos_run(text: &str, bold: bool) -> Run {
+    Run {
+        text: text.to_string(),
+        style_id: None,
+        style: TextStyle::Plain,
+        bold,
+        italic: false,
+        font_ascii: None,
+        font_east: None,
+    }
+}
+
+fn equation_jos_runs(text: &str) -> Vec<Run> {
+    let mut runs = Vec::new();
+    let mut plain = String::new();
+    let mut i = 0;
+    while i < text.len() {
+        let ch = text[i..].chars().next().unwrap_or_default();
+        if ch == '_' || ch == '^' {
+            if !plain.is_empty() {
+                runs.push(equation_jos_run(&plain, false));
+                plain.clear();
+            }
+            let (arg, next) = read_script_arg(text, i + ch.len_utf8());
+            runs.push(Run {
+                text: arg,
+                style_id: None,
+                style: if ch == '_' {
+                    TextStyle::Subscript
+                } else {
+                    TextStyle::Superscript
+                },
+                bold: false,
+                italic: false,
+                font_ascii: None,
+                font_east: None,
+            });
+            i = next;
+            continue;
+        }
+        plain.push(ch);
+        i += ch.len_utf8();
+    }
+    if !plain.is_empty() {
+        runs.push(equation_jos_run(&plain, false));
+    }
+    runs
 }
 
 fn formula_runs(latex: &str) -> Vec<Run> {
@@ -879,140 +1019,552 @@ fn summarize(blocks: &[Block]) -> String {
     out.trim().to_string()
 }
 
+fn is_jos_reference_list(items: &[Vec<Block>]) -> bool {
+    items.iter().any(|sub| {
+        let s = summarize(sub);
+        s.contains('[')
+            && s.chars().any(|c| c.is_ascii_digit())
+            && (s.contains('—') || s.contains("--"))
+    })
+}
+
+fn itemize_merged_text(items: &[Vec<Block>]) -> String {
+    let mut merged = String::from("itemize ");
+    let mut first = true;
+    for sub in items {
+        let text = summarize(sub);
+        if text.is_empty() {
+            continue;
+        }
+        if !first {
+            merged.push(' ');
+        }
+        merged.push_str(&text);
+        first = false;
+    }
+    merged
+}
+
+/// 合并连续 TheoremLike 为单段（对齐 sh chunk flatten）。
+fn coalesce_theorem_like_blocks(blocks: &[Block]) -> Vec<Block> {
+    let mut out: Vec<Block> = Vec::with_capacity(blocks.len());
+    let mut buf: Vec<(TheoremLikeKind, String)> = Vec::new();
+
+    let flush = |buf: &mut Vec<(TheoremLikeKind, String)>, out: &mut Vec<Block>| {
+        if buf.is_empty() {
+            return;
+        }
+        if buf.len() == 1 {
+            let (kind, body) = buf.pop().unwrap();
+            out.push(Block::TheoremLike {
+                kind,
+                title: None,
+                body,
+                span: Span::default(),
+            });
+            return;
+        }
+        let mut merged = String::new();
+        for (kind, body) in buf.drain(..) {
+            let part = format_theorem_like_sh(&kind, &body);
+            if !merged.is_empty() {
+                merged.push(' ');
+            }
+            merged.push_str(&part);
+        }
+        out.push(Block::TheoremLike {
+            kind: TheoremLikeKind::Theorem,
+            title: None,
+            body: merged,
+            span: Span::default(),
+        });
+    };
+
+    for block in blocks {
+        if let Block::TheoremLike { kind, body, .. } = block {
+            buf.push((kind.clone(), body.clone()));
+        } else {
+            flush(&mut buf, &mut out);
+            out.push(block.clone());
+        }
+    }
+    flush(&mut buf, &mut out);
+    out
+}
+
+fn format_theorem_like_sh(kind: &TheoremLikeKind, body: &str) -> String {
+    match kind {
+        TheoremLikeKind::Proof => format!("theorem proof {body}"),
+        TheoremLikeKind::Proposition => format!("proposition {body} proposition"),
+        TheoremLikeKind::Theorem => format!("theorem {body} theorem"),
+        TheoremLikeKind::Lemma => format!("lemma {body} lemma"),
+        TheoremLikeKind::Corollary => format!("corollary {body} corollary"),
+        TheoremLikeKind::Definition => format!("definition {body} definition"),
+        TheoremLikeKind::Remark => format!("remark {body} remark"),
+        TheoremLikeKind::Example => format!("example {body} example"),
+    }
+}
+
 fn write_algorithm_table(
     w: &mut Writer<Vec<u8>>,
     lines: &[AlgLine],
     io: &[(String, String)],
     caption: Option<&str>,
     number: Option<&str>,
+    text_width: u32,
 ) {
-    let cap = match (number, caption) {
-        (Some(n), Some(c)) if !c.is_empty() => format!("{n}: {c}"),
-        (Some(n), _) => n.to_string(),
-        (_, Some(c)) => format!("Algorithm: {c}"),
-        _ => "Algorithm".to_string(),
-    };
-    let has_input = io
-        .iter()
-        .any(|(kind, _)| normalize_io_label(kind) == "Input");
-    let has_output = io
-        .iter()
-        .any(|(kind, _)| normalize_io_label(kind) == "Output");
-    let para = Paragraph {
-        style_id: Some(STYLE_CAPTION.to_string()),
-        runs: vec![Run {
-            text: cap.clone(),
-            style_id: None,
-            style: TextStyle::Bold,
-            bold: true,
-            italic: false,
-            font_ascii: None,
-            font_east: None,
-        }],
-        jc: Some("center".into()),
-        keep_next: true,
-        keep_lines: true,
-    };
-    write_paragraph(w, &para);
+    let cap = build_algorithm_caption(number, caption);
+    if lines.is_empty() {
+        if !cap.is_empty() {
+            write_paragraph(
+                w,
+                &Paragraph {
+                    style_id: Some(STYLE_CAPTION.to_string()),
+                    runs: vec![Run::plain(cap)],
+                    jc: Some("center".to_string()),
+                    keep_next: true,
+                    keep_lines: true,
+                },
+            );
+        }
+        return;
+    }
 
-    w.write_event(Event::Start(BytesStart::new("w:tbl")))
-        .unwrap();
+    let max_depth = lines.iter().map(|l| u32::from(l.indent)).max().unwrap_or(0);
+    let line_width = 560u32;
+    let guide_width = 280u32;
+    let comment_width = 3050u32;
+    let code_width = 2200u32.max(
+        text_width
+            .saturating_sub(line_width)
+            .saturating_sub(guide_width.saturating_mul(max_depth))
+            .saturating_sub(comment_width),
+    );
+    let mut widths = vec![line_width];
+    widths.extend(std::iter::repeat_n(guide_width, max_depth as usize));
+    widths.push(code_width);
+    widths.push(comment_width);
+    let total_cols = widths.len();
+
+    let mut tbl = BytesStart::new("w:tbl");
+    tbl.push_attribute((
+        "xmlns:w",
+        "http://schemas.openxmlformats.org/wordprocessingml/2006/main",
+    ));
+    w.write_event(Event::Start(tbl)).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:tblPr")))
         .unwrap();
     let mut tbl_w = BytesStart::new("w:tblW");
-    tbl_w.push_attribute(("w:w", "9000"));
-    tbl_w.push_attribute(("w:type", "dxa"));
+    tbl_w.push_attribute(("w:w", "5000"));
+    tbl_w.push_attribute(("w:type", "pct"));
     w.write_event(Event::Empty(tbl_w)).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:tblBorders")))
         .unwrap();
-    for side in ["top", "bottom"] {
-        let name = format!("w:{side}");
-        let mut b = BytesStart::new(name.as_str());
-        b.push_attribute(("w:val", "single"));
-        b.push_attribute(("w:sz", "8"));
-        b.push_attribute(("w:space", "0"));
-        b.push_attribute(("w:color", "000000"));
-        w.write_event(Event::Empty(b)).unwrap();
-    }
-    for side in ["left", "right", "insideH", "insideV"] {
-        let name = format!("w:{side}");
-        let mut b = BytesStart::new(name.as_str());
-        b.push_attribute(("w:val", "nil"));
+    for (side, val, sz) in [
+        ("top", "single", "8"),
+        ("left", "nil", "4"),
+        ("bottom", "single", "8"),
+        ("right", "nil", "4"),
+        ("insideH", "nil", "4"),
+        ("insideV", "nil", "4"),
+    ] {
+        let mut b = BytesStart::new(format!("w:{side}"));
+        b.push_attribute(("w:val", val));
+        if val != "nil" {
+            b.push_attribute(("w:sz", sz));
+            b.push_attribute(("w:space", "0"));
+            b.push_attribute(("w:color", "000000"));
+        }
         w.write_event(Event::Empty(b)).unwrap();
     }
     w.write_event(Event::End(BytesEnd::new("w:tblBorders")))
         .unwrap();
+    let mut layout = BytesStart::new("w:tblLayout");
+    layout.push_attribute(("w:type", "fixed"));
+    w.write_event(Event::Empty(layout)).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:tblPr"))).unwrap();
 
     w.write_event(Event::Start(BytesStart::new("w:tblGrid")))
         .unwrap();
-    for col_w in ["650", "6350", "2000"] {
-        let mut grid_col = BytesStart::new("w:gridCol");
-        grid_col.push_attribute(("w:w", col_w));
-        w.write_event(Event::Empty(grid_col)).unwrap();
+    for width in &widths {
+        let w_str = width.to_string();
+        let mut gc = BytesStart::new("w:gridCol");
+        gc.push_attribute(("w:w", w_str.as_str()));
+        w.write_event(Event::Empty(gc)).unwrap();
     }
     w.write_event(Event::End(BytesEnd::new("w:tblGrid")))
         .unwrap();
 
-    write_algorithm_caption_row(w, &cap);
-    for (kind, content) in io {
-        let code = format!("{}: {content}", normalize_io_label(kind));
-        write_algorithm_row(w, "", &code, "", false);
-    }
+    let title_width: u32 = widths.iter().sum();
+    begin_algorithm_table_row(w);
+    write_algorithm_cell(
+        w,
+        algorithm_title_runs(&cap),
+        title_width,
+        total_cols as u32,
+        None,
+        AlgoCellBorders {
+            top: true,
+            bottom: true,
+            left: false,
+        },
+        true,
+        true,
+        false,
+        Some(80),
+    );
+    end_algorithm_table_row(w);
+
+    let mut io_lines: Vec<(String, String)> = io.to_vec();
+    let has_input = io_lines
+        .iter()
+        .any(|(k, _)| normalize_io_label(k) == "Input");
+    let has_output = io_lines
+        .iter()
+        .any(|(k, _)| normalize_io_label(k) == "Output");
     if !has_input {
-        write_algorithm_row(w, "", "Input:", "", false);
+        io_lines.insert(0, ("Input".to_string(), String::new()));
     }
     if !has_output {
-        write_algorithm_row(w, "", "Output:", "", false);
+        io_lines.push(("Output".to_string(), String::new()));
     }
+    for (kind, content) in &io_lines {
+        let label = normalize_io_label(kind);
+        let mut runs = algorithm_inline_runs(&format!("{label}: "), true);
+        runs.extend(algorithm_inline_runs(content, false));
+        begin_algorithm_table_row(w);
+        write_algorithm_cell(
+            w,
+            vec![],
+            line_width,
+            1,
+            Some("right"),
+            AlgoCellBorders::default(),
+            true,
+            true,
+            false,
+            None,
+        );
+        write_algorithm_cell(
+            w,
+            runs,
+            widths[1..].iter().sum(),
+            (total_cols - 1) as u32,
+            None,
+            AlgoCellBorders::default(),
+            true,
+            true,
+            false,
+            None,
+        );
+        end_algorithm_table_row(w);
+    }
+
+    let mut line_no = 0u32;
     for (idx, line) in lines.iter().enumerate() {
-        let line_no = (idx + 1).to_string();
-        let code = algorithm_code_text(line);
-        let comment = if line.comment.trim().is_empty() {
-            String::new()
+        line_no += 1;
+        let keep_next = idx + 1 < lines.len();
+        let indent = u32::from(line.indent);
+        let guides: std::collections::HashSet<u8> = line.guides.iter().copied().collect();
+        let end_guides: std::collections::HashSet<u8> = line.end_guides.iter().copied().collect();
+
+        begin_algorithm_table_row(w);
+        write_algorithm_cell(
+            w,
+            algorithm_inline_runs(&line_no.to_string(), false),
+            line_width,
+            1,
+            Some("right"),
+            AlgoCellBorders::default(),
+            keep_next,
+            true,
+            true,
+            None,
+        );
+        for level in 0..max_depth {
+            write_algorithm_cell(
+                w,
+                vec![],
+                guide_width,
+                1,
+                None,
+                AlgoCellBorders {
+                    top: false,
+                    bottom: end_guides.contains(&(level as u8)),
+                    left: guides.contains(&(level as u8)),
+                },
+                keep_next,
+                true,
+                false,
+                None,
+            );
+        }
+        let span = max_depth - indent + 1;
+        let code_span_width: u32 = widths[1 + indent as usize..1 + indent as usize + span as usize]
+            .iter()
+            .sum();
+        write_algorithm_cell(
+            w,
+            algorithm_code_runs(&format_algline_display_code(line)),
+            code_span_width,
+            span,
+            None,
+            AlgoCellBorders::default(),
+            keep_next,
+            true,
+            false,
+            None,
+        );
+        let comment = if line.comment.is_empty() {
+            vec![]
         } else {
-            format!("// {}", line.comment.trim())
+            algorithm_inline_runs(&format!("// {}", line.comment), false)
         };
-        write_algorithm_row(w, &line_no, &code, &comment, false);
+        write_algorithm_cell(
+            w,
+            comment,
+            comment_width,
+            1,
+            Some("right"),
+            AlgoCellBorders::default(),
+            keep_next,
+            true,
+            false,
+            None,
+        );
+        end_algorithm_table_row(w);
     }
 
     w.write_event(Event::End(BytesEnd::new("w:tbl"))).unwrap();
 }
 
-fn write_algorithm_caption_row(w: &mut Writer<Vec<u8>>, caption: &str) {
-    w.write_event(Event::Start(BytesStart::new("w:tr")))
-        .unwrap();
+#[derive(Default)]
+struct AlgoCellBorders {
+    top: bool,
+    bottom: bool,
+    left: bool,
+}
+
+fn build_algorithm_caption(number: Option<&str>, caption: Option<&str>) -> String {
+    match (number, caption) {
+        (Some(n), Some(c)) if !c.is_empty() => {
+            if let Some(no) = n.strip_prefix("Algorithm ") {
+                format!("算法 {no}  {c}")
+            } else {
+                format!("{n}  {c}")
+            }
+        }
+        (Some(n), _) => n.to_string(),
+        (_, Some(c)) => c.to_string(),
+        _ => String::new(),
+    }
+}
+
+fn begin_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
+    w.write_event(Event::Start(BytesStart::new("w:tr"))).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:trPr")))
         .unwrap();
     w.write_event(Event::Empty(BytesStart::new("w:cantSplit")))
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:trPr"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tc")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tcPr")))
-        .unwrap();
-    let mut grid_span = BytesStart::new("w:gridSpan");
-    grid_span.push_attribute(("w:val", "3"));
-    w.write_event(Event::Empty(grid_span)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
-    let para = Paragraph {
-        style_id: Some(STYLE_CODE.to_string()),
-        runs: vec![Run {
-            text: caption.to_string(),
-            style_id: None,
-            style: TextStyle::Code,
-            bold: true,
-            italic: false,
-            font_ascii: None,
-            font_east: None,
-        }],
-        jc: Some("center".to_string()),
-        keep_next: false,
-        keep_lines: true,
-    };
-    write_paragraph(w, &para);
-    w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
+}
+
+fn end_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
     w.write_event(Event::End(BytesEnd::new("w:tr"))).unwrap();
+}
+
+fn write_algorithm_cell(
+    w: &mut Writer<Vec<u8>>,
+    runs: Vec<Run>,
+    width: u32,
+    grid_span: u32,
+    align: Option<&str>,
+    borders: AlgoCellBorders,
+    keep_next: bool,
+    keep_lines: bool,
+    no_wrap: bool,
+    left_margin: Option<u32>,
+) {
+    w.write_event(Event::Start(BytesStart::new("w:tc"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tcPr"))).unwrap();
+    let w_str = width.to_string();
+    let mut tc_w = BytesStart::new("w:tcW");
+    tc_w.push_attribute(("w:w", w_str.as_str()));
+    tc_w.push_attribute(("w:type", "dxa"));
+    w.write_event(Event::Empty(tc_w)).unwrap();
+    if grid_span > 1 {
+        let mut gs = BytesStart::new("w:gridSpan");
+        gs.push_attribute(("w:val", grid_span.to_string().as_str()));
+        w.write_event(Event::Empty(gs)).unwrap();
+    }
+    if no_wrap {
+        w.write_event(Event::Empty(BytesStart::new("w:noWrap"))).unwrap();
+    }
+    if borders.top || borders.bottom || borders.left {
+        w.write_event(Event::Start(BytesStart::new("w:tcBorders")))
+            .unwrap();
+        if borders.top {
+            let mut b = BytesStart::new("w:top");
+            b.push_attribute(("w:val", "single"));
+            b.push_attribute(("w:sz", "8"));
+            b.push_attribute(("w:space", "0"));
+            b.push_attribute(("w:color", "000000"));
+            w.write_event(Event::Empty(b)).unwrap();
+        }
+        if borders.bottom {
+            let mut b = BytesStart::new("w:bottom");
+            b.push_attribute(("w:val", "single"));
+            b.push_attribute(("w:sz", "8"));
+            b.push_attribute(("w:space", "0"));
+            b.push_attribute(("w:color", "000000"));
+            w.write_event(Event::Empty(b)).unwrap();
+        }
+        if borders.left {
+            let mut b = BytesStart::new("w:left");
+            b.push_attribute(("w:val", "single"));
+            b.push_attribute(("w:sz", "4"));
+            b.push_attribute(("w:space", "0"));
+            b.push_attribute(("w:color", "000000"));
+            w.write_event(Event::Empty(b)).unwrap();
+        }
+        w.write_event(Event::End(BytesEnd::new("w:tcBorders"))).unwrap();
+    }
+    if let Some(m) = left_margin {
+        w.write_event(Event::Start(BytesStart::new("w:tcMar")))
+            .unwrap();
+        let m_str = m.to_string();
+        let mut left = BytesStart::new("w:left");
+        left.push_attribute(("w:w", m_str.as_str()));
+        left.push_attribute(("w:type", "dxa"));
+        w.write_event(Event::Empty(left)).unwrap();
+        w.write_event(Event::End(BytesEnd::new("w:tcMar"))).unwrap();
+    }
+    w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
+
+    let p = Paragraph {
+        style_id: None,
+        runs: if runs.is_empty() {
+            vec![Run::plain(String::new())]
+        } else {
+            runs
+        },
+        jc: align.map(str::to_string),
+        keep_next,
+        keep_lines,
+    };
+    write_paragraph_with_opts(w, &p, true, 18);
+    w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
+}
+
+fn algorithm_title_runs(caption: &str) -> Vec<Run> {
+    if let Some(caps) = regex_simple_algorithm_title(caption) {
+        return vec![
+            algo_run(&caps.0, true),
+            algo_run(&caps.1, false),
+        ];
+    }
+    vec![algo_run(caption, false)]
+}
+
+fn regex_simple_algorithm_title(caption: &str) -> Option<(String, String)> {
+    let caption = caption.trim();
+    if let Some(rest) = caption.strip_prefix("算法") {
+        let rest = rest.trim_start();
+        if let Some((num, body)) = rest.split_once(|c: char| c.is_whitespace()) {
+            let body = body.trim();
+            if !num.chars().all(|c| c.is_ascii_digit()) {
+                return None;
+            }
+            return Some((format!("Algorithm {num}: "), body.to_string()));
+        }
+    }
+    None
+}
+
+fn algo_run(text: &str, bold: bool) -> Run {
+    Run {
+        text: text.to_string(),
+        style_id: None,
+        style: if bold {
+            TextStyle::Bold
+        } else {
+            TextStyle::Plain
+        },
+        bold,
+        italic: false,
+        font_ascii: Some("Times New Roman".to_string()),
+        font_east: Some("宋体".to_string()),
+    }
+}
+
+fn algorithm_inline_runs(text: &str, bold: bool) -> Vec<Run> {
+    if text.is_empty() {
+        return vec![];
+    }
+    vec![algo_run(text, bold)]
+}
+
+fn algorithm_code_runs(text: &str) -> Vec<Run> {
+    let lower = text.to_ascii_lowercase();
+    if lower.starts_with("foreach ") && lower.ends_with(" do") {
+        let body = &text[8..text.len().saturating_sub(3)];
+        return vec![
+            algo_run("foreach", true),
+            algo_run(&format!(" {body} "), false),
+            algo_run("do", true),
+        ];
+    }
+    if lower.starts_with("if ") && lower.ends_with(" then") {
+        let body = &text[3..text.len().saturating_sub(5)];
+        return vec![
+            algo_run("if", true),
+            algo_run(&format!(" {body} "), false),
+            algo_run("then", true),
+        ];
+    }
+    if lower.starts_with("return") {
+        return vec![
+            algo_run("return", true),
+            algo_run(&text[6..], false),
+        ];
+    }
+    algorithm_inline_runs(text, false)
+}
+
+fn format_algline_display_code(line: &AlgLine) -> String {
+    if let Some(kw) = line.keyword.as_deref() {
+        match kw {
+            "ForEach" => {
+                let cond = line
+                    .code
+                    .strip_prefix("ForEach (")
+                    .or_else(|| line.code.strip_prefix("foreach ("))
+                    .and_then(|s| s.strip_suffix(')'))
+                    .unwrap_or(line.code.as_str());
+                format!("foreach {cond} do")
+            }
+            "If" => {
+                let cond = line
+                    .code
+                    .strip_prefix("If (")
+                    .or_else(|| line.code.strip_prefix("if ("))
+                    .and_then(|s| s.strip_suffix(')'))
+                    .unwrap_or(line.code.as_str());
+                format!("if {cond} then")
+            }
+            "Return" => {
+                if line.code.starts_with("return") {
+                    line.code.clone()
+                } else {
+                    format!("return {}", line.code.trim())
+                }
+            }
+            "End" => "end".to_string(),
+            _ => line.code.clone(),
+        }
+    } else {
+        line.code.clone()
+    }
 }
 
 fn normalize_io_label(kind: &str) -> &'static str {
@@ -1022,104 +1574,6 @@ fn normalize_io_label(kind: &str) -> &'static str {
     } else {
         "Input"
     }
-}
-
-fn algorithm_code_text(line: &AlgLine) -> String {
-    let guide_slots = line
-        .guides
-        .iter()
-        .chain(line.end_guides.iter())
-        .copied()
-        .max()
-        .map(|level| level.saturating_add(1))
-        .unwrap_or(line.indent);
-    let mut out = String::new();
-    for level in 0..guide_slots {
-        if line.guides.contains(&level) || line.end_guides.contains(&level) {
-            out.push_str("| ");
-        } else {
-            out.push_str("  ");
-        }
-    }
-    if guide_slots < line.indent {
-        out.push_str(&"  ".repeat((line.indent - guide_slots) as usize));
-    }
-    out.push_str(line.code.trim());
-    out
-}
-
-fn write_algorithm_row(
-    w: &mut Writer<Vec<u8>>,
-    line_no: &str,
-    code: &str,
-    comment: &str,
-    is_header: bool,
-) {
-    w.write_event(Event::Start(BytesStart::new("w:tr")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:trPr")))
-        .unwrap();
-    w.write_event(Event::Empty(BytesStart::new("w:cantSplit")))
-        .unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:trPr"))).unwrap();
-    write_algorithm_cell(w, line_no, "650", Some("center"), is_header);
-    write_algorithm_cell(w, code, "6350", None, is_header);
-    write_algorithm_cell(w, comment, "2000", None, is_header);
-    w.write_event(Event::End(BytesEnd::new("w:tr"))).unwrap();
-}
-
-fn write_algorithm_cell(
-    w: &mut Writer<Vec<u8>>,
-    text: &str,
-    width: &str,
-    jc: Option<&str>,
-    bold: bool,
-) {
-    w.write_event(Event::Start(BytesStart::new("w:tc")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tcPr")))
-        .unwrap();
-    let mut tc_w = BytesStart::new("w:tcW");
-    tc_w.push_attribute(("w:w", width));
-    tc_w.push_attribute(("w:type", "dxa"));
-    w.write_event(Event::Empty(tc_w)).unwrap();
-    let mut valign = BytesStart::new("w:vAlign");
-    valign.push_attribute(("w:val", "top"));
-    w.write_event(Event::Empty(valign)).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tcBorders")))
-        .unwrap();
-    for side in ["left", "bottom"] {
-        let name = format!("w:{side}");
-        let mut border = BytesStart::new(name.as_str());
-        border.push_attribute(("w:val", "single"));
-        border.push_attribute(("w:sz", "4"));
-        border.push_attribute(("w:space", "0"));
-        border.push_attribute(("w:color", "000000"));
-        w.write_event(Event::Empty(border)).unwrap();
-    }
-    w.write_event(Event::End(BytesEnd::new("w:tcBorders")))
-        .unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
-
-    let para = Paragraph {
-        // v13 P7: algorithm cell 不再用 STYLE_CODE + Courier New,
-        // 改为空样式 + sz=18 + Times New Roman/宋体（与 sh 一致）
-        style_id: None,
-        runs: vec![Run {
-            text: text.to_string(),
-            style_id: None,
-            style: TextStyle::Plain,
-            bold,
-            italic: false,
-            font_ascii: Some("Times New Roman".to_string()),
-            font_east: Some("宋体".to_string()),
-        }],
-        jc: jc.map(str::to_string),
-        keep_next: false,
-        keep_lines: true,
-    };
-    write_paragraph_with_opts(w, &para, true, 18);
-    w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
 }
 
 fn write_table(
@@ -1154,14 +1608,16 @@ fn write_table(
 
     w.write_event(Event::Start(BytesStart::new("w:tblPr")))
         .unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tblW")))
-        .unwrap();
     let total_w: i64 = 9000i64; // 6.25 inches — 适合 A4 双栏
-    let mut w_attr = BytesStart::new("w:w");
-    w_attr.push_attribute(("w:w", total_w.to_string().as_str()));
-    w_attr.push_attribute(("w:type", "dxa"));
-    w.write_event(Event::Empty(w_attr)).unwrap();
-    w.write_event(Event::End(BytesEnd::new("w:tblW"))).unwrap();
+    // v13.2.4 R5: 正确写入 tblW（属性在 w:tblW 元素上）
+    let mut tbl_w = BytesStart::new("w:tblW");
+    tbl_w.push_attribute(("w:w", total_w.to_string().as_str()));
+    tbl_w.push_attribute(("w:type", "dxa"));
+    w.write_event(Event::Empty(tbl_w)).unwrap();
+    // v13.2.4 R5: 表格居中
+    let mut jc = BytesStart::new("w:jc");
+    jc.push_attribute(("w:val", "center"));
+    w.write_event(Event::Empty(jc)).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:tblBorders")))
         .unwrap();
     for side in ["top", "bottom", "insideH", "insideV"] {
@@ -1212,6 +1668,11 @@ fn write_table(
             // Cell properties
             w.write_event(Event::Start(BytesStart::new("w:tcPr")))
                 .unwrap();
+            // v13.2.4 R5: cell 宽度
+            let mut tc_w = BytesStart::new("w:tcW");
+            tc_w.push_attribute(("w:w", col_w_str.as_str()));
+            tc_w.push_attribute(("w:type", "dxa"));
+            w.write_event(Event::Empty(tc_w)).unwrap();
             // gridSpan for colspan
             if cell.colspan > 1 {
                 let mut gs = BytesStart::new("w:gridSpan");
@@ -1270,6 +1731,70 @@ fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
     write_paragraph_with_opts(w, p, false, 0)
 }
 
+/// v13.2.7: 正文段落 run 归一化——合并 plain run 并清理 CJK 内部空格（对齐 sh latex_to_text）。
+fn normalize_body_runs(runs: Vec<Run>) -> Vec<Run> {
+    let has_script = runs
+        .iter()
+        .any(|r| matches!(r.style, TextStyle::Superscript | TextStyle::Subscript));
+    if has_script {
+        let runs = merge_adjacent_runs(runs);
+        return runs
+            .into_iter()
+            .map(|mut r| {
+                r.text = collapse_cjk_internal_spaces(&r.text);
+                r
+            })
+            .collect();
+    }
+    let flat: String = runs.iter().map(|r| r.text.as_str()).collect();
+    let flat = collapse_cjk_internal_spaces(flat.trim());
+    if flat.is_empty() {
+        return vec![];
+    }
+    vec![Run::plain(flat)]
+}
+
+fn is_body_style_for_cjk(style_id: &Option<String>) -> bool {
+    style_id.as_deref().is_some_and(|s| {
+        matches!(s, "JOSBody" | "JOSReference")
+    })
+}
+
+/// v13.2.1 R1: JOSBody 等正文段落内联 Bold/Italic/Code 降级为 Plain（对齐 sh oracle）。
+fn downgrade_body_inline_styles(p: Paragraph) -> Paragraph {
+    let is_body = p.style_id.as_deref().is_some_and(|s| {
+        matches!(
+            s,
+            "JOSBody"
+                | "JOSAbstractEn"
+                | "JOSAbstractZh"
+                | "JOSKeywords"
+                | "JOSReference"
+        )
+    });
+    if !is_body {
+        return p;
+    }
+    Paragraph {
+        runs: p
+            .runs
+            .into_iter()
+            .map(|mut r| {
+                if matches!(
+                    r.style,
+                    TextStyle::Bold | TextStyle::Italic | TextStyle::BoldItalic | TextStyle::Code
+                ) {
+                    r.style = TextStyle::Plain;
+                    r.bold = false;
+                    r.italic = false;
+                }
+                r
+            })
+            .collect(),
+        ..p
+    }
+}
+
 /// v13 P1/P7: 增加 force_table_cell_font + cell_font_half_points 参数。
 /// table cell 内部用 force_table_cell_font=true 让 write_run 自动获得字体；
 /// cell_font_half_points > 0 时替代默认 15 (e.g. algorithm cell 用 18)。
@@ -1279,8 +1804,18 @@ fn write_paragraph_with_opts(
     force_table_cell_font: bool,
     cell_font_half_points: u16,
 ) {
-    // v12 run 规范化：在写出前对段落内 runs 做相邻同格式合并。
-    let runs = merge_adjacent_runs(p.runs.clone());
+    let p = if force_table_cell_font {
+        p.clone()
+    } else {
+        downgrade_body_inline_styles(p.clone())
+    };
+    let runs = if force_table_cell_font {
+        merge_adjacent_runs(p.runs.clone())
+    } else if is_body_style_for_cjk(&p.style_id) {
+        normalize_body_runs(p.runs.clone())
+    } else {
+        merge_adjacent_runs(p.runs.clone())
+    };
     let p = Paragraph {
         style_id: p.style_id.clone(),
         jc: p.jc.clone(),
@@ -1430,16 +1965,6 @@ fn write_run(
     w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
 }
 
-fn split_first_http_url(text: &str) -> (&str, Option<&str>) {
-    let Some(start) = text.find("http://").or_else(|| text.find("https://")) else {
-        return (text, None);
-    };
-    let rest = &text[start..];
-    let end = rest
-        .find(|c: char| c.is_whitespace() || matches!(c, ')' | '）' | ',' | '，' | ';' | '；'))
-        .unwrap_or(rest.len());
-    (text[..start].trim_end(), Some(&rest[..end]))
-}
 
 fn collapse_cjk_internal_spaces(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
@@ -1521,6 +2046,143 @@ fn is_cjk_char(ch: char) -> bool {
 /// 10. 英文单位 (JOSBodyNoIndent)
 /// 11. 英文摘要 (JOSAbstractEn) — 标签 "Abstract:" + 正文
 /// 12. 英文关键词 (JOSKeywords) — 标签 "Key words:" + 列表
+fn write_spacer(w: &mut Writer<Vec<u8>>, height_twips: u32) {
+    w.write_event(Event::Start(BytesStart::new("w:p")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:pPr")))
+        .unwrap();
+    let mut spacing = BytesStart::new("w:spacing");
+    let line = height_twips.to_string();
+    spacing.push_attribute(("w:line", line.as_str()));
+    spacing.push_attribute(("w:lineRule", "exact"));
+    w.write_event(Event::Empty(spacing)).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:pPr"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
+}
+
+fn token_width_units(token: &str) -> f64 {
+    let mut total = 0.0;
+    for ch in token.chars() {
+        if ch.is_whitespace() {
+            total += 0.35;
+        } else if ('\u{4E00}'..='\u{9FFF}').contains(&ch) {
+            total += 1.0;
+        } else if ch.is_uppercase() {
+            total += 0.62;
+        } else if ch.is_lowercase() || ch.is_ascii_digit() {
+            total += 0.52;
+        } else if matches!(ch, '-' | '/' | '.') {
+            total += 0.28;
+        } else {
+            total += 0.35;
+        }
+    }
+    total
+}
+
+fn wrap_text_units(text: &str, max_units: f64) -> Vec<String> {
+    let tokens = tokenize_citation_text(text);
+    let mut lines: Vec<String> = Vec::new();
+    let mut current = String::new();
+    let mut width = 0.0;
+    for token in tokens {
+        let mut token = token;
+        let mut token_width = token_width_units(&token);
+        if !current.is_empty() && width + token_width > max_units {
+            lines.push(current.trim().to_string());
+            current.clear();
+            width = 0.0;
+            token = token.trim_start().to_string();
+            token_width = token_width_units(&token);
+        }
+        if !token.is_empty() || !current.is_empty() {
+            current.push_str(&token);
+            width += token_width;
+        }
+    }
+    if !current.is_empty() {
+        lines.push(current.trim().to_string());
+    }
+    lines.into_iter().filter(|l| !l.is_empty()).collect()
+}
+
+fn tokenize_citation_text(text: &str) -> Vec<String> {
+    let mut tokens = Vec::new();
+    let mut i = 0;
+    while i < text.len() {
+        if text[i..].starts_with("http://") || text[i..].starts_with("https://") {
+            let start = i;
+            while i < text.len() {
+                let ch = text[i..].chars().next().unwrap();
+                if ch.is_whitespace() {
+                    break;
+                }
+                i += ch.len_utf8();
+            }
+            tokens.push(text[start..i].to_string());
+            continue;
+        }
+        let ch = text[i..].chars().next().unwrap();
+        let start = i;
+        i += ch.len_utf8();
+        if ch.is_whitespace() {
+            tokens.push(" ".to_string());
+            continue;
+        }
+        if ch.is_ascii_alphanumeric() {
+            while i < text.len() {
+                let c = text[i..].chars().next().unwrap();
+                if c.is_ascii_alphanumeric() || matches!(c, '-' | '/') {
+                    i += c.len_utf8();
+                } else {
+                    break;
+                }
+            }
+            tokens.push(text[start..i].to_string());
+            continue;
+        }
+        if ('\u{4E00}'..='\u{9FFF}').contains(&ch) {
+            tokens.push(ch.to_string());
+            continue;
+        }
+        tokens.push(ch.to_string());
+    }
+    tokens
+}
+
+fn split_citation_text(text: &str, max_units: f64) -> Vec<String> {
+    let text = text.trim();
+    if text.is_empty() {
+        return vec![];
+    }
+    wrap_text_units(text, max_units)
+}
+
+fn normalize_institute_line(text: &str) -> String {
+    let mut s = collapse_cjk_internal_spaces(text);
+    // "通讯作者:石洪雷" → "通讯作者: 石洪雷"
+    if let Some(idx) = s.find(':') {
+        let after = &s[idx + 1..];
+        if after.starts_with(' ') {
+            return s;
+        }
+        if !after.is_empty() {
+            s.insert(idx + 1, ' ');
+        }
+    }
+    s
+}
+
+fn spaced_keywords(keywords: &[String]) -> String {
+    keywords
+        .join("; ")
+        .split(';')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("; ")
+}
+
 fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData) {
     use doc_semantic_ast::MetaData;
 
@@ -1530,26 +2192,20 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
             style_id: Some(STYLE_TITLE_ZH.to_string()),
             // v13 P2: 不再在 run 上加 bold:true,JOSTitleZh 样式内部已含 bold
             runs: vec![Run::plain(title.clone())],
-            jc: Some("center".into()),
+            jc: Some("left".to_string()),
             keep_next: false,
             keep_lines: true,
         };
         write_paragraph(w, &p);
     }
 
-    // ── 中文作者 ──
+    // ── 中文作者（整段单 run，对齐 sh populate）──
     if !meta.authors.is_empty() {
-        let mut runs: Vec<Run> = Vec::new();
-        for (i, a) in meta.authors.iter().enumerate() {
-            if i > 0 {
-                runs.push(Run::plain(", ".to_string()));
-            }
-            runs.push(Run::plain(a.clone()));
-        }
+        let authors = meta.authors.join("");
         let p = Paragraph {
             style_id: Some(STYLE_AUTHOR_ZH.to_string()),
-            runs,
-            jc: Some("center".into()),
+            runs: vec![Run::plain(authors)],
+            jc: Some("left".to_string()),
             keep_next: false,
             keep_lines: false,
         };
@@ -1560,25 +2216,24 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     for line in &meta.institute_lines {
         let p = Paragraph {
             style_id: Some(STYLE_INSTITUTE_ZH.to_string()),
-            runs: vec![Run::plain(collapse_cjk_internal_spaces(line))],
-            jc: Some("center".into()),
+            runs: vec![Run::plain(normalize_institute_line(line))],
+            jc: Some("left".to_string()),
             keep_next: false,
             keep_lines: false,
         };
         write_paragraph(w, &p);
     }
 
-    // ── 中文摘要（标签 + 正文，同段）──
+    if !meta.institute_lines.is_empty() {
+        write_spacer(w, 300);
+    }
+
+    // ── 中文摘要（标签 + 正文，单 run）──
     if let Some(abstract_zh) = &meta.abstract_text {
         if !abstract_zh.is_empty() {
-            // v13 P2: label "摘   要: " 不再 bold:true,
-            // JOSAbstractZh 样式内部不要求 inline bold
             let p = Paragraph {
                 style_id: Some(STYLE_ABSTRACT_ZH.to_string()),
-                runs: vec![
-                    Run::plain("摘   要: ".to_string()),
-                    Run::plain(abstract_zh.clone()),
-                ],
+                runs: vec![Run::plain(format!("摘   要: {abstract_zh}"))],
                 jc: None,
                 keep_next: false,
                 keep_lines: false,
@@ -1587,16 +2242,12 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         }
     }
 
-    // ── 中文关键词（标签 + 列表）──
+    // ── 中文关键词（标签 + 列表，单 run）──
     if !meta.keywords.is_empty() {
-        let joined = meta.keywords.join("; ");
+        let joined = spaced_keywords(&meta.keywords);
         let p = Paragraph {
             style_id: Some(STYLE_KEYWORDS.to_string()),
-            // v13 P2: label "关键词: " 不再 bold:true
-            runs: vec![
-                Run::plain("关键词: ".to_string()),
-                Run::plain(joined),
-            ],
+            runs: vec![Run::plain(format!("关键词: {joined}"))],
             jc: None,
             keep_next: false,
             keep_lines: false,
@@ -1608,11 +2259,7 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
     if let Some(cat) = &meta.category {
         let p = Paragraph {
             style_id: Some(STYLE_BODY_NO_INDENT.to_string()),
-            // v13 P2: label 不再 bold:true
-            runs: vec![
-                Run::plain("中图法分类号: ".to_string()),
-                Run::plain(cat.clone()),
-            ],
+            runs: vec![Run::plain(format!("中图法分类号: {cat}"))],
             jc: None,
             keep_next: false,
             keep_lines: false,
@@ -1620,64 +2267,35 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         write_paragraph(w, &p);
     }
 
-    // ── 中文引用格式 ──
+    write_spacer(w, 300);
+
+    // ── 引用格式（按宽度换行，无额外标签）──
     if let Some(cz) = &meta.citation_zh {
-        if !cz.is_empty() {
-            let (citation, url) = split_first_http_url(cz);
+        for line in split_citation_text(cz, 52.0) {
             let p = Paragraph {
                 style_id: Some(STYLE_CITATION.to_string()),
-                // v13 P2: label 不再 bold:true
-                runs: vec![
-                    Run::plain("中文引用格式: ".to_string()),
-                    Run::plain(citation.to_string()),
-                ],
+                runs: vec![Run::plain(collapse_cjk_internal_spaces(&line))],
                 jc: None,
                 keep_next: false,
                 keep_lines: false,
             };
             write_paragraph(w, &p);
-            if let Some(url) = url {
-                let p = Paragraph {
-                    style_id: Some(STYLE_CITATION.to_string()),
-                    runs: vec![Run::plain(url.to_string())],
-                    jc: None,
-                    keep_next: false,
-                    keep_lines: false,
-                };
-                write_paragraph(w, &p);
-            }
         }
     }
-
-    // ── 英文引用格式 ──
     if let Some(ce) = &meta.citation_en {
-        if !ce.is_empty() {
-            let (citation, url) = split_first_http_url(ce);
+        for line in split_citation_text(ce, 52.0) {
             let p = Paragraph {
                 style_id: Some(STYLE_CITATION.to_string()),
-                // v13 P2: label 不再 bold:true
-                runs: vec![
-                    Run::plain("英文引用格式: ".to_string()),
-                    Run::plain(citation.to_string()),
-                ],
+                runs: vec![Run::plain(collapse_cjk_internal_spaces(&line))],
                 jc: None,
                 keep_next: false,
                 keep_lines: false,
             };
             write_paragraph(w, &p);
-            if let Some(url) = url {
-                let p = Paragraph {
-                    style_id: Some(STYLE_CITATION.to_string()),
-                    runs: vec![Run::plain(url.to_string())],
-                    jc: None,
-                    keep_next: false,
-                    keep_lines: false,
-                };
-                write_paragraph(w, &p);
-            }
         }
     }
 
+    write_spacer(w, 220);
     // ── 英文标题 ──
     if let Some(title_en) = &meta.title_en {
         let p = Paragraph {
@@ -1691,18 +2309,12 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         write_paragraph(w, &p);
     }
 
-    // ── 英文作者 ──
+    // ── 英文作者（整段单 run）──
     if !meta.authors_en.is_empty() {
-        let mut runs: Vec<Run> = Vec::new();
-        for (i, a) in meta.authors_en.iter().enumerate() {
-            if i > 0 {
-                runs.push(Run::plain(", ".to_string()));
-            }
-            runs.push(Run::plain(a.clone()));
-        }
+        let authors = meta.authors_en.join("");
         let p = Paragraph {
             style_id: Some(STYLE_CITATION.to_string()),
-            runs,
+            runs: vec![Run::plain(authors)],
             jc: None,
             keep_next: false,
             keep_lines: false,
@@ -1729,16 +2341,14 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         }
     }
 
-    // ── 英文摘要（标签 + 正文，同段）──
+    write_spacer(w, 340);
+
+    // ── 英文摘要（标签 + 正文，单 run）──
     if let Some(abstract_en) = &meta.abstract_en {
         if !abstract_en.is_empty() {
-            // v13 P2: label "Abstract:" 不再 bold:true
             let p = Paragraph {
                 style_id: Some(STYLE_ABSTRACT_EN.to_string()),
-                runs: vec![
-                    Run::plain("Abstract:   ".to_string()),
-                    Run::plain(abstract_en.clone()),
-                ],
+                runs: vec![Run::plain(format!("Abstract:   {abstract_en}"))],
                 jc: None,
                 keep_next: false,
                 keep_lines: false,
@@ -1747,16 +2357,12 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
         }
     }
 
-    // ── 英文关键词 ──
+    // ── 英文关键词（单 run）──
     if !meta.keywords_en.is_empty() {
-        let joined = meta.keywords_en.join("; ");
+        let joined = spaced_keywords(&meta.keywords_en);
         let p = Paragraph {
             style_id: Some(STYLE_KEYWORDS.to_string()),
-            // v13 P2: label "Key words: " 不再 bold:true
-            runs: vec![
-                Run::plain("Key words: ".to_string()),
-                Run::plain(joined),
-            ],
+            runs: vec![Run::plain(format!("Key words: {joined}"))],
             jc: None,
             keep_next: false,
             keep_lines: false,
@@ -1766,6 +2372,35 @@ fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData
 
     // 兜底：避免编译器认为 MetaData 未使用
     let _ = MetaData::default();
+}
+
+/// v13.2.5 R6: 输出作者简介（文档末尾）。
+fn write_author_bio(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData) {
+    if meta.author_bio.is_empty() {
+        return;
+    }
+    write_paragraph(
+        w,
+        &Paragraph {
+            style_id: Some(STYLE_REFERENCE_HEADING.to_string()),
+            runs: vec![Run::plain("作者简介".to_string())],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        },
+    );
+    for bio in &meta.author_bio {
+        write_paragraph(
+            w,
+            &Paragraph {
+                style_id: Some(STYLE_REFERENCE.to_string()),
+                runs: vec![Run::plain(bio.clone())],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            },
+        );
+    }
 }
 
 #[cfg(test)]
@@ -1847,7 +2482,26 @@ mod tests {
     }
 
     #[test]
-    fn algorithm_serializes_as_three_column_table() {
+    fn block_equation_uses_jos_code_plain_text() {
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Equation {
+                latex: r"\mathrm{Score}(u,t)=\alpha\,\mathrm{Freq}(u,t)+\beta\,\mathrm{Err}(u,t)+\gamma\,\mathrm{Delay}(u,t)+\delta\,\mathrm{Trend}(u,t)".to_string(),
+                is_block: true,
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        assert!(xml.contains(r#"<w:pStyle w:val="JOSCode"/>"#));
+        assert!(xml.contains("Score(u,t)"));
+        assert!(xml.contains("gamma"));
+        assert!(!xml.contains("m:oMath"), "block equation should not use OMML");
+    }
+
+    #[test]
+    fn algorithm_serializes_as_table() {
         let doc = Document {
             metadata: Default::default(),
             blocks: vec![Block::Algorithm {
@@ -1864,7 +2518,7 @@ mod tests {
                         indent: 1,
                         guides: vec![0],
                         end_guides: vec![],
-                        code: "collect p".to_string(),
+                        code: "ForEach (p)".to_string(),
                         comment: "hot path".to_string(),
                         keyword: Some("ForEach".to_string()),
                     },
@@ -1879,15 +2533,100 @@ mod tests {
         let xml = serialize_document(&doc, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
 
-        assert!(xml.contains("<w:tbl>"));
-        assert!(xml.contains(r#"<w:gridCol w:w="650"/>"#));
-        assert!(xml.contains(r#"<w:gridCol w:w="6350"/>"#));
-        assert!(xml.contains(r#"<w:gridCol w:w="2000"/>"#));
-        assert!(xml.contains("Algorithm 1: Attention list"));
-        assert!(xml.contains("Input: logs"));
-        assert!(xml.contains(">1<"));
-        assert!(xml.contains(">2<"));
-        assert!(xml.contains("| collect p"));
-        assert!(xml.contains("// hot path"));
+        assert!(xml.contains("w:tbl"), "algorithm should use table");
+        assert!(xml.contains("Algorithm 1:"));
+        assert!(xml.contains("Attention list"));
+        assert!(xml.contains("Input:"));
+        assert!(xml.contains("logs"));
+        assert!(xml.contains("init H"));
+        assert!(xml.contains("foreach"));
+        assert!(!xml.contains(" | "), "algorithm lines should not merge with | ");
+    }
+
+    #[test]
+    fn normalize_body_runs_collapses_cjk_spaces() {
+        let runs = normalize_body_runs(vec![
+            Run::plain("中心 ".to_string()),
+            Run::plain("之前".to_string()),
+        ]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].text, "中心之前");
+    }
+
+    #[test]
+    fn downgrade_body_inline_styles_drops_bold() {
+        let p = downgrade_body_inline_styles(Paragraph {
+            style_id: Some(STYLE_BODY.to_string()),
+            runs: vec![Run::bold("bold text")],
+            ..Default::default()
+        });
+        assert_eq!(p.runs[0].style, TextStyle::Plain);
+        assert!(!p.runs[0].bold);
+    }
+
+    #[test]
+    fn downgrade_body_inline_styles_keeps_sup() {
+        let p = downgrade_body_inline_styles(Paragraph {
+            style_id: Some(STYLE_BODY.to_string()),
+            runs: vec![Run {
+                text: "x".to_string(),
+                style: TextStyle::Superscript,
+                ..Default::default()
+            }],
+            ..Default::default()
+        });
+        assert_eq!(p.runs[0].style, TextStyle::Superscript);
+    }
+
+    #[test]
+    fn downgrade_body_inline_styles_keeps_heading() {
+        let p = downgrade_body_inline_styles(Paragraph {
+            style_id: Some(STYLE_HEADING1.to_string()),
+            runs: vec![Run::bold("heading")],
+            ..Default::default()
+        });
+        assert_eq!(p.runs[0].style, TextStyle::Bold);
+    }
+
+    #[test]
+    fn table_has_center_alignment_and_tcW() {
+        use doc_semantic_ast::{TableCell, TableRow};
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Table {
+                rows: vec![TableRow {
+                    cells: vec![
+                        TableCell {
+                            runs: vec![TextRun {
+                                text: "A".to_string(),
+                                style: TextStyle::Plain,
+                                span: Span::default(),
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            bg_color: None,
+                        },
+                        TableCell {
+                            runs: vec![TextRun {
+                                text: "B".to_string(),
+                                style: TextStyle::Plain,
+                                span: Span::default(),
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            bg_color: None,
+                        },
+                    ],
+                }],
+                caption: None,
+                number: None,
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        assert!(xml.contains(r#"<w:jc w:val="center"/>"#));
+        assert!(xml.contains("<w:tcW"));
     }
 }

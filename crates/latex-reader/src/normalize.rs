@@ -1121,24 +1121,26 @@ pub fn split_runs_with_sup_sub(
     NormalizedText { runs }
 }
 
-/// 把 base_style (Plain/Bold/Italic) 与 inner_style (上/下标) 合并。
-/// 优先级：Code > BoldItalic > Bold > Italic > MathInline > Superscript/Subscript > Plain。
-fn combine_styles(base: TextStyle, inner: TextStyle) -> TextStyle {
+/// 把 inner run 样式与外层 wrapper（\\textbf/\\textit 等）合并。
+/// 上/下标是位置属性，优先于粗/斜体 wrapper 保留。
+fn combine_styles(inner: TextStyle, wrapper: TextStyle) -> TextStyle {
     use TextStyle::*;
-    // 上/下标是位置属性，不被 base 覆盖；如果是 plain base，保持 plain + 位置
-    match (base, inner) {
-        (Code, _) => Code,
-        (Bold, Code) => Code,
-        (Italic, Code) => Code,
+    if matches!(inner, Superscript | Subscript) {
+        return inner;
+    }
+    if matches!(wrapper, Superscript | Subscript) {
+        return wrapper;
+    }
+    match (inner, wrapper) {
+        (Code, _) | (_, Code) => Code,
         (Bold, Italic) | (Italic, Bold) => BoldItalic,
-        (Bold, _) => Bold,
-        (Italic, _) => Italic,
+        (_, Bold) => Bold,
+        (_, Italic) => Italic,
+        (BoldItalic, _) | (_, BoldItalic) => BoldItalic,
         (MathInline, MathInline) => MathInline,
-        (MathInline, _) => inner, // inner 是 sup/sub
-        (Plain, x) => x,
-        (BoldItalic, _) => BoldItalic,
-        (Superscript, _) => inner, // inner 是 sup/sub
-        (Subscript, _) => inner,
+        (MathInline, _) | (_, MathInline) => MathInline,
+        (Plain, x) | (x, Plain) => x,
+        (inner, _) => inner,
     }
 }
 
@@ -1346,6 +1348,34 @@ mod tests {
         // 这是 V1 26 步算法的第 21 步通用兜底语义；调用方应在 replace_command_arg 前序步骤
         // 处理需要保留的命令。
         assert_eq!(plain, "foobar");
+    }
+
+    #[test]
+    fn latex_to_text_footnote_star_in_table_cell() {
+        let cite = HashMap::new();
+        let label = HashMap::new();
+        let n = latex_to_text("72 vs 4388 条$^*$", &cite, &label);
+        assert!(
+            n.runs
+                .iter()
+                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
+            "runs: {:?}",
+            n.runs
+                .iter()
+                .map(|r| (&r.text, r.style))
+                .collect::<Vec<_>>()
+        );
+        let n2 = latex_to_text(r"\textbf{72 vs 4388 条$^*$}", &cite, &label);
+        assert!(
+            n2.runs
+                .iter()
+                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
+            "textbf runs: {:?}",
+            n2.runs
+                .iter()
+                .map(|r| (&r.text, r.style))
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]

@@ -124,6 +124,11 @@ fn clean_bibitem_body(body: &str) -> String {
     for cmd in ["em", "it", "bf", "sl", "rm", "sf", "sc", "tt", "up"] {
         s = replace_named_group(&s, cmd);
     }
+    // v13.2.1 R7: accent / 罕见字符命令
+    s = crate::normalize::replace_command_arg(&s, "c", |inner| inner.to_string());
+    s = crate::normalize::replace_command_arg(&s, "rjrare", |inner| inner.to_string());
+    // v13.2.1 R7: LaTeX 非断行空格
+    s = s.replace('~', " ");
     // 一般清洗：\textbf \textit 等保留内容
     s = s.replace("``", "\u{201C}").replace("''", "\u{201D}");
     s = s.replace("---", "\u{2014}").replace("--", "\u{2013}");
@@ -597,9 +602,15 @@ fn extract_english_front_matter(text: &str) -> (String, String, String) {
     //     去除 ~ (不间断空格)、\fontsize{...}\selectfont、\song 等残留。
     (
         normalize_extracted_text(&title_en),
-        normalize_extracted_text(&authors_en),
+        normalize_author_en(&authors_en),
         normalize_extracted_text(&institute_en),
     )
+}
+
+/// 英文作者行：保留逗号，仅将 `~` 转为空格（不走完整 latex_to_text）。
+fn normalize_author_en(s: &str) -> String {
+    let s = s.replace('~', " ").replace('\n', " ");
+    crate::normalize::collapse_whitespace_pub(s.trim())
 }
 
 /// 抽取 `\begin{list}…\end{list}` 内的 `\item`。
@@ -620,37 +631,32 @@ fn extract_author_bio(text: &str) -> Vec<String> {
             let abs = i + rel;
             if let Some(end_rel) = text[abs..].find(end) {
                 let body = &text[abs + begin.len()..abs + end_rel];
-                // 按 \item 切
+                // 按 \item 切（跳过 list 环境参数 preamble）
                 let mut last = 0usize;
-                // 用 char_indices 推进，保证 p 始终在 char 边界
+                let mut seen_item = false;
                 let ci_pairs: Vec<(usize, char)> = body.char_indices().collect();
                 let mut ci = 0usize;
                 while ci < ci_pairs.len() {
                     let p = ci_pairs[ci].0;
                     if p + 5 <= body.len() && body[p..].starts_with("\\item") {
-                        // 提交 last..p
-                        if p > last {
+                        if seen_item && p > last {
                             let seg = &body[last..p];
                             let cleaned = clean_bio_item(seg);
                             if !cleaned.is_empty() {
                                 out.push(cleaned);
                             }
                         }
-                        // 跳过 "\\item" 这 5 个字符，落到下一个 char 起点
+                        seen_item = true;
                         let advance_to = p + 5;
-                        // binary_search_by_key 返回 Ok=精确匹配，Err=插入点（>=advance_to 的最小索引）
                         let next_ci = match ci_pairs.binary_search_by_key(&advance_to, |&(i, _)| i)
                         {
                             Ok(idx) => idx,
                             Err(idx) => idx,
                         };
-                        // 防御：若 next_ci 仍然指向 advance_to 字节位置但不是 char 起点，
-                        // 则 advance 到下一个 char
                         if next_ci < ci_pairs.len() {
                             last = ci_pairs[next_ci].0;
                             ci = next_ci;
                         } else {
-                            // 跳到 body 末尾
                             last = body.len();
                             ci = ci_pairs.len();
                         }
@@ -658,7 +664,7 @@ fn extract_author_bio(text: &str) -> Vec<String> {
                     }
                     ci += 1;
                 }
-                if last < body.len() {
+                if seen_item && last < body.len() {
                     let seg = &body[last..];
                     let cleaned = clean_bio_item(seg);
                     if !cleaned.is_empty() {
@@ -675,11 +681,16 @@ fn extract_author_bio(text: &str) -> Vec<String> {
 }
 
 fn clean_bio_item(s: &str) -> String {
-    let s = crate::normalize::strip_comments(s);
-    let s = s.replace("\\\\", " ");
-    let s = crate::normalize::strip_unknown_commands_inline(&s);
-    let s = crate::normalize::collapse_whitespace_pub(&s);
-    s.trim().to_string()
+    let mut raw = s.trim().to_string();
+    raw = raw.replace("\\par", " ");
+    raw = raw.replace("\\noindent", " ");
+    let item_tex = format!(r"\item {raw}");
+    let empty_cite = std::collections::HashMap::new();
+    let empty_label = std::collections::HashMap::new();
+    let mut text =
+        crate::normalize::latex_to_text(&item_tex, &empty_cite, &empty_label).join_plain();
+    text = text.replace('{', "").replace('}', "");
+    crate::normalize::collapse_whitespace_pub(&text).trim().to_string()
 }
 
 // ─── unit tests ─────────────────────────────────────────────────────────────
@@ -725,5 +736,33 @@ B. Author, Title B. 2021.
         let m = parse_newcommands(raw);
         let body = m.get("Body").unwrap();
         assert!(body.contains("Body text"));
+    }
+
+    #[test]
+    fn clean_bio_item_normalizes_latex() {
+        let raw = r"{\hei 石洪雷}，博士，CCF专业会员，主要研究领域为微服务架构开发。
+\par\noindent E-mail: \nolinkurl{shihonglei0042@link.tyut.edu.cn}";
+        let s = clean_bio_item(raw);
+        assert!(s.contains("石洪雷"));
+        assert!(s.contains("CCF专业会员"));
+        assert!(s.contains("shihonglei0042@link.tyut.edu.cn"));
+        assert!(!s.contains("\\hei"));
+        assert!(!s.contains("{"));
+    }
+
+    #[test]
+    fn bibitem_removes_tilde() {
+        let body = r"Nabor~C. Smith";
+        let s = clean_bibitem_body(body);
+        assert!(s.contains("Nabor C."));
+        assert!(!s.contains('~'));
+    }
+
+    #[test]
+    fn bibitem_removes_cedilla() {
+        let body = r"Fran{\c{c}}ois Journal";
+        let s = clean_bibitem_body(body);
+        assert!(s.contains("Francois") || s.contains("Fran c ois") || s.contains("Fran"));
+        assert!(!s.contains(r"\c{"));
     }
 }

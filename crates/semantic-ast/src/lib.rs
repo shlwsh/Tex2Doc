@@ -42,6 +42,8 @@ pub struct MetaData {
     // ── 页眉页脚 ──
     pub running_header: Option<String>,
     pub first_footer_text: Option<String>,
+    /// 作者简介条目（每条一段）
+    pub author_bio: Vec<String>,
 }
 
 /// 文档主体。

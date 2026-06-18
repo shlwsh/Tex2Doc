@@ -199,14 +199,10 @@ pub fn convert_dir(
                 }
             }
         }
-        if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
-            let first_h = "Journal of Software 软件学报".to_string();
-            ps_eff.first_header_text = Some(first_h);
-            changed = true;
-        }
-        // V2：默认页脚带 PAGE 字段（caller 没显式给的话自动加）。
-        if ps_eff.footer_text.is_none() {
-            ps_eff.footer_text = Some("— {{PAGE}} —".to_string());
+        // 首页 masthead 由 packer 写入 header0.xml；勿用单行 first_header_text 覆盖。
+        if ps_eff.first_footer_text.is_none() {
+            ps_eff.first_footer_text =
+                Some(doc_docx_writer::PageSetup::JOS_FIRST_FOOTER.to_string());
             changed = true;
         }
         if changed {
@@ -365,14 +361,10 @@ pub fn convert_zip(
                 }
             }
         }
-        if ps_eff.first_header_text.is_none() && ps_eff.header_text.is_some() {
-            let first_h = "Journal of Software 软件学报".to_string();
-            ps_eff.first_header_text = Some(first_h);
-            changed = true;
-        }
-        // V2：默认页脚带 PAGE 字段（caller 没显式给的话自动加）。
-        if ps_eff.footer_text.is_none() {
-            ps_eff.footer_text = Some("— {{PAGE}} —".to_string());
+        // 首页 masthead 由 packer 写入 header0.xml；勿用单行 first_header_text 覆盖。
+        if ps_eff.first_footer_text.is_none() {
+            ps_eff.first_footer_text =
+                Some(doc_docx_writer::PageSetup::JOS_FIRST_FOOTER.to_string());
             changed = true;
         }
         if changed {

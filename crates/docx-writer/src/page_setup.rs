@@ -35,6 +35,10 @@ pub struct PageSetup {
     pub first_header_text: Option<String>,
     /// V2：首页页脚（first_page_footer）专用文本。覆盖 footer_text。
     pub first_footer_text: Option<String>,
+    /// JOS：偶数页页眉文本（对齐 build_jos_docx.py even_header_text）。
+    pub even_header_text: Option<String>,
+    /// JOS：首页页脚左缩进（twips）。
+    pub first_footer_indent_twips: Option<u32>,
 }
 
 impl Default for PageSetup {
@@ -55,11 +59,20 @@ impl Default for PageSetup {
             footer_text: None,
             first_header_text: None,
             first_footer_text: None,
+            even_header_text: None,
+            first_footer_indent_twips: None,
         }
     }
 }
 
 impl PageSetup {
+    /// JOS 默认首页页脚（与 JOS_PROFILE.first_footer_text 一致）。
+    pub const JOS_FIRST_FOOTER: &'static str =
+        "收稿时间: XXXX-XX-XX; 修改时间: XXXX-XX-XX; 采用时间: XXXX-XX-XX";
+
+    /// JOS 默认偶数页页眉。
+    pub const JOS_EVEN_HEADER: &'static str = "Journal of Software 软件学报";
+
     /// JOS 18.40cm × 26.00cm 模板（设计稿 §7.1）。
     ///
     /// 页面 18.4 × 26.0 cm；上下左右 = 1.0/1.45/2.20/1.45 cm；
@@ -80,6 +93,15 @@ impl PageSetup {
             footer_text: None,
             first_header_text: None,
             first_footer_text: None,
+            even_header_text: Some(Self::JOS_EVEN_HEADER.to_string()),
+            first_footer_indent_twips: Some(330),
         }
+    }
+
+    /// 正文区宽度（twips）= 页面宽 − 左右页边距。
+    pub fn text_width_twips(&self) -> u32 {
+        let left = self.margin_left.unwrap_or(1440);
+        let right = self.margin_right.unwrap_or(1800);
+        self.width_twips.saturating_sub(left + right)
     }
 }

@@ -247,26 +247,72 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_command(&mut self) -> Option<MathExpr> {
-        // 已知命令：\frac, \sqrt, \left, \right, \text, \sin, \cos, \tan, \log, \ln, \exp,
-        //          \alpha ... \omega
-        let cmds = [
-            "frac", "sqrt", "left", "right", "text", "sin", "cos", "tan", "log", "ln", "exp",
+        if !self.starts_with("\\") {
+            return None;
+        }
+        self.i += 1; // skip backslash
+
+        let cmd_start = self.i;
+        while self.i < self.s.len() {
+            let b = self.s.as_bytes()[self.i];
+            if b.is_ascii_alphabetic() {
+                self.i += 1;
+            } else {
+                break;
+            }
+        }
+        if self.i == cmd_start {
+            return None;
+        }
+        let cmd = &self.s[cmd_start..self.i];
+
+        // 可选 * 后缀
+        if self.i < self.s.len() && self.s.as_bytes()[self.i] == b'*' {
+            self.i += 1;
+        }
+
+        // v13.2.6 R8: 字体命令 → 只取内容，不加 \? 前缀
+        if matches!(cmd, "mathrm" | "mathbf" | "mathsf" | "mathtt" | "mathcal" | "mathit") {
+            return Some(self.parse_group_or_single());
+        }
+
+        // v13.2.6 R8: 装饰括号命令 → 去掉装饰
+        if matches!(
+            cmd,
+            "bigl" | "bigr" | "Bigl" | "Bigr" | "big" | "Big" | "left" | "right"
+        ) {
+            if cmd == "left" {
+                return Some(self.lower_command("left"));
+            }
+            if cmd == "right" {
+                return Some(self.lower_command("right"));
+            }
+            self.skip_ws();
+            if self.peek() == Some(b'{') {
+                return Some(self.parse_group_or_single());
+            }
+            if let Some(c) = self.peek() {
+                self.i += 1;
+                return Some(MathExpr::Op(c as char));
+            }
+            return Some(MathExpr::Seq(Vec::new()));
+        }
+
+        // 已知命令列表
+        let known = [
+            "frac", "sqrt", "text", "sin", "cos", "tan", "log", "ln", "exp", "min", "max", "sum",
             "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
             "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi", "chi", "psi", "omega",
             "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi", "Psi", "Omega",
-            "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "infty", "sum",
-            "int", "prod",
+            "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "infty", "int",
+            "prod",
         ];
-        for &cmd in &cmds {
-            if self.starts_with(&format!("\\{cmd}")) {
-                let len = 1 + cmd.len();
-                self.consume(len);
-                return Some(self.lower_command(cmd));
-            }
+        if known.contains(&cmd) {
+            return Some(self.lower_command(cmd));
         }
-        // \begin{matrix} ... \end{matrix}：V1 简化版
-        if self.starts_with("\\begin") {
-            self.consume("\\begin".len());
+
+        // \begin{matrix} ... \end{matrix}
+        if cmd == "begin" {
             self.skip_ws();
             if self.peek() == Some(b'{') {
                 self.i += 1;
@@ -283,14 +329,24 @@ impl<'a> Parser<'a> {
                     return Some(MathExpr::Matrix { rows });
                 }
             }
+            return Some(MathExpr::Seq(Vec::new()));
         }
-        if self.starts_with("\\end") {
-            // 简单跳过
-            self.consume(self.s.len() - self.i);
+        if cmd == "end" {
+            self.consume(self.s.len().saturating_sub(self.i));
+            return Some(MathExpr::Seq(Vec::new()));
         }
-        // 未知命令：作为 Raw 吞掉
-        self.i += 1;
-        Some(MathExpr::Raw("\\?".into()))
+
+        // v13.2.6 R8: 未知命令 → 输出 {content} 而非 \?
+        let mut parts = Vec::new();
+        self.skip_ws();
+        while self.peek() == Some(b'{') {
+            parts.push(self.parse_group_or_single());
+            self.skip_ws();
+        }
+        if !parts.is_empty() {
+            return Some(MathExpr::flatten(parts));
+        }
+        Some(MathExpr::Seq(Vec::new()))
     }
 
     fn parse_matrix_rows(&mut self) -> Vec<Vec<MathExpr>> {
@@ -408,7 +464,7 @@ impl<'a> Parser<'a> {
                     MathExpr::Text(String::new())
                 }
             }
-            "sin" | "cos" | "tan" | "log" | "ln" | "exp" => {
+            "sin" | "cos" | "tan" | "log" | "ln" | "exp" | "min" | "max" => {
                 let arg = self.parse_group_or_single();
                 MathExpr::Function {
                     name: cmd.to_string(),
@@ -540,5 +596,39 @@ mod tests {
         let result = parse_latex_math(&nested);
         // Should not panic and should return some result
         let _ = format!("{:?}", result);
+    }
+
+    #[test]
+    fn mathrm_preserves_text() {
+        let e = parse_latex_math(r"\mathrm{Score}");
+        let s = format!("{e:?}");
+        assert!(!s.contains(r"\?"));
+        assert!(s.contains("Score"));
+    }
+
+    #[test]
+    fn min_becomes_function() {
+        let e = parse_latex_math(r"\min(x)");
+        if let MathExpr::Function { name, .. } = e {
+            assert_eq!(name, "min");
+        } else {
+            panic!("expected Function for min, got {e:?}");
+        }
+    }
+
+    #[test]
+    fn bigl_merged() {
+        let e = parse_latex_math(r"\bigl(x\bigr)");
+        let s = format!("{e:?}");
+        assert!(!s.contains(r"\?"));
+    }
+
+    #[test]
+    fn formula_renders_without_escape() {
+        use crate::omml::to_omml;
+        let omml = to_omml(&parse_latex_math(r"\mathrm{Score}"));
+        let s = String::from_utf8_lossy(&omml);
+        assert!(!s.contains(r"\?"));
+        assert!(s.contains("Score"));
     }
 }
