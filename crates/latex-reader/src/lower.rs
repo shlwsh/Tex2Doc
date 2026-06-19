@@ -884,6 +884,9 @@ fn flush_paragraph(
     }
     let body = buffer.trim().to_string();
     let s = *start;
+    if body.contains("Freq_t") || body.contains("Freq") {
+        eprintln!("flush_paragraph body IN ({}): {body}", body.len());
+    }
 
     // V2 接入：把 LaTeX 段落走过 `latex_to_text` normalizer，
     // 输出多 run（plain / italic / bold / sup / sub）。
@@ -901,6 +904,9 @@ fn flush_paragraph(
         })
         .collect();
     if !runs.is_empty() {
+        if body.contains("Freq_t") || body.contains("Freq") {
+            eprintln!("flush_paragraph runs OUT ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+        }
         doc.push(Block::Paragraph {
             runs,
             span: Span::new(s, s + buffer.len() as u32, span.source),
@@ -1152,10 +1158,12 @@ fn detect_section_label(s: &str) -> Option<&'static str> {
     const LABELS: &[&str] = &["附中文参考文献", "作者简介"];
     let line_end = s.find('\n').unwrap_or(s.len());
     let line = &s[..line_end];
-    for label in LABELS {
-        if line.contains(label) {
-            return Some(label);
-        }
+    if line.contains("附中文参考文献") {
+        // v13.2 F15: 包含 `:` 标点（对齐 sh `builder.add_paragraph("附中文参考文献:")`）
+        return Some("附中文参考文献:");
+    }
+    if line.contains("作者简介") {
+        return Some("作者简介");
     }
     None
 }
@@ -1412,6 +1420,56 @@ fn lower_list(
     }
 }
 
+/// v13.2 F14: 剥 `\begin{list}{}{ ... }` body 开头、第一个 `\item` 之前的
+///   「参数残渗行」（如 `\leftmargin=2em \itemindent=-2em \labelwidth=0pt ...`）。
+///
+/// 根因：scan_environment 把 `\begin{list}{}{...}` 的第二对 `{}` 内容也吞了，
+///   但有些 list 模板把 `{}` 第二对为空、参数直接写在 body 起始行（如
+///   paper3 main-jos.tex `\begin{list}{}{ \leftmargin=2em ... }`）。
+///   这部分参数被 main loop 当段文本推到 buffer，最终 flush_paragraph 后
+///   输出 `indent=-2em ...` 等字面到 docx。
+/// 这里显式砍掉第一个 `\item` 之前的所有非空非注释行（保留空行因为是段落边界）。
+fn strip_list_param_lines(body: &str) -> String {
+    let mut prefix_end = 0usize;
+    let mut found = false;
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    let mut prefix_end = 0usize;
+    let mut found = false;
+    while i < len {
+        // 行末
+        let mut eol = i;
+        while eol < len && bytes[eol] != b'\n' {
+            eol += 1;
+        }
+        let line = &body[i..eol];
+        let trimmed = line.trim_start();
+        // 必须是真正的 `\item` (后跟空白、`[`、`{`、或行尾)，
+        // 不能匹配 `\itemindent` / `\itemsep` 等以 `\item` 开头的命令。
+        if trimmed.starts_with("\\item") {
+            let after = &trimmed[5..];
+            if after.is_empty()
+                || after.starts_with(' ')
+                || after.starts_with('\t')
+                || after.starts_with('{')
+                || after.starts_with('[')
+                || after.starts_with('\r')
+            {
+                prefix_end = i;
+                found = true;
+                break;
+            }
+        }
+        // 跳过此行（不论是空行还是参数行）
+        i = eol + 1;
+    }
+    if !found {
+        return body.to_string();
+    }
+    body[prefix_end..].to_string()
+}
+
 /// 过滤 list body 中可能散落的 `itemize` / `enumerate` 字面量。
 ///
 /// 处理两类残渗：
@@ -1564,11 +1622,10 @@ fn lower_description_with_label(
         item_start = 0;
     } else {
         // 第一个非空行是 section label（如 `{\xiaowuhao\hei 附中文参考文献:}`）
+        // v13.2 F15: 保留 `:`（对齐 sh 行为——`builder.add_paragraph("附中文参考文献:")`），
+        //   之前 `trim_end_matches(':')` 把 `:` 剥了，rust 输出缺标点。
         let label_text = extract_item_label_text(first_trimmed);
-        let label_clean = label_text
-            .trim()
-            .trim_end_matches('}')
-            .trim_end_matches(':');
+        let label_clean = label_text.trim().trim_end_matches('}');
         if !label_clean.is_empty() {
             section_label = Some(label_clean.to_string());
         }
@@ -1598,12 +1655,24 @@ fn lower_description_with_label(
             if after.starts_with('[') {
                 if let Some((label_text, rest)) = extract_bracketed_label(after) {
                     let label_clean = strip_label_formatting(label_text);
+                    // v13.2 F15: 对齐 sh oracle 格式——[N] 编号后直接空格接作者名，
+                    //   **不**插入 "— " 中划线装饰。原 `format!("{label_clean} — {rest}")`
+                    //   多余且与 sh 不一致。
+                    //   v13.2 F15b: 用 sentinel `\u{0002}/\u{0003}` 包裹 label_clean，
+                    //   防止后续 `flush_paragraph` 调 latex_to_text 的 `split_runs_with_sup_sub`
+                    //   把 `[N]` 误判为 citation 上标（JOS 段是编号标签，**不是**上标）。
+                    let label_wrapped = if label_clean.starts_with('[') && label_clean.ends_with(']')
+                    {
+                        format!("\u{0002}{label_clean}\u{0003}")
+                    } else {
+                        label_clean.clone()
+                    };
                     let item_text = if label_clean.is_empty() {
                         rest.to_string()
                     } else if rest.is_empty() {
-                        label_clean
+                        label_wrapped
                     } else {
-                        format!("{label_clean} — {rest}")
+                        format!("{label_wrapped} {rest}")
                     };
                     current_body = Some(Box::leak(item_text.into_boxed_str()));
                     continue;
@@ -1725,15 +1794,20 @@ fn extract_item_label_text(s: &str) -> String {
 
 /// 剥掉 item 内容最外层的 `{}` 并递归剥掉 LaTeX 格式化命令，还原纯文字。
 ///
-/// 用于处理 `list` 环境中的 `\item {\hei 姓名}` 或 `description` 环境中的裸 item。
-/// 例如：`{\hei 石洪雷}` → `"石洪雷"`，`{\textbf{作者简介}}` → `"作者简介"`。
+/// 用于处理 `list` 环境中的 `\item {\hei 姓名}，博士，...` 或 description 中的
+/// 裸 item。例如：`{\hei 石洪雷}，博士，CCF...` → `"石洪雷，博士，CCF..."`。
+///
+/// **v13.2 F15 修复**：原实现剥外层 `{...}` 后**丢弃** `}` 之后的 rest 内容
+/// （如 `，博士，...`），导致 item body 只剩姓名。修复：剥外层后**拼接** rest。
 fn strip_item_braces_and_formatting(s: &str) -> String {
     let bytes = s.as_bytes();
-    // 如果被 `{}` 包裹，剥掉外壳
     if bytes.first() == Some(&b'{') {
         if let Some(len) = find_matching_brace(s, 0) {
             let inner = &s[1..1 + len];
-            return strip_item_braces_and_formatting(inner);
+            let rest = &s[1 + len + 1..];
+            let mut out = strip_item_braces_and_formatting(inner);
+            out.push_str(rest);
+            return out;
         }
     }
     strip_label_formatting(s)
@@ -1756,6 +1830,44 @@ fn strip_label_formatting(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut i = 0;
     while i < bytes.len() {
+        // v13.2 F12: 跳过 $...$ 与 \(...\) 内的 inline math 内容，
+        // 避免把 \mathrm{Trend} 在 inline math 内部被误剥。
+        if bytes[i] == b'$' {
+            // 找匹配的 `$`（不跨越 `$$`）
+            out.push('$');
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'$' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'$' {
+                        out.push('$');
+                        out.push('$');
+                        i += 2;
+                        continue;
+                    }
+                    out.push('$');
+                    i += 1;
+                    break;
+                }
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b'(' {
+            // \( ... \)
+            out.push_str("\\(");
+            i += 2;
+            while i < bytes.len() {
+                if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b')' {
+                    out.push_str("\\)");
+                    i += 2;
+                    break;
+                }
+                out.push(bytes[i] as char);
+                i += 1;
+            }
+            continue;
+        }
         if bytes[i] == b'\\' {
             let j = i + 1;
             let mut k = j;
@@ -1873,12 +1985,26 @@ fn lower_item_body(
         lower_with_macros_numbering_and_cites(&p, None, macros, numbering, Some(cite_numbers));
     let mut out = sub.blocks;
     if out.is_empty() {
-        out.push(Block::Paragraph {
-            runs: vec![TextRun {
-                text: stripped.trim().to_string(),
-                style: TextStyle::Plain,
+        // v13.2 F12: fallback 路径走 latex_to_text 二次切分，
+        // v13.2 F12: fallback 路径走 latex_to_text 二次切分，
+        //   让 inline math 内的 _t 切成 sub run（之前是单 Plain TextRun，
+        //   sub/sup 信息丢失导致 docx 渲染为 "Freq t" 而非下标）。
+        let normalized = crate::normalize::latex_to_text(
+            stripped.trim(),
+            cite_numbers,
+            label_map,
+        );
+        let runs: Vec<TextRun> = normalized
+            .runs
+            .into_iter()
+            .map(|r| TextRun {
+                text: r.text,
+                style: r.style,
                 span,
-            }],
+            })
+            .collect();
+        out.push(Block::Paragraph {
+            runs,
             span,
         });
     }
@@ -2974,17 +3100,21 @@ mod tests {
 
     #[test]
     fn lower_theorem_like_normalizes_math() {
-        let src = "\\begin{theorem}\nFor $\\mathrm{Score}(u,t)\\in[0,1]$ and $\\alpha_i+\\lambda=1$.\n\\end{theorem}";
+        let src =
+            "\\begin{theorem}\nFor $\\mathrm{Score}(u,t)\\in[0,1]$ and $\\alpha_i+\\lambda=1$.\n\\end{theorem}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
             Block::TheoremLike { body, .. } => {
                 assert!(body.contains("Score"));
                 assert!(body.contains("α"));
-                assert!(body.contains("λ"));
-                assert!(!body.contains("\\mathrm"));                assert!(!body.contains("\\alpha"));
+                // v13.2 F12: \lambda 在 clean_math 后保留 Roman
+                assert!(body.contains("lambda"), "got: {body}");
+                assert!(!body.contains("\\mathrm"));
+                assert!(!body.contains("\\alpha"));
                 assert!(!body.contains("\\lambda"));
-                assert!(!body.contains('_'));
+                // v13.2 F12: subscript run 加 `_` 前缀后，body 含 `_i`
+                assert!(body.contains("_i"), "got: {body}");
             }
             _ => panic!("expected theorem-like"),
         }
@@ -3104,6 +3234,66 @@ mod tests {
                 assert!(first.contains("冯志勇"));
                 assert!(second.contains("[6]"));
                 assert!(second.contains("吴化尧"));
+            }
+            _ => panic!("expected list"),
+        }
+    }
+
+    #[test]
+    fn lower_description_journal_ref_label_not_superscript() {
+        // v13.2 F15: JOS 期刊格式 `\item[{[N]}]` 的 `[N]` 是**编号标签**，
+        //   不是 citation 上标。JOSReference 段 item body 经过 parser AST
+        //   + flush_paragraph → latex_to_text.split_runs 会被误判为 superscript——
+        //   F15 用 `\u{0002}/\u{0003}` sentinel 包裹 `[N]` 避免误切。
+        //   这里验证 item 输出的 runs 中**没有**Superscript style。
+        let src = "\\begin{description}[font=\\normalfont]\n\\item[{[5]}] 冯志勇. 题名.\n\\end{description}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::List { items, .. } => {
+                let any_superscript = items[0].iter().any(|b| match b {
+                    Block::Paragraph { runs, .. } => runs
+                        .iter()
+                        .any(|r| matches!(r.style, TextStyle::Superscript)),
+                    _ => false,
+                });
+                assert!(
+                    !any_superscript,
+                    "JOS ref item `[N]` 不应是 Superscript run，但发现 Superscript"
+                );
+            }
+            _ => panic!("expected list"),
+        }
+    }
+
+    #[test]
+    fn lower_description_journal_ref_label_has_single_space_after() {
+        // v13.2 F15: JOS ref 段 item 输出文本 `[5] 冯志勇,...` 中
+        //   `[5]` 与 `冯志勇` 之间应当**恰好 1 空格**（与 sh oracle 一致），
+        //   而不是 `[5]  冯志勇`（merge_adjacent_runs 重复追加空格）。
+        let src = "\\begin{description}[font=\\normalfont]\n\\item[{[5]}] 冯志勇. 题名.\n\\end{description}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::List { items, .. } => {
+                let item_text: String = items[0]
+                    .iter()
+                    .filter_map(|b| match b {
+                        Block::Paragraph { runs, .. } => {
+                            Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                        }
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("");
+                assert!(
+                    item_text.contains("[5] 冯志勇"),
+                    "期望 `[5] 冯志勇`（1 空格），实际: {item_text:?}"
+                );
+                assert!(
+                    !item_text.contains("[5]  冯"),
+                    "不应有 `[5]  冯`（2 空格），实际: {item_text:?}"
+                );
             }
             _ => panic!("expected list"),
         }
@@ -3607,12 +3797,11 @@ mod tests {
 
     #[test]
     fn lower_inline_math_and_cite_together() {
-        // V2: inline math stays in paragraph, no separate Block::Equation created
         let src = "According to $E=mc^2$ \\cite{einstein1905}, we get $a+b=c$.";
         let p = parse(src);
         let mut macros = crate::expand::MacroMap::new();
         let doc = lower_with_macros(&p, None, &mut macros);
-        // NO separate Block::Equation blocks for inline math
+        // V2: inline math stays in paragraph, no separate Block::Equation created
         let eq_count = doc
             .blocks
             .iter()
@@ -3645,6 +3834,30 @@ mod tests {
             "paragraph should not contain raw $ delimiters, got: {}",
             text
         );
+    }
+
+    #[test]
+    fn strip_label_formatting_preserves_inline_math() {
+        // v13.2 F12: \mathrm/\textbf 等格式化命令不应该剥 inline math 内部的
+        // 内容。itemize 中的 inline math 之前会被 strip_label_formatting 误剥
+        // `\mathrm{Trend}` 里的 `{` 包裹，丢失数学结构。
+        let raw = r"$\mathrm{Trend}(u,t)=\sigma\!\bigl((\mathrm{Freq}_t-\mathrm{Freq}_{t-1})/\max(\mathrm{Freq}_{t-1},\varepsilon)\bigr)$，热度趋势";
+        let out = strip_label_formatting(raw);
+        // inline math 内部的 \mathrm/\sigma/\bigl/\bigr/\max 都不应被剥外壳
+        assert!(out.contains(r"\mathrm{Trend}"), "got: {out}");
+        assert!(out.contains(r"\mathrm{Freq}_t"), "got: {out}");
+        assert!(out.contains(r"\sigma"), "got: {out}");
+        assert!(out.contains(r"\bigl"), "got: {out}");
+        assert!(out.contains(r"\bigr"), "got: {out}");
+        assert!(out.contains(r"\max"), "got: {out}");
+    }
+
+    #[test]
+    fn strip_label_formatting_strips_outer_mathrm() {
+        // 反向验证：非 inline math 内的 \mathrm{label} 仍应被剥壳
+        let raw = r"\mathrm{label}";
+        let out = strip_label_formatting(raw);
+        assert_eq!(out, "label");
     }
 
     #[test]
@@ -3686,7 +3899,8 @@ mod tests {
         let doc = lower_with_macros(&p, None, &mut macros);
         let abstract_text = doc.metadata.abstract_text.unwrap_or_default();
         assert!(abstract_text.contains("±"), "got: {abstract_text}");
-        assert!(abstract_text.contains("γ+δ"), "got: {abstract_text}");
+        // v13.2 F12: \gamma / \delta 在 clean_math 后保留 Roman
+        assert!(abstract_text.contains("gamma+delta"), "got: {abstract_text}");
         assert!(!abstract_text.contains("\\pm"), "got: {abstract_text}");
         assert!(!abstract_text.contains("\\gamma"), "got: {abstract_text}");
     }

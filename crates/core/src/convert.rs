@@ -11,7 +11,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use doc_latex_reader::{
-    lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_tex, IncludeGraph,
+    lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_bib, parse_tex,
+    IncludeGraph,
 };
 use doc_semantic_ast::{Block, Document, Span, TextRun, TextStyle};
 use doc_utils::{ImageAssets, VirtualFs};
@@ -427,6 +428,8 @@ fn parse_tex_with_vfs(
     let graph = IncludeGraph::build(vfs, Path::new(main_tex))?;
     let joined = graph.join(vfs)?;
     let parse = parse_tex(&joined.text);
+    // v13.2 F13: 优先读 bbl（最稳，clean_bibitem_body 已处理 LaTeX 残余）；
+    // 若 vfs 不含 bbl 但含 .bib，直接用 `parse_bib` 解析 .bib，输出 BibItem 列表。
     let bbl_path = Path::new(main_tex).with_extension("bbl");
     if let Ok(bytes) = vfs.read(&bbl_path) {
         if let Ok(raw_bbl) = std::str::from_utf8(bytes) {
@@ -438,7 +441,36 @@ fn parse_tex_with_vfs(
             }
         }
     }
+    // v13.2 F13: 兜底——找 .bib 解析（vfs 与 main_tex 同目录）
+    let main_dir = Path::new(main_tex).parent().unwrap_or(Path::new(""));
+    if let Some(bib_path) = find_bib_in_vfs(vfs, main_dir) {
+        if let Ok(bytes) = vfs.read(&bib_path) {
+            if let Ok(raw_bib) = std::str::from_utf8(bytes) {
+                let refs = parse_bib(raw_bib);
+                if !refs.is_empty() {
+                    let mut doc = lower_to_document(&parse, Some(&joined));
+                    append_bibliography_paragraphs(&mut doc, &refs);
+                    return Ok(doc);
+                }
+            }
+        }
+    }
     Ok(lower_to_document(&parse, Some(&joined)))
+}
+
+/// v13.2 F13: 在 vfs 中找 main_tex 同目录的 `references.bib` 或 `<stem>.bib`。
+fn find_bib_in_vfs(vfs: &VirtualFs, main_dir: &Path) -> Option<PathBuf> {
+    for name in ["references.bib"] {
+        let p = if main_dir.as_os_str().is_empty() {
+            PathBuf::from(name)
+        } else {
+            main_dir.join(name)
+        };
+        if vfs.read(&p).is_ok() {
+            return Some(p);
+        }
+    }
+    None
 }
 
 fn append_bibliography_paragraphs(

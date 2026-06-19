@@ -110,6 +110,18 @@ pub fn serialize_document(
 
     let body_blocks = coalesce_theorem_like_blocks(&doc.blocks);
     for block in &body_blocks {
+        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl"))) {
+            eprintln!("BODY BLOCK Paragraph runs ({}): {}", match block { Block::Paragraph { runs, .. } => runs.len(), _ => 0 }, match block { Block::Paragraph { runs, .. } => runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "), _ => "".into() });
+        }
+        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("indent=-2em") || r.text.contains("sep=4pt"))) {
+            eprintln!("BODY BLOCK Paragraph INDENT ({}): {}", match block { Block::Paragraph { runs, .. } => runs.len(), _ => 0 }, match block { Block::Paragraph { runs, .. } => runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "), _ => "".into() });
+        }
+        if matches!(block, Block::TheoremLike { body, .. } if body.contains("Freq") || body.contains("minbigl")) {
+            eprintln!("BODY BLOCK TheoremLike body: {}", match block { Block::TheoremLike { body, .. } => body.clone(), _ => "".into() });
+        }
+        if matches!(block, Block::List { items, .. } if items.iter().any(|sub| sub.iter().any(|b| match b { Block::Paragraph { runs, .. } => runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")), _ => false }))) {
+            eprintln!("BODY BLOCK List with Freq item");
+        }
         match block {
             Block::Heading {
                 level,
@@ -139,6 +151,12 @@ pub fn serialize_document(
                 write_paragraph(&mut w, &para);
             }
             Block::Paragraph { runs, .. } => {
+                if runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")) {
+                    eprintln!("Block::Paragraph ENTER runs ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+                }
+                if runs.iter().any(|r| r.text.contains("indent=-2em")) {
+                    eprintln!("Block::Paragraph INDENT runs ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+                }
                 let paragraph_text = runs.iter().map(|r| r.text.as_str()).collect::<String>();
                 let paragraph_text = paragraph_text.trim();
                 if matches!(paragraph_text, "{" | "}") {
@@ -204,6 +222,23 @@ pub fn serialize_document(
                     continue;
                 }
                 for (idx, sub) in items.iter().enumerate() {
+                    if sub.iter().any(|b| match b {
+                        Block::Paragraph { runs, .. } => runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")),
+                        _ => false,
+                    }) {
+                        eprintln!("serialize List item {idx} sub.len()={}", sub.len());
+                        for b in sub {
+                            match b {
+                                Block::Paragraph { runs, .. } => {
+                                    eprintln!("  Paragraph: {} runs", runs.len());
+                                    for r in runs {
+                                        eprintln!("    run: [{:?}]={:?}", r.style, r.text);
+                                    }
+                                }
+                                _ => eprintln!("  other block: {:?}", std::mem::discriminant(b)),
+                            }
+                        }
+                    }
                     // v12 保留子结构：当 item 只有一个 Paragraph 块时直接用其 runs
                     if sub.len() == 1 {
                         if let Block::Paragraph { runs, .. } = &sub[0] {
@@ -218,6 +253,7 @@ pub fn serialize_document(
                                 };
                                 docx_runs.insert(0, Run::plain(prefix));
                             }
+                            eprintln!("  List item {idx} docx_runs: {}", docx_runs.len());
                             let para = Paragraph {
                                 style_id: Some(style.to_string()),
                                 runs: merge_adjacent_runs(docx_runs),
@@ -230,16 +266,20 @@ pub fn serialize_document(
                         }
                     }
                     // 多个块或非 Paragraph 块：拼接 summarize 文本为单 run 段落
-                    let text = summarize(sub);
+                    // v13.2 F12: 保留 run style（subscript/superscript 等）
+                    let summarized = summarize(sub);
                     let runs = if is_jos_ref {
-                        vec![Run::plain(text)]
+                        summarized
                     } else {
                         let prefix = if *is_ordered {
                             format!("{}. ", idx + 1)
                         } else {
                             "• ".to_string()
                         };
-                        vec![Run::plain(prefix + &text)]
+                        let mut with_prefix = Vec::with_capacity(summarized.len() + 1);
+                        with_prefix.push(Run::plain(prefix));
+                        with_prefix.extend(summarized);
+                        with_prefix
                     };
                     let para = Paragraph {
                         style_id: Some(style.to_string()),
@@ -257,7 +297,8 @@ pub fn serialize_document(
                 number,
                 ..
             } => {
-                write_table(&mut w, rows, caption.as_deref(), number.as_deref());
+                // v13.2 F8: 传入 page_setup，让 write_table 按 text_width 算 tblW/tcW
+                write_table(&mut w, rows, caption.as_deref(), number.as_deref(), page_setup);
             }
             Block::Figure {
                 path,
@@ -294,34 +335,13 @@ pub fn serialize_document(
                             .or_else(|| assets.get(basename))
                             .or_else(|| assets.get(png_basename.as_str()));
                         if let Some(bytes) = bytes_opt {
-                            // 将图片统一转换为 JPEG（RGBA 先转 RGB）再嵌入；
-                            // JPEG 在 OOXML 中兼容性更好（soffice/LibreOffice 渲染更稳定）。
-                            let rgb_jpg = {
-                                use image::{ImageReader, RgbImage};
-                                if let Ok(img) = ImageReader::new(std::io::Cursor::new(bytes))
-                                    .with_guessed_format()
-                                    .map(|r| r.decode())
-                                {
-                                    if let Ok(img) = img {
-                                        let rgb: RgbImage = img.to_rgb8();
-                                        let mut buf = std::io::Cursor::new(Vec::new());
-                                        if rgb.write_to(&mut buf, image::ImageFormat::Jpeg).is_ok()
-                                        {
-                                            Some(buf.into_inner())
-                                        } else {
-                                            None
-                                        }
-                                    } else {
-                                        None
-                                    }
-                                } else {
-                                    None
-                                }
-                            };
-                            let (ext, final_bytes) = if let Some(jpg) = rgb_jpg {
-                                ("jpg".to_string(), jpg)
-                            } else {
-                                // 回退原格式（PNG）
+                            // v13.2 F3: 对齐 sh oracle 的 pdftoppm 输出策略——
+                            //   - PNG 原样嵌入（保留 alpha，soffice/Word 都支持）
+                            //   - JPEG 原样嵌入（避免再编码掉画质）
+                            //   - PDF 通过 pdfium 在 convert.rs 阶段已经转成 PNG
+                            // sh 的 Python 路径 (`build_jos_docx.py:insert_images`) 也是
+                            // 直接把 PNG bytes 写进 word/media/，不二次转码。
+                            let (ext, final_bytes) = {
                                 let ext = if bytes.len() >= 8
                                     && bytes[0] == 0x89
                                     && bytes[1] == b'P'
@@ -329,8 +349,15 @@ pub fn serialize_document(
                                     && bytes[3] == b'G'
                                 {
                                     "png"
-                                } else {
+                                } else if bytes.len() >= 3
+                                    && bytes[0] == 0xFF
+                                    && bytes[1] == 0xD8
+                                    && bytes[2] == 0xFF
+                                {
                                     "jpg"
+                                } else {
+                                    // 兜底：未知格式仍尝试当作 PNG 嵌入
+                                    "png"
                                 };
                                 (ext.to_string(), bytes.to_vec())
                             };
@@ -698,6 +725,10 @@ fn clean_equation_display_oracle(text: &str) -> String {
         s = unwrap_latex_command_arg(&s, cmd);
     }
     for (from, to) in [
+        // v13.2 F12: 对齐 sh oracle `clean_math` 的字符替换列表
+        // sh 故意不替换 \gamma/\delta/\lambda/\sigma/\varepsilon 为 Greek，
+        // 而是保留 Roman (gamma/delta/lambda/sigma/varepsilon)；但
+        // \alpha/\beta/\rho/\xi 仍然用 Greek letter。我们照此办理。
         ("\\pm", "±"),
         ("\\%", "%"),
         ("\\rightarrow", "→"),
@@ -725,6 +756,10 @@ fn clean_equation_display_oracle(text: &str) -> String {
         ("\\bigr", ""),
         ("\\left", ""),
         ("\\right", ""),
+        // v13.2 F12 补充：与 sh 行为对齐——gamma/delta/lambda/sigma
+        // 保留 Roman (给后置的 strip_latex_command_names 剥反斜杠时输出
+        // 'gamma' / 'delta' / 'lambda' / 'sigma')，但 varepsilon 仍是 ε
+        ("\\varepsilon", "ε"),
     ] {
         s = s.replace(from, to);
     }
@@ -984,47 +1019,64 @@ fn replace_latex_command_arg(text: &str, command: &str, keep_inner: bool) -> Str
     out
 }
 
-fn summarize(blocks: &[Block]) -> String {
-    let mut out = String::new();
+/// v13.2 F12: `summarize` 重写为返回 `Vec<Run>`（保留 run style）。
+///   之前返回 `String` 会丢失 subscript/superscript/italic/bold 等 style，
+///   导致 inline math 中的 `Freq_t` 在 docx 里渲染为 "Freqt"（plain run 拼接）
+///   而不是 "Freq" + t（下标 run）。返回 Run 序列保留 latex_to_text 切出的
+///   上下标信息，对齐 sh oracle。
+fn summarize(blocks: &[Block]) -> Vec<Run> {
+    let mut out: Vec<Run> = Vec::new();
     for b in blocks {
         match b {
             Block::Paragraph { runs, .. } => {
                 for r in runs {
-                    out.push_str(&r.text);
-                    out.push(' ');
+                    out.push(from_text_run(r));
                 }
             }
             Block::List { items, .. } => {
                 for it in items {
-                    out.push_str(&summarize(it));
+                    out.extend(summarize(it));
                 }
             }
             Block::Heading { text, .. } => {
-                out.push_str(text);
-                out.push(' ');
+                out.push(Run::plain(text.clone()));
             }
             Block::TheoremLike {
                 kind, title, body, ..
             } => {
-                out.push_str(kind.display_name());
+                out.push(Run::plain(kind.display_name().to_string()));
                 if let Some(title) = title {
-                    out.push_str(title);
+                    out.push(Run::plain(title.clone()));
                 }
-                out.push_str(body);
-                out.push(' ');
+                out.push(Run::plain(body.clone()));
             }
             _ => {}
         }
     }
-    out.trim().to_string()
+    out
+}
+
+/// 兼容版 summarize_to_string：把 summarize 的 Vec<Run> 拼成单字符串。
+/// 保留给 `is_jos_reference_list` / `has_inline_math` 等只关心"含 [N]"等纯
+/// 文本特征的上层使用。
+fn summarize_to_string(blocks: &[Block]) -> String {
+    // v13.2 F12: 不用 join(" ") 插空格——run 之间直接拼回去。
+    //   原 `join(" ")` 让 `max` plain + `_v` sub + ` count(v)` plain 拼成
+    //   `max _v  count(v)`（多了一个空格），与 sh 的 `max_v count(v)`
+    //   文本对不上。直接拼接保留原 LaTeX 文本的空白。
+    summarize(blocks)
+        .into_iter()
+        .map(|r| r.text)
+        .collect::<Vec<_>>()
+        .join("")
 }
 
 fn is_jos_reference_list(items: &[Vec<Block>]) -> bool {
     items.iter().any(|sub| {
-        let s = summarize(sub);
+        let s = summarize_to_string(sub);
         s.contains('[')
             && s.chars().any(|c| c.is_ascii_digit())
-            && (s.contains('—') || s.contains("--"))
+            && (s.contains('—') || s.contains("--") || s.contains(']'))
     })
 }
 
@@ -1032,7 +1084,7 @@ fn itemize_merged_text(items: &[Vec<Block>]) -> String {
     let mut merged = String::from("itemize ");
     let mut first = true;
     for sub in items {
-        let text = summarize(sub);
+        let text = summarize_to_string(sub);
         if text.is_empty() {
             continue;
         }
@@ -1581,6 +1633,7 @@ fn write_table(
     rows: &[doc_semantic_ast::TableRow],
     caption: Option<&str>,
     number: Option<&str>,
+    page_setup: Option<&PageSetup>,
 ) {
     if let Some(cap) = caption {
         let cap_text = match number {
@@ -1608,11 +1661,16 @@ fn write_table(
 
     w.write_event(Event::Start(BytesStart::new("w:tblPr")))
         .unwrap();
-    let total_w: i64 = 9000i64; // 6.25 inches — 适合 A4 双栏
-    // v13.2.4 R5: 正确写入 tblW（属性在 w:tblW 元素上）
+    // v13.2 F8: 对齐 sh oracle（`build_jos_docx.py` 用 pct=5000 即 100% 页宽）——
+    // 这样当 page_setup 改变时，docx 表格宽度自适应而不依赖绝对 dxa 数值。
+    // 同时给后续 cell 宽度计算用 text_width 做基准（替代硬编码 9000）。
+    let text_width = page_setup
+        .map(|ps| ps.text_width_twips() as i64)
+        .unwrap_or_else(|| PageSetup::jos_paper3().text_width_twips() as i64);
+    let total_w: i64 = 5000;
     let mut tbl_w = BytesStart::new("w:tblW");
     tbl_w.push_attribute(("w:w", total_w.to_string().as_str()));
-    tbl_w.push_attribute(("w:type", "dxa"));
+    tbl_w.push_attribute(("w:type", "pct"));
     w.write_event(Event::Empty(tbl_w)).unwrap();
     // v13.2.4 R5: 表格居中
     let mut jc = BytesStart::new("w:jc");
@@ -1641,8 +1699,9 @@ fn write_table(
     let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
     w.write_event(Event::Start(BytesStart::new("w:tblGrid")))
         .unwrap();
-    // V2：均分表格宽度（避免某些 cell 被挤到 1 字符宽导致 wrap）
-    let col_w: i64 = total_w / ncols.max(1) as i64;
+    // v13.2 F8: cell 宽度 = text_width / ncols（替代硬编码 9000/ncols）。
+    // sh oracle `build_jos_docx.py` 也是按 text_width 平均分。
+    let col_w: i64 = text_width / ncols.max(1) as i64;
     let col_w_str = col_w.to_string();
     for _ in 0..ncols {
         let mut gc = BytesStart::new("w:gridCol");
@@ -1728,6 +1787,7 @@ fn write_table(
 }
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
+    eprintln!("write_paragraph RUNS ({}): {}", p.runs.len(), p.runs.iter().map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text)).collect::<Vec<_>>().join(" || "));
     write_paragraph_with_opts(w, p, false, 0)
 }
 
@@ -1755,13 +1815,17 @@ fn normalize_body_runs(runs: Vec<Run>) -> Vec<Run> {
 }
 
 fn is_body_style_for_cjk(style_id: &Option<String>) -> bool {
-    style_id.as_deref().is_some_and(|s| {
-        matches!(s, "JOSBody" | "JOSReference")
-    })
+    // v13.2 F15: 仅 JOSBody 走 CJK 空格清理。JOSReference（参考文献段）
+    //   中文逗号+空格是**有意的标点格式**（对齐 sh oracle `parse_bbl` 输出
+    //   "冯志勇, 徐砚伟"），不应被 `collapse_cjk_internal_spaces` 误清。
+    style_id.as_deref().is_some_and(|s| s == "JOSBody")
 }
 
 /// v13.2.1 R1: JOSBody 等正文段落内联 Bold/Italic/Code 降级为 Plain（对齐 sh oracle）。
 fn downgrade_body_inline_styles(p: Paragraph) -> Paragraph {
+    if p.runs.iter().any(|r| r.text.contains("Freq")) {
+        eprintln!("downgrade RUNS: {}", p.runs.iter().map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text)).collect::<Vec<_>>().join(" || "));
+    }
     let is_body = p.style_id.as_deref().is_some_and(|s| {
         matches!(
             s,
@@ -2628,5 +2692,104 @@ mod tests {
         let xml = String::from_utf8(xml).expect("document xml utf8");
         assert!(xml.contains(r#"<w:jc w:val="center"/>"#));
         assert!(xml.contains("<w:tcW"));
+    }
+
+    /// v13.2 F8: 表格 tblW 必须是 pct=5000 (100% 页宽)，而不是硬编码 9000/dxa。
+    /// cell 宽度 (tcW) 来自 page_setup.text_width_twips()，不是固定值。
+    #[test]
+    fn table_tblW_uses_pct_and_tcW_scales_with_text_width() {
+        use crate::page_setup::PageSetup;
+        use doc_semantic_ast::{TableCell, TableRow};
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Table {
+                rows: vec![TableRow {
+                    cells: (0..4)
+                        .map(|i| TableCell {
+                            runs: vec![TextRun {
+                                text: format!("col{i}"),
+                                style: TextStyle::Plain,
+                                span: Span::default(),
+                            }],
+                            colspan: 1,
+                            rowspan: 1,
+                            bg_color: None,
+                        })
+                        .collect(),
+                }],
+                caption: None,
+                number: None,
+                span: Span::default(),
+            }],
+        };
+        // 选一个 text_width 与硬编码 9000 明显不同的 page_setup，避免假阳性
+        let ps = PageSetup {
+            width_twips: 10433, // 7.25 英寸 — JOS 模板
+            height_twips: 14742,
+            margin_top: Some(567),
+            margin_right: Some(822),
+            margin_bottom: Some(1247),
+            margin_left: Some(822),
+            margin_header: Some(737),
+            margin_footer: Some(1260),
+            cols_space: None,
+            cols_num: None,
+            header_text: None,
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: None,
+            even_header_text: None,
+            first_footer_indent_twips: None,
+        };
+        let text_width = ps.text_width_twips();
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, Some(&ps), &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        // 1) tblW 必须是 pct=5000
+        assert!(
+            xml.contains(r#"<w:tblW w:w="5000" w:type="pct"/>"#),
+            "tblW must be pct=5000 (100% page width): {xml}"
+        );
+        // 2) tcW 必须是 text_width / 4
+        let expected_cell = text_width / 4;
+        assert!(
+            xml.contains(&format!(
+                r#"<w:tcW w:w="{expected_cell}" w:type="dxa"/>"#
+            )),
+            "tcW must be text_width/ncols = {expected_cell}: {xml}"
+        );
+    }
+
+    /// v13.2 F3: PNG 字节原样嵌入，不二次 JPEG 编码。
+    #[test]
+    fn figure_keeps_png_bytes_unchanged() {
+        // 最小 PNG (1x1 透明像素)
+        const PNG_1X1: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let mut assets = ImageAssets::default();
+        assets.insert("figures/fig1.png".to_string(), PNG_1X1.to_vec());
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Figure {
+                path: "figures/fig1.png".to_string(),
+                caption: Some("测试图".to_string()),
+                scale: 1.0,
+                number: Some("图 1".to_string()),
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let _xml = serialize_document(&doc, Some(&assets), None, &mut embedded);
+        assert_eq!(embedded.len(), 1, "expected exactly 1 embedded image");
+        assert_eq!(embedded[0].ext, "png", "must keep PNG extension");
+        assert_eq!(
+            embedded[0].bytes, PNG_1X1,
+            "PNG bytes must be embedded unchanged (no JPEG re-encoding)"
+        );
     }
 }

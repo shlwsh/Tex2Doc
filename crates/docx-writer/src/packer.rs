@@ -120,6 +120,10 @@ fn empty_footer_body() -> String {
 }
 
 fn header_line_body(text: &str, text_width: u32) -> String {
+    // v13.2 F1: 与 sh 的 header_xml() 对齐——
+    //   pStyle="JOSMasthead"、run 上无内嵌 rPr（不写 w:rFonts/w:sz，
+    //   由 styles.xml 中的 JOSMasthead 样式统一提供字体/字号）。
+    //   页码字段用 <w:fldSimple>，与 sh 完全一致。
     let clean = text.lines().next().unwrap_or(text).trim();
     let mut para = format!(
         r#"<w:p><w:pPr><w:pStyle w:val="JOSMasthead"/><w:tabs><w:tab w:val="right" w:pos="{text_width}"/></w:tabs></w:pPr>"#,
@@ -127,7 +131,7 @@ fn header_line_body(text: &str, text_width: u32) -> String {
     para.push_str(r#"<w:r><w:t xml:space="preserve">"#);
     para.push_str(&xml_escape_local(clean));
     para.push_str("</w:t></w:r><w:r><w:tab/></w:r>");
-    render_runs(&mut para, "{{PAGE}}");
+    para.push_str(r#"<w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple>"#);
     para.push_str("</w:p>");
     para
 }
@@ -663,6 +667,21 @@ mod tests {
             header1.contains("PAGE"),
             "header1.xml must contain PAGE field: {header1}"
         );
+        // v13.2 F1: header1 必须使用 JOSMasthead 样式且 run 上无内嵌 rPr
+        assert!(
+            header1.contains(r#"<w:pStyle w:val="JOSMasthead"/>"#),
+            "header1 should use JOSMasthead: {header1}"
+        );
+        assert!(
+            !header1.contains("<w:rPr>"),
+            "header1 must not embed rPr inside runs: {header1}"
+        );
+        // v13.2 F1: tab 位置必须等于 text_width（不是硬编码 9000）
+        let text_width = ps.text_width_twips();
+        assert!(
+            header1.contains(&format!(r#"<w:tab w:val="right" w:pos="{text_width}"/>"#)),
+            "header1 tab pos should equal text_width {text_width}: {header1}"
+        );
         // 首页页脚
         let footer1 = {
             let mut f = r.by_name("word/footer1.xml").unwrap();
@@ -673,6 +692,77 @@ mod tests {
         assert!(
             footer1.contains("首页脚"),
             "footer1.xml must contain first footer: {footer1}"
+        );
+        // v13.2 F1: footer1 必须使用 JOSMasthead 样式（不是 Footer）
+        assert!(
+            footer1.contains(r#"<w:pStyle w:val="JOSMasthead"/>"#),
+            "footer1 should use JOSMasthead: {footer1}"
+        );
+    }
+
+    /// v13.2 F1: sectPr 内的 header/footer 引用必须 6 个齐全且类型对得上 rId。
+    #[test]
+    fn pack_sectpr_has_all_six_header_footer_refs_with_correct_types() {
+        use doc_semantic_ast::Document;
+        let mut doc = Document::new();
+        doc.push(Block::Paragraph {
+            runs: vec![TextRun {
+                text: "body".into(),
+                style: TextStyle::Plain,
+                span: Span::default(),
+            }],
+            span: Span::default(),
+        });
+        let ps = PageSetup {
+            width_twips: 11906,
+            height_twips: 16838,
+            margin_top: Some(1440),
+            margin_right: Some(1440),
+            margin_bottom: Some(1440),
+            margin_left: Some(1440),
+            margin_header: Some(720),
+            margin_footer: Some(720),
+            cols_space: None,
+            cols_num: None,
+            header_text: Some("软件学报 ISSN 1000-9825".to_string()),
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: Some("收稿时间: XXX".to_string()),
+            even_header_text: Some("Journal of Software 软件学报".to_string()),
+            first_footer_indent_twips: Some(330),
+        };
+        let bytes = pack_with_page_setup(&doc, None, None, Some(&ps)).unwrap();
+        let mut r = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
+        let mut doc_xml = String::new();
+        std::io::Read::read_to_string(
+            &mut r.by_name("word/document.xml").unwrap(),
+            &mut doc_xml,
+        )
+        .unwrap();
+        // 必须 6 个 headerReference / footerReference + titlePg
+        for typ in ["first", "default", "even"] {
+            assert!(
+                doc_xml.contains(&format!(r#"<w:headerReference w:type="{typ}"#)),
+                "missing headerReference {typ} in sectPr: {doc_xml}"
+            );
+            assert!(
+                doc_xml.contains(&format!(r#"<w:footerReference w:type="{typ}"#)),
+                "missing footerReference {typ} in sectPr: {doc_xml}"
+            );
+        }
+        assert!(doc_xml.contains("<w:titlePg/>"), "missing titlePg: {doc_xml}");
+        // rIdH0 / rIdH1 / rIdH2 必须是 first / default / even
+        assert!(
+            doc_xml.contains(r#"<w:headerReference w:type="first" r:id="rIdH0"/>"#),
+            "first header should be rIdH0: {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains(r#"<w:headerReference w:type="default" r:id="rIdH1"/>"#),
+            "default header should be rIdH1: {doc_xml}"
+        );
+        assert!(
+            doc_xml.contains(r#"<w:headerReference w:type="even" r:id="rIdH2"/>"#),
+            "even header should be rIdH2: {doc_xml}"
         );
     }
 }

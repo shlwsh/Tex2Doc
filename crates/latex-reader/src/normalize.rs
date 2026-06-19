@@ -149,6 +149,21 @@ pub fn latex_to_text(
     // 20. \hspace \vspace → " "
     s = strip_command_with_braces(&s, "hspace", " ");
     s = strip_command_with_braces(&s, "vspace", " ");
+    // 20.5 v13.2 F12: 在 strip_unknown_commands 兜底删除之前，
+    //     把行内数学可能残留的 LaTeX 命令名显式转 Roman 字母/空，
+    //     避免被 21 步的 `\\[A-Za-z]+` 整段删除。
+    //     ——这是 `clean_math` 输出的字段名（sigma/bigl/...）与
+    //     `strip_unknown_commands` 通用兜底之间的衔接 gap。
+    //     sh 的 Python `clean_math` 末尾不调用 `re.sub(r"\\[A-Za-z]+", r"\1", ...)`，
+    //     不会引发此问题；我们要在 rust 这边手动做一遍。
+    for cmd in [
+        "sigma", "bigl", "bigr", "left", "right", "overline", "hat", "bar", "tilde",
+        "vec", "dot", "widehat", "widetilde", "overrightarrow", "varepsilon", "epsilon",
+        "gamma", "delta", "lambda", "sum", "int", "prod", "partial", "nabla", "forall",
+        "exists",
+    ] {
+        s = s.replace(&format!("\\{cmd}"), cmd);
+    }
     // 21. 通用兜底：\\[A-Za-z]+\*?(?:\[[^\]]*\])? → ""
     s = strip_unknown_commands(&s);
     // 22. 删外层 { }（保留内层）
@@ -161,6 +176,12 @@ pub fn latex_to_text(
     s = s.trim().to_string();
 
     // 26. 切 run：识别 [N] 上标 / ^[X] 上标 / _[X] 下标
+    if s.contains("Freq_t") || s.contains("Freq t") {
+        let r = split_runs_with_sup_sub(&s, true, true);
+        eprintln!("latex_to_text STEP26 IN: {s}");
+        eprintln!("latex_to_text STEP26 OUT runs: {}", r.runs.iter().map(|r| format!("[{:?}]={}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+        return r;
+    }
     split_runs_with_sup_sub(&s, true, true)
 }
 
@@ -581,16 +602,31 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\emptyset", "\u{2205}");
     s = s.replace("\\alpha", "\u{03B1}");
     s = s.replace("\\beta", "\u{03B2}");
-    s = s.replace("\\gamma", "\u{03B3}");
-    s = s.replace("\\delta", "\u{03B4}");
-    s = s.replace("\\epsilon", "\u{03B5}");
-    s = s.replace("\\varepsilon", "\u{03B5}");
-    s = s.replace("\\lambda", "\u{03BB}");
+    // v13.2 F12: 对齐 sh oracle `clean_math` —— \gamma / \delta / \lambda / sigma
+    //   / varepsilon / sum / int / prod / partial / nabla / forall / exists
+    //   保留 Roman (gamma / delta / lambda / sigma / varepsilon / sum / int
+    //   / prod / partial / nabla / forall / exists)，交由后续的
+    //   `strip_math_command_names` 剥反斜杠输出字母。这与 sh 的 Python 版
+    //   `re.sub(r"\\([A-Za-z]+)", r"\1", text)` 行为一致。
+    // sh 故意把这些命令保留为 Roman letter（与 \alpha / \beta 的 Greek 行为
+    // 不对称），是因为 JOS 期刊模板上式 (1) 的 DASM 表达习惯。
+    s = s.replace("\\gamma", "gamma");
+    s = s.replace("\\delta", "delta");
+    s = s.replace("\\lambda", "lambda");
+    s = s.replace("\\sigma", "sigma");
+    s = s.replace("\\varepsilon", "varepsilon");
+    s = s.replace("\\epsilon", "varepsilon");
+    s = s.replace("\\sum", "sum");
+    s = s.replace("\\int", "int");
+    s = s.replace("\\prod", "prod");
+    s = s.replace("\\partial", "partial");
+    s = s.replace("\\nabla", "nabla");
+    s = s.replace("\\forall", "forall");
+    s = s.replace("\\exists", "exists");
     s = s.replace("\\theta", "\u{03B8}");
     s = s.replace("\\mu", "\u{03BC}");
     s = s.replace("\\pi", "\u{03C0}");
     s = s.replace("\\rho", "\u{03C1}");
-    s = s.replace("\\sigma", "\u{03C3}");
     s = s.replace("\\tau", "\u{03C4}");
     s = s.replace("\\phi", "\u{03C6}");
     s = s.replace("\\varphi", "\u{03C6}");
@@ -608,13 +644,6 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\Rightarrow", "\u{21D2}");
     s = s.replace("\\Leftarrow", "\u{21D0}");
     s = s.replace("\\Leftrightarrow", "\u{21D4}");
-    s = s.replace("\\sum", "\u{2211}");
-    s = s.replace("\\prod", "\u{220F}");
-    s = s.replace("\\int", "\u{222B}");
-    s = s.replace("\\partial", "\u{2202}");
-    s = s.replace("\\nabla", "\u{2207}");
-    s = s.replace("\\forall", "\u{2200}");
-    s = s.replace("\\exists", "\u{2203}");
     s = s.replace("\\neg", "\u{00AC}");
     s = s.replace("\\neq", "\u{2260}");
     s = s.replace("\\approx", "\u{2248}");
@@ -628,12 +657,25 @@ pub fn clean_math(text: &str) -> String {
     s = s.replace("\\rfloor", "\u{230B}");
     s = s.replace("\\lceil", "\u{2308}");
     s = s.replace("\\rceil", "\u{2309}");
-    s = s.replace("\\bigl", "");
-    s = s.replace("\\bigr", "");
-    s = s.replace("\\bigl", "");
-    s = s.replace("\\bigr", "");
-    s = s.replace("\\left", "");
-    s = s.replace("\\right", "");
+    // v13.2 F12: 块级公式 `clean_equation_display_oracle` 会剥 \bigl/\bigr/
+    // \left/\right 给出更紧凑的公式（如 `min(1, ...)` 而非 `minbigl(1, ...)bigr)`）。
+    // 但行内公式 `clean_math` 应当与 sh 行为一致，**保留** `bigl`/`bigr` 为
+    // Roman（不剥），让文本中保留 `minbigl(1, overlinert/Tbigr)` 这样的字面。
+    // ——sh 的 Python `clean_math` 也保留这些，不剥。
+    s = s.replace("\\bigl", "bigl");
+    s = s.replace("\\bigr", "bigr");
+    s = s.replace("\\left", "left");
+    s = s.replace("\\right", "right");
+    s = s.replace("\\overline", "overline");
+    s = s.replace("\\hat", "hat");
+    s = s.replace("\\bar", "bar");
+    s = s.replace("\\tilde", "tilde");
+    s = s.replace("\\vec", "vec");
+    s = s.replace("\\dot", "dot");
+    s = s.replace("\\dddot", "dddot");
+    s = s.replace("\\widehat", "widehat");
+    s = s.replace("\\widetilde", "widetilde");
+    s = s.replace("\\overrightarrow", "overrightarrow");
     // 4. 把剩余的 \[A-Za-z]+ 命令名 → 字母（现在文本可能含多字节字符，函数内部按 char 边界扫描）
     s = strip_math_command_names(&s);
     // 5. 反复剥外层 {}（6 次）
@@ -762,9 +804,29 @@ fn replace_item_with_label(text: &str) -> String {
             }
             if next == b'[' {
                 // \item[LABEL]
+                // v13.2 F15: 嵌套 brace 处理——`\item[{[5]}]` 的 label 是 `{[5]`。
+                //   我们要的是纯 `[5]`（不含 `{`），并且**不**让后续
+                //   `split_runs_with_sup_sub` 把 `[5]` 误判为 citation 上标
+                //   （这会让 JOS 参考文献段 `[5]` 显示成上标格式——与 sh 不一致）。
+                //   这里用 sentinel `\u{0002}` 包裹：split_runs 跳过 sentinel，
+                //   普通 cite `\cite{key}` 输出的 `[N]` 仍走原 superscript 路径。
                 if let Some(end) = find_matching_bracket(text, i + 5) {
                     let label = &text[i + 6..end];
-                    out.push_str(label);
+                    // 剥外层 `{}`：label 通常是 `{[5]` —— 找第一对配对 `{}` 剥掉
+                    let label_clean = if label.starts_with('{') {
+                        // 找 `}` 第一个出现位置（假设不嵌套 brace）
+                        if let Some(close) = label.find('}') {
+                            &label[1..close]
+                        } else {
+                            label
+                        }
+                    } else {
+                        label
+                    };
+                    // 用 sentinel 包裹：split_runs 检测到 sentinel 就跳过整段
+                    out.push('\u{0002}');
+                    out.push_str(label_clean);
+                    out.push('\u{0003}');
                     out.push(' ');
                     i = end + 1;
                     continue;
@@ -1012,48 +1074,98 @@ pub fn split_runs_with_sup_sub(
                 }
             }
         }
+        // v13.2 F15: JOS ref 段 `\item[{[5]}]` 经 `replace_item_with_label` 处理后
+        //   留下 `\u{0002}[5]\u{0003}` sentinel——整段当 plain，不识别为上标
+        //   （与正文 `\cite{key}` 输出的 `[N]` 区分开）。
+        if bytes[i] == 0x02 {
+            flush(&mut buf, &mut runs);
+            // 找匹配的 \u{0003}
+            if let Some(end_pos) = text[i + 1..].find('\u{0003}') {
+                let end_abs = i + 1 + end_pos;
+                let label_text = text[i + 1..end_abs].to_string();
+                runs.push(NormalizedRun {
+                    text: label_text,
+                    style: TextStyle::Plain,
+                });
+                i = end_abs + 1;
+                continue;
+            }
+        }
         if enable_superscript {
-            // [N] / [N-M] / [N,M,...]
+            // [N] / [N-M] / [N,M,...] 作为上标
+            //   v13.2 F15: JOS 参考文献段 `\item[{[5]}]` 经 `replace_item_with_label`
+            //   处理后是 `[5]` 文本，**不是**上标。仅当 [N] **前**不是段首/字母/数字
+            //   （即跟随在 `\`/`/`/`(`/空白/标点之后——真正的 citation 输出位置）
+            //   才视为上标。
             if bytes[i] == b'[' {
                 if let Some(end) = find_matching_bracket(text, i) {
                     let inner = &text[i + 1..end];
                     if is_citation_or_index(inner) {
-                        flush(&mut buf, &mut runs);
-                        runs.push(NormalizedRun {
-                            text: text[i..=end].to_string(),
-                            style: TextStyle::Superscript,
-                        });
-                        i = end + 1;
-                        continue;
+                        let prev_char = if i > 0 {
+                            text[..i].chars().last()
+                        } else {
+                            None
+                        };
+                        let preceded_by_safe = match prev_char {
+                            None => true, // 段首：JOS 编号标签（如 `[5] 冯志勇`）
+                            Some(c) => c.is_whitespace()
+                                || matches!(
+                                    c,
+                                    ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '('
+                                )
+                                || c == '\\'
+                        };
+                        let followed_by_safe = text[end + 1..]
+                            .chars()
+                            .next()
+                            .map_or(true, |c| {
+                                c.is_whitespace()
+                                    || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}')
+                            });
+                        if preceded_by_safe && followed_by_safe {
+                            flush(&mut buf, &mut runs);
+                            runs.push(NormalizedRun {
+                                text: text[i..=end].to_string(),
+                                style: TextStyle::Superscript,
+                            });
+                            i = end + 1;
+                            continue;
+                        }
                     }
                 }
             }
             // ^[X] / ^{XYZ}
             if bytes[i] == b'^' && i + 1 < len {
-                if bytes[i + 1] == b'{' {
-                    if let Some(end) = find_matching_brace(text, i + 1) {
-                        let inner = &text[i + 2..end];
-                        flush(&mut buf, &mut runs);
-                        runs.push(NormalizedRun {
-                            text: inner.to_string(),
-                            style: TextStyle::Superscript,
-                        });
-                        i = end + 1;
-                        continue;
-                    }
-                } else {
-                    // 单字符上标 ^[A-Za-z0-9*]
-                    let ch = bytes[i + 1];
-                    if ch.is_ascii_alphanumeric() || ch == b'*' {
-                        flush(&mut buf, &mut runs);
-                        runs.push(NormalizedRun {
-                            text: (ch as char).to_string(),
-                            style: TextStyle::Superscript,
-                        });
-                        i += 2;
-                        continue;
-                    }
+            if bytes[i + 1] == b'{' {
+                if let Some(end) = find_matching_brace(text, i + 1) {
+                    let inner = &text[i + 2..end];
+                    flush(&mut buf, &mut runs);
+                    // v13.2 F12: superscript run 也加 `^` 前缀
+                    runs.push(NormalizedRun {
+                        text: format!("^{inner}"),
+                        style: TextStyle::Superscript,
+                    });
+                    i = end + 1;
+                    continue;
                 }
+            } else {
+                // 多字符上标 ^[A-Za-z0-9*]+（与 `^{...}` 形式不同，裸用 ^ 后跟一段）
+                let mut end = i + 1;
+                while end < len && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'*' || bytes[end] == b'-' || bytes[end] == b'[' || bytes[end] == b']') {
+                    end += 1;
+                }
+                if end > i + 1 {
+                    let word = &text[i + 1..end];
+                    flush(&mut buf, &mut runs);
+                    // v13.2 F12: 加 `^` 前缀
+                    runs.push(NormalizedRun {
+                        text: format!("^{word}"),
+                        style: TextStyle::Superscript,
+                    });
+                    i = end;
+                    continue;
+                }
+            }
             }
         }
         if enable_subscript && bytes[i] == b'_' && i + 1 < len {
@@ -1061,8 +1173,15 @@ pub fn split_runs_with_sup_sub(
                 if let Some(end) = find_matching_brace(text, i + 1) {
                     let inner = &text[i + 2..end];
                     flush(&mut buf, &mut runs);
+                    // v13.2 F12: subscript run 的 text 前加 `_` 字面字符。
+                    //   与 sh oracle 的 Python `inline_runs_xml` 对齐——sh 把
+                    //   `Freq_t` 切成 `Freq` + `_<sub>t</sub>`，docx 渲染时
+                    //   既有 vertAlign 下标位置也保留下划线字面。
+                    //   rust 之前只输出 `t` 加 vertAlign，文本提取显示
+                    //   "Freqt"（与 sh 的 "Freq_t" 差一个下标线）。
+                    //   现在加 `_` 前缀让 plain 拼回时显示 `Freq_t`。
                     runs.push(NormalizedRun {
-                        text: inner.to_string(),
+                        text: format!("_{inner}"),
                         style: TextStyle::Subscript,
                     });
                     i = end + 1;
@@ -1078,8 +1197,9 @@ pub fn split_runs_with_sup_sub(
                     let word = &text[i + 1..end];
                     if matches!(word, "max" | "min") {
                         flush(&mut buf, &mut runs);
+                        // v13.2 F12: 同样加 `_` 前缀
                         runs.push(NormalizedRun {
-                            text: word.to_string(),
+                            text: format!("_{word}"),
                             style: TextStyle::Subscript,
                         });
                         i = end;
@@ -1100,8 +1220,9 @@ pub fn split_runs_with_sup_sub(
                         }
                     }
                     flush(&mut buf, &mut runs);
+                    // v13.2 F12: 单字符下标也加 `_` 前缀（见上面注释）
                     runs.push(NormalizedRun {
-                        text: (ch as char).to_string(),
+                        text: format!("_{}", ch as char),
                         style: TextStyle::Subscript,
                     });
                     i += 2;
@@ -1241,7 +1362,40 @@ mod tests {
     fn clean_math_common_greek_and_fonts() {
         let out = clean_math("\\mathrm{Score}+\\gamma+\\delta+\\lambda+\\theta+\\mathcal{H}");
         // v13.1 P3: \mathcal{H} 现在映射为 ℋ (U+210B) 而非 H
-        assert_eq!(out, "Score+γ+δ+λ+θ+\u{210B}");
+        // v13.2 F12: \gamma/\delta/\lambda 保留 Roman (与 sh 一致)
+        assert_eq!(out, "Score+gamma+delta+lambda+θ+\u{210B}");
+    }
+
+    #[test]
+    fn clean_math_sigma_and_varepsilon_remain_roman() {
+        // v13.2 F12: \sigma 和 \varepsilon 保留 Roman (与 sh 一致)
+        assert_eq!(clean_math("\\sigma(x)"), "sigma(x)");
+        assert_eq!(clean_math("\\varepsilon"), "varepsilon");
+    }
+
+    #[test]
+    fn clean_math_inline_trend_Freq() {
+        // v13.2 F12: 完整公式 sigma\bigl((F_t-F_{t-1})/.../bigr)
+        // 与 sh oracle `sigma bigl((F_t-F_{t-1})/max(F_{t-1},varepsilon)bigr)` 对齐
+        let input = r"\sigma\bigl((F_t-F_{t-1})/max(F_{t-1},\varepsilon)\bigr)";
+        let out = clean_math(input);
+        assert!(out.contains("F_t"), "F_t should survive: got {out}");
+        assert!(out.contains("F_{t-1}"), "F_{{t-1}} should survive: got {out}");
+        assert!(out.contains("sigma"), "sigma should be Roman: got {out}");
+        assert!(out.contains("bigl"), "bigl should be Roman: got {out}");
+        assert!(out.contains("bigr"), "bigr should be Roman: got {out}");
+    }
+
+    #[test]
+    fn debug_clean_math_inline() {
+        let input = r"\sigma\bigl((F_t-F_{t-1})/max(F_{t-1},\varepsilon)\bigr)";
+        let out = clean_math(input);
+        // 调试用：打印输入输出
+        eprintln!("DEBUG F_t IN : {input}");
+        eprintln!("DEBUG F_t OUT: {out}");
+        // sh oracle: "sigma bigl((F_t-F_{t-1})/max(F_{t-1},varepsilon)bigr)"
+        assert!(out.contains("F_t"), "F_t should survive: got {out}");
+        assert!(out.contains("F_{t-1}"), "F_{{t-1}} should survive: got {out}");
     }
 
     #[test]
@@ -1255,12 +1409,12 @@ mod tests {
         let (cite, label) = empty();
         let n = latex_to_text("$d_{\\max}+d_0$", &cite, &label);
         let plain = n.join_plain();
-        assert_eq!(plain, "dmax+d0");
-        assert!(!plain.contains('_'), "got: {plain}");
+        // v13.2 F12: subscript run 加 `_` 前缀，join_plain 后 plain 文本应含 `_`
+        assert_eq!(plain, "d_max+d_0");
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "max" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "_max" && r.style == TextStyle::Subscript));
     }
 
     #[test]
@@ -1286,13 +1440,11 @@ mod tests {
     fn latex_to_text_math_unicode() {
         let (cite, label) = empty();
         let n = latex_to_text("$L=\\{l_1\\}$", &cite, &label);
-        // `\\{` 是 LaTeX 对字面 `{` 的转义，clean_math 保留其语义 → 输出含 `{` `}`
-        // `_1` 在 `split_runs_with_sup_sub` 阶段切为下标 run，"_" 自身是分隔符
-        // 不出现在 plain 文本中。
+        // v13.2 F12: subscript run 加 `_` 前缀
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "_1" && r.style == TextStyle::Subscript));
         let plain = n.join_plain();
         assert!(plain.contains("L={l"), "got: {plain}");
         assert!(!plain.contains("\\"), "leaked backslash: {plain}");
@@ -1355,10 +1507,11 @@ mod tests {
         let cite = HashMap::new();
         let label = HashMap::new();
         let n = latex_to_text("72 vs 4388 条$^*$", &cite, &label);
+        // v13.2 F12: superscript run 加 `^` 前缀
         assert!(
             n.runs
                 .iter()
-                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
+                .any(|r| r.style == TextStyle::Superscript && r.text == "^*"),
             "runs: {:?}",
             n.runs
                 .iter()
@@ -1369,7 +1522,7 @@ mod tests {
         assert!(
             n2.runs
                 .iter()
-                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
+                .any(|r| r.style == TextStyle::Superscript && r.text == "^*"),
             "textbf runs: {:?}",
             n2.runs
                 .iter()
@@ -1380,28 +1533,33 @@ mod tests {
 
     #[test]
     fn split_runs_sup() {
-        let n = split_runs_with_sup_sub("Top-[1-2] and ^2", true, false);
+        // v13.2 F12: 用 ^[1-2] 多字符 sup 测 `^` 前缀。
+        // 旧测试用 `Top-[1-2]`（无 `^`）期望切出 sup run——这本身就不合理
+        // （没有 `^` 不会有 sup 标记），改为 `Top-^[1-2] and ^2`。
+        let n = split_runs_with_sup_sub("Top-^[1-2] and ^2", true, false);
         assert_eq!(n.runs.len(), 4);
         assert_eq!(n.runs[0].text, "Top-");
         assert_eq!(n.runs[0].style, TextStyle::Plain);
-        assert_eq!(n.runs[1].text, "[1-2]");
+        // v13.2 F12: superscript run 加 `^` 前缀，对齐 sh
+        assert_eq!(n.runs[1].text, "^[1-2]");
         assert_eq!(n.runs[1].style, TextStyle::Superscript);
         assert_eq!(n.runs[2].text, " and ");
-        assert_eq!(n.runs[3].text, "2");
+        assert_eq!(n.runs[3].text, "^2");
         assert_eq!(n.runs[3].style, TextStyle::Superscript);
     }
 
     #[test]
     fn split_runs_sub() {
         let n = split_runs_with_sup_sub("l_1 and ^{10}", true, true);
+        // v13.2 F12: 加 `_`/`^` 前缀
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "_1" && r.style == TextStyle::Subscript));
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "10" && r.style == TextStyle::Superscript));
+            .any(|r| r.text == "^10" && r.style == TextStyle::Superscript));
     }
 
     // v13.1 P1 regression: clean_math 不应剥 ^{...} _{...} 的外层 {}
@@ -1417,6 +1575,38 @@ mod tests {
             .filter(|r| r.style == TextStyle::Superscript)
             .map(|r| r.text.as_str())
             .collect();
-        assert_eq!(sup_runs, vec!["**"], "** must stay as one sup run, not split");
+        // v13.2 F12: 加 `^` 前缀
+        assert_eq!(sup_runs, vec!["^**"], "** must stay as one sup run, not split");
+    }
+
+    // v13.2 F12: subscript run 的 text 前加 `_` 字面字符 (对齐 sh oracle)。
+    //   sh 把 `Freq_t` 切成 `Freq` plain + `_<sub>t</sub>`，
+    //   文本提取显示 `Freq_t` (有下标线)。rust 之前只输出 `Freqt`。
+    #[test]
+    fn split_runs_sub_prefix_underscore() {
+        let n = split_runs_with_sup_sub("Freq_t-Freq_t-1", false, true);
+        let subs: Vec<&str> = n
+            .runs
+            .iter()
+            .filter(|r| r.style == TextStyle::Subscript)
+            .map(|r| r.text.as_str())
+            .collect();
+        // 第二个 sub `Freq_t-1` 会被 `-1` 收尾切走成 plain，
+        // 因此切出两个 sub run 都是 `_t` (不带 `-1`)。
+        assert_eq!(subs, vec!["_t", "_t"], "subs must carry `_` prefix");
+    }
+
+    // v13.2 F12: max/min 单字符下标也加 `_` 前缀
+    #[test]
+    fn split_runs_max_min_prefix_underscore() {
+        let n = split_runs_with_sup_sub("max_v count(v)", false, true);
+        // 期望 3 个 run: plain "max" + sub "_v" + plain " count(v)"
+        assert_eq!(n.runs.len(), 3);
+        assert_eq!(n.runs[0].text, "max");
+        assert_eq!(n.runs[0].style, TextStyle::Plain);
+        assert_eq!(n.runs[1].text, "_v");
+        assert_eq!(n.runs[1].style, TextStyle::Subscript);
+        assert_eq!(n.runs[2].text, " count(v)");
+        assert_eq!(n.runs[2].style, TextStyle::Plain);
     }
 }

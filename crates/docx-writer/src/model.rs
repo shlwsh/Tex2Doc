@@ -138,7 +138,21 @@ pub fn merge_adjacent_runs(runs: Vec<Run>) -> Vec<Run> {
                     // v13.1 P2: footnote 标点 (* † ‡ § ¶) 不加前导空格
                     let is_footnote = is_footnote_symbol(&run.text);
                     if !is_footnote {
-                        last.text.push(' ');
+                        // v13.2 F15: 双向去重——last 末尾或 run 前导已带空白时不重复追加。
+                        //   避免 `merge` 后多 1 空格（如 `[5]  冯志勇` → `[5] 冯志勇`）。
+                        let last_ends_with_space = last
+                            .text
+                            .chars()
+                            .last()
+                            .map_or(false, |c| c.is_whitespace());
+                        let run_starts_with_space = run
+                            .text
+                            .chars()
+                            .next()
+                            .map_or(false, |c| c.is_whitespace());
+                        if !last_ends_with_space && !run_starts_with_space {
+                            last.text.push(' ');
+                        }
                     }
                     last.text.push_str(&run.text);
                 }
@@ -172,6 +186,36 @@ mod tests {
         let out = merge_adjacent_runs(runs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "hello world");
+    }
+
+    #[test]
+    fn merge_adjacent_runs_no_double_space_when_last_trailing() {
+        // v13.2 F15: last 已带尾部空格时不重复追加
+        let runs = vec![Run::plain("hello "), Run::plain("world")];
+        let out = merge_adjacent_runs(runs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "hello world");
+    }
+
+    #[test]
+    fn merge_adjacent_runs_no_double_space_when_run_leading() {
+        // v13.2 F15: run 已带前导空格时不重复追加（典型场景：JOS ref `[5]`
+        //   + ` 冯志勇` 合并——run 已有前空格，merge 不应再加 1 空格）
+        let runs = vec![Run::plain("[5]"), Run::plain(" 冯志勇, ...")];
+        let out = merge_adjacent_runs(runs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "[5] 冯志勇, ...");
+    }
+
+    #[test]
+    fn merge_adjacent_runs_no_double_space_both_sides() {
+        // v13.2 F15: last 末尾 + run 前导都有空白时不追加
+        //   输入："hello  "（带尾随双空格） + "  world"（带前导双空格）
+        //   期望：保留所有空白（无 push ' '）
+        let runs = vec![Run::plain("hello  "), Run::plain("  world")];
+        let out = merge_adjacent_runs(runs);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].text, "hello    world");
     }
 
     #[test]

@@ -17,7 +17,9 @@ pub use green::GreenNode;
 pub use green::SyntaxKind;
 pub use green::SyntaxNode;
 pub use include::{IncludeGraph, JoinedStream};
-pub use latex_to_text::{compress_numbers as latex_compress_numbers, parse_bbl, parse_newcommands};
+pub use latex_to_text::{
+    compress_numbers as latex_compress_numbers, parse_bbl, parse_bib, parse_newcommands,
+};
 pub use lower::{
     lower_to_document, lower_to_document_with_cite_map, lower_to_standard_document,
     lower_with_macros, lower_with_macros_to_standard_document,

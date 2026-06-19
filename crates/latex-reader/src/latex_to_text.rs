@@ -114,6 +114,219 @@ pub fn parse_bbl(raw: &str) -> (HashMap<String, usize>, Vec<BibItem>) {
     (cite_map, refs)
 }
 
+/// 解析 `.bib` 文件（`@type{key, field={value}, ...}` 格式），转成 `BibItem` 列表。
+///
+/// 用于 `\bibliography{refs}` 但 vfs 不含 `.bbl` 的场景：直接把 `.bib` 解析成
+/// 55 条 plain text 引用，拼成与 `parse_bbl` 等价的结果。
+/// 与 sh oracle 的 `parse_bbl` 输出格式对齐——v13.2 F13 增加支持。
+pub fn parse_bib(raw: &str) -> Vec<BibItem> {
+    let mut refs: Vec<BibItem> = Vec::new();
+    let bytes = raw.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+
+    while i < len {
+        // 找 `@type{`
+        if i + 1 < len && bytes[i] == b'@' {
+            // 找 `{`
+            let mut p = i + 1;
+            while p < len && bytes[p] != b'{' {
+                p += 1;
+            }
+            if p >= len {
+                break;
+            }
+            // 找匹配的 `}` —— BibItem body 跨多行可能含 `}`，找第一个匹配到外层 `,` 即可
+            // 简单做法：找匹配大括号（嵌套计算）
+            let mut depth = 1;
+            let mut q = p + 1;
+            while q < len && depth > 0 {
+                if bytes[q] == b'{' {
+                    depth += 1;
+                } else if bytes[q] == b'}' {
+                    depth -= 1;
+                }
+                if depth == 0 {
+                    break;
+                }
+                q += 1;
+            }
+            if q >= len {
+                break;
+            }
+            // body in p+1..q
+            let body = &raw[p + 1..q];
+            // 第一个 `,` 之前是 key
+            let mut key_end = 0;
+            let mut brace_depth = 0;
+            for (k, c) in body.char_indices() {
+                if c == '{' {
+                    brace_depth += 1;
+                } else if c == '}' {
+                    brace_depth -= 1;
+                } else if c == ',' && brace_depth == 0 {
+                    key_end = k;
+                    break;
+                }
+            }
+            let key = body[..key_end].trim().to_string();
+            if key.is_empty() {
+                i = q + 1;
+                continue;
+            }
+            // body 转 plain text（清洗 `field = {value}, field2 = "value2"`）
+            let text = bib_body_to_text(&body[key_end + 1..]);
+            refs.push(BibItem { key, text });
+            i = q + 1;
+        } else {
+            i += 1;
+        }
+    }
+    refs
+}
+
+/// 把 `.bib` 单条目 body（`field = {value}, field2 = "value2"`）按常见引用格式
+/// 转成纯文本：`Author. Title. Journal, Year, vol(issue): pages.`。
+/// 与 sh oracle 输出的英文引用格式对齐。
+fn bib_body_to_text(body: &str) -> String {
+    // 拆 field=value 对
+    let mut fields: Vec<(String, String)> = Vec::new();
+    let mut current_key: Option<String> = None;
+    let mut current_value_start = 0;
+    let mut depth = 0;
+    let bytes = body.as_bytes();
+    let mut i = 0;
+
+    while i < body.len() {
+        let c = body[i..].chars().next().unwrap();
+        if c == '{' {
+            if depth == 0 {
+                if current_key.is_none() {
+                    if let Some(eq) = body[current_value_start..i].find('=') {
+                        let k = body[current_value_start..current_value_start + eq]
+                            .trim()
+                            .to_string();
+                        if !k.is_empty() {
+                            current_key = Some(k);
+                        }
+                    }
+                }
+            }
+            depth += 1;
+        } else if c == '}' {
+            depth -= 1;
+            if depth == 0 && current_key.is_some() {
+                let val = body[current_value_start..i].to_string();
+                fields.push((current_key.take().unwrap(), val));
+                let mut j = i + 1;
+                while j < body.len()
+                    && (bytes[j] == b',' || bytes[j] == b' ' || bytes[j] == b'\n' || bytes[j] == b'\t')
+                {
+                    j += 1;
+                }
+                current_value_start = j;
+                i = j;
+                continue;
+            }
+        } else if c == '=' && depth == 0 && current_key.is_none() {
+            let k = body[current_value_start..i].trim();
+            if !k.is_empty()
+                && k.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+            {
+                current_key = Some(k.to_string());
+                let mut j = i + 1;
+                while j < body.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n') {
+                    j += 1;
+                }
+                if j < body.len() && bytes[j] == b'{' {
+                    current_value_start = j + 1;
+                    depth = 1;
+                    i = j + 1;
+                    continue;
+                } else if j < body.len() && bytes[j] == b'"' {
+                    if let Some(end) = body[j + 1..].find('"') {
+                        let val = body[j + 1..j + 1 + end].to_string();
+                        fields.push((current_key.take().unwrap(), val));
+                        let mut k = j + 2 + end;
+                        while k < body.len()
+                            && (bytes[k] == b',' || bytes[k] == b' ' || bytes[k] == b'\n' || bytes[k] == b'\t')
+                        {
+                            k += 1;
+                        }
+                        current_value_start = k;
+                        i = k;
+                        continue;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+
+    // 拼出 plain text：Author. Title. Journal, Year, vol(issue): pages.
+    let mut by_key: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for (k, v) in &fields {
+        by_key.insert(k.clone(), v.trim().to_string());
+    }
+    let author = by_key.get("author").cloned().unwrap_or_default();
+    let title = by_key.get("title").cloned().unwrap_or_default();
+    let journal = by_key.get("journal").cloned().unwrap_or_default();
+    let year = by_key.get("year").cloned().unwrap_or_default();
+    let volume = by_key.get("volume").cloned().unwrap_or_default();
+    let number = by_key.get("number").cloned().unwrap_or_default();
+    let pages = by_key.get("pages").cloned().unwrap_or_default();
+
+    let author_str = bib_author_to_text(&author);
+    let title_clean = title.replace('{', "").replace('}', "");
+    let title_clean = title_clean.replace("``", "\u{201C}").replace("''", "\u{201D}");
+
+    let mut parts = Vec::new();
+    if !author_str.is_empty() {
+        parts.push(author_str);
+    }
+    if !title_clean.is_empty() {
+        parts.push(format!("{title_clean}."));
+    }
+    let mut venue = String::new();
+    if !journal.is_empty() {
+        venue.push_str(&journal.replace('{', "").replace('}', ""));
+    }
+    if !volume.is_empty() {
+        if !venue.is_empty() {
+            venue.push_str(", ");
+        }
+        venue.push_str(&volume);
+        if !number.is_empty() {
+            venue.push_str(&format!("({number})"));
+        }
+    }
+    if !pages.is_empty() {
+        if !venue.is_empty() {
+            venue.push_str(": ");
+        }
+        let pages_clean = pages.replace("--", "\u{2013}").replace("---", "\u{2014}");
+        venue.push_str(&pages_clean);
+    }
+    if !venue.is_empty() {
+        parts.push(format!("{venue}."));
+    }
+    if !year.is_empty() {
+        parts.push(format!("{year}."));
+    }
+    parts.join(" ")
+}
+
+/// 把 BibTeX author 字段（"Last, First and Last2, First2 and ..."）
+/// 转成英文引用格式："Last, First, Last2, First2, ..."。
+fn bib_author_to_text(s: &str) -> String {
+    s.split(" and ")
+        .map(|a| a.trim().replace('{', "").replace('}', ""))
+        .filter(|a| !a.is_empty())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 fn clean_bibitem_body(body: &str) -> String {
     let mut s = body.to_string();
     // 剥 \begin{thebibliography}{N} ... \end{thebibliography}（只在首尾）
@@ -631,6 +844,12 @@ fn extract_author_bio(text: &str) -> Vec<String> {
             let abs = i + rel;
             if let Some(end_rel) = text[abs..].find(end) {
                 let body = &text[abs + begin.len()..abs + end_rel];
+                // v13.2 F15: 跳过 list body 开头、第一个 `\item` 之前的所有
+                //   「参数残渗行」(`\leftmargin=2em \itemindent=-2em ...`)。
+                //   之前直接传 body 给 clean_bio_item → latex_to_text →
+                //   strip_command("item") 会把 `\itemindent` 误剥为
+                //   `indent=-2em` 字面输出。
+                let body = skip_list_param_lines(body);
                 // 按 \item 切（跳过 list 环境参数 preamble）
                 let mut last = 0usize;
                 let mut seen_item = false;
@@ -680,6 +899,39 @@ fn extract_author_bio(text: &str) -> Vec<String> {
     out
 }
 
+/// 跳过 list body 开头、第一个 `\item` 之前的「参数残渗行」。
+///
+/// 用于 `extract_author_bio` 在传给 `latex_to_text` 之前调用，避免
+/// `\leftmargin=2em \itemindent=-2em \labelwidth=0pt ...` 里的 `\itemindent`
+/// 被 `strip_command("item")` 误剥为 `indent=-2em` 字面输出。
+fn skip_list_param_lines(body: &str) -> &str {
+    let bytes = body.as_bytes();
+    let len = bytes.len();
+    let mut i = 0;
+    while i < len {
+        let mut eol = i;
+        while eol < len && bytes[eol] != b'\n' {
+            eol += 1;
+        }
+        let line = &body[i..eol];
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("\\item") {
+            let after = &trimmed[5..];
+            if after.is_empty()
+                || after.starts_with(' ')
+                || after.starts_with('\t')
+                || after.starts_with('{')
+                || after.starts_with('[')
+                || after.starts_with('\r')
+            {
+                return &body[i..];
+            }
+        }
+        i = eol + 1;
+    }
+    body
+}
+
 fn clean_bio_item(s: &str) -> String {
     let mut raw = s.trim().to_string();
     raw = raw.replace("\\par", " ");
@@ -689,6 +941,7 @@ fn clean_bio_item(s: &str) -> String {
     let empty_label = std::collections::HashMap::new();
     let mut text =
         crate::normalize::latex_to_text(&item_tex, &empty_cite, &empty_label).join_plain();
+
     text = text.replace('{', "").replace('}', "");
     crate::normalize::collapse_whitespace_pub(&text).trim().to_string()
 }
