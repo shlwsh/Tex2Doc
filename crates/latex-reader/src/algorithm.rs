@@ -34,6 +34,8 @@ use std::collections::HashMap;
 /// 算法内 LaTeX 数学符号 Unicode 化。
 fn normalize_alg_math(s: &str) -> String {
     let mut r = s.to_string();
+    // v13.2 F17d: 先把 \\; 转为 ;（algorithm2e 行终止符）
+    r = r.replace("\\;", ";");
     // 多重替换：先长后短
     r = r.replace("\\leftarrow", "←");
     r = r.replace("\\Leftarrow", "⇐");
@@ -344,10 +346,18 @@ pub fn parse_algorithm_rows(body: &str) -> Vec<AlgLine> {
             }
         }
         // 普通语句
-        let raw = line.text.replace("\\;", " ");
-        let code = normalize_alg_code(&raw);
+        // v13.2 F17d: 保留 `\;` 在 line.text，由 normalize_alg_code → normalize_alg_math
+        //   转为 `;`（之前 replace 为空格丢掉了语句末尾的 `;`）。
+        let mut code = normalize_alg_code(&line.text);
+        // v13.2 F20: 跳过空文本行（strip_caption/KwIn/KwOut/label 后空），避免被下面的
+        //   `!ends_with(';')` 分支加上 `;` 输出空 `;` 行。
         if code.is_empty() {
             continue;
+        }
+        // sh 版行为：每行后默认加 `;`（即使源码没有 `\;`）。
+        // v13.2 F17e: 如果 text 已含 `;`（来自 `\;`）则不再加。
+        if !code.trim_end().ends_with(';') && !code.trim_end().ends_with(',') {
+            code.push(';');
         }
         let indent = *indent_stack.last().unwrap_or(&0);
         out.push(AlgLine {
@@ -414,7 +424,9 @@ impl<'a> Iterator for LogicLineIter<'a> {
                 if cb == b'\\' && i + 1 < len {
                     let next = bytes[i + 1];
                     if next == b';' {
-                        // \; → 终止本行
+                        // v13.2 F17d: 保留 `\;` 在 line.text（让 normalize_alg_code
+                        //   后处理转为 `;`），仅终止本行——之前直接 i+=2 跳过 `\;`
+                        //   丢掉了语句末尾的 `;`。
                         i += 2;
                         break;
                     }
@@ -446,6 +458,17 @@ impl<'a> Iterator for LogicLineIter<'a> {
                     }
                     continue;
                 }
+                if cb == b'{' {
+                    // v13.2 F17: 跳到配对 `}`，不当作行结束
+                    //   （避免 `\mathrm{count}` 内的 `}` 误切本行）。
+                    if let Some(end) = find_matching_brace_at(body, i) {
+                        i = end + 1;
+                    } else {
+                        // 无配对则吞掉这一个字符
+                        i += 1;
+                    }
+                    continue;
+                }
                 if cb == b'}' {
                     // 块的右括号作为当前层的结束
                     i += 1;
@@ -460,7 +483,10 @@ impl<'a> Iterator for LogicLineIter<'a> {
                 i += ch.len_utf8();
             }
             self.pos = i;
-            let raw = body[start..i].trim().trim_end_matches('}').trim();
+            // v13.2 F17c: 不再 trim_end_matches('}')——F17 在 LogicLineIter 跳过 {...}
+            //   后 line.text 含完整 `{...}` 内容；之前 trim 末尾的 `}` 破坏 brace 结构
+            //   （嵌套 \If{...}{...} 的 cond/body 都被剥掉）。
+            let raw = body[start..i].trim();
             if raw.is_empty() && comment.is_none() {
                 continue;
             }
@@ -559,7 +585,9 @@ fn split_two_braces(s: &str) -> Option<(String, String)> {
     let end1 = find_matching_brace_at(s, p)?;
     let cond = s[p + 1..end1].to_string();
     let mut q = end1 + 1;
-    while q < s.len() && (s.as_bytes()[q] == b' ' || s.as_bytes()[q] == b'\t') {
+    // v13.2 F17b: 跳所有 ASCII 空白（space/tab/换行）—— 之前只跳 space/tab，
+    //   在 body 起始 `{` 前有 `\n` 时漏掉第二对 brace，导致 cond 正确但 body 为空。
+    while q < s.len() && (s.as_bytes()[q] as char).is_ascii_whitespace() {
         q += 1;
     }
     if q >= s.len() || s.as_bytes()[q] != b'{' {

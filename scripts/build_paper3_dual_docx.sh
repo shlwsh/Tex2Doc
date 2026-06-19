@@ -76,22 +76,69 @@ from zipfile import ZipFile, ZIP_DEFLATED
 latex_dir = Path(r"$LATEX_DIR")
 main_tex = Path(r"$MAIN_TEX")
 out_zip = Path(r"$ZIP")
+paper3_dir = latex_dir.parent
+# v13.2 F14: upload.zip 必须包含 images 资源 + 完整 LaTeX 源码布局。
+#
+# paper3 main-jos.tex 内有：
+#   - `\graphicspath{{../figures/}}`（line 24） → 期望 `figures/` 与 main-jos.tex 平级
+#   - `\input{sections/zh/00_abstract}`（多文件 include）→ 期望 `sections/zh/*.tex` 与 main-jos.tex 平级
+#   - `\bibliography{references}` → 期望 `references.bib` 在主 tex 同级或 texinputs path
+#
+# zip 布局（与 paper3 源盘路径镜像，但简化）：
+#   - 顶层 `main-jos.tex`（主 tex，与现有 server 测试 fixture `main_tex=main-jos.tex` 兼容）
+#   - 顶层 `figures/fig*.{png,pdf}`（来自 paper3_dir/figures/）
+#   - 顶层 `sections/**/*.tex`（来自 latex_dir/sections/，保留相对路径）
+#   - 顶层 `references.bib`、`rjthesis.cls` 等（来自 latex_dir/）
 keep_suffixes = {".tex", ".bib", ".cls", ".bst", ".sty"}
+figure_suffixes = {".png", ".jpg", ".jpeg", ".gif", ".pdf", ".eps", ".svg"}
 
 if not main_tex.is_file():
     raise SystemExit(f"missing main tex: {main_tex}")
 
-files = [p for p in latex_dir.rglob("*") if p.is_file() and p.suffix.lower() in keep_suffixes]
-if not files:
+# 主 tex：放 zip 顶层
+src_files_top_level = [main_tex]
+# 其他源码（latex_dir 内除 main_jos.tex 外的 keep_suffix）：保留 latex_dir 相对路径放顶层
+src_files_under_tex = [
+    p for p in latex_dir.rglob("*")
+    if p.is_file()
+    and p.suffix.lower() in keep_suffixes
+    and p.resolve() != main_tex.resolve()
+]
+# 图片：latex_dir 下 + paper3_dir/figures/ 下（与 \graphicspath 对齐）
+fig_files = [
+    p for p in latex_dir.rglob("*")
+    if p.is_file() and p.suffix.lower() in figure_suffixes
+]
+fig_dir = paper3_dir / "figures"
+if fig_dir.is_dir():
+    fig_files += [
+        p for p in fig_dir.rglob("*")
+        if p.is_file() and p.suffix.lower() in figure_suffixes
+    ]
+
+if not src_files_top_level and not src_files_under_tex:
     raise SystemExit(f"no tex assets found under: {latex_dir}")
 
 out_zip.parent.mkdir(parents=True, exist_ok=True)
 with ZipFile(out_zip, "w", ZIP_DEFLATED) as zf:
-    for p in sorted(files):
-        zf.write(p, p.relative_to(latex_dir).as_posix())
+    # 主 tex 放顶层
+    for p in src_files_top_level:
+        zf.write(p, p.name)
+    # 其他源码（section, bib, cls 等）保留 latex_dir 相对路径放顶层
+    for p in sorted(src_files_under_tex):
+        rel = p.relative_to(latex_dir).as_posix()  # sections/zh/01_intro.tex
+        zf.write(p, rel)
+    # 图片放顶层 figures/
+    for p in fig_files:
+        # latex_dir 下图片（如有）放 latex_dir 相对路径顶层；paper3_dir/figures/ 下放 figures/
+        try:
+            rel_to_paper3 = p.relative_to(paper3_dir).as_posix()
+        except ValueError:
+            rel_to_paper3 = p.name
+        zf.write(p, rel_to_paper3)
 
 print(f"[paper3-zip] wrote {out_zip}")
-print(f"[paper3-zip] entries = {len(files)}")
+print(f"[paper3-zip] entries: tex_top={len(src_files_top_level)} tex_other={len(src_files_under_tex)} figures={len(fig_files)}")
 PY
 fi
 

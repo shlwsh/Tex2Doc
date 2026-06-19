@@ -163,8 +163,23 @@ pub fn serialize_document(
                     continue;
                 }
                 // v13.2.5 R6: metadata 已含作者简介时跳过正文中的重复标题
-                if paragraph_text == "作者简介" && !doc.metadata.author_bio.is_empty() {
-                    continue;
+                //   v13.2 F16: 同时跳过正文里与 metadata.author_bio 完全重复的 bio 段
+                //   ——避免出现两次（main 正文 `\begin{list}` 段 + 末尾 write_author_bio）。
+                if !doc.metadata.author_bio.is_empty() {
+                    if paragraph_text == "作者简介" {
+                        continue;
+                    }
+                    let mut matched = false;
+                    for b in &doc.metadata.author_bio {
+                        if b.trim() == paragraph_text {
+                            matched = true;
+                            break;
+                        }
+                    }
+                    if matched {
+                        eprintln!("F16 skip bio para: {paragraph_text:?}");
+                        continue;
+                    }
                 }
                 // 启发：参考文献样式 — 段落以 `[数字]` 开头时用 JOSReference
                 // （悬挂缩进，西文 Times New Roman，中文宋体）。
@@ -197,6 +212,33 @@ pub fn serialize_document(
                 // （来自 `\item[{[N]}]`，lower_list 加了 `{` 包装）。
                 // 使用 `JOSReference` 样式（悬挂缩进 + Times New Roman + SimSun）。
                 let is_jos_ref = is_jos_reference_list(items);
+                // v13.2 F16: 论文作者 bio（`\begin{list}{}{... \item {\hei Name}, ...}`）
+                //   也是 list —— 但每条 bio 应当**独立**段落输出，不能合并 +
+                //   加 `itemize ` 前缀（sh 版 `extract_bios` 行为）。
+                let is_bio = is_journal_bio_list(items);
+                // v13.2 F16: 如果 bio 列表**已包含在** metadata.author_bio 中，
+                //   跳过整段——避免重复（末尾 write_author_bio 会输出）。
+                if is_bio && !doc.metadata.author_bio.is_empty() {
+                    // 检查所有 items 文本是否都在 metadata.author_bio 中
+                    let all_in_metadata = items.iter().all(|sub| {
+                        let s: String = sub
+                            .iter()
+                            .filter_map(|b| match b {
+                                Block::Paragraph { runs, .. } => {
+                                    Some(runs.iter().map(|r| r.text.as_str()).collect::<String>())
+                                }
+                                _ => None,
+                            })
+                            .collect::<Vec<_>>()
+                            .join("");
+                        let s = s.trim();
+                        doc.metadata.author_bio.iter().any(|b| b.trim() == s)
+                    });
+                    if all_in_metadata {
+                        eprintln!("F16 skip entire bio list ({}) items", items.len());
+                        continue;
+                    }
+                }
                 // v13 P0: 仿 sh oracle 行为——itemize/enumerate 全部用
                 // JOSBody 样式 + 手写序号"1. …"。之前用 ListBullet/ListNumber
                 // 与 sh 完全错位，导致 v12 段 #147-#159 大量 deleted/inserted。
@@ -207,7 +249,9 @@ pub fn serialize_document(
                 };
                 // v13.2.7: sh 将 itemize 留在 chunk 内，latex_to_text 后合并为单段
                 // （前缀 "itemize " + 各项空格拼接）；enumerate 仍逐 item 独立段。
-                if !is_jos_ref && !*is_ordered {
+                // v13.2 F16: bio list 不合并、不加 itemize 前缀——
+                //   每条 bio 独立 JOSBody 段（与 sh 一致）。
+                if !is_jos_ref && !is_bio && !*is_ordered {
                     let merged = itemize_merged_text(items);
                     if merged.len() > "itemize ".len() {
                         let para = Paragraph {
@@ -245,7 +289,8 @@ pub fn serialize_document(
                             let mut docx_runs: Vec<Run> =
                                 runs.iter().map(from_text_run).collect();
                             // v13: 手写序号作为前缀 plain run
-                            if !is_jos_ref {
+                            //   v13.2 F16: bio list 不加序号/bullet——独立段落输出。
+                            if !is_jos_ref && !is_bio {
                                 let prefix = if *is_ordered {
                                     format!("{}. ", idx + 1)
                                 } else {
@@ -395,6 +440,9 @@ pub fn serialize_document(
                             write_drawing_paragraph(&mut w, &drawing);
 
                             // caption 单独写一行
+                            // v13.2 R8: caption 设 keepNext + keepLines，让"图片 + 标题"在同页；
+                            // 图片段本身已 keepNext（write_drawing_paragraph line 725），所以这里
+                            // caption 设 keepNext 是为对称（caption 之后如果紧跟另一段别跨页）。
                             if let Some(cap) = caption {
                                 let cap_text = match number {
                                     Some(n) => format!("{} {}", n, cap),
@@ -404,7 +452,7 @@ pub fn serialize_document(
                                     style_id: Some(STYLE_CAPTION.to_string()),
                                     runs: vec![Run::plain(cap_text)],
                                     jc: None,
-                                    keep_next: false,
+                                    keep_next: true,
                                     keep_lines: true,
                                 };
                                 write_paragraph(&mut w, &cap_para);
@@ -448,8 +496,11 @@ pub fn serialize_document(
                         style_id: Some(STYLE_CAPTION.to_string()),
                         runs: vec![Run::plain(cap_text)],
                         jc: None,
-                        keep_next: false,
-                        keep_lines: false,
+                        // v13.2 R8: 表格 caption 也跟表绑一起（caption 在表之后时，
+                        //  表本身已通过 trPr/cantSplit 行内不跨页 + caption keepLines，
+                        //  这里再设 keepNext 让 caption 后紧跟段也别把 caption 拉走）。
+                        keep_next: true,
+                        keep_lines: true,
                     };
                     write_paragraph(&mut w, &cap_para);
                 }
@@ -1071,12 +1122,50 @@ fn summarize_to_string(blocks: &[Block]) -> String {
         .join("")
 }
 
+/// v13.2 F16: 判定 list 是否应作为 JOS 参考文献段处理。
+///
+/// 判别依据：list 内每个 item 应当**都是**「JOS 参考文献段落」——
+///   即段首含 `[N]` 编号标签。这种 list 不合并、不加 `itemize ` 前缀，
+///   与 JOS 期刊格式一致。
+///
+/// 反例：
+///   - 标准 `\begin{itemize}` 多条 item —— items 不含 `[N]`，false
+///   - JOS bio `\begin{list}{}{... \item {\hei Name}, ... }` —— items 是
+///     纯 paragraph blocks（含人名/邮箱），不含 `[N]` 编号，false
+///     —— serializer 不走 JOS ref 路径，需要**额外**识别 bio 避免合并
+///     （见 `is_journal_bio_list`）。
 fn is_jos_reference_list(items: &[Vec<Block>]) -> bool {
-    items.iter().any(|sub| {
+    items.iter().all(|sub| {
         let s = summarize_to_string(sub);
         s.contains('[')
             && s.chars().any(|c| c.is_ascii_digit())
             && (s.contains('—') || s.contains("--") || s.contains(']'))
+    })
+}
+
+/// v13.2 F16: 判定 list 是否是 JOS 期刊作者 bio 风格
+///   （`\begin{list}{}{... \item {\hei Name}, ...}`）。
+///
+/// 判别：items 全部是单个 Block::Paragraph 且不含 `[N]` 编号前缀，
+///   且至少 1 个 item 内容以中文姓名 + 「，博士」/「，教授」等 bio 关键词开头。
+///   对这种 list，serializer **不合并** + **不加 `itemize ` 前缀**——
+///   每段独立输出（与 sh 版 `extract_bios` 行为对齐）。
+fn is_journal_bio_list(items: &[Vec<Block>]) -> bool {
+    if items.is_empty() || items.len() < 2 {
+        return false;
+    }
+    items.iter().all(|sub| {
+        sub.len() == 1
+            && matches!(&sub[0], Block::Paragraph { runs, .. } if {
+                let s: String = runs.iter().map(|r| r.text.as_str()).collect();
+                // 必须不含 [N] 编号 + 是中文 bio 段（含中文字符 + bio 关键词）
+                !s.contains('[')
+                    && s.chars().any(|c| '\u{4e00}' <= c && c <= '\u{9fff}')
+                    && (s.contains("，博士")
+                        || s.contains("，教授")
+                        || s.contains("E-mail")
+                        || s.contains("E-mail:"))
+            })
     })
 }
 
@@ -2760,6 +2849,92 @@ mod tests {
         );
     }
 
+    /// v13.2 R8: 表格 caption 段必须有 keepNext + keepLines（让 caption 与表绑同页），
+    /// 与 sh oracle 对齐（build_jos_docx.py 给每个 JOSCaption 段都加 keepNext/keepLines）。
+    #[test]
+    fn table_caption_paragraph_has_keep_next_and_keep_lines() {
+        let cell = doc_semantic_ast::TableCell {
+            runs: vec![doc_semantic_ast::TextRun {
+                text: "a".to_string(),
+                style: doc_semantic_ast::TextStyle::Plain,
+                span: doc_semantic_ast::Span::default(),
+            }],
+            colspan: 1,
+            rowspan: 1,
+            bg_color: None,
+        };
+        let row = doc_semantic_ast::TableRow { cells: vec![cell.clone(), cell] };
+        let doc = doc_semantic_ast::Document {
+            metadata: Default::default(),
+            blocks: vec![doc_semantic_ast::Block::Table {
+                rows: vec![row],
+                caption: Some("测试表".to_string()),
+                number: Some("表 1".to_string()),
+                span: doc_semantic_ast::Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        // 找 JOSCaption 段 (caption 在表之前)
+        let caps: Vec<&str> = {
+            let mut start = 0;
+            let mut out = Vec::new();
+            while let Some(pos) = xml[start..].find("<w:pStyle w:val=\"JOSCaption\"/>") {
+                let abs = start + pos;
+                let p_start = xml[..abs].rfind("<w:p>").unwrap_or(0);
+                let p_end = abs + xml[abs..].find("</w:p>").unwrap();
+                out.push(&xml[p_start..p_end + 6]);
+                start = p_end + 6;
+            }
+            out
+        };
+        assert!(!caps.is_empty(), "must have at least 1 JOSCaption paragraph");
+        for cap in &caps {
+            assert!(cap.contains("<w:keepNext/>"),
+                "table caption must have keepNext (caption + table on same page): {cap}");
+            assert!(cap.contains("<w:keepLines/>"),
+                "table caption must have keepLines (caption never splits): {cap}");
+        }
+    }
+
+    /// v13.2 R8: 表格内每行必须含 `<w:trPr><w:cantSplit/></w:trPr>`，行不跨页。
+    #[test]
+    fn table_rows_have_cant_split() {
+        let cell = doc_semantic_ast::TableCell {
+            runs: vec![doc_semantic_ast::TextRun {
+                text: "x".to_string(),
+                style: doc_semantic_ast::TextStyle::Plain,
+                span: doc_semantic_ast::Span::default(),
+            }],
+            colspan: 1,
+            rowspan: 1,
+            bg_color: None,
+        };
+        let row = doc_semantic_ast::TableRow { cells: vec![cell.clone(), cell] };
+        let doc = doc_semantic_ast::Document {
+            metadata: Default::default(),
+            blocks: vec![doc_semantic_ast::Block::Table {
+                rows: vec![row.clone(), row],
+                caption: Some("两行表".to_string()),
+                number: Some("表 2".to_string()),
+                span: doc_semantic_ast::Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        let tr_prs: Vec<&str> = xml.split("<w:trPr>")
+            .skip(1)
+            .filter_map(|s| s.split("</w:trPr>").next())
+            .collect();
+        assert_eq!(tr_prs.len(), 2, "must have exactly 2 trPr (one per row)");
+        for tp in &tr_prs {
+            assert!(tp.contains("<w:cantSplit/>"),
+                "every row must have cantSplit (row not split across pages): {tp}");
+        }
+    }
+
     /// v13.2 F3: PNG 字节原样嵌入，不二次 JPEG 编码。
     #[test]
     fn figure_keeps_png_bytes_unchanged() {
@@ -2791,5 +2966,60 @@ mod tests {
             embedded[0].bytes, PNG_1X1,
             "PNG bytes must be embedded unchanged (no JPEG re-encoding)"
         );
+    }
+
+    /// v13.2 R8: 图片段 + 图 caption 段都必须含 keepNext + keepLines，让
+    /// "图 + 标题" 在同页（不让图单独成页或被分两半）。
+    #[test]
+    fn figure_drawing_and_caption_have_keep_next_and_keep_lines() {
+        const PNG_1X1: &[u8] = &[
+            0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00,
+            0x00, 0x1F, 0x15, 0xC4, 0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, 0x54, 0x78,
+            0x9C, 0x63, 0x00, 0x01, 0x00, 0x00, 0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+            0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82,
+        ];
+        let mut assets = ImageAssets::default();
+        assets.insert("figures/fig1.png".to_string(), PNG_1X1.to_vec());
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Figure {
+                path: "figures/fig1.png".to_string(),
+                caption: Some("测试图".to_string()),
+                scale: 1.0,
+                number: Some("图 1".to_string()),
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, Some(&assets), None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        // 1) JOSImage 段必须 keepNext + keepLines（图段 → caption 不分页）
+        // 找 pPr 起止：从 <w:p> 之后到 <w:pStyle ... JOSImage/> 之后
+        let img_ppr = {
+            let i = xml.find("<w:pStyle w:val=\"JOSImage\"/>").expect("JOSImage missing");
+            // pPr 在 <w:p> 之后, 在 <w:pStyle> 之内(pStyle 之后) </w:pPr> 之前
+            let ppr_start = xml[..i].rfind("<w:pPr>").expect("pPr before JOSImage");
+            // 找 pStyle 之后第一个 </w:pPr>
+            let after_pstyle = i + "<w:pStyle w:val=\"JOSImage\"/>".len();
+            let ppr_end = xml[after_pstyle..].find("</w:pPr>").expect("pPr close after JOSImage") + after_pstyle + "</w:pPr>".len();
+            &xml[ppr_start..ppr_end]
+        };
+        assert!(img_ppr.contains("<w:keepNext/>"),
+            "image drawing paragraph must have keepNext (image + caption on same page): {img_ppr}");
+        assert!(img_ppr.contains("<w:keepLines/>"),
+            "image drawing paragraph must have keepLines (image never splits): {img_ppr}");
+        // 2) JOSCaption 段（图片 caption）也必须 keepNext + keepLines
+        let cap_ppr = {
+            let i = xml.find("<w:pStyle w:val=\"JOSCaption\"/>").expect("JOSCaption missing");
+            let ppr_start = xml[..i].rfind("<w:pPr>").expect("pPr before JOSCaption");
+            let after_pstyle = i + "<w:pStyle w:val=\"JOSCaption\"/>".len();
+            let ppr_end = xml[after_pstyle..].find("</w:pPr>").expect("pPr close after JOSCaption") + after_pstyle + "</w:pPr>".len();
+            &xml[ppr_start..ppr_end]
+        };
+        assert!(cap_ppr.contains("<w:keepNext/>"),
+            "figure caption must have keepNext (image + caption on same page): {cap_ppr}");
+        assert!(cap_ppr.contains("<w:keepLines/>"),
+            "figure caption must have keepLines (caption never splits): {cap_ppr}");
     }
 }

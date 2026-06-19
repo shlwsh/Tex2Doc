@@ -114,6 +114,14 @@ async fn convert_paper3_zip_returns_docx() {
         bytes.len()
     );
     assert_eq!(&bytes[..4], b"PK\x03\x04", "docx magic mismatch");
+
+    // v13.2 F14: paper3 docx 期望 ≥1MB（含 10 张嵌入 PNG）。
+    //   upload.zip 缺 figures 时 docx 约 46KB（无图）。回归测试兜底。
+    assert!(
+        bytes.len() > 1024 * 1024,
+        "paper3 docx 太小（{} bytes）—— 疑似 upload.zip 缺 figures 嵌入图片",
+        bytes.len()
+    );
     let _ = shutdown.send(());
 }
 

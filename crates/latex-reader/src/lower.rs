@@ -1196,8 +1196,10 @@ fn lower_environment(
         "description" | "description*" => {
             lower_description_with_label(body, span, macros, numbering, cite_numbers, label_map)
         }
-        // JOS 论文参考文献用 `\begin{list}{}{... \item[{[N]}] ... }`，
-        // 视为无序 List，items 已有 `[N] —` 前缀（lower_list 中处理）。
+        // JOS 论文作者 bio 用 `\begin{list}{}{... \item ...}` 自定义 list，
+        //   内容被 serializer 通过 `is_journal_bio_list` 识别为 bio 段（不合并、
+        //   不加 `itemize ` 前缀）。这里仍走 lower_list 输出 Block::List，
+        //   serializer 在 is_bio=true 时跳过 itemize_merged_text 合并。
         "list" | "list*" => lower_list(
             body,
             false,
