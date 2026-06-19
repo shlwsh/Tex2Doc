@@ -1106,22 +1106,23 @@ pub fn split_runs_with_sup_sub(
                         } else {
                             None
                         };
-                        let preceded_by_safe = match prev_char {
-                            None => true, // 段首：JOS 编号标签（如 `[5] 冯志勇`）
-                            Some(c) => c.is_whitespace()
-                                || matches!(
-                                    c,
-                                    ',' | '.' | ';' | ':' | '!' | '?' | ')' | ']' | '}' | '('
-                                )
-                                || c == '\\'
-                        };
+                        // v13.2.7a: 中文标点（`。！？；：`等）和非 ASCII 也视为安全——
+                        // 中文学术段落的 `\cite` 输出 `[N]` 后几乎总是紧跟 `。` 或汉字
+                        // （如 "重要[1-6]。" 或 "研究[7]。"）。
                         let followed_by_safe = text[end + 1..]
                             .chars()
                             .next()
                             .map_or(true, |c| {
                                 c.is_whitespace()
-                                    || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}')
+                                    || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}' | '(')
+                                    || !c.is_ascii()
                             });
+                        let preceded_by_safe = match prev_char {
+                            None => true,
+                            // v13.2.7b: 数字前跟 [N] → 危险（`abc[1]` 应保持同 run）
+                            // 字母/汉字/标点后跟 [N] → 安全（`LogGPT[32]`、`研究[7]`、`重要[1-6]。`）
+                            Some(c) => !c.is_ascii_digit(),
+                        };
                         if preceded_by_safe && followed_by_safe {
                             flush(&mut buf, &mut runs);
                             runs.push(NormalizedRun {
@@ -1142,7 +1143,7 @@ pub fn split_runs_with_sup_sub(
                     flush(&mut buf, &mut runs);
                     // v13.2 F12: superscript run 也加 `^` 前缀
                     runs.push(NormalizedRun {
-                        text: format!("^{inner}"),
+                        text: inner.to_string(),
                         style: TextStyle::Superscript,
                     });
                     i = end + 1;
@@ -1157,9 +1158,9 @@ pub fn split_runs_with_sup_sub(
                 if end > i + 1 {
                     let word = &text[i + 1..end];
                     flush(&mut buf, &mut runs);
-                    // v13.2 F12: 加 `^` 前缀
+                    // 上标 run 只保留内容文本，不带 `^` 字面字符。
                     runs.push(NormalizedRun {
-                        text: format!("^{word}"),
+                        text: word.to_string(),
                         style: TextStyle::Superscript,
                     });
                     i = end;
@@ -1181,7 +1182,7 @@ pub fn split_runs_with_sup_sub(
                     //   "Freqt"（与 sh 的 "Freq_t" 差一个下标线）。
                     //   现在加 `_` 前缀让 plain 拼回时显示 `Freq_t`。
                     runs.push(NormalizedRun {
-                        text: format!("_{inner}"),
+                        text: inner.to_string(),
                         style: TextStyle::Subscript,
                     });
                     i = end + 1;
@@ -1197,9 +1198,9 @@ pub fn split_runs_with_sup_sub(
                     let word = &text[i + 1..end];
                     if matches!(word, "max" | "min") {
                         flush(&mut buf, &mut runs);
-                        // v13.2 F12: 同样加 `_` 前缀
+                        // 单字符下标只保留内容文本，不带 `_` 字面字符。
                         runs.push(NormalizedRun {
-                            text: format!("_{word}"),
+                            text: word.to_string(),
                             style: TextStyle::Subscript,
                         });
                         i = end;
@@ -1220,9 +1221,9 @@ pub fn split_runs_with_sup_sub(
                         }
                     }
                     flush(&mut buf, &mut runs);
-                    // v13.2 F12: 单字符下标也加 `_` 前缀（见上面注释）
+                    // 单字符下标只保留内容文本，不带 `_` 字面字符。
                     runs.push(NormalizedRun {
-                        text: format!("_{}", ch as char),
+                        text: (ch as char).to_string(),
                         style: TextStyle::Subscript,
                     });
                     i += 2;
@@ -1409,12 +1410,13 @@ mod tests {
         let (cite, label) = empty();
         let n = latex_to_text("$d_{\\max}+d_0$", &cite, &label);
         let plain = n.join_plain();
-        // v13.2 F12: subscript run 加 `_` 前缀，join_plain 后 plain 文本应含 `_`
-        assert_eq!(plain, "d_max+d_0");
+        // v13.2.7a: subscript run **不带** `_` 字面字符前缀。
+        // `<w:vertAlign>` 已让内容下标显示；plain 文本提取只拼接 run 文本。
+        assert_eq!(plain, "dmax+d0");
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "_max" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "max" && r.style == TextStyle::Subscript));
     }
 
     #[test]
@@ -1440,11 +1442,11 @@ mod tests {
     fn latex_to_text_math_unicode() {
         let (cite, label) = empty();
         let n = latex_to_text("$L=\\{l_1\\}$", &cite, &label);
-        // v13.2 F12: subscript run 加 `_` 前缀
+        // v13.2.7a: subscript run **不带** `_` 字面前缀
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "_1" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
         let plain = n.join_plain();
         assert!(plain.contains("L={l"), "got: {plain}");
         assert!(!plain.contains("\\"), "leaked backslash: {plain}");
@@ -1507,11 +1509,11 @@ mod tests {
         let cite = HashMap::new();
         let label = HashMap::new();
         let n = latex_to_text("72 vs 4388 条$^*$", &cite, &label);
-        // v13.2 F12: superscript run 加 `^` 前缀
+        // v13.2.7a: superscript run **不带** `^` 字面前缀
         assert!(
             n.runs
                 .iter()
-                .any(|r| r.style == TextStyle::Superscript && r.text == "^*"),
+                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
             "runs: {:?}",
             n.runs
                 .iter()
@@ -1522,7 +1524,7 @@ mod tests {
         assert!(
             n2.runs
                 .iter()
-                .any(|r| r.style == TextStyle::Superscript && r.text == "^*"),
+                .any(|r| r.style == TextStyle::Superscript && r.text == "*"),
             "textbf runs: {:?}",
             n2.runs
                 .iter()
@@ -1533,33 +1535,31 @@ mod tests {
 
     #[test]
     fn split_runs_sup() {
-        // v13.2 F12: 用 ^[1-2] 多字符 sup 测 `^` 前缀。
-        // 旧测试用 `Top-[1-2]`（无 `^`）期望切出 sup run——这本身就不合理
-        // （没有 `^` 不会有 sup 标记），改为 `Top-^[1-2] and ^2`。
+        // v13.2.7a: 用 ^[1-2] 多字符 sup 测不带 `^` 前缀。
         let n = split_runs_with_sup_sub("Top-^[1-2] and ^2", true, false);
         assert_eq!(n.runs.len(), 4);
         assert_eq!(n.runs[0].text, "Top-");
         assert_eq!(n.runs[0].style, TextStyle::Plain);
-        // v13.2 F12: superscript run 加 `^` 前缀，对齐 sh
-        assert_eq!(n.runs[1].text, "^[1-2]");
+        // v13.2.7a: superscript run **不带** `^` 前缀
+        assert_eq!(n.runs[1].text, "[1-2]");
         assert_eq!(n.runs[1].style, TextStyle::Superscript);
         assert_eq!(n.runs[2].text, " and ");
-        assert_eq!(n.runs[3].text, "^2");
+        assert_eq!(n.runs[3].text, "2");
         assert_eq!(n.runs[3].style, TextStyle::Superscript);
     }
 
     #[test]
     fn split_runs_sub() {
         let n = split_runs_with_sup_sub("l_1 and ^{10}", true, true);
-        // v13.2 F12: 加 `_`/`^` 前缀
+        // v13.2.7a: **不带** `_`/`^` 字面前缀
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "_1" && r.style == TextStyle::Subscript));
+            .any(|r| r.text == "1" && r.style == TextStyle::Subscript));
         assert!(n
             .runs
             .iter()
-            .any(|r| r.text == "^10" && r.style == TextStyle::Superscript));
+            .any(|r| r.text == "10" && r.style == TextStyle::Superscript));
     }
 
     // v13.1 P1 regression: clean_math 不应剥 ^{...} _{...} 的外层 {}
@@ -1575,13 +1575,12 @@ mod tests {
             .filter(|r| r.style == TextStyle::Superscript)
             .map(|r| r.text.as_str())
             .collect();
-        // v13.2 F12: 加 `^` 前缀
-        assert_eq!(sup_runs, vec!["^**"], "** must stay as one sup run, not split");
+        // v13.2.7a: 不带 `^` 前缀
+        assert_eq!(sup_runs, vec!["**"], "** must stay as one sup run, not split");
     }
 
-    // v13.2 F12: subscript run 的 text 前加 `_` 字面字符 (对齐 sh oracle)。
-    //   sh 把 `Freq_t` 切成 `Freq` plain + `_<sub>t</sub>`，
-    //   文本提取显示 `Freq_t` (有下标线)。rust 之前只输出 `Freqt`。
+    // v13.2.7a: subscript run 的 text **不带** `_` 字面前缀。
+    //   `<w:vertAlign="subscript">` 已让内容下标显示；rust 不应再写 `_` 字面。
     #[test]
     fn split_runs_sub_prefix_underscore() {
         let n = split_runs_with_sup_sub("Freq_t-Freq_t-1", false, true);
@@ -1592,19 +1591,19 @@ mod tests {
             .map(|r| r.text.as_str())
             .collect();
         // 第二个 sub `Freq_t-1` 会被 `-1` 收尾切走成 plain，
-        // 因此切出两个 sub run 都是 `_t` (不带 `-1`)。
-        assert_eq!(subs, vec!["_t", "_t"], "subs must carry `_` prefix");
+        // 因此切出两个 sub run 都是 `t` (不带 `_` 前缀)。
+        assert_eq!(subs, vec!["t", "t"], "subs must NOT carry `_` prefix");
     }
 
-    // v13.2 F12: max/min 单字符下标也加 `_` 前缀
+    // v13.2.7a: max/min 单字符下标也 **不带** `_` 前缀
     #[test]
     fn split_runs_max_min_prefix_underscore() {
         let n = split_runs_with_sup_sub("max_v count(v)", false, true);
-        // 期望 3 个 run: plain "max" + sub "_v" + plain " count(v)"
+        // 期望 3 个 run: plain "max" + sub "v" + plain " count(v)"
         assert_eq!(n.runs.len(), 3);
         assert_eq!(n.runs[0].text, "max");
         assert_eq!(n.runs[0].style, TextStyle::Plain);
-        assert_eq!(n.runs[1].text, "_v");
+        assert_eq!(n.runs[1].text, "v");
         assert_eq!(n.runs[1].style, TextStyle::Subscript);
         assert_eq!(n.runs[2].text, " count(v)");
         assert_eq!(n.runs[2].style, TextStyle::Plain);

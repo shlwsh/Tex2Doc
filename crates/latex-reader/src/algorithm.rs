@@ -643,10 +643,10 @@ mod tests {
     fn parse_algorithm_comment_normalizes_math() {
         let body = "A \\leftarrow TopK(H, K) \\tcp*{按 $w_p$ 降序取前 $K$ 项}";
         let rows = parse_algorithm_rows(body);
-        // v13.2 F12: subscript run 加 `_` 前缀，plain `w` + sub `_p` 拼成 `w_p`
-        assert!(rows[0].comment.contains("w_p"), "got: {}", rows[0].comment);
-        // v13.2 F12: subscript run 加 `_` 前缀
-        assert!(rows[0].comment.contains("_p"), "got: {}", rows[0].comment);
+        // v13.2.7a: subscript run **不带** `_` 字面前缀；
+        // plain 拼接 = plain `w` + sub `p` = `wp`
+        assert!(rows[0].comment.contains("wp"), "got: {}", rows[0].comment);
+        assert!(rows[0].comment.contains("p"), "got: {}", rows[0].comment);
         assert!(!rows[0].comment.contains('$'), "got: {}", rows[0].comment);
     }
 }

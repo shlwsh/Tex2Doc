@@ -884,9 +884,6 @@ fn flush_paragraph(
     }
     let body = buffer.trim().to_string();
     let s = *start;
-    if body.contains("Freq_t") || body.contains("Freq") {
-        eprintln!("flush_paragraph body IN ({}): {body}", body.len());
-    }
 
     // V2 接入：把 LaTeX 段落走过 `latex_to_text` normalizer，
     // 输出多 run（plain / italic / bold / sup / sub）。
@@ -904,9 +901,6 @@ fn flush_paragraph(
         })
         .collect();
     if !runs.is_empty() {
-        if body.contains("Freq_t") || body.contains("Freq") {
-            eprintln!("flush_paragraph runs OUT ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
-        }
         doc.push(Block::Paragraph {
             runs,
             span: Span::new(s, s + buffer.len() as u32, span.source),
@@ -3115,8 +3109,11 @@ mod tests {
                 assert!(!body.contains("\\mathrm"));
                 assert!(!body.contains("\\alpha"));
                 assert!(!body.contains("\\lambda"));
-                // v13.2 F12: subscript run 加 `_` 前缀后，body 含 `_i`
-                assert!(body.contains("_i"), "got: {body}");
+                // v13.2.7a: subscript run **不带** `_` 字面前缀——`\alpha_i` 经 normalize
+                // 后是 plain `α` + sub `i`，join_plain 输出 `αi`（中间无 `_`）。
+                assert!(body.contains("αi"), "got: {body}");
+                // 同时验证 clean_math 已经把 `\alpha` 转成 α（unicode）
+                assert!(body.contains("α"), "got: {body}");
             }
             _ => panic!("expected theorem-like"),
         }

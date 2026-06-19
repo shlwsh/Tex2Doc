@@ -1863,8 +1863,13 @@ fn write_table(
                         .collect()
                 },
                 jc: None,
-                keep_next: false,
-                keep_lines: false,
+                // v13.2.7a: 对齐 sh oracle（`build_jos_docx.py` 给 JOSTableText
+                //   cell 段落都加 `<w:keepLines/><w:keepNext/>`）——
+                //   trPr/cantSplit 只防单行跨页；cell 段落加 keepLines/keepNext
+                //   让 Word/LibreOffice 把整张表视为不可跨页的视觉单元，
+                //   配合 caption 的 keepNext/keepLines 后 caption+表不再跨页。
+                keep_next: true,
+                keep_lines: true,
             };
             write_paragraph_with_opts(w, &p, true, 15);
             w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
