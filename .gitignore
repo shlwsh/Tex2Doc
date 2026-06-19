@@ -52,3 +52,11 @@ scripts/combined.html
 **/__pycache__/
 **/*.pyc
 **/*.pyo
+
+# === 凭据 / 本地环境变量 ==========================================
+# 任何 .env* 文件都不进入版本库；模板（.env.example / .env.*.example）显式例外。
+# 约定：项目根目录下，开发者复制 .env.example 为 .env / .env.mygit
+# 等填入本地凭据即可。
+.env*
+!.env.example
+!.env.*.example
