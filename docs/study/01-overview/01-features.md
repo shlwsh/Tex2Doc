@@ -6,7 +6,7 @@
 
 ## 1.1 一句话定义
 
-**Tex2Doc（Doc-engine）** 是一个**纯 Rust 编写核心转换逻辑、Flutter 跨端承载 UI** 的 **LaTeX → DOCX 文档格式转换工具**，可在 Windows / macOS / Linux 桌面、Flutter Web PWA、Chrome MV3 扩展以及 HTTP 服务端多种形态下运行。
+**Tex2Doc（Doc-engine）** 是一个**纯 Rust 编写核心转换逻辑、以 Semantic TeX Engine 为长期方向**的 **LaTeX/CTeX → DOCX 高保真转换工具**，可在 Windows / macOS / Linux 桌面、Flutter Web PWA、Chrome MV3 扩展、HTTP 服务端以及 CLI/脚本多种形态下运行。
 
 ---
 
@@ -20,6 +20,7 @@
 | 工程化 LaTeX 项目（含 `\input`、`\graphicspath`） | 普通转换工具无法处理 include 拓扑 | 内置 `IncludeGraph` 模块，支持 `\input` / `\include` / `\graphicspath` |
 | 中文 CTeX / rjthesis 等特殊模板 | 大量装饰命令污染段落流 | 顶部 metadata 剥离层 + 宏表展开，干净输出 |
 | Web / 桌面 / 浏览器扩展需要不同实现 | 多端重复开发 | 共享同一 Rust 核心，三种绑定（WASM / FFI / HTTP） |
+| 中文学术论文/JOS/医学论文需要可验证高保真 | 单次转换很难判断质量是否退化 | `doc-compiler-engine` 输出阶段报告；V2 CLI 可生成 oracle PDF、docx PDF 与质量报告 |
 
 ---
 
@@ -54,37 +55,47 @@
 * 公式：嵌入 `<m:oMath>` 段（OMML）。
 * 引用：作者-年份（`AuthorYear`）与数字（`Numeric`）两种内置 BibTeX 样式。
 
-### 1.3.3 BibLaTeX 解析（`doc-bib`）
+### 1.3.3 Semantic TeX Engine facade（`doc-compiler-engine`）
+
+* **统一编译入口**：`SemanticTexEngine` 支持 `source / dir / zip / VFS -> DOCX`。
+* **显式阶段报告**：`SourceMount`、`IncludeGraph`、`TexParse`、`SemanticCollect`、`DocumentGraph`、`DocxRender` 每阶段记录状态。
+* **Document Graph**：在旧 `Document` 之外同步输出 `StandardDocument`，为后续 HTML/Markdown renderer、LuaHook collector、XDV layout collector 留出稳定接口。
+* **Profile**：内置 `GenericArticle`、`ChineseAcademic`、`JosPaper`、`MedicalJournal` 四类 profile，当前 paper3 默认走 `JosPaper`。
+* **paper3 脚本**：`scripts/build_paper3_compiler_engine_docx.sh` 直接调用该引擎，输出到 `examples/paper3/output/to-docx/*-compiler-engine.docx`。
+
+### 1.3.4 BibLaTeX 解析（`doc-bib`）
 
 * 支持 `@inproceedings` / `@article` / `@book` / `@misc` / `@techreport`。
 * 字段：`author` / `title` / `year` / `booktitle` / `journal` / `publisher` / `url`。
 * 错误降级：未闭合自动补、非法条目跳过。
 
-### 1.3.4 字体探测（`doc-utils/fontdetect`）
+### 1.3.5 字体探测（`doc-utils/fontdetect`）
 
 * 自动识别 Windows / macOS / Linux 系统字体目录。
 * 内置 CTeX 字体 → Office 字体映射表（SimSun / SimHei / KaiTi / FangSong / SimLi 等）。
 * 三态结果：`Available` / `Embed` / `Fallback`。
 * 写出 docx 时按探测结果替换 `w:ascii` / `w:hAnsi` / `w:eastAsia` / `w:cs` 属性。
 
-### 1.3.5 端到端形态
+### 1.3.6 端到端形态
 
 | 形态 | 入口 | 适用场景 |
 |------|------|----------|
 | **CLI / 集成测试** | `cargo test -p doc-core --test paper3_e2e` | CI 验证、本地脚本 |
+| **Compiler Engine 脚本** | `bash scripts/build_paper3_compiler_engine_docx.sh` | 直接验证 Semantic TeX Engine facade |
+| **V2 CLI** | `cargo run -p doc-engine -- build ...` | TeX oracle、DOCX、PDF、质量报告串联 |
 | **HTTP 服务端** | `cargo run -p doc-server` | 集成到企业内部系统、Web 代理 |
 | **WASM 库** | `wasm-pack build crates/wasm` | Flutter Web、Chrome 扩展、第三方 JS |
 | **Native cdylib** | `cargo build -p doc-native` | Flutter Desktop（Windows / macOS / Linux） |
 | **Flutter App** | `flutter build web/windows/...` | 跨端 PWA 与桌面应用 |
 | **Chrome MV3 扩展** | `extension/manifest.json` | 浏览器内联转换、Overleaf / arXiv 集成 |
 
-### 1.3.6 工程基础设施
+### 1.3.7 工程基础设施
 
 * **CI**：GitHub Actions 三平台矩阵（Ubuntu / Windows / macOS），fmt + clippy -D warnings + cargo test。
 * **Git 钩子**：`.githooks/post-commit` 自动 push。
 * **提交脚本**：`scripts/commit_push.ps1`（PowerShell）一站式 add / commit / push。
 * **端到端验证**：`scripts/verify_paper3.mjs`（Playwright） + `scripts/e2e_paper3.mjs`（Web PWA） + `bin/native_smoke.dart`（Desktop）。
-* **GitNexus 索引**：2419 符号 / 5035 关系 / 203 执行流已索引；建议改代码前跑 `impact` 与 `detect_changes`。
+* **GitNexus 索引**：当前仓库已按 `Tex2Doc` 索引；改代码前跑 `impact`，提交前跑 `detect_changes`。
 
 ---
 
@@ -117,8 +128,9 @@
 
 | 能力 | 当前状态 | 备注 |
 |------|----------|------|
-| 完整 LaTeX 引擎（编译数学宏包、引用解析） | ❌ 不支持 | 纯解析器，不调用 TeX |
-| PDF / PostScript / EPS 图片 | ❌ 不支持 | 显式 `Unsupported` 错误 |
+| 完整 LaTeX 引擎（编译数学宏包、引用解析） | ⚠️ 主转换不调用 TeX；V2 校验可调用 | `tex-facade` 仅用于 oracle PDF / 质量闭环 |
+| PDF 图片 | ⚠️ 部分支持 | 目录/zip 转换中可用 `pdfium-render` 把 PDF 第一页转 PNG；依赖系统 pdfium |
+| PostScript / EPS / SVG 图片 | ❌ 不支持 | 后续作为显式降级项 |
 | TikZ / pgfplots 绘图 | ❌ 整段 `RawFallback` | 保留原文 |
 | `\def` / `\let` / 条件宏 / 嵌套宏定义 | ❌ 不展开 | 宏表简化实现 |
 | `\newcommand` 带可选参数 `[def]{body}` 的实参替换 | ❌ 仅做字面替换 | 不识别 `#1` |
@@ -128,7 +140,7 @@
 | 复杂宏包（`minted` / `listings` 高亮） | ❌ RawFallback | V2 路线图 |
 | Office 字体嵌入字形 | ⚠️ 提示级 | `Embed` 状态下在 docx 中声明，但不嵌入字形文件 |
 
-> **V2 草案**：上述边界**主线**不变。V2 在 [../08-pdf-pipeline/](../08-pdf-pipeline/README.md) 引入 docx→PDF 同步生成与 TeX oracle 质量对比，TeX **仅在验证阶段**被可插拔调用，V1 主线依旧"纯解析器不调用 TeX"。详见第八章。
+> **V2 现状**：上述边界的主线原则仍保留。V2 已在 [../08-pdf-pipeline/](../08-pdf-pipeline/README.md) 落地 docx→PDF、TeX oracle 和三层质量对比；TeX 仍只在校验/对比阶段被可插拔调用。
 
 ---
 
@@ -146,12 +158,12 @@
 
 ---
 
-## 1.7 关键成果指标（V1.3 现状）
+## 1.7 关键成果指标（2026-06-20 现状）
 
-* **核心代码量**：约 7,400 行 Rust（不含 vendor / target）。
-* **测试覆盖**：`cargo test --workspace` 全通过；`paper3_e2e` 跑通 8 千行 LaTeX（包含 6 个 `\input` 子文件 + BibTeX）。
-* **转换耗时**：`examples/paper3/latex/main-jos.tex` 在 Windows 11 / i7-12700H 上单次转换 < 800 ms。
-* **产物大小**：约 41 KB 输入 zip → 38 KB docx（首四字节 `PK\x03\x04` 验证通过）。
+* **Workspace 规模**：15 个 Rust crate，覆盖转换核心、编译 facade、V2 PDF 质量闭环、WASM/Native/Server/CLI 入口。
+* **测试覆盖**：`cargo test -p doc-compiler-engine` 2/2 通过；`cargo test -p doc-docx-writer` 34/34 通过；paper3 e2e 可验证真实论文样例。
+* **paper3 compiler-engine 产物**：`scripts/build_paper3_compiler_engine_docx.sh` 已生成约 3.0 MB DOCX，包含 250 个语义块、10 个图片资产。
+* **DOCX 结构**：首四字节 `PK\x03\x04`，包含 `word/document.xml`、`word/styles.xml`、`word/media/image1.png` ~ `image10.png`。
 * **内容断言**：5/5 关键中文短语（"微服务架构下" / "网关" / "Grafana Loki" / "石洪雷" / "赵涓涓"）命中。
 * **杂质剥离**：21 个 LaTeX 装饰命令（`\hypersetup` / `\rjtitle` / `\PassOptionsToClass` 等）100% 剥离。
 * **多平台 CI**：Ubuntu + Windows + macOS 三平台 `cargo test --workspace --all-targets` 全部通过。
@@ -162,4 +174,4 @@
 
 继续阅读 [02-quick-tour.md](./02-quick-tour.md) 跑通最小演示。
 
-> **演进路线（设计稿）**：V1.3 之后，V2 在 [../08-pdf-pipeline/](../08-pdf-pipeline/README.md) 引入 PDF 流水线与三层质量对比，详见第八章。
+> **最新进展**：V2 PDF 流水线和 Semantic TeX Engine facade 已进入实现状态，详见 [../08-pdf-pipeline/07-progress-2026-06-20.md](../08-pdf-pipeline/07-progress-2026-06-20.md)。

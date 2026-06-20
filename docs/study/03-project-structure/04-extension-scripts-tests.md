@@ -102,6 +102,9 @@ a.click();
 
 | 脚本 | 平台 | 行数 | 作用 |
 |------|------|------|------|
+| `build_paper3_compiler_engine_docx.sh` | Bash | 50+ | 用 `doc-compiler-engine` 把 paper3 转成 DOCX |
+| `build_paper3_dual_docx.sh` | Bash | 200+ | 生成 sh/rust 双版本 DOCX，并在可用时生成 pandoc 对照 |
+| `build_paper3_pandoc_docx.sh` | Bash + Python | 140+ | 用 pandoc 把 paper3 LaTeX 转成 DOCX 对照基线 |
 | `build_paper3_zip.mjs` | Node | 79 | 把 `examples/paper3/latex/` → `upload.zip` |
 | `commit_push.ps1` | PowerShell | 144 | 自动 add / commit / push |
 | `e2e_extension.mjs` | Node | 200+ | Playwright 验证 Chrome 扩展 |
@@ -126,6 +129,33 @@ a.click();
 // 1) 读 examples/paper3/latex/ 全部 .tex / .cls / .bib（递归）
 // 2) 用 fflate 打包成 zip
 // 3) 写 examples/paper3/upload.zip
+```
+
+#### `build_paper3_compiler_engine_docx.sh`
+
+```bash
+# 1) 读取 examples/paper3/latex/main-jos.tex
+# 2) cargo run -p doc-compiler-engine --example paper3_to_docx
+# 3) 使用 jos-paper profile + JOS 页面设置
+# 4) 写 examples/paper3/output/to-docx/*-compiler-engine.docx
+```
+
+#### `build_paper3_dual_docx.sh`
+
+```bash
+# 1) 调 scripts/build_docx.sh 生成 sh 版 DOCX
+# 2) 调 doc-engine convert 生成 rust 版 DOCX
+# 3) 若 pandoc 可用，调 build_paper3_pandoc_docx.sh 生成 pandoc 对照
+# 4) 三个产物统一落到 examples/paper3/output/to-docx
+```
+
+#### `build_paper3_pandoc_docx.sh`
+
+```bash
+# 1) 递归展开 \input{...}，生成 pandoc 友好的 master.tex
+# 2) 删除 \graphicspath{...}
+# 3) 把 \includegraphics{...} 改写为绝对路径
+# 4) 调 pandoc --from=latex --to=docx
 ```
 
 #### `e2e_paper3.mjs`

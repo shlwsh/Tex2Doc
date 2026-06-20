@@ -1,6 +1,6 @@
 # 第二章 · Rust 技术栈
 
-> Tex2Doc 的核心转换逻辑完全用 Rust 实现，10 个 crate 构成一个 Cargo Workspace。本节列出所有依赖、技术约束与构建配置。
+> Tex2Doc 的核心转换逻辑完全用 Rust 实现，当前 15 个 crate 构成一个 Cargo Workspace。本节列出所有依赖、技术约束与构建配置。
 
 ---
 
@@ -32,19 +32,21 @@ profile = "minimal"
 [workspace]
 resolver = "2"
 members = [
-    "crates/core",         # doc-core：FFI/WASM 统一门面
+    "crates/core",         # doc-core：FFI/WASM/HTTP 兼容门面
     "crates/utils",        # doc-utils：VFS、路径、图片、字体
     "crates/semantic-ast", # doc-semantic-ast：核心语义块模型
     "crates/latex-reader", # doc-latex-reader：Logos + Rowan 解析
     "crates/docx-writer",  # doc-docx-writer：OOXML 序列化 + ZIP 打包
     "crates/bib",          # doc-bib：BibLaTeX 解析
     "crates/mathml",       # doc-mathml：LaTeX → MathML / OMML
+    "crates/compiler-engine", # doc-compiler-engine：Semantic TeX Engine facade
     "crates/wasm",         # doc-wasm：WASM 桥接（cdylib）
     "crates/native",       # doc-native：原生 cdylib（dart:ffi 桥接）
     "crates/server",       # doc-server：Axum HTTP 服务
-]
-exclude = [
-    "crates/cli",          # （占位目录，未来 CLI 工具）
+    "crates/tex-facade",   # doc-tex-facade：TeX oracle 封装
+    "crates/docx-pdf",     # doc-docx-pdf：LibreOffice DOCX → PDF
+    "crates/quality",      # doc-quality：结构/文本/视觉质量对比
+    "crates/cli",          # doc-engine：V2 CLI
 ]
 ```
 
@@ -80,9 +82,11 @@ exclude = [
    └───────────────────────────┘
 ```
 
-* `doc-core` 是**唯一**对外门面；其它 crate 不允许被 `doc-wasm` / `doc-native` / `doc-server` 直接依赖（除 `doc-semantic-ast` 通过 `doc-utils` 间接使用）。
+* `doc-core` 是兼容对外门面；`doc-wasm` / `doc-native` / `doc-server` 继续通过它保持 API 稳定。
+* `doc-compiler-engine` 是新语义编译 facade；面向后续 LuaHook/XDV/多 renderer 扩展。
 * `doc-docx-writer` 是**唯一**写入 OOXML 的 crate；公式依赖 `doc-mathml` 提供 OMML。
 * `doc-utils` 是**唯一**处理 VFS / 路径 / 图片 / 字体的 crate；不可被绕过。
+* V2 PDF 质量闭环由 `doc-tex-facade` / `doc-docx-pdf` / `doc-quality` / `doc-engine` 组成。
 
 ---
 
@@ -95,6 +99,7 @@ exclude = [
 | `quick-xml` | 0.36 (features=`serialize`) | OOXML / MathML / OMML 写出 | `doc-docx-writer` / `doc-mathml` |
 | `zip` | 2.2 (default-features=false, features=`deflate`) | docx / 读 zip | `doc-docx-writer` / `doc-core` / `doc-wasm` |
 | `image` | 0.25 (default-features=false, features=`png,jpeg`) | PNG/JPEG 探测 | `doc-utils` / `doc-docx-writer` |
+| `pdfium-render` | 0.8 | PDF 图片第一页转 PNG | `doc-core` / `doc-compiler-engine` |
 | `base64` | 0.22 | 图片内联 | `doc-docx-writer` |
 | `thiserror` | 1.0 | 错误派生 | 全部 crate |
 | `anyhow` | 1.0 | 顶层错误装箱 | `Cargo.toml`（锁版本，未深度使用） |
@@ -106,10 +111,10 @@ exclude = [
 | `axum` | 0.7 (features=`multipart,macros`) | HTTP 框架 | `doc-server` |
 | `tower` | 0.5 | 服务中间件 | `doc-server` |
 | `tower-http` | 0.6 (features=`limit,trace`) | body 限制 / trace | `doc-server` |
-| `tokio` | 1.40 (features=`macros,rt-multi-thread,signal`) | 异步运行时 | `doc-server` |
 | `tracing` / `tracing-subscriber` | 0.1 / 0.3 | 日志 | `doc-server` |
 | `mime` | 0.3 | docx MIME | `doc-server` |
-| `clap` | 4.5 (features=`derive`) | CLI 参数（锁版本，V2 落地） | `Cargo.toml` |
+| `clap` | 4.5 (features=`derive`) | CLI 参数 | `doc-engine` |
+| `tokio` | 1.40 | 异步运行时 / 外部进程 | `doc-server` / `doc-engine` / `doc-tex-facade` |
 | `insta` | 1.40 (features=`yaml,ron`) | 快照测试 | `doc-latex-reader` |
 | `proptest` | 1.4 | 属性测试 | `doc-latex-reader` / `doc-utils` |
 | `criterion` | 0.5 (features=`html_reports`) | 基准测试（锁版本） | `Cargo.toml` |
@@ -207,7 +212,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 * `Cargo.lock` 已 **入仓**（用于应用 crate 锁定可重现构建）。
 * 工作区 `publish = false`（内部 crate 不发布到 crates.io）。
-* `anyhow` / `clap` / `tokio` 等暂未直接使用的依赖也锁版本，便于 V2 增量启用。
+* `anyhow` / `clap` / `tokio` 已被 V2 CLI 和服务端使用；新增依赖变更需同步更新 `Cargo.lock`。
 
 ---
 
@@ -219,9 +224,14 @@ cargo build --workspace
 
 # 单 crate
 cargo build -p doc-core
+cargo build -p doc-compiler-engine
 cargo build -p doc-wasm
 cargo build -p doc-native
 cargo build -p doc-server
+cargo build -p doc-engine
+cargo build -p doc-tex-facade
+cargo build -p doc-docx-pdf
+cargo build -p doc-quality
 
 # Release
 cargo build --workspace --release
@@ -231,6 +241,9 @@ cargo test --workspace --all-targets
 
 # 跑指定集成测试
 cargo test -p doc-core --test paper3_e2e -- --nocapture
+cargo test -p doc-compiler-engine
+cargo test -p doc-docx-writer
+bash scripts/build_paper3_compiler_engine_docx.sh
 
 # 强制 clippy 零警告
 cargo clippy --workspace --all-targets -- -D warnings

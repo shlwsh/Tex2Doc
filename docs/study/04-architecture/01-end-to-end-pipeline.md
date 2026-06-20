@@ -25,17 +25,18 @@
 │           └─────────────────────┼─────────────────────┘                  │
 │                                 │                                        │
 │                    ┌────────────▼────────────┐                           │
-│                    │       doc-core          │  统一门面                  │
-│                    │   (FFI/WASM 唯一入口)   │                           │
+│                    │       doc-core          │  兼容门面                  │
+│                    │   (FFI/WASM/HTTP API)   │                           │
 │                    └────────────┬────────────┘                           │
 │                                 │                                        │
 │                    ┌────────────▼────────────┐                           │
-│                    │  转换管道（5 段流水线）  │  核心实现                  │
-│                    │  1. Include 拓扑        │                           │
-│                    │  2. Logos 词法          │                           │
-│                    │  3. Rowan 语法树        │                           │
-│                    │  4. 语义降级            │                           │
-│                    │  5. OOXML 序列化        │                           │
+│                    │ doc-compiler-engine     │  新语义编译 facade         │
+│                    │  1. SourceMount         │                           │
+│                    │  2. IncludeGraph        │                           │
+│                    │  3. TexParse            │                           │
+│                    │  4. SemanticCollect     │                           │
+│                    │  5. DocumentGraph       │                           │
+│                    │  6. DocxRender          │                           │
 │                    └────────────┬────────────┘                           │
 │                                 │                                        │
 │        ┌────────────┬───────────┼────────────┬─────────────┐            │
@@ -51,7 +52,7 @@
 
 ---
 
-## 2. 端到端数据流（五段流水线）
+## 2. 端到端数据流（当前六段主链路）
 
 ### 2.1 全景
 
@@ -61,8 +62,15 @@
 │ 源码    │───▶│ 文件系统 │───▶│ 词法     │───▶│ 语法树   │───▶│  AST    │───▶│ 包     │
 │ (zip)   │    │  (VFS)   │    │ (tokens) │    │  (CST)   │    │         │    │ (.docx)│
 └─────────┘    └──────────┘    └──────────┘    └──────────┘    └────────┘    └────────┘
-   Pass-1: include 拓扑 & 拼接     Pass-2: 朴素 Rowan 构建       Pass-3: 降级
+   Pass-1: include 拓扑 & 拼接     Pass-2: 朴素 Rowan 构建       Pass-3: semantic collect
 ```
+
+当前存在两条兼容链路：
+
+| 链路 | 入口 | 说明 |
+|---|---|---|
+| 兼容转换链路 | `doc-core::convert_sync/convert_dir/convert_zip` | WASM/Native/Server/旧 CLI 继续依赖，保证 API 稳定 |
+| 语义编译链路 | `doc-compiler-engine::SemanticTexEngine` | 新增 source/dir/zip/VFS facade，输出 `DocumentGraph` 和 `CompileReport`，paper3 compiler-engine 脚本使用 |
 
 ### 2.2 详细阶段
 
@@ -150,13 +158,30 @@
   4. `zip::ZipWriter` 打包：`[Content_Types].xml` / `_rels/.rels` / `word/_rels/document.xml.rels` / `word/document.xml` / `word/styles.xml`。
   5. `Deflated` 压缩。
 
+#### 阶段 6：Document Graph 与 compiler-engine 报告（`doc-compiler-engine`）
+
+`doc-compiler-engine` 在旧 `Document` 之上构造 `StandardDocument`，并把 VFS、图片资产、阶段状态打包成 `DocumentGraph`：
+
+```text
+VirtualFs
+  -> IncludeGraph / JoinedStream
+  -> Parse
+  -> Document
+  -> StandardDocument
+  -> ImageAssets
+  -> CompileReport
+  -> DOCX bytes
+```
+
+这层不替换 `doc-core` 的公开 API，而是给后续 LuaHook collector、XDV layout collector、AI 宏推断和 HTML/Markdown renderer 留出稳定扩展点。
+
 ### 2.3 数据流时序图
 
 ```
 Zip 字节流 (50 MiB max)
    │
    ▼
-[doc-core::convert_zip]
+[doc-core::convert_zip 或 SemanticTexEngine::compile_zip_to_docx]
    │
    ├─► 解压到 VirtualFs
    │     │
@@ -182,7 +207,7 @@ Zip 字节流 (50 MiB max)
    │
    ├─► Document (semantic AST)
    │
-   ├─► doc-docx-writer::pack
+   ├─► doc-docx-writer::pack_with_page_setup
    │     │
    │     ├─► serialize_document
    │     ├─► write_styles
@@ -190,6 +215,16 @@ Zip 字节流 (50 MiB max)
    │     └─► zip 打包
    │
    └─► docx 字节流
+```
+
+V2 CLI 额外提供质量闭环：
+
+```text
+doc-engine build
+  ├─ zip -> docx                    (doc-core convert)
+  ├─ tex -> oracle.pdf              (doc-tex-facade)
+  ├─ docx -> rust.pdf               (doc-docx-pdf)
+  └─ docx/rust.pdf/oracle.pdf -> report.md/json (doc-quality)
 ```
 
 ---
@@ -205,9 +240,9 @@ Zip 字节流 (50 MiB max)
 └─────────────────────────────────┬───────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────┐
-│ L2: 门面层（doc-core）                                       │
-│     - 统一对外 4 个转换入口                                  │
-│     - 错误模型 / 选项 / 结果类型                              │
+│ L2: 门面层（doc-core + doc-compiler-engine）                  │
+│     - doc-core: 兼容 FFI/WASM/HTTP 的 4 个转换入口             │
+│     - doc-compiler-engine: 新语义编译 facade + DocumentGraph   │
 └─────────────────────────────────┬───────────────────────────┘
                                   │
 ┌─────────────────────────────────▼───────────────────────────┐
@@ -225,6 +260,7 @@ Zip 字节流 (50 MiB max)
 ### 3.2 依赖图（实际 `Cargo.toml`）
 
 * `doc-core` 依赖：`doc-utils` / `doc-semantic-ast` / `doc-latex-reader` / `doc-docx-writer` / `doc-bib`
+* `doc-compiler-engine` 依赖：`doc-utils` / `doc-semantic-ast` / `doc-latex-reader` / `doc-docx-writer` / `zip` / `image` / `pdfium-render`
 * `doc-latex-reader` 依赖：`doc-utils` / `doc-semantic-ast` + `logos` + `rowan`
 * `doc-docx-writer` 依赖：`doc-utils` / `doc-semantic-ast` / `doc-mathml` + `quick-xml` + `zip` + `image` + `base64`
 * `doc-mathml` 依赖：`doc-semantic-ast`（间接） + `quick-xml`
@@ -238,7 +274,8 @@ Zip 字节流 (50 MiB max)
 
 * **业务 crate 不允许依赖入口 crate**（`doc-latex-reader` 不依赖 `doc-wasm`）。
 * **基础 crate 永远是叶子节点**（`doc-utils` / `doc-semantic-ast` / `doc-bib` / `doc-mathml` 不依赖任何内部 crate）。
-* **`doc-core` 是唯一聚合点**：任何新增入口都通过它。
+* **`doc-core` 是兼容聚合点**：WASM/Native/Server 仍通过它。
+* **`doc-compiler-engine` 是新架构聚合点**：后续语义 collector / renderer 扩展优先挂到它。
 
 ---
 

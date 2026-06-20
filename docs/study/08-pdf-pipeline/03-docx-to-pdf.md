@@ -472,10 +472,10 @@ flowchart LR
 
     TexFacade -.不依赖.-> DocxPdf
     DocxPdf -.不依赖.-> TexFacade
-    V1["V1 9 crate"] -.不依赖.-> DocxPdf
+    Compat["兼容转换 crate"] -.不依赖.-> DocxPdf
 ```
 
-- V1 9 个 crate **不依赖** `doc-docx-pdf`。
+- 兼容转换 crate（`doc-core` / `doc-latex-reader` / `doc-docx-writer` 等）**不依赖** `doc-docx-pdf`。
 - `doc-tex-facade` 与 `doc-docx-pdf` **互不依赖**（路径 A 与路径 B 是平行的）。
 - `lopdf` 是 workspace 共享（已在 V1 用），不引入新依赖。
 

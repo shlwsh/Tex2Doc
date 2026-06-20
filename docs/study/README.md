@@ -1,7 +1,7 @@
 # Tex2Doc 项目说明文档（Study 索引）
 
 > **项目代号**：Doc-engine / Tex2Doc
-> **当前版本**：V1.3（基于 Sprint 0 + M1–M2 + M3 + M5 + M7 累积成果）
+> **当前版本**：V2.1（V1.3 纯 Rust 转换主线 + V2 PDF 质量闭环 + Semantic TeX Engine facade）
 > **文档目标**：为新加入项目的工程师 / 架构师 / 维护者提供**自下而上**的完整学习入口
 
 本目录汇总了 Tex2Doc 项目的所有学习材料。建议按以下顺序阅读：
@@ -18,7 +18,7 @@
 | ② 技术栈 | [02-tech-stack/02-flutter-dart-stack.md](./02-tech-stack/02-flutter-dart-stack.md) | Flutter / Dart / FFI 工具链 |
 | ② 技术栈 | [02-tech-stack/03-web-extension-stack.md](./02-tech-stack/03-web-extension-stack.md) | Chrome MV3 / Node.js 端到端栈 |
 | ③ 工程目录 | [03-project-structure/01-top-level.md](./03-project-structure/01-top-level.md) | 仓库根目录结构总览 |
-| ③ 工程目录 | [03-project-structure/02-rust-crates.md](./03-project-structure/02-rust-crates.md) | `crates/` 内 9 个 crate 详尽说明 |
+| ③ 工程目录 | [03-project-structure/02-rust-crates.md](./03-project-structure/02-rust-crates.md) | `crates/` 内 15 个 crate 详尽说明 |
 | ③ 工程目录 | [03-project-structure/03-flutter-app.md](./03-project-structure/03-flutter-app.md) | `flutter_app/` 多端工程目录 |
 | ③ 工程目录 | [03-project-structure/04-extension-scripts-tests.md](./03-project-structure/04-extension-scripts-tests.md) | 扩展、脚本、测试、夹具目录 |
 | ④ 架构 | [04-architecture/01-end-to-end-pipeline.md](./04-architecture/01-end-to-end-pipeline.md) | 端到端数据流：LaTeX → DOCX |
@@ -47,15 +47,16 @@
 | ⑧ 演进路线 | [08-pdf-pipeline/03-docx-to-pdf.md](./08-pdf-pipeline/03-docx-to-pdf.md) | `crates/docx-pdf` 设计：LibreOffice headless 二次转换 |
 | ⑧ 演进路线 | [08-pdf-pipeline/04-quality-comparison.md](./08-pdf-pipeline/04-quality-comparison.md) | `crates/quality` 三层质量对比：结构 + 文本 + 视觉 |
 | ⑧ 演进路线 | [08-pdf-pipeline/05-implementation-roadmap.md](./08-pdf-pipeline/05-implementation-roadmap.md) | M1–M5 实施路线图、风险、回滚 |
+| ⑧ 演进路线 | [08-pdf-pipeline/07-progress-2026-06-20.md](./08-pdf-pipeline/07-progress-2026-06-20.md) | 最新实现快照：V2 CLI、compiler-engine、paper3 to-docx |
 
 ---
 
 ## 文档总览
 
 ### 第一章 · 项目概览（[01-overview/](./01-overview/））
-* **产品定位**：LaTeX → DOCX 纯 Rust 核心 + Flutter 全平台转换工具
+* **产品定位**：LaTeX/CTeX → DOCX 纯 Rust 核心 + Semantic TeX Engine facade + Flutter 全平台转换工具
 * **目标用户**：需要把 LaTeX 论文、报告、模板高保真转换为 Word 文档的学术/工程作者
-* **关键差异化**：零重型 TeX 依赖、本地化离线运行、多端覆盖（桌面/Web/扩展/CLI/服务端）
+* **关键差异化**：语义优先转换、中文学术论文/JOS 模板高保真、可选 TeX oracle 质量闭环、本地化离线运行、多端覆盖（桌面/Web/扩展/CLI/服务端）
 
 ### 第二章 · 技术栈（[02-tech-stack/](./02-tech-stack/））
 * Rust 1.82+ 稳定工具链 + Cargo Workspace
@@ -66,22 +67,22 @@
 
 ### 第三章 · 工程目录（[03-project-structure/](./03-project-structure/））
 * 仓库根：工作区配置、CI、钩子、夹具
-* `crates/`：9 个核心 crate（`core` / `utils` / `semantic-ast` / `latex-reader` / `mathml` / `docx-writer` / `bib` / `wasm` / `native` / `server`）
+* `crates/`：15 个 crate（`core` / `compiler-engine` / `utils` / `semantic-ast` / `latex-reader` / `mathml` / `docx-writer` / `bib` / `wasm` / `native` / `server` / `tex-facade` / `docx-pdf` / `quality` / `cli`）
 * `flutter_app/`：多端 Dart 工程（Web/Windows/macOS/Linux）
 * `extension/`：Chrome MV3 扩展（popup + background + content）
 * `tests/`、`examples/`、`scripts/`、`docs/`、`flutter_app/wasm/`、`flutter_app/windows/`
 
 ### 第四章 · 技术架构（[04-architecture/](./04-architecture/））
-* 五段流水线：Include 拓扑 → Logos 词法 → Rowan 语法树 → 语义降级 → OOXML 序列化
+* 六段主链路：VFS/Include 拓扑 → Logos/Rowan 解析 → Semantic Collector → Semantic AST / StandardDocument → Document Graph → DOCX Renderer
 * 三种前端集成模式：WASM（Web）、FFI（Desktop）、HTTP（Server）
-* 跨平台复用：唯一核心 crate `doc-core`，三套绑定
+* 两层门面：`doc-core` 保持 FFI/WASM/HTTP 兼容，`doc-compiler-engine` 承载新一代语义编译器 facade
 
 ### 第五章 · 关键技术（[05-key-tech/](./05-key-tech/））
 * 深入解析每个 crate 的设计原理、数据结构、关键算法
 * 适合需要修改核心逻辑、二次开发、性能调优的工程师
 
 ### 第六章 · 使用说明（[06-user-guide/](./06-user-guide/））
-* 五种使用方式：CLI/PWA/Desktop/Extension/Server
+* 六种使用方式：CLI/PWA/Desktop/Extension/Server/Compiler Engine 脚本
 * 每种方式含：环境要求、构建步骤、典型操作流程
 
 ### 第七章 · 部署手册（[07-deployment/](./07-deployment/））
@@ -89,11 +90,11 @@
 * CI 三平台矩阵（Ubuntu / Windows / macOS）
 * Git 钩子与提交工作流
 
-### 第八章 · 演进路线 V2 · PDF 流水线（[08-pdf-pipeline/](./08-pdf-pipeline/））— 设计稿
-* V1 → V2 演进：新增 docx→PDF 同步生成、TeX oracle 质量对比
-* 三个新 crate：`tex-facade`（可插拔 TeX 封装）、`docx-pdf`（LibreOffice roundtrip）、`quality`（结构+文本+视觉三层）
-* 5 阶段排期（M1–M5），合计 9–14 周
-* **当前状态**：设计稿，未开始落地
+### 第八章 · 演进路线 V2 · PDF 流水线（[08-pdf-pipeline/](./08-pdf-pipeline/））
+* V1 → V2 演进：新增 docx→PDF 同步生成、TeX oracle 质量对比、CLI 串联构建
+* 已落地 crate：`tex-facade`（可插拔 TeX 封装）、`docx-pdf`（LibreOffice roundtrip）、`quality`（结构+文本+视觉三层）、`cli`（统一命令入口）
+* 新增语义编译 facade：`doc-compiler-engine`，对齐 Semantic TeX Engine 方向，支持 source/dir/zip/VFS → DOCX
+* **当前状态**：核心实现已落地；最新快照见 [08-pdf-pipeline/07-progress-2026-06-20.md](./08-pdf-pipeline/07-progress-2026-06-20.md)
 
 ---
 
@@ -106,11 +107,12 @@
 * `Doc-engine_后期开发进展报告_v1.1~v1.3_20260614.md` — 后期开发报告
 * `Doc-engine_任务清单完成度补丁_v1.0_v1.3_20260614.md` — 任务完成度补丁
 * `Doc-engine_V1.3_计划与实施归档_20260614.md` — V1.3 计划与归档
+* `docs-zh/semantic-tex-engine-docx-implementation-plan.md` — Semantic TeX Engine 最新实现技术方案
 
 ---
 
 ## 贡献约定
 
-* 提交代码：使用 `scripts/commit_push.ps1`，自动 add / commit / push
+* 提交代码：先按 `AGENTS.md` 跑 GitNexus impact/detect_changes，再使用 git 或 `scripts/commit_push.ps1`
 * 文档变更：与代码同步更新到本目录
 * 提问反馈：使用本仓库的 issue / PR 流程

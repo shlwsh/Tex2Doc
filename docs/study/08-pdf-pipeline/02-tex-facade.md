@@ -438,13 +438,13 @@ flowchart LR
     TexFacade --> Pdftotext["外部 pdftotext / mutool"]
     TexFacade --> TexEngine["外部 xelatex / tectonic / latexmk"]
 
-    V1Crate["V1 9 个 crate<br/>(latex-reader / docx-writer ...)"] -. 不依赖 .-> TexFacade
+    V1Crate["兼容转换 crate<br/>(latex-reader / docx-writer / doc-core ...)"] -. 不依赖 .-> TexFacade
     TexFacade -. 不依赖 .-> V1Crate
 ```
 
-- `doc-tex-facade` **不依赖**任何 V1 crate。
-- V1 crate **不依赖** `doc-tex-facade`。
-- 唯一调用点是 `bin/doc-engine` 的新子命令 `tex-compile` / `verify --layer all`。
+- `doc-tex-facade` 不依赖 `doc-core` / `doc-latex-reader` / `doc-docx-writer`。
+- 兼容转换 crate 不依赖 `doc-tex-facade`。
+- 主要调用点是 `doc-engine` CLI 的 `tex-compile` / `build` / 质量验证路径。
 
 ---
 

@@ -1,6 +1,6 @@
 # 01 · V2 端到端流水线总览
 
-> 本章站在 V2 草案的"高空"上，回答三个问题：
+> 本章最初站在 V2 草案的"高空"上，回答三个问题；当前实现状态请同时参考 [07-progress-2026-06-20.md](./07-progress-2026-06-20.md)：
 > 1. V2 比 V1 多出哪几条数据流？
 > 2. 新增的产物怎么命名、放在哪？
 > 3. CI 与本地开发时一次完整跑动是哪些步骤、哪些会失败、退出码怎么定？
@@ -19,7 +19,7 @@ V2 在 V1 之外**叠加**三条新路径：
 | **B. docx → pdf 转换** | 校验阶段 | `crates/docx-pdf` → LibreOffice headless | `*.pdf` | **是**（失败 exit 1） |
 | **C. 三层质量对比** | 校验阶段 | `crates/quality` | `*-质量报告.{md,json}` + `reports/diff/*.png` | **是**（按层定退出码） |
 
-> **关键不变量**：V1 主线本身（[crates/latex-reader/](../../../crates/latex-reader/) → [crates/docx-writer/](../../../crates/docx-writer/)）**代码、行为、依赖都不变**。V2 路径只读 V1 写出的 docx，**不修改 docx**，**不写回 V1 crate**。
+> **关键不变量**：兼容主线（[crates/latex-reader/](../../../crates/latex-reader/) → [crates/docx-writer/](../../../crates/docx-writer/) → `doc-core`）继续保留。V2 路径默认只读既有 DOCX/PDF 产物；新语义编译入口由 `doc-compiler-engine` 另行承载。
 
 ---
 
@@ -107,7 +107,15 @@ flowchart LR
 
 ## 1.4 shell 入口
 
-V2 新增 [scripts/build_docx_and_pdf.sh](../../../scripts/build_docx_and_pdf.sh)（**草案**）：
+早期设计中的 `build_docx_and_pdf.sh` 已由当前 `doc-engine build` 与 paper3 专用脚本替代。推荐入口：
+
+```bash
+cargo run -p doc-engine -- build ...
+bash scripts/build_paper3_compiler_engine_docx.sh
+bash scripts/build_paper3_dual_docx.sh
+```
+
+历史草案如下：
 
 ```bash
 #!/usr/bin/env bash

@@ -4,6 +4,32 @@
 
 ---
 
+## 0. 当前 Workspace 总览（2026-06-20）
+
+当前根 `Cargo.toml` 声明 15 个 crate：
+
+| crate 目录 | 包名 | 定位 |
+|---|---|---|
+| `crates/core` | `doc-core` | FFI/WASM/HTTP 兼容门面，保留旧 `convert_*` API |
+| `crates/compiler-engine` | `doc-compiler-engine` | Semantic TeX Engine facade，显式编排 source/dir/zip/VFS → Document Graph → DOCX |
+| `crates/utils` | `doc-utils` | VFS、路径、图片、字体工具 |
+| `crates/semantic-ast` | `doc-semantic-ast` | `Document`、`Block`、`StandardDocument` 等语义模型 |
+| `crates/latex-reader` | `doc-latex-reader` | IncludeGraph、Logos/Rowan 解析、规则降级 collector |
+| `crates/docx-writer` | `doc-docx-writer` | OOXML 序列化、样式、图片、页眉页脚、ZIP 打包 |
+| `crates/bib` | `doc-bib` | Bib/BibLaTeX 解析 |
+| `crates/mathml` | `doc-mathml` | LaTeX math → MathML/OMML |
+| `crates/wasm` | `doc-wasm` | Web/扩展 WASM 入口 |
+| `crates/native` | `doc-native` | 桌面端 FFI 入口 |
+| `crates/server` | `doc-server` | HTTP 服务入口 |
+| `crates/tex-facade` | `doc-tex-facade` | xelatex/tectonic/latexmk oracle 编译封装 |
+| `crates/docx-pdf` | `doc-docx-pdf` | LibreOffice headless DOCX → PDF |
+| `crates/quality` | `doc-quality` | 结构/文本/视觉质量对比 |
+| `crates/cli` | `doc-engine` | 统一 CLI：convert、tex-compile、docx-to-pdf、verify-pdf、build、AST/render dump、docx diff |
+
+最新新增的战略入口是 `doc-compiler-engine`。它目前复用 `doc-latex-reader` 和 `doc-docx-writer`，但把语义采集、Document Graph、DOCX 渲染阶段显式暴露出来，后续可替换为 LuaHook/XDV collector 或新增 HTML/Markdown renderer。
+
+---
+
 ## 1. `crates/core/` — `doc-core`
 
 ### 1.1 作用
@@ -78,6 +104,97 @@ pub struct ConvertResult { docx: Vec<u8>, warnings: Vec<String> }
 * [ ] 跑 `cargo test -p doc-core --test paper3_e2e`（最严格）
 * [ ] 公共 API 变更需同步更新 `doc-wasm` / `doc-native` / `doc-server` / `flutter_app/lib/`
 * [ ] 跑 `gitnexus impact({target: "doc_core::convert_zip"})`
+
+---
+
+## 1A. `crates/compiler-engine/` — `doc-compiler-engine`
+
+### 1A.1 作用
+
+**Semantic TeX Engine facade**。这是新一代 TeX → DOCX 主链路的稳定编排层：当前复用 rule-based `doc-latex-reader`，但已经把“语义采集、Document Graph、DOCX Renderer”显式建模，便于后续接入 LuaHook、XDV layout collector、独立公式引擎和多 renderer。
+
+### 1A.2 目录树
+
+```
+crates/compiler-engine/
+├── Cargo.toml
+├── src/
+│   └── lib.rs                   # SemanticTexEngine + CompileOptions + DocumentGraph + CompileReport
+└── examples/
+    └── paper3_to_docx.rs        # paper3 目录输入 -> DOCX 示例二进制
+```
+
+### 1A.3 关键 API
+
+| API | 用途 |
+|---|---|
+| `SemanticTexEngine::compile_source_to_docx` | 单文件字符串输入 |
+| `SemanticTexEngine::compile_dir_to_docx` | 真实目录输入，paper3 脚本使用该入口 |
+| `SemanticTexEngine::compile_zip_to_docx` | zip 包输入 |
+| `SemanticTexEngine::compile_vfs_to_graph` | 只生成 `DocumentGraph`，用于调试/后续多 renderer |
+| `SemanticTexEngine::compile_vfs_to_docx` | VFS → DOCX |
+
+### 1A.4 关键类型
+
+```rust
+pub enum EngineProfile {
+    GenericArticle,
+    ChineseAcademic,
+    JosPaper,
+    MedicalJournal,
+}
+
+pub struct CompileOptions {
+    pub profile: EngineProfile,
+    pub template_bytes: Option<Vec<u8>>,
+    pub page_setup: Option<doc_docx_writer::PageSetup>,
+    pub collect_standard_ast: bool,
+    pub enable_bibliography: bool,
+}
+
+pub struct DocumentGraph {
+    pub document: Document,
+    pub standard_document: Option<StandardDocument>,
+    pub image_assets: ImageAssets,
+    pub report: CompileReport,
+}
+```
+
+### 1A.5 阶段报告
+
+`CompileReport` 记录以下阶段：
+
+```text
+SourceMount
+IncludeGraph
+TexParse
+SemanticCollect
+DocumentGraph
+DocxRender
+```
+
+paper3 当前输出约 250 个语义块、10 个图片资产，生成 DOCX 大约 3.0 MB。
+
+### 1A.6 使用与测试
+
+```bash
+cargo test -p doc-compiler-engine
+
+bash scripts/build_paper3_compiler_engine_docx.sh
+
+cargo run -p doc-compiler-engine --example paper3_to_docx -- \
+  --project-root examples/paper3/latex \
+  --main-tex examples/paper3/latex/main-jos.tex \
+  --profile jos-paper \
+  --out examples/paper3/output/to-docx/paper3-compiler-engine.docx
+```
+
+### 1A.7 修改前 checklist
+
+* [ ] 跑 `cargo test -p doc-compiler-engine`
+* [ ] 跑 `bash scripts/build_paper3_compiler_engine_docx.sh`
+* [ ] 若改 `CompileOptions` 或 `CompileArtifact`，同步更新 `examples/paper3_to_docx.rs` 和 `docs-zh/semantic-tex-engine-docx-implementation-plan.md`
+* [ ] 若改主链路行为，检查 `doc-core::convert_dir/convert_zip` 是否应迁移到该 facade
 
 ---
 

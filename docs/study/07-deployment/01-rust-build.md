@@ -101,6 +101,12 @@ strip = "symbols"
 # doc-core（FFI 门面）
 cargo build -p doc-core
 
+# doc-compiler-engine（Semantic TeX Engine facade）
+cargo build -p doc-compiler-engine
+
+# doc-engine CLI（V2 PDF/质量闭环）
+cargo build -p doc-engine
+
 # doc-wasm（需 wasm32 target）
 cargo build -p doc-wasm --target wasm32-unknown-unknown
 
@@ -109,6 +115,11 @@ cargo build -p doc-native
 
 # doc-server（二进制）
 cargo build -p doc-server
+
+# V2 PDF 质量闭环 crate
+cargo build -p doc-tex-facade
+cargo build -p doc-docx-pdf
+cargo build -p doc-quality
 ```
 
 ### 3.4 包含测试代码
@@ -162,6 +173,8 @@ cargo test --workspace --all-targets
 ```bash
 cargo test -p doc-latex-reader
 cargo test -p doc-utils
+cargo test -p doc-compiler-engine
+cargo test -p doc-docx-writer
 ```
 
 ### 4.3 集成测试
@@ -169,6 +182,7 @@ cargo test -p doc-utils
 ```bash
 cargo test -p doc-core --test paper3_e2e -- --nocapture
 cargo test -p doc-server --test api
+bash scripts/build_paper3_compiler_engine_docx.sh
 ```
 
 ### 4.4 显示 println 输出
@@ -248,7 +262,8 @@ criterion_main!(benches);
 | `cargo build --workspace`（首次） | ~3 min |
 | `cargo build -p doc-core`（增量） | < 5 s |
 | `cargo test -p doc-core --test paper3_e2e` | ~3 s |
-| paper3 转换 | ~800 ms |
+| `cargo test -p doc-compiler-engine` | < 1 s（增量） |
+| paper3 compiler-engine 转换 | 生成约 3.0 MB DOCX，含 250 blocks / 10 image assets |
 
 ---
 
@@ -257,6 +272,8 @@ criterion_main!(benches);
 | 路径 | 用途 |
 |------|------|
 | `target/debug/doc_server`（Linux / macOS）<br>`target/debug/doc-server.exe`（Windows） | doc-server 二进制 |
+| `target/debug/doc-engine`（Linux / macOS）<br>`target/debug/doc-engine.exe`（Windows） | V2 CLI 二进制 |
+| `target/debug/examples/paper3_to_docx` | compiler-engine paper3 示例二进制 |
 | `target/debug/libdoc_native.so`（Linux）<br>`target/debug/libdoc_native.dylib`（macOS）<br>`target/debug/doc_native.dll`（Windows） | doc-native cdylib |
 | `target/wasm32-unknown-unknown/debug/doc_engine.wasm` | doc-wasm 字节流 |
 

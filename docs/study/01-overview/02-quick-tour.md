@@ -22,6 +22,7 @@
 | **Flutter SDK** ≥ 3.12 | Web / 桌面端构建 |
 | **wasm-pack** | WASM 产物构建 |
 | **Chrome 114+** | MV3 扩展联调 |
+| **LibreOffice / TeX / pandoc** | V2 PDF 质量闭环和 pandoc 对照，非最小 DOCX 转换必需 |
 
 > 仓库根的 `rust-toolchain.toml` 固定 stable channel，包含 `rustfmt` / `clippy` / `rust-src` 三个组件。
 
@@ -38,7 +39,28 @@ cd Tex2Doc
 
 ---
 
-## 2.3 跑核心库单元测试
+## 2.3 最短路径：跑 paper3 compiler-engine 转换
+
+```bash
+bash scripts/build_paper3_compiler_engine_docx.sh
+```
+
+预期输出：
+
+```text
+docx: examples/paper3/output/to-docx/v13-论文稿件-jos-<TS>-compiler-engine.docx
+blocks: 250
+image-assets: 10
+stage: SourceMount Completed
+...
+stage: DocxRender Completed
+```
+
+该命令只依赖 Rust/Cargo，直接调用 `doc-compiler-engine` 的 `paper3_to_docx` example。
+
+---
+
+## 2.4 跑核心库单元测试
 
 ```bash
 cargo test --workspace --all-targets
@@ -60,7 +82,7 @@ test result: ok. X passed; 0 failed
 
 ---
 
-## 2.4 跑端到端视觉验证（Playwright）
+## 2.5 跑端到端视觉验证（Playwright）
 
 ```bash
 # 一次性安装 Chromium
@@ -86,7 +108,7 @@ node scripts/e2e_paper3.mjs
 
 ---
 
-## 2.5 桌面端冒烟（仅 Windows / macOS / Linux）
+## 2.6 桌面端冒烟（仅 Windows / macOS / Linux）
 
 ```bash
 # 构建 Rust native cdylib + Flutter Windows app
@@ -100,7 +122,7 @@ cd flutter_app && dart run bin/native_smoke.dart
 
 ---
 
-## 2.6 命令行 one-shot 转换
+## 2.7 命令行 one-shot 转换
 
 把任意 LaTeX 项目转换到 docx：
 
@@ -124,9 +146,19 @@ fn main() {
 cargo test -p doc-core --test paper3_e2e -- --nocapture
 ```
 
+V2 CLI:
+
+```bash
+cargo run -p doc-engine -- convert \
+  --zip examples/paper3/upload.zip \
+  --main-tex main-jos.tex \
+  --page-setup jos-paper3 \
+  --out examples/paper3/output/to-docx/paper3-rust.docx
+```
+
 ---
 
-## 2.7 启动 HTTP 服务端
+## 2.8 启动 HTTP 服务端
 
 ```bash
 # 默认监听 0.0.0.0:8080
@@ -147,7 +179,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/convert \
 
 ---
 
-## 2.8 常见问题
+## 2.9 常见问题
 
 * **`cannot find -lffi`（Linux）**：缺 `libffi-dev` / `libclang-dev`。
 * **WASM 编译失败**：升级 `wasm-pack` 至 ≥ 0.12，且 `wasm32-unknown-unknown` target 已安装（`rustup target add wasm32-unknown-unknown`）。
@@ -155,7 +187,7 @@ curl -X POST http://127.0.0.1:8080/api/v1/convert \
 
 ---
 
-## 2.9 下一步
+## 2.10 下一步
 
 * 想深入架构：读 [04-architecture/](../04-architecture/)
 * 想看技术细节：读 [05-key-tech/](../05-key-tech/)

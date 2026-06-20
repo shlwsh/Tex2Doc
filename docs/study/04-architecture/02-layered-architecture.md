@@ -15,9 +15,14 @@
 | `doc-latex-reader` | doc-utils, doc-semantic-ast, logos, rowan, thiserror, serde |
 | `doc-docx-writer` | doc-utils, doc-semantic-ast, doc-mathml, quick-xml, zip, thiserror, serde, image, base64 |
 | `doc-core` | doc-utils, doc-semantic-ast, doc-latex-reader, doc-docx-writer, doc-bib, thiserror, serde, serde_json, zip |
+| `doc-compiler-engine` | doc-utils, doc-semantic-ast, doc-latex-reader, doc-docx-writer, zip, image, pdfium-render, thiserror, serde, tracing |
 | `doc-wasm` | doc-core, wasm-bindgen, serde, serde-wasm-bindgen, serde_json, thiserror, js-sys, zip, console_error_panic_hook（可选） |
 | `doc-native` | doc-core, serde, serde_json, thiserror |
 | `doc-server` | doc-core, axum, tower, tower-http, tokio, tokio-util, memchr, http, bytes, serde, serde_json, thiserror, tracing, tracing-subscriber, mime, async-trait |
+| `doc-tex-facade` | tokio, async-trait, which, blake3, tempfile 等，封装 xelatex/tectonic/latexmk |
+| `doc-docx-pdf` | LibreOffice headless 后端、超时与 profile 管理 |
+| `doc-quality` | 结构、文本、视觉、PDF 结构质量对比 |
+| `doc-engine` | doc-core, doc-tex-facade, doc-docx-pdf, doc-quality, doc-docx-writer, doc-latex-reader, doc-semantic-ast, clap, tokio |
 
 > 间接依赖未列出（如 axum 依赖 tokio 等）。
 
@@ -87,9 +92,25 @@
   * `CoreError`（Io/Parse/Serialize/Unsupported）
 * **依赖**：L1 全集 + L0（utils, semantic-ast）
 * **关键约束**：
-  * **唯一**被 `doc-wasm` / `doc-native` / `doc-server` 直接依赖的业务 crate。
+  * `doc-wasm` / `doc-native` / `doc-server` 直接依赖该 crate 以保持旧边界稳定。
   * 错误类型 `serde::Serialize` + `serde::Deserialize`（FFI 透传）。
   * `forbid(unsafe_code)`。
+
+### 2.3A L2 — 语义编译门面（`doc-compiler-engine`）
+
+* **职责**：承载下一代 Semantic TeX Engine 主链路。
+* **公开 API**：
+  * `SemanticTexEngine::compile_source_to_docx`
+  * `SemanticTexEngine::compile_dir_to_docx`
+  * `SemanticTexEngine::compile_zip_to_docx`
+  * `SemanticTexEngine::compile_vfs_to_graph`
+  * `CompileOptions` / `EngineProfile`
+  * `DocumentGraph` / `CompileReport` / `CompileStage`
+* **依赖**：复用 `doc-latex-reader`、`doc-semantic-ast`、`doc-docx-writer`、`doc-utils`。
+* **关键约束**：
+  * 不破坏 `doc-core` 对 WASM/Native/Server 的兼容 API。
+  * `DocumentGraph` 同时保留 legacy `Document` 与 `StandardDocument`。
+  * 后续 LuaHook/XDV/AI macro fallback 应优先挂到该层，而不是直接改入口层。
 
 ### 2.4 L3 — 入口层
 
@@ -131,6 +152,16 @@
   * docx 头/大小验证（`PK\x03\x04` + ≥ 4 KiB）。
   * 错误状态码映射（400/422/500）。
 
+#### `doc-engine` CLI
+* **职责**：V2 命令行总入口。
+* **子命令**：
+  * `convert`：zip → DOCX，兼容 `doc-core`
+  * `tex-compile`：TeX → oracle PDF
+  * `docx-to-pdf`：DOCX → PDF
+  * `verify-pdf`：结构/文本/视觉质量报告
+  * `build`：串联 TeX oracle、DOCX、PDF、质量报告
+  * `ast-dump` / `render-dump` / `docx-diff`：调试与回归辅助
+
 ---
 
 ## 3. 跨层调用关系
@@ -153,6 +184,19 @@ doc-wasm / doc-native / doc-server
                        │
                        ▼
                  doc-bib（间接）
+
+doc-compiler-engine
+         │
+         ├──► doc-latex-reader
+         ├──► doc-semantic-ast / StandardDocument
+         ├──► doc-utils / ImageAssets
+         └──► doc-docx-writer
+
+doc-engine CLI
+         ├──► doc-core
+         ├──► doc-tex-facade
+         ├──► doc-docx-pdf
+         └──► doc-quality
 ```
 
 ### 3.2 反向调用
@@ -172,13 +216,13 @@ doc-wasm / doc-native / doc-server
 │        ├──► doc-docx-writer 消费                            │
 │        └──► doc-bib::BibEntry（嵌入 Block::Bibliography）     │
 │                                                             │
-│  doc-utils::VirtualFs ◄── doc-core 装载                     │
+│  doc-utils::VirtualFs ◄── doc-core / compiler-engine 装载   │
 │        │                                                    │
 │        ├──► doc-latex_reader::IncludeGraph 使用            │
 │        ├──► doc-core::convert_dir 写入                      │
 │        └──► doc-core::convert_zip 写入                      │
 │                                                             │
-│  doc_utils::ImageAssets ◄── doc-core 扫描 VFS 填充         │
+│  doc_utils::ImageAssets ◄── doc-core / compiler-engine 扫描 VFS 填充 │
 │        │                                                    │
 │        └──► doc-docx-writer::pack_with_assets 消费          │
 └─────────────────────────────────────────────────────────────┘
@@ -233,8 +277,10 @@ lower   ──► parser, include, expand, utils, semantic_ast
 ### 5.1 Crate 命名
 
 * `doc-utils` / `doc-semantic-ast` / `doc-latex-reader` / `doc-docx-writer` / `doc-bib` / `doc-mathml`：业务 crate，发布名带 `doc-` 前缀。
-* `doc-core`：门面 crate。
+* `doc-core`：兼容门面 crate。
+* `doc-compiler-engine`：语义编译 facade crate。
 * `doc-wasm` / `doc-native` / `doc-server`：入口 crate（cdylib / cdylib / bin）。
+* `doc-tex-facade` / `doc-docx-pdf` / `doc-quality` / `doc-engine`：V2 PDF 质量闭环 crate。
 
 ### 5.2 Cargo.toml 声明
 
@@ -246,10 +292,12 @@ doc-latex-reader = { path = "crates/latex-reader" }
 doc-docx-writer  = { path = "crates/docx-writer" }
 doc-bib          = { path = "crates/bib" }
 doc-mathml       = { path = "crates/mathml" }
+doc-compiler-engine = { path = "crates/compiler-engine" }
 ```
 
 * 业务 crate 内部依赖：使用 `path = ...` + `workspace = true`（共享版本号）。
-* 入口 crate 内部依赖：仅依赖 `doc-core`（不直接依赖其他业务 crate）。
+* 旧入口 crate 内部依赖：优先依赖 `doc-core`，保持 WASM/Native/Server API 稳定。
+* 新语义编译/质量闭环入口：依赖 `doc-compiler-engine` 或 V2 PDF crate，以 `DocumentGraph` / 质量报告为扩展边界。
 
 ### 5.3 Rust 类型命名
 

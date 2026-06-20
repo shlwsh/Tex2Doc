@@ -29,16 +29,17 @@ E:\work\Tex2Doc\
 ├── .gitnexus/                   # GitNexus 索引（自动生成）
 │   ├── run.cjs                  # 索引运行器
 │   └── ...
-├── crates/                      # Rust workspace（9 个 crate）
+├── crates/                      # Rust workspace（15 个 crate）
 ├── docs/                        # 项目文档（已有）
 │   ├── *.md                     # 技术方案 / 任务清单 / 进展报告
 │   └── study/                   # 【本目录】学习文档
+├── docs-zh/                     # 中文专题方案，如 Semantic TeX Engine 实现方案
 ├── examples/                    # 示例项目 + 端到端夹具
 │   └── paper3/                  # 主要示例（8 千行 LaTeX）
 ├── extension/                   # Chrome MV3 扩展
 ├── flutter_app/                 # Flutter 多端工程
 ├── node_modules/                # npm 依赖（.gitignore）
-├── scripts/                     # Node + PowerShell 脚本
+├── scripts/                     # Bash + Python + Node + PowerShell 脚本
 ├── target/                      # Cargo 编译产物（.gitignore）
 ├── tests/                       # 跨 crate 共享夹具
 │   └── fixtures/
@@ -103,6 +104,7 @@ E:\work\Tex2Doc\
 ```
 crates/
 ├── core/                        # doc-core：FFI/WASM 统一门面
+├── compiler-engine/             # doc-compiler-engine：Semantic TeX Engine facade
 ├── utils/                       # doc-utils：通用工具库
 ├── semantic-ast/                # doc-semantic-ast：核心语义块模型
 ├── latex-reader/                # doc-latex-reader：LaTeX 解析器
@@ -112,7 +114,10 @@ crates/
 ├── wasm/                        # doc-wasm：WASM 桥接
 ├── native/                      # doc-native：原生 cdylib
 ├── server/                      # doc-server：HTTP 服务
-└── cli/                         # （占位，未来 CLI）
+├── tex-facade/                  # doc-tex-facade：TeX oracle 封装
+├── docx-pdf/                    # doc-docx-pdf：DOCX -> PDF
+├── quality/                     # doc-quality：结构/文本/视觉质量对比
+└── cli/                         # doc-engine：统一 CLI
 ```
 
 > 详细到文件级的说明见 [02-rust-crates.md](./02-rust-crates.md)。
