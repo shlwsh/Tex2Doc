@@ -13,6 +13,8 @@
 > Auto selector 开发报告：[Semantic TeX Engine Auto Selector 开发进展报告（20260620-125915）](./semantic-tex-engine-development-report-20260620-125915.md)
 >
 > 双引擎对比脚本开发报告：[Semantic TeX Engine 双引擎对比脚本开发报告（20260620-130628）](./semantic-tex-engine-development-report-20260620-130628.md)
+>
+> ProfileSpec 开发报告：[Semantic TeX Engine ProfileSpec 开发报告（20260620-131521）](./semantic-tex-engine-development-report-20260620-131521.md)
 
 ## 1. 当前结论
 
@@ -23,7 +25,7 @@
 | 里程碑 | 状态 | 说明 |
 |---|---|---|
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
-| M2 Profile 化 | 部分完成 | 已有 `EngineProfile` 枚举，但 profile 规则尚未外置，JOS 页眉页脚仍主要在 `doc-core/docx-writer` 侧 |
+| M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
 | M3 结构增强 | 部分完成 | 表格、图片、引用已有文本级/块级处理；显式 `ReferenceGraph`、bookmark、hyperlink、图片尺寸表达式尚未完成 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；DOCX writer 块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
@@ -124,6 +126,14 @@ DocxRender
 - 用户显式指定 runtime backend 且关闭 fallback 时，runtime 失败会返回错误，用于验证该 backend 是否真的可用。
 - 已提供 `parse_semantic_events_jsonl`，作为 XeLaTeX/LuaTeX sidecar 协议解析入口。
 
+当前 profile 规则边界：
+
+- `EngineProfile::spec()` 已返回 `ProfileSpec`。
+- `ProfileSpec` 包含 document class 白名单、默认页面设置、字体策略、caption 策略和引用策略。
+- `JosPaper` profile 已内置 `PageSetup::jos_paper3()`，`paper3_to_docx` example 不再手写 JOS 页面设置。
+- `CompileReport.profile_spec` 会输出本次编译使用的 profile 规则摘要。
+- 规则仍为 Rust 内置表，尚未外置到 YAML/TOML。
+
 ### 2.3 paper3 样例
 
 已存在脚本：
@@ -193,9 +203,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-125728.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-125728-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-125728-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-131628.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-131627-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-131627-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -203,6 +213,8 @@ semantic-engine 后端报告：
 backend-requested: xelatex-hook
 backend-selected: xelatex-hook
 backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available: found /usr/bin/xelatex
+profile-id: jos-paper
+profile-page-setup: jos-paper3
 ```
 
 2026-06-20 最新 semantic backend 对比结果：
@@ -218,18 +230,19 @@ backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available:
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-130548-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-130548-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
+| rust-rule | `v15-论文稿件-jos-20260620-131459-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-131459-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-130548-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-131459-dual-engines-comparison-report.md
 ```
 
 结论：
 
 - `semantic_backend=auto` 在 paper3 上选择 `xelatex-hook`。
+- semantic log 已输出 `profile-id: jos-paper` 与 `profile-page-setup: jos-paper3`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -264,7 +277,7 @@ doc-latex-reader -> doc-semantic-ast::Document -> doc-docx-writer
 
 ### 3.2 Profile 仍是枚举，不是规则系统
 
-当前 `EngineProfile` 仅提供：
+当前 `EngineProfile` 已提供：
 
 ```rust
 GenericArticle
@@ -273,15 +286,20 @@ JosPaper
 MedicalJournal
 ```
 
-缺少：
+并通过 `EngineProfile::spec()` 暴露：
 
 - 文档类白名单。
-- front matter 抽取规则。
-- 字体映射。
+- 默认页面设置。
+- 字体策略。
 - caption 命名策略。
-- 参考文献样式。
+- 引用策略。
+
+仍缺少：
+
+- front matter 抽取规则。
 - DOCX style 映射。
 - 兼容性评分阈值。
+- YAML/TOML 外置规则。
 
 ### 3.3 引用图未结构化
 
@@ -398,7 +416,7 @@ bash scripts/compare_paper3_dual_engines.sh
 
 ### T3 Profile 规则表
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -407,10 +425,13 @@ bash scripts/compare_paper3_dual_engines.sh
 
 实现要点：
 
-- 新增 `ProfileSpec`。
-- 增加 `EngineProfile::spec()`。
-- 把 JOS 默认 `PageSetup::jos_paper3()` 纳入 `JosPaper` profile。
-- 为后续 YAML/TOML 外置规则预留结构。
+- 已新增 `ProfileSpec`、`FontPolicySpec`、`CaptionPolicySpec`、`CitationPolicySpec`、`PageSetupProfile`。
+- 已增加 `EngineProfile::spec()`。
+- 已把 JOS 默认 `PageSetup::jos_paper3()` 纳入 `JosPaper` profile。
+- `CompileOptions::effective_page_setup()` 会在未显式覆盖时使用 profile 默认页面。
+- `CompileReport.profile_spec` 会输出可审计的 profile 摘要。
+- `paper3_to_docx` example 已去掉手写 JOS page setup，改由 `JosPaper` profile 提供。
+- 已为后续 YAML/TOML 外置规则预留结构。
 
 验收：
 
@@ -666,6 +687,7 @@ T13 AI fallback
 
 ```bash
 cargo fmt -p doc-compiler-engine
+cargo test -p doc-compiler-engine profile
 cargo test -p doc-compiler-engine
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-core
@@ -677,7 +699,8 @@ bash scripts/compare_paper3_semantic_backends.sh
 结果：
 
 ```text
-doc-compiler-engine: 10 passed, 1 ignored
+doc-compiler-engine profile: 2 passed
+doc-compiler-engine: 12 passed, 1 ignored
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-core: 5 passed
 paper3 three-docx: sh/rust-rule/semantic-engine generated
@@ -694,14 +717,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T3：
+下一步建议进入 T4：
 
 ```text
-T3 Profile 规则表
+T4 ReferenceGraph
 ```
 
 具体先做：
 
-1. 为 `EngineProfile` 增加 `ProfileSpec`，把 JOS、中文学术、医学期刊的页面、字体、caption、引用策略内聚到新语义路径。
-2. 保持 `doc-core`、`doc-engine convert` 旧路径不依赖 `doc-compiler-engine`。
-3. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。
+1. 在新语义路径中定义 `ReferenceGraph`，结构化 `label/ref/eqref/autoref/cite`。
+2. 将当前文本级引用替换能力保留为 fallback，不影响 `doc-core` 旧路径。
+3. 对未解析引用输出 diagnostics，为后续 bookmark/hyperlink 做准备。
+4. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。

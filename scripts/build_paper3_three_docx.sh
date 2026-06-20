@@ -231,7 +231,7 @@ append_report_row "semantic-engine" "$SEMANTIC_DOCX" "$SEMANTIC_LOG"
   echo
   echo "## Semantic Backend"
   echo
-  grep -E '^backend-(requested|selected|fallback-from|reason):' "$SEMANTIC_LOG" || true
+  grep -E '^(backend-(requested|selected|fallback-from|reason)|profile-(id|page-setup)):' "$SEMANTIC_LOG" || true
 } >>"$REPORT"
 
 echo "=== done ==="

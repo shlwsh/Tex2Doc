@@ -21,7 +21,6 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         profile: args.profile,
         semantic_backend: args.semantic_backend,
         allow_backend_fallback: args.allow_backend_fallback,
-        page_setup: Some(doc_docx_writer::PageSetup::jos_paper3()),
         ..CompileOptions::default()
     };
     if args.no_standard_ast {
@@ -48,6 +47,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         println!("backend-fallback-from: {}", fallback_from.id());
     }
     println!("backend-reason: {}", artifact.report.backend.reason);
+    println!("profile-id: {}", artifact.report.profile_spec.id);
+    println!(
+        "profile-page-setup: {}",
+        artifact.report.profile_spec.default_page_setup
+    );
     for stage in artifact.report.stages {
         println!("stage: {:?} {:?}", stage.stage, stage.status);
     }

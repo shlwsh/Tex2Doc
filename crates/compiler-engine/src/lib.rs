@@ -39,19 +39,239 @@ pub enum EngineProfile {
 
 impl EngineProfile {
     pub fn id(self) -> &'static str {
+        self.spec().id
+    }
+
+    pub fn spec(self) -> ProfileSpec {
         match self {
-            Self::GenericArticle => "generic-article",
-            Self::ChineseAcademic => "chinese-academic",
-            Self::JosPaper => "jos-paper",
-            Self::MedicalJournal => "medical-journal",
+            Self::GenericArticle => ProfileSpec {
+                profile: self,
+                id: "generic-article",
+                display_name: "Generic Article",
+                document_classes: &["article", "report", "book"],
+                page_setup: PageSetupProfile::Default,
+                font_policy: FontPolicySpec {
+                    latin_main: "Times New Roman",
+                    cjk_main: "",
+                    math: "Cambria Math",
+                    notes: "Default Word-compatible article font policy",
+                },
+                caption_policy: CaptionPolicySpec {
+                    figure_prefix: "Figure",
+                    table_prefix: "Table",
+                    equation_prefix: "Equation",
+                    numbering: "arabic",
+                },
+                citation_policy: CitationPolicySpec {
+                    style: "numeric",
+                    bibliography_style: "plain",
+                    reference_section_title: "References",
+                },
+            },
+            Self::ChineseAcademic => ProfileSpec {
+                profile: self,
+                id: "chinese-academic",
+                display_name: "Chinese Academic Paper",
+                document_classes: &["ctexart", "ctexrep", "ctexbook", "article"],
+                page_setup: PageSetupProfile::A4,
+                font_policy: FontPolicySpec {
+                    latin_main: "Times New Roman",
+                    cjk_main: "SimSun",
+                    math: "Cambria Math",
+                    notes: "CTeX-oriented Chinese academic font policy",
+                },
+                caption_policy: CaptionPolicySpec {
+                    figure_prefix: "图",
+                    table_prefix: "表",
+                    equation_prefix: "式",
+                    numbering: "chapter-or-section",
+                },
+                citation_policy: CitationPolicySpec {
+                    style: "numeric-compressed",
+                    bibliography_style: "gbt7714-like",
+                    reference_section_title: "参考文献",
+                },
+            },
+            Self::JosPaper => ProfileSpec {
+                profile: self,
+                id: "jos-paper",
+                display_name: "Journal of Software Paper",
+                document_classes: &["rjthesis", "ctexart"],
+                page_setup: PageSetupProfile::JosPaper3,
+                font_policy: FontPolicySpec {
+                    latin_main: "Times New Roman",
+                    cjk_main: "SimSun/FangSong/KaiTi",
+                    math: "Cambria Math",
+                    notes: "JOS paper3 profile; CTeX/XeCJK templates prefer XeLaTeX",
+                },
+                caption_policy: CaptionPolicySpec {
+                    figure_prefix: "图",
+                    table_prefix: "表",
+                    equation_prefix: "式",
+                    numbering: "section-scoped",
+                },
+                citation_policy: CitationPolicySpec {
+                    style: "numeric-super-compressed",
+                    bibliography_style: "unsrt",
+                    reference_section_title: "References",
+                },
+            },
+            Self::MedicalJournal => ProfileSpec {
+                profile: self,
+                id: "medical-journal",
+                display_name: "Medical Journal Manuscript",
+                document_classes: &["article", "elsarticle", "wlscirep"],
+                page_setup: PageSetupProfile::A4,
+                font_policy: FontPolicySpec {
+                    latin_main: "Times New Roman",
+                    cjk_main: "SimSun",
+                    math: "Cambria Math",
+                    notes: "Medical manuscript profile with restrained Word defaults",
+                },
+                caption_policy: CaptionPolicySpec {
+                    figure_prefix: "Fig.",
+                    table_prefix: "Table",
+                    equation_prefix: "Equation",
+                    numbering: "arabic",
+                },
+                citation_policy: CitationPolicySpec {
+                    style: "numeric",
+                    bibliography_style: "vancouver-like",
+                    reference_section_title: "References",
+                },
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProfileSpec {
+    pub profile: EngineProfile,
+    pub id: &'static str,
+    pub display_name: &'static str,
+    pub document_classes: &'static [&'static str],
+    pub page_setup: PageSetupProfile,
+    pub font_policy: FontPolicySpec,
+    pub caption_policy: CaptionPolicySpec,
+    pub citation_policy: CitationPolicySpec,
+}
+
+impl ProfileSpec {
+    pub fn default_page_setup(self) -> Option<doc_docx_writer::PageSetup> {
+        self.page_setup.to_page_setup()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum PageSetupProfile {
+    Default,
+    A4,
+    JosPaper3,
+}
+
+impl PageSetupProfile {
+    pub fn id(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::A4 => "a4",
+            Self::JosPaper3 => "jos-paper3",
+        }
+    }
+
+    pub fn to_page_setup(self) -> Option<doc_docx_writer::PageSetup> {
+        match self {
+            Self::Default => None,
+            Self::A4 => Some(doc_docx_writer::PageSetup {
+                width_twips: 11906,
+                height_twips: 16838,
+                margin_top: Some(1440),
+                margin_right: Some(1440),
+                margin_bottom: Some(1440),
+                margin_left: Some(1440),
+                margin_header: Some(720),
+                margin_footer: Some(720),
+                cols_space: Some(720),
+                cols_num: Some(1),
+                header_text: None,
+                footer_text: None,
+                first_header_text: None,
+                first_footer_text: None,
+                even_header_text: None,
+                first_footer_indent_twips: None,
+            }),
+            Self::JosPaper3 => Some(doc_docx_writer::PageSetup::jos_paper3()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FontPolicySpec {
+    pub latin_main: &'static str,
+    pub cjk_main: &'static str,
+    pub math: &'static str,
+    pub notes: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CaptionPolicySpec {
+    pub figure_prefix: &'static str,
+    pub table_prefix: &'static str,
+    pub equation_prefix: &'static str,
+    pub numbering: &'static str,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CitationPolicySpec {
+    pub style: &'static str,
+    pub bibliography_style: &'static str,
+    pub reference_section_title: &'static str,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProfileSpecReport {
+    pub id: String,
+    pub display_name: String,
+    pub document_classes: Vec<String>,
+    pub default_page_setup: String,
+    pub latin_main_font: String,
+    pub cjk_main_font: String,
+    pub math_font: String,
+    pub figure_caption_prefix: String,
+    pub table_caption_prefix: String,
+    pub equation_caption_prefix: String,
+    pub citation_style: String,
+    pub bibliography_style: String,
+    pub reference_section_title: String,
+}
+
+impl ProfileSpecReport {
+    fn from_spec(spec: ProfileSpec) -> Self {
+        Self {
+            id: spec.id.to_string(),
+            display_name: spec.display_name.to_string(),
+            document_classes: spec
+                .document_classes
+                .iter()
+                .map(|class| (*class).to_string())
+                .collect(),
+            default_page_setup: spec.page_setup.id().to_string(),
+            latin_main_font: spec.font_policy.latin_main.to_string(),
+            cjk_main_font: spec.font_policy.cjk_main.to_string(),
+            math_font: spec.font_policy.math.to_string(),
+            figure_caption_prefix: spec.caption_policy.figure_prefix.to_string(),
+            table_caption_prefix: spec.caption_policy.table_prefix.to_string(),
+            equation_caption_prefix: spec.caption_policy.equation_prefix.to_string(),
+            citation_style: spec.citation_policy.style.to_string(),
+            bibliography_style: spec.citation_policy.bibliography_style.to_string(),
+            reference_section_title: spec.citation_policy.reference_section_title.to_string(),
         }
     }
 }
 
 /// Semantic collection backend selection.
 ///
-/// `Auto` currently resolves to [`SemanticBackendKind::RuleBased`] unless a
-/// future runtime backend is explicitly enabled and available.
+/// `Auto` scans template features and available TeX runtimes before selecting
+/// a concrete semantic backend.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum SemanticBackendKind {
     #[default]
@@ -145,6 +365,14 @@ impl Default for CompileOptions {
     }
 }
 
+impl CompileOptions {
+    pub fn effective_page_setup(&self) -> Option<doc_docx_writer::PageSetup> {
+        self.page_setup
+            .clone()
+            .or_else(|| self.profile.spec().default_page_setup())
+    }
+}
+
 /// High-level compiler facade.
 #[derive(Debug, Default, Clone)]
 pub struct SemanticTexEngine;
@@ -231,17 +459,28 @@ impl SemanticTexEngine {
         options: &CompileOptions,
     ) -> Result<CompileArtifact, EngineError> {
         let mut graph = self.compile_vfs_to_graph(main_tex, vfs, options)?;
+        let page_setup = options.effective_page_setup();
+        let page_setup_label = if options.page_setup.is_some() {
+            "explicit page setup override".to_string()
+        } else {
+            format!(
+                "profile default page setup: {}",
+                options.profile.spec().page_setup.id()
+            )
+        };
         graph.report.push(
             CompileStage::DocxRender,
             StageStatus::Completed,
-            "DOCX renderer packed document.xml, styles.xml, relationships and media",
+            format!(
+                "DOCX renderer packed document.xml, styles.xml, relationships and media ({page_setup_label})"
+            ),
         );
 
         let docx = doc_docx_writer::pack_with_page_setup(
             &graph.document,
             options.template_bytes.as_deref(),
             Some(&graph.image_assets),
-            options.page_setup.as_ref(),
+            page_setup.as_ref(),
         )
         .map_err(|e| EngineError::Serialize(e.to_string()))?;
         graph.report.docx_bytes = docx.len();
@@ -310,6 +549,7 @@ pub struct DocumentGraph {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileReport {
     pub profile: EngineProfile,
+    pub profile_spec: ProfileSpecReport,
     pub backend: BackendSelectionReport,
     pub stages: Vec<StageReport>,
     pub diagnostics: Vec<EngineDiagnostic>,
@@ -324,6 +564,7 @@ impl CompileReport {
     pub fn new(profile: EngineProfile) -> Self {
         Self {
             profile,
+            profile_spec: ProfileSpecReport::from_spec(profile.spec()),
             backend: BackendSelectionReport::default(),
             stages: Vec::new(),
             diagnostics: Vec::new(),
@@ -1733,6 +1974,48 @@ E = mc^2
     }
 
     #[test]
+    fn profile_spec_exposes_jos_rules() {
+        let spec = EngineProfile::JosPaper.spec();
+        let page_setup = spec
+            .default_page_setup()
+            .expect("JOS profile should provide page setup");
+
+        assert_eq!(spec.id, "jos-paper");
+        assert_eq!(spec.page_setup, PageSetupProfile::JosPaper3);
+        assert!(spec.document_classes.contains(&"rjthesis"));
+        assert_eq!(spec.caption_policy.figure_prefix, "图");
+        assert_eq!(spec.citation_policy.bibliography_style, "unsrt");
+        assert_eq!(page_setup.width_twips, 10433);
+        assert_eq!(page_setup.height_twips, 14742);
+    }
+
+    #[test]
+    fn profile_default_page_setup_is_used_for_docx_render() {
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            profile: EngineProfile::JosPaper,
+            semantic_backend: SemanticBackendKind::RuleBased,
+            page_setup: None,
+            ..CompileOptions::default()
+        };
+        let artifact = engine
+            .compile_source_to_docx("main.tex", SAMPLE, &options)
+            .expect("compile source with profile setup");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(artifact.report.profile_spec.id, "jos-paper");
+        assert_eq!(
+            artifact.report.profile_spec.default_page_setup,
+            "jos-paper3"
+        );
+        assert!(document_xml.contains(r#"w:w="10433""#));
+        assert!(document_xml.contains(r#"w:h="14742""#));
+        assert!(artifact.report.stages.iter().any(|stage| stage
+            .message
+            .contains("profile default page setup: jos-paper3")));
+    }
+
+    #[test]
     fn explicit_runtime_backend_falls_back_to_rule_based() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
@@ -1972,5 +2255,15 @@ a+b=c
                 },
             },
         }
+    }
+
+    fn docx_document_xml(docx: &[u8]) -> String {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx)).expect("docx zip");
+        let mut file = archive
+            .by_name("word/document.xml")
+            .expect("document.xml part");
+        let mut xml = String::new();
+        file.read_to_string(&mut xml).expect("read document.xml");
+        xml
     }
 }

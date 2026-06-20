@@ -122,7 +122,14 @@ phrases = [p for p in os.environ["KEY_PHRASES"].split("|") if p]
 def read_backend_lines(path: Path) -> list[str]:
     if not path.is_file():
         return []
-    wanted = ("backend-requested:", "backend-selected:", "backend-fallback-from:", "backend-reason:")
+    wanted = (
+        "backend-requested:",
+        "backend-selected:",
+        "backend-fallback-from:",
+        "backend-reason:",
+        "profile-id:",
+        "profile-page-setup:",
+    )
     return [
         line.strip()
         for line in path.read_text(encoding="utf-8", errors="replace").splitlines()
