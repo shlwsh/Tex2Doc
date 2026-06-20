@@ -568,6 +568,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-compiler-engine"
+version = "0.1.0"
+dependencies = [
+ "doc-docx-writer",
+ "doc-latex-reader",
+ "doc-semantic-ast",
+ "doc-utils",
+ "image",
+ "pdfium-render",
+ "serde",
+ "thiserror 1.0.69",
+ "tracing",
+ "zip",
+]
+
+[[package]]
 name = "doc-core"
 version = "0.1.0"
 dependencies = [
