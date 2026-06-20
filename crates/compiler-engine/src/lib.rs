@@ -96,13 +96,14 @@ impl BackendSelectionReport {
 
     fn fallback(
         requested: SemanticBackendKind,
+        fallback_from: SemanticBackendKind,
         selected: SemanticBackendKind,
         reason: impl Into<String>,
     ) -> Self {
         Self {
             requested,
             selected,
-            fallback_from: Some(requested),
+            fallback_from: Some(fallback_from),
             reason: reason.into(),
         }
     }
@@ -692,6 +693,210 @@ impl From<std::io::Error> for EngineError {
     }
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct TemplateSignals {
+    has_tex_source: bool,
+    xetex_required: bool,
+    luatex_preferred: bool,
+    reasons: Vec<&'static str>,
+}
+
+impl TemplateSignals {
+    fn observe(&mut self, text: &str) {
+        self.has_tex_source = true;
+        let lower = text.to_ascii_lowercase();
+        let compact = lower
+            .chars()
+            .filter(|ch| !ch.is_ascii_whitespace())
+            .collect::<String>();
+
+        if compact.contains("\\documentclass{ctex")
+            || (compact.contains("\\documentclass") && compact.contains("{ctexart}"))
+            || (compact.contains("\\documentclass") && compact.contains("{ctexrep}"))
+            || (compact.contains("\\documentclass") && compact.contains("{ctexbook}"))
+            || compact.contains("\\usepackage{ctex")
+        {
+            self.mark_xetex("ctex class/package");
+        }
+
+        if compact.contains("\\usepackage{xecjk") || compact.contains("\\requirepackage{xecjk") {
+            self.mark_xetex("xeCJK package");
+        }
+
+        if compact.contains("\\usepackage{fontspec")
+            || compact.contains("\\setmainfont")
+            || compact.contains("\\setcjkmainfont")
+            || compact.contains("\\xetex")
+        {
+            self.mark_xetex("fontspec/XeTeX font command");
+        }
+
+        if compact.contains("\\directlua")
+            || compact.contains("\\usepackage{luatexja")
+            || compact.contains("\\luatex")
+        {
+            self.luatex_preferred = true;
+            self.push_reason("LuaTeX feature");
+        }
+    }
+
+    fn mark_xetex(&mut self, reason: &'static str) {
+        self.xetex_required = true;
+        self.push_reason(reason);
+    }
+
+    fn push_reason(&mut self, reason: &'static str) {
+        if !self.reasons.contains(&reason) {
+            self.reasons.push(reason);
+        }
+    }
+
+    fn reason_summary(&self) -> String {
+        if self.reasons.is_empty() {
+            "no XeTeX-only or LuaTeX-specific template feature detected".to_string()
+        } else {
+            format!("detected {}", self.reasons.join(", "))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeAvailabilitySnapshot {
+    xelatex: BackendAvailability,
+    lualatex: BackendAvailability,
+}
+
+impl RuntimeAvailabilitySnapshot {
+    fn detect() -> Self {
+        Self {
+            xelatex: command_available("xelatex"),
+            lualatex: command_available("lualatex"),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct AutoBackendSelection {
+    kind: SemanticBackendKind,
+    reason: String,
+}
+
+fn select_auto_backend(vfs: &VirtualFs) -> AutoBackendSelection {
+    let signals = collect_template_signals(vfs);
+    select_auto_backend_with_availability(&signals, RuntimeAvailabilitySnapshot::detect())
+}
+
+fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
+    let mut signals = TemplateSignals::default();
+    for path in vfs.paths() {
+        if !is_tex_like_path(path) {
+            continue;
+        }
+        let Ok(bytes) = vfs.read(path) else {
+            continue;
+        };
+        let Ok(text) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        signals.observe(text);
+    }
+    signals
+}
+
+fn is_tex_like_path(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "tex" | "sty" | "cls" | "ltx"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn select_auto_backend_with_availability(
+    signals: &TemplateSignals,
+    availability: RuntimeAvailabilitySnapshot,
+) -> AutoBackendSelection {
+    let signal_reason = signals.reason_summary();
+
+    if !signals.has_tex_source {
+        return AutoBackendSelection {
+            kind: SemanticBackendKind::RuleBased,
+            reason: "Auto selected RuleBasedBackend: no TeX-like source was available for runtime feature detection".to_string(),
+        };
+    }
+
+    if signals.xetex_required {
+        if availability.xelatex.available {
+            return AutoBackendSelection {
+                kind: SemanticBackendKind::XeLaTeXHook,
+                reason: format!(
+                    "Auto selected XeLaTeXHookBackend: {}; {}",
+                    signal_reason, availability.xelatex.reason
+                ),
+            };
+        }
+
+        return AutoBackendSelection {
+            kind: SemanticBackendKind::RuleBased,
+            reason: format!(
+                "Auto selected RuleBasedBackend: {}; xelatex unavailable: {}",
+                signal_reason, availability.xelatex.reason
+            ),
+        };
+    }
+
+    if signals.luatex_preferred {
+        if availability.lualatex.available {
+            return AutoBackendSelection {
+                kind: SemanticBackendKind::LuaTeXNode,
+                reason: format!(
+                    "Auto selected LuaTeXNodeBackend: {}; {}",
+                    signal_reason, availability.lualatex.reason
+                ),
+            };
+        }
+
+        return AutoBackendSelection {
+            kind: SemanticBackendKind::RuleBased,
+            reason: format!(
+                "Auto selected RuleBasedBackend: {}; lualatex unavailable: {}",
+                signal_reason, availability.lualatex.reason
+            ),
+        };
+    }
+
+    if availability.lualatex.available {
+        return AutoBackendSelection {
+            kind: SemanticBackendKind::LuaTeXNode,
+            reason: format!(
+                "Auto selected LuaTeXNodeBackend: generic LaTeX document; {}",
+                availability.lualatex.reason
+            ),
+        };
+    }
+
+    if availability.xelatex.available {
+        return AutoBackendSelection {
+            kind: SemanticBackendKind::XeLaTeXHook,
+            reason: format!(
+                "Auto selected XeLaTeXHookBackend: LuaLaTeX unavailable for generic document; {}",
+                availability.xelatex.reason
+            ),
+        };
+    }
+
+    AutoBackendSelection {
+        kind: SemanticBackendKind::RuleBased,
+        reason: format!(
+            "Auto selected RuleBasedBackend: no runtime backend available; xelatex: {}; lualatex: {}",
+            availability.xelatex.reason, availability.lualatex.reason
+        ),
+    }
+}
+
 fn collect_with_selected_backend(
     main_tex: &str,
     vfs: &mut VirtualFs,
@@ -700,12 +905,36 @@ fn collect_with_selected_backend(
 ) -> Result<SemanticBackendArtifact, EngineError> {
     match options.semantic_backend {
         SemanticBackendKind::Auto => {
-            report.backend = BackendSelectionReport::new(
-                SemanticBackendKind::Auto,
-                SemanticBackendKind::RuleBased,
-                "Auto currently selects the built-in rule-based backend; runtime semantic backends are opt-in prototypes",
-            );
-            RuleBasedBackend.collect(main_tex, vfs, options, report)
+            let selection = select_auto_backend(vfs);
+            match selection.kind {
+                SemanticBackendKind::RuleBased => {
+                    report.backend = BackendSelectionReport::new(
+                        SemanticBackendKind::Auto,
+                        SemanticBackendKind::RuleBased,
+                        selection.reason,
+                    );
+                    RuleBasedBackend.collect(main_tex, vfs, options, report)
+                }
+                SemanticBackendKind::XeLaTeXHook => collect_runtime_or_fallback_requested(
+                    SemanticBackendKind::Auto,
+                    XeLaTeXHookBackend,
+                    selection.reason,
+                    main_tex,
+                    vfs,
+                    options,
+                    report,
+                ),
+                SemanticBackendKind::LuaTeXNode => collect_runtime_or_fallback_requested(
+                    SemanticBackendKind::Auto,
+                    LuaTeXNodeBackend,
+                    selection.reason,
+                    main_tex,
+                    vfs,
+                    options,
+                    report,
+                ),
+                SemanticBackendKind::Auto => unreachable!("auto selector must resolve a backend"),
+            }
         }
         SemanticBackendKind::RuleBased => {
             report.backend = BackendSelectionReport::new(
@@ -717,7 +946,7 @@ fn collect_with_selected_backend(
         }
         SemanticBackendKind::XeLaTeXHook => collect_runtime_or_fallback(
             XeLaTeXHookBackend,
-            "XeLaTeXHookBackend is a planned runtime semantic backend; current build falls back to RuleBasedBackend",
+            "XeLaTeXHookBackend explicitly requested",
             main_tex,
             vfs,
             options,
@@ -725,7 +954,7 @@ fn collect_with_selected_backend(
         ),
         SemanticBackendKind::LuaTeXNode => collect_runtime_or_fallback(
             LuaTeXNodeBackend,
-            "LuaTeXNodeBackend is a planned runtime semantic backend; current build falls back to RuleBasedBackend",
+            "LuaTeXNodeBackend explicitly requested",
             main_tex,
             vfs,
             options,
@@ -736,26 +965,53 @@ fn collect_with_selected_backend(
 
 fn collect_runtime_or_fallback<B: SemanticBackend>(
     backend: B,
-    reason: &'static str,
+    reason: impl Into<String>,
     main_tex: &str,
     vfs: &mut VirtualFs,
     options: &CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
-    let requested = backend.kind();
+    collect_runtime_or_fallback_requested(
+        backend.kind(),
+        backend,
+        reason,
+        main_tex,
+        vfs,
+        options,
+        report,
+    )
+}
+
+fn collect_runtime_or_fallback_requested<B: SemanticBackend>(
+    requested: SemanticBackendKind,
+    backend: B,
+    reason: impl Into<String>,
+    main_tex: &str,
+    vfs: &mut VirtualFs,
+    options: &CompileOptions,
+    report: &mut CompileReport,
+) -> Result<SemanticBackendArtifact, EngineError> {
+    let reason = reason.into();
+    let attempted = backend.kind();
     let availability = backend.is_available();
     if availability.available {
         report.backend = BackendSelectionReport::new(
             requested,
-            requested,
-            format!("{} available: {}", requested.id(), availability.reason),
+            attempted,
+            format!(
+                "{}; {} available: {}",
+                reason,
+                attempted.id(),
+                availability.reason
+            ),
         );
         match backend.collect(main_tex, vfs, options, report) {
             Ok(artifact) => return Ok(artifact),
             Err(err) if options.allow_backend_fallback => {
                 return collect_rule_based_fallback(
                     requested,
-                    format!("{} failed: {}; {}", requested.id(), err, reason),
+                    attempted,
+                    format!("{} failed: {}; {}", attempted.id(), err, reason),
                     main_tex,
                     vfs,
                     options,
@@ -769,9 +1025,10 @@ fn collect_runtime_or_fallback<B: SemanticBackend>(
     if options.allow_backend_fallback {
         return collect_rule_based_fallback(
             requested,
+            attempted,
             format!(
                 "{} unavailable: {}; {}",
-                requested.id(),
+                attempted.id(),
                 availability.reason,
                 reason
             ),
@@ -784,30 +1041,35 @@ fn collect_runtime_or_fallback<B: SemanticBackend>(
 
     report.backend = BackendSelectionReport::new(
         requested,
-        requested,
-        format!("{} unavailable: {}", requested.id(), availability.reason),
+        attempted,
+        format!("{} unavailable: {}", attempted.id(), availability.reason),
     );
     Err(EngineError::Unsupported(format!(
         "{} unavailable: {}",
-        requested.id(),
+        attempted.id(),
         availability.reason
     )))
 }
 
 fn collect_rule_based_fallback(
     requested: SemanticBackendKind,
+    fallback_from: SemanticBackendKind,
     reason: String,
     main_tex: &str,
     vfs: &mut VirtualFs,
     options: &CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
-    report.backend =
-        BackendSelectionReport::fallback(requested, SemanticBackendKind::RuleBased, &reason);
+    report.backend = BackendSelectionReport::fallback(
+        requested,
+        fallback_from,
+        SemanticBackendKind::RuleBased,
+        &reason,
+    );
     let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
     artifact.diagnostics.push(EngineDiagnostic::warning(
         "backend_fallback",
-        format!("{} -> {}", requested.id(), reason),
+        format!("{} -> {}", fallback_from.id(), reason),
     ));
     Ok(artifact)
 }
@@ -1421,8 +1683,12 @@ E = mc^2
     #[test]
     fn compiles_single_source_to_docx() {
         let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
         let artifact = engine
-            .compile_source_to_docx("main.tex", SAMPLE, &CompileOptions::default())
+            .compile_source_to_docx("main.tex", SAMPLE, &options)
             .expect("compile source");
 
         assert_eq!(&artifact.docx[..4], b"PK\x03\x04");
@@ -1454,8 +1720,12 @@ E = mc^2
         }
 
         let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
         let artifact = engine
-            .compile_zip_to_docx(out.get_ref(), "main.tex", &CompileOptions::default())
+            .compile_zip_to_docx(out.get_ref(), "main.tex", &options)
             .expect("compile zip");
 
         assert_eq!(&artifact.docx[..4], b"PK\x03\x04");
@@ -1560,6 +1830,42 @@ E = mc^2
     }
 
     #[test]
+    fn auto_selector_prefers_xelatex_for_xecjk_templates() {
+        let mut signals = TemplateSignals::default();
+        signals.observe(
+            r#"
+\documentclass{ctexart}
+\usepackage{xeCJK}
+\setCJKmainfont{SimSun}
+"#,
+        );
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+
+        assert_eq!(selection.kind, SemanticBackendKind::XeLaTeXHook);
+        assert!(selection.reason.contains("XeLaTeXHookBackend"));
+    }
+
+    #[test]
+    fn auto_selector_prefers_luatex_for_generic_templates() {
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\documentclass{article}\n\\begin{document}Hi\\end{document}");
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+
+        assert_eq!(selection.kind, SemanticBackendKind::LuaTeXNode);
+        assert!(selection.reason.contains("generic LaTeX"));
+    }
+
+    #[test]
+    fn auto_selector_keeps_xecjk_templates_off_luatex_without_xelatex() {
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\usepackage{xeCJK}");
+        let selection = select_auto_backend_with_availability(&signals, availability(false, true));
+
+        assert_eq!(selection.kind, SemanticBackendKind::RuleBased);
+        assert!(selection.reason.contains("xelatex unavailable"));
+    }
+
+    #[test]
     #[ignore = "requires lualatex on PATH and exercises the external runtime backend"]
     fn luatex_runtime_collects_semantic_events() {
         if !command_available("lualatex").available {
@@ -1644,6 +1950,27 @@ a+b=c
             _report: &mut CompileReport,
         ) -> Result<SemanticBackendArtifact, EngineError> {
             unreachable!("missing backend should not be collected")
+        }
+    }
+
+    fn availability(xelatex: bool, lualatex: bool) -> RuntimeAvailabilitySnapshot {
+        RuntimeAvailabilitySnapshot {
+            xelatex: BackendAvailability {
+                available: xelatex,
+                reason: if xelatex {
+                    "xelatex test binary".to_string()
+                } else {
+                    "xelatex missing in test".to_string()
+                },
+            },
+            lualatex: BackendAvailability {
+                available: lualatex,
+                reason: if lualatex {
+                    "lualatex test binary".to_string()
+                } else {
+                    "lualatex missing in test".to_string()
+                },
+            },
         }
     }
 }

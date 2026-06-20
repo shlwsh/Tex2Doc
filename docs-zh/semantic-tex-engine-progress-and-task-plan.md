@@ -9,6 +9,8 @@
 > 双后端语义采集审核方案：[Semantic TeX Engine 双后端语义采集方案（20260620-115348）](./semantic-tex-engine-dual-backend-design-20260620-115348.md)
 >
 > 本轮开发报告：[Semantic TeX Engine 开发进展报告（20260620-124347）](./semantic-tex-engine-development-report-20260620-124347.md)
+>
+> Auto selector 开发报告：[Semantic TeX Engine Auto Selector 开发进展报告（20260620-125915）](./semantic-tex-engine-development-report-20260620-125915.md)
 
 ## 1. 当前结论
 
@@ -22,7 +24,7 @@
 | M2 Profile 化 | 部分完成 | 已有 `EngineProfile` 枚举，但 profile 规则尚未外置，JOS 页眉页脚仍主要在 `doc-core/docx-writer` 侧 |
 | M3 结构增强 | 部分完成 | 表格、图片、引用已有文本级/块级处理；显式 `ReferenceGraph`、bookmark、hyperlink、图片尺寸表达式尚未完成 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；DOCX writer 块公式仍走文本化输出 |
-| M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
+| M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
 
 ## 2. 已落地内容
@@ -101,18 +103,21 @@ DocxRender
 当前实现方式：
 
 1. 输入统一挂载到 `VirtualFs`。
-2. `SemanticBackendKind::Auto` 当前选择 `RuleBasedBackend`。
-3. `RuleBasedBackend` 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
-4. `parse_tex` 使用现有 Logos/Rowan 解析器。
-5. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
-6. `StandardDocument::from_legacy_document` 生成标准文档图。
-7. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
+2. `SemanticBackendKind::Auto` 扫描 `.tex/.sty/.cls/.ltx` 的模板特征，并结合 `xelatex` / `lualatex` 可用性选择 backend。
+3. `ctex` / `xeCJK` / `fontspec` / XeTeX 字体命令优先选择 `XeLaTeXHookBackend`。
+4. LuaTeX 特征或通用 LaTeX 在 `lualatex` 可用时优先选择 `LuaTeXNodeBackend`。
+5. runtime 不可用或失败且允许 fallback 时，回退 `RuleBasedBackend`。
+6. `RuleBasedBackend` 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
+7. `parse_tex` 使用现有 Logos/Rowan 解析器。
+8. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
+9. `StandardDocument::from_legacy_document` 生成标准文档图。
+10. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
 
 当前双后端相关边界：
 
 - `XeLaTeXHookBackend` 已能 materialize VFS、注入 hook tex、调用 `xelatex`、解析 JSONL sidecar，并在 paper3 上严格选中。
 - `LuaTeXNodeBackend` 已能 materialize VFS、注入 Lua collector、调用 `lualatex`、采集 macro events 与 `post_linebreak_filter` 段落事件。
-- 默认 `Auto` 仍保守选择 `RuleBasedBackend`，不改变旧路径与默认行为。
+- 默认 `Auto` 已启用模板特征选择：paper3 这类 `ctex` / `xeCJK` 模板会选择 `XeLaTeXHookBackend`，通用 LaTeX 在 `lualatex` 可用时会选择 `LuaTeXNodeBackend`，无可用 runtime 时回退 `RuleBasedBackend`。
 - 用户显式指定 runtime backend 且允许 fallback 时，runtime 失败会回退到 `RuleBasedBackend`，并输出 `backend_fallback` warning。
 - 用户显式指定 runtime backend 且关闭 fallback 时，runtime 失败会返回错误，用于验证该 backend 是否真的可用。
 - 已提供 `parse_semantic_events_jsonl`，作为 XeLaTeX/LuaTeX sidecar 协议解析入口。
@@ -165,21 +170,30 @@ semantic-engine
 examples/paper3/output/to-docx
 ```
 
-2026-06-20 验证结果：
+2026-06-20 最新三路径验证结果：
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-124347.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-124347-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-124347-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-125728.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-125728-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-125728-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
 
 semantic-engine 后端报告：
 
 ```text
 backend-requested: xelatex-hook
 backend-selected: xelatex-hook
-backend-reason: xelatex-hook available: found /usr/bin/xelatex
+backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available: found /usr/bin/xelatex
 ```
+
+2026-06-20 最新 semantic backend 对比结果：
+
+| requested | selected | fallback_from | 文件 | 大小 | media |
+|---|---|---|---|---:|---:|
+| auto | xelatex-hook |  | `paper3-20260620-125747-auto.docx` | 3,055,688 bytes | 10 |
+| rule-based | rule-based |  | `paper3-20260620-125747-rule_based.docx` | 3,055,688 bytes | 10 |
+| xelatex-hook | xelatex-hook |  | `paper3-20260620-125747-xelatex_hook.docx` | 3,055,688 bytes | 10 |
+| luatex-node | rule-based | luatex-node | `paper3-20260620-125747-luatex_node.docx` | 3,055,688 bytes | 10 |
 
 ### 2.4 V2 质量闭环
 
@@ -531,7 +545,7 @@ cargo test -p doc-compiler-engine collector
 | B1 Backend trait 与报告字段 | 已完成初版 | `SemanticBackend`、`SemanticBackendKind`、`BackendSelectionReport`、`CompileReport.backend` 已落地 |
 | B2 XeLaTeXHookBackend 原型 | 已完成初版 | 已生成 hook tex、调用 `xelatex`、解析 sidecar；paper3 严格选中 `xelatex-hook` |
 | B3 LuaTeXNodeBackend 原型 | 已完成初版 | 已生成 Lua collector、调用 `lualatex`、采集 heading/paragraph/label/ref/cite/equation 等事件；paper3 因 `xeCJK` 强制 XeTeX 按设计 fallback |
-| B4 Auto selector | 初版完成 | `Auto` 当前保守选择 `RuleBasedBackend`，尚未根据模板特征启用 runtime backend |
+| B4 Auto selector | 已完成初版 | `Auto` 已根据模板特征和 runtime 可用性选择 `XeLaTeXHookBackend` / `LuaTeXNodeBackend` / `RuleBasedBackend`；paper3 自动选择 `xelatex-hook` |
 | B5 双 runtime 后端对比脚本 | 已完成初版 | 已新增 `scripts/compare_paper3_semantic_backends.sh` 与 `scripts/build_paper3_three_docx.sh` |
 | B6 LayoutGraph 与 XDV/Lua layout 合并 | 数据结构初版 | `LayoutGraph`/`LayoutNode` 已预留；尚无 XDV/Lua layout 实际采集 |
 
@@ -612,15 +626,22 @@ T13 AI fallback
 已执行：
 
 ```bash
-cargo test -p doc-compiler-engine -p doc-mathml -p doc-quality
+cargo fmt -p doc-compiler-engine
+cargo test -p doc-compiler-engine
+cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
+cargo test -p doc-core
+bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_semantic_backends.sh
 ```
 
 结果：
 
 ```text
-doc-compiler-engine: 2 passed
-doc-mathml: 19 passed
-doc-quality: 15 passed
+doc-compiler-engine: 10 passed, 1 ignored
+doc-compiler-engine luatex ignored integration: 1 passed
+doc-core: 5 passed
+paper3 three-docx: sh/rust-rule/semantic-engine generated
+paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
 已知 warning：
@@ -632,16 +653,16 @@ doc-quality: 15 passed
 
 ## 7. 下一步执行项
 
-下一步应等待审核；审核通过后进入 T1：
+下一步建议进入 T2/T3：
 
 ```text
-建立独立 Semantic Engine 路径边界
+T2 双路径对比脚本与报告
+T3 Profile 规则表
 ```
 
 具体先做：
 
-1. 审核独立双路径方案。
-2. 为新路径新增 profile 规则内聚，不改 `doc-core`。
-3. 为 `doc-compiler-engine` 增加 paper3 semantic E2E。
-4. 新增双路径对比脚本。
-5. 跑 `cargo test -p doc-core -p doc-compiler-engine`，确认旧路径不受影响。
+1. 将三路径验证脚本中的摘要能力扩展为 `compare_paper3_dual_engines.sh`，补充 document.xml 文本摘要、关键短语命中和差异报告。
+2. 为 `EngineProfile` 增加 `ProfileSpec`，把 JOS、中文学术、医学期刊的页面、字体、caption、引用策略内聚到新语义路径。
+3. 保持 `doc-core`、`doc-engine convert` 旧路径不依赖 `doc-compiler-engine`。
+4. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。

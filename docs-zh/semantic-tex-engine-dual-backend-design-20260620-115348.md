@@ -5,6 +5,8 @@
 > 本方案只完善规划设计，不进入代码开发。审核通过前，不改动现有 `doc-core` Rust 转换引擎，也不改动当前 `doc-compiler-engine` 行为。
 >
 > 实现更新：2026-06-20 已按本方案完成双后端初版开发，详情见：[Semantic TeX Engine 开发进展报告（20260620-124347）](./semantic-tex-engine-development-report-20260620-124347.md)。
+>
+> Auto selector 更新：2026-06-20 已实现模板特征与 runtime 可用性驱动的 Auto 选择器，详情见：[Semantic TeX Engine Auto Selector 开发进展报告（20260620-125915）](./semantic-tex-engine-development-report-20260620-125915.md)。
 
 ## 1. 结论
 
@@ -561,7 +563,7 @@ cargo test -p doc-compiler-engine luatex_node
 
 ### B4 Auto selector
 
-状态：待开发
+状态：已完成初版
 
 目标：
 
@@ -569,10 +571,19 @@ cargo test -p doc-compiler-engine luatex_node
 - 支持 fallback。
 - 在 `CompileReport` 输出选择原因。
 
+当前实现：
+
+- 扫描 `.tex/.sty/.cls/.ltx`，识别 `ctex`、`xeCJK`、`fontspec`、XeTeX 字体命令和 LuaTeX 特征。
+- `ctex` / `xeCJK` / `fontspec` 优先选择 `XeLaTeXHookBackend`，避免把 XeTeX-only 模板误交给 LuaTeX。
+- LuaTeX 特征和通用 LaTeX 在 `lualatex` 可用时选择 `LuaTeXNodeBackend`。
+- runtime 不可用或失败且允许 fallback 时回退 `RuleBasedBackend`，并在 `BackendSelectionReport.fallback_from` 中记录真实失败后端。
+- paper3 Auto 验证结果为 `requested=auto`、`selected=xelatex-hook`。
+
 验证：
 
 ```bash
-cargo test -p doc-compiler-engine backend_selector
+cargo test -p doc-compiler-engine auto_selector
+bash scripts/compare_paper3_semantic_backends.sh
 ```
 
 ### B5 双 runtime 后端对比脚本
