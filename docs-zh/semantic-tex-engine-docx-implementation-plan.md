@@ -3,6 +3,10 @@
 > 当前实现进度、缺口和开发任务清单见：[semantic-tex-engine-progress-and-task-plan.md](./semantic-tex-engine-progress-and-task-plan.md)
 >
 > 最新独立双路径审核方案见：[Semantic TeX Engine 独立 DOCX 转换路径方案（20260620-112803）](./semantic-tex-engine-independent-docx-plan-20260620-112803.md)
+>
+> 最新双后端语义采集审核方案见：[Semantic TeX Engine 双后端语义采集方案（20260620-115348）](./semantic-tex-engine-dual-backend-design-20260620-115348.md)
+>
+> 最新开发进展报告见：[Semantic TeX Engine 开发进展报告（20260620-124347）](./semantic-tex-engine-development-report-20260620-124347.md)
 
 ## 1. 目标定位
 

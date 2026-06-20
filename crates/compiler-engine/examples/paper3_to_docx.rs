@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use doc_compiler_engine::{CompileOptions, EngineProfile, SemanticTexEngine};
+use doc_compiler_engine::{CompileOptions, EngineProfile, SemanticBackendKind, SemanticTexEngine};
 
 fn main() {
     if let Err(err) = run() {
@@ -19,6 +19,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     let mut options = CompileOptions {
         profile: args.profile,
+        semantic_backend: args.semantic_backend,
+        allow_backend_fallback: args.allow_backend_fallback,
         page_setup: Some(doc_docx_writer::PageSetup::jos_paper3()),
         ..CompileOptions::default()
     };
@@ -34,6 +36,18 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("bytes: {}", artifact.docx.len());
     println!("blocks: {}", artifact.report.block_count);
     println!("image-assets: {}", artifact.report.image_asset_count);
+    println!(
+        "backend-requested: {}",
+        artifact.report.backend.requested.id()
+    );
+    println!(
+        "backend-selected: {}",
+        artifact.report.backend.selected.id()
+    );
+    if let Some(fallback_from) = artifact.report.backend.fallback_from {
+        println!("backend-fallback-from: {}", fallback_from.id());
+    }
+    println!("backend-reason: {}", artifact.report.backend.reason);
     for stage in artifact.report.stages {
         println!("stage: {:?} {:?}", stage.stage, stage.status);
     }
@@ -46,6 +60,8 @@ struct Args {
     main_tex: PathBuf,
     out: PathBuf,
     profile: EngineProfile,
+    semantic_backend: SemanticBackendKind,
+    allow_backend_fallback: bool,
     no_standard_ast: bool,
 }
 
@@ -55,6 +71,8 @@ impl Args {
         let mut main_tex = None;
         let mut out = None;
         let mut profile = EngineProfile::JosPaper;
+        let mut semantic_backend = SemanticBackendKind::Auto;
+        let mut allow_backend_fallback = true;
         let mut no_standard_ast = false;
 
         let mut args = std::env::args().skip(1);
@@ -66,6 +84,11 @@ impl Args {
                 "--profile" => {
                     profile = parse_profile(&next_string(&mut args, "--profile")?)?;
                 }
+                "--semantic-backend" => {
+                    semantic_backend =
+                        parse_semantic_backend(&next_string(&mut args, "--semantic-backend")?)?;
+                }
+                "--no-backend-fallback" => allow_backend_fallback = false,
                 "--no-standard-ast" => no_standard_ast = true,
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
@@ -77,6 +100,8 @@ impl Args {
             main_tex: main_tex.ok_or_else(usage)?,
             out: out.ok_or_else(usage)?,
             profile,
+            semantic_backend,
+            allow_backend_fallback,
             no_standard_ast,
         })
     }
@@ -101,10 +126,27 @@ fn parse_profile(raw: &str) -> Result<EngineProfile, String> {
     }
 }
 
+fn parse_semantic_backend(raw: &str) -> Result<SemanticBackendKind, String> {
+    match raw {
+        "auto" => Ok(SemanticBackendKind::Auto),
+        "rule" | "rule-based" => Ok(SemanticBackendKind::RuleBased),
+        "xelatex" | "xelatex-hook" => Ok(SemanticBackendKind::XeLaTeXHook),
+        "luatex" | "lualatex" | "luatex-node" => Ok(SemanticBackendKind::LuaTeXNode),
+        other => Err(format!(
+            "unsupported semantic backend: {other}\n\n{}",
+            usage()
+        )),
+    }
+}
+
 fn usage() -> String {
     "usage: cargo run -p doc-compiler-engine --example paper3_to_docx -- \\
   --project-root examples/paper3/latex \\
   --main-tex examples/paper3/latex/main-jos.tex \\
-  --out examples/paper3/output/to-docx/paper3-compiler-engine.docx"
+  --out examples/paper3/output/to-docx/paper3-compiler-engine.docx \\
+  [--profile jos-paper] \\
+  [--semantic-backend auto|rule-based|xelatex-hook|luatex-node] \\
+  [--no-backend-fallback] \\
+  [--no-standard-ast]"
         .to_string()
 }

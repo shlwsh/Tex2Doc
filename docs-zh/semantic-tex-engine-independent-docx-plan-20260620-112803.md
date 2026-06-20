@@ -3,6 +3,8 @@
 > 状态：待审核
 >
 > 本方案只调整设计与任务清单，不要求立即开发。审核通过前，不改动现有 Rust 版本 DOCX 转换引擎。
+>
+> 后续补充方案：[Semantic TeX Engine 双后端语义采集方案（20260620-115348）](./semantic-tex-engine-dual-backend-design-20260620-115348.md)
 
 ## 1. 方案目标
 
@@ -404,4 +406,4 @@ bash scripts/compare_paper3_dual_engines.sh
 - 是否接受新旧引擎长期双路径并存。
 - 是否接受新路径通过复用/复制旧组件快速落地。
 - 是否接受后续开发从 P1/P2/P3 开始，而不是迁移 `doc-core`。
-
+- 是否接受新 Semantic Engine 内部进一步采用 XeLaTeXHookBackend + LuaTeXNodeBackend 双后端路线。
