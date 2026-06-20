@@ -29,6 +29,10 @@
 > 兼容性分析器开发报告：[Semantic TeX Engine 兼容性分析器开发报告（20260620-190143）](./semantic-tex-engine-development-report-20260620-190143.md)
 >
 > Semantic Collector trait 开发报告：[Semantic TeX Engine Collector 输出模型开发报告（20260620-192816）](./semantic-tex-engine-development-report-20260620-192816.md)
+>
+> 详细进展报告：[Semantic TeX Engine 详细进展报告（20260620-193855）](./semantic-tex-engine-detailed-progress-report-20260620-193855.md)
+>
+> 待完成内容技术实现设计方案：[Semantic TeX Engine 待完成内容技术实现设计方案（20260620-193855）](./semantic-tex-engine-remaining-implementation-design-20260620-193855.md)
 
 ## 1. 当前结论
 
