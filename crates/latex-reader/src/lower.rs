@@ -13,8 +13,8 @@
 //! 8. **错误降级**：未匹配内容进入 `Block::RawFallback`（绝不 panic）。
 
 use doc_semantic_ast::{
-    Block, Document, SourceBundle, Span, StandardDocument, TableCell, TableRow, TextRun, TextStyle,
-    TheoremLikeKind,
+    Block, Document, FigureSizing, SourceBundle, Span, StandardDocument, TableCell, TableRow,
+    TextRun, TextStyle, TheoremLikeKind,
 };
 use std::collections::HashMap;
 
@@ -2522,10 +2522,18 @@ fn lower_captioned_env(
         .as_deref()
         .map(|cap| normalize_caption(cap, cite_numbers, label_map));
     if name.starts_with("figure") {
+        let (path, sizing) = img
+            .map(|img| (img.path, img.sizing))
+            .unwrap_or_else(|| (String::new(), None));
+        let scale = sizing
+            .as_ref()
+            .and_then(|s| s.normalized_width_ratio)
+            .unwrap_or(1.0);
         Block::Figure {
-            path: img.unwrap_or_default(),
+            path,
             caption: caption_normalized,
-            scale: 1.0,
+            scale,
+            sizing,
             number: Some(numbering.next_figure()),
             span,
         }
@@ -2603,20 +2611,50 @@ fn extract_brace_arg(line: &str, cmd: &str) -> Option<String> {
     None
 }
 
-fn extract_includegraphics_and_caption(body: &str) -> (Option<String>, Option<String>) {
-    let img: Option<String> = if let Some(args) = find_command_with_brace(body, "includegraphics") {
-        // 形如 \includegraphics[width=.7\textwidth]{path}
-        if let Some(close) = args.rfind('}') {
-            Some(args[close + 1..].trim().to_string())
-        } else {
-            Some(args.to_string())
-        }
-    } else {
-        None
-    };
+#[derive(Debug, Clone)]
+struct IncludeGraphicsInfo {
+    path: String,
+    sizing: Option<FigureSizing>,
+}
+
+fn extract_includegraphics_and_caption(body: &str) -> (Option<IncludeGraphicsInfo>, Option<String>) {
+    let img = find_includegraphics(body);
     let caption: Option<String> =
         find_command_with_brace(body, "caption").map(|args| args.to_string());
     (img, caption)
+}
+
+fn find_includegraphics(body: &str) -> Option<IncludeGraphicsInfo> {
+    let pat = "\\includegraphics";
+    let idx = body.find(pat)?;
+    let mut i = idx + pat.len();
+    while i < body.len() && (body.as_bytes()[i] == b' ' || body.as_bytes()[i] == b'\t') {
+        i += 1;
+    }
+
+    let mut options = Vec::new();
+    while i < body.len() && body.as_bytes()[i] == b'[' {
+        let close = find_matching_bracket(body, i)?;
+        let start = i + 1;
+        let end = start + close;
+        options.push(body[start..end].trim().to_string());
+        i = end + 1;
+        while i < body.len() && (body.as_bytes()[i] == b' ' || body.as_bytes()[i] == b'\t') {
+            i += 1;
+        }
+    }
+
+    if i >= body.len() || body.as_bytes()[i] != b'{' {
+        return None;
+    }
+    let start = i + 1;
+    let off = find_matching_brace(body, i)?;
+    let path = body[start..start + off].trim().to_string();
+    let source_options = if options.is_empty() { None } else { Some(options.join(",")) };
+    Some(IncludeGraphicsInfo {
+        path,
+        sizing: FigureSizing::from_options(source_options),
+    })
 }
 
 fn find_command_with_brace<'a>(body: &'a str, cmd: &str) -> Option<&'a str> {
@@ -2644,6 +2682,28 @@ fn find_command_with_brace<'a>(body: &'a str, cmd: &str) -> Option<&'a str> {
     let start = i + 1;
     let off = find_matching_brace(body, i)?;
     Some(&body[start..start + off])
+}
+
+/// 找与 `s[pos]`（应为 `[`）配对的 `]` 偏移（相对于 `[` 之后的位置）。
+fn find_matching_bracket(s: &str, pos: usize) -> Option<usize> {
+    let bytes = s.as_bytes();
+    if bytes.get(pos) != Some(&b'[') {
+        return None;
+    }
+    let mut depth = 0i32;
+    for (i, &b) in bytes.iter().enumerate().skip(pos) {
+        match b {
+            b'[' => depth += 1,
+            b']' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i - pos - 1);
+                }
+            }
+            _ => {}
+        }
+    }
+    None
 }
 
 /// 找与 `s[pos]`（应为 `{`）配对的 `}` 偏移（**相对于 `{` 之后的位置**）。
@@ -3424,13 +3484,23 @@ mod tests {
     #[test]
     fn lower_figure_with_caption() {
         let src =
-            "\\begin{figure}\n\\includegraphics[width=.7]{a.png}\n\\caption{Demo}\n\\end{figure}";
+            "\\begin{figure}\n\\includegraphics[width=.7\\textwidth,height=4cm,scale=.5]{a.png}\n\\caption{Demo}\n\\end{figure}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
-            Block::Figure { path, caption, .. } => {
+            Block::Figure { path, caption, scale, sizing, .. } => {
                 assert_eq!(path, "a.png");
                 assert_eq!(caption.as_deref(), Some("Demo"));
+                assert_eq!(*scale, 0.7);
+                let sizing = sizing.as_ref().expect("figure sizing");
+                assert_eq!(
+                    sizing.source_options.as_deref(),
+                    Some("width=.7\\textwidth,height=4cm,scale=.5")
+                );
+                assert_eq!(sizing.width_expr.as_deref(), Some(".7\\textwidth"));
+                assert_eq!(sizing.height_expr.as_deref(), Some("4cm"));
+                assert_eq!(sizing.scale_expr.as_deref(), Some(".5"));
+                assert_eq!(sizing.normalized_width_ratio, Some(0.7));
             }
             _ => panic!("expected figure"),
         }

@@ -1507,6 +1507,18 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
 \renewcommand{\subsection}[1]{\docxsemwriteheading{2}{#1}\docxsemoldsubsection{#1}}
 \let\docxsemoldsubsubsection\subsubsection
 \renewcommand{\subsubsection}[1]{\docxsemwriteheading{3}{#1}\docxsemoldsubsubsection{#1}}
+\ifcsname includegraphics\endcsname
+  \let\docxsemoldincludegraphics\includegraphics
+  \renewcommand{\includegraphics}{\@ifnextchar[{\docxsemincludegraphicsopt}{\docxsemincludegraphicsplain}}
+  \def\docxsemincludegraphicsopt[#1]#2{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null}}%
+    \docxsemoldincludegraphics[#1]{#2}%
+  }
+  \newcommand{\docxsemincludegraphicsplain}[1]{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null}}%
+    \docxsemoldincludegraphics{#1}%
+  }
+\fi
 \AtEndDocument{\immediate\closeout\docxsemout}
 \makeatother
 "#;

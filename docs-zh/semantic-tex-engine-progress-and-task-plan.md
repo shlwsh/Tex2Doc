@@ -23,6 +23,8 @@
 > OMML 公式接入开发报告：[Semantic TeX Engine OMML 公式接入开发报告（20260620-135937）](./semantic-tex-engine-development-report-20260620-135937.md)
 >
 > 表格 span 渲染开发报告：[Semantic TeX Engine 表格 span 渲染开发报告（20260620-182504）](./semantic-tex-engine-development-report-20260620-182504.md)
+>
+> 图片尺寸表达式开发报告：[Semantic TeX Engine 图片尺寸表达式开发报告（20260620-184710）](./semantic-tex-engine-development-report-20260620-184710.md)
 
 ## 1. 当前结论
 
@@ -34,7 +36,7 @@
 |---|---|---|
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
-| M3 结构增强 | 部分完成 | 表格已支持 `multicolumn` 与基础 `multirow` 到 DOCX `gridSpan/vMerge`；图片已有块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版；图片尺寸表达式尚未完成 |
+| M3 结构增强 | 部分完成 | 表格已支持 `multicolumn` 与基础 `multirow` 到 DOCX `gridSpan/vMerge`；图片已支持 `includegraphics` 尺寸表达式采集、Graph 元数据和 DOCX EMU 换算初版；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；新语义路径已在 DOCX 后处理阶段接入块级公式 OMML 初版；旧 `doc-docx-writer` 默认块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
@@ -170,6 +172,15 @@ DocxRender
 - `doc-docx-writer` 已输出 `w:vMerge w:val="restart"` / `continue`。
 - 复杂 `multirow` 变体、跨行跨列组合冲突、表格内多段落与脚注仍待后续增强。
 
+当前图片尺寸表达式边界：
+
+- `Block::Figure` 已新增可选 `FigureSizing` 元数据，保存 `source_options`、`width_expr`、`height_expr`、`scale_expr` 与相对比例。
+- `doc-latex-reader` 已能从 `\includegraphics[width=.8\textwidth,height=...,scale=...]{...}` 中采集 path 和 options。
+- `StandardDocument` 的 `FigureNode` 已保留 sizing；`LayoutHints.width` 会写入类似 `0.8000\textwidth` 的归一化宽度提示。
+- `doc-docx-writer` 已按 `PageSetup` 将 `\textwidth`、`\linewidth`、`\columnwidth`、`\textheight` 以及 `in/cm/mm/pt/bp/pc` 转为 EMU。
+- `XeLaTeXHookBackend` 的 hook 已补充 `includegraphics` figure event，`width_expr` 与 LuaTeX sidecar 协议对齐。
+- 无法解析尺寸表达式时仍回退旧的图片默认尺寸策略。
+
 ### 2.3 paper3 样例
 
 已存在脚本：
@@ -239,9 +250,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-182407.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-182406-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-182406-semantic-engine-xelatex_hook.docx` | 3,057,541 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-184633.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-184633-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-184633-semantic-engine-xelatex_hook.docx` | 3,057,574 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -274,13 +285,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-182406-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-182406-dual-engines-semantic-engine-auto.docx` | 3,057,541 bytes | 10 | 653 | 12 | 20 | 42,535 |
+| rust-rule | `v15-论文稿件-jos-20260620-184633-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-184633-dual-engines-semantic-engine-auto.docx` | 3,057,574 bytes | 10 | 653 | 12 | 20 | 42,535 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-182406-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-184633-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -621,7 +632,7 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 ### T8 图片尺寸表达式
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -630,8 +641,11 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 实现要点：
 
-- 扩展 `Block::Figure` 或新增标准 graph resource metadata。
-- 在 DOCX renderer 中按 page/profile 转换 EMU 尺寸。
+- 已新增 `FigureSizing`，保存原始 options、width/height/scale 表达式和归一化比例。
+- 已扩展 `Block::Figure` 与 `FigureNode`，标准文档图保存 sizing，`LayoutHints.width` 保存归一化宽度提示。
+- `doc-latex-reader` 已解析 `includegraphics` optional arguments。
+- `doc-docx-writer` 已按 `PageSetup` 把相对正文尺寸和绝对单位转换为 EMU。
+- `XeLaTeXHookBackend` 已补充 `includegraphics` sidecar event，LuaTeX 已有同类事件。
 - 无法计算时保留当前默认尺寸。
 
 验收：
@@ -639,6 +653,11 @@ bash scripts/compare_paper3_dual_engines.sh 15
 ```bash
 cargo test -p doc-latex-reader figure
 cargo test -p doc-docx-writer image
+cargo test -p doc-semantic-ast
+cargo test -p doc-core
+cargo test -p doc-compiler-engine
+bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_dual_engines.sh 15
 ```
 
 ### T9 兼容性分析器
@@ -789,6 +808,10 @@ cargo test -p doc-latex-reader multi -- --nocapture
 cargo test -p doc-latex-reader table
 cargo test -p doc-docx-writer table_colspan_and_rowspan_emit_grid_span_and_vmerge -- --nocapture
 cargo test -p doc-docx-writer table
+cargo test -p doc-semantic-ast
+cargo test -p doc-latex-reader figure -- --nocapture
+cargo test -p doc-docx-writer image -- --nocapture
+cargo test -p doc-docx-writer figure
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-latex-reader ref
 cargo test -p doc-core
@@ -811,6 +834,10 @@ doc-latex-reader multi: 7 passed
 doc-latex-reader table: 7 unit tests plus snapshot_table passed
 doc-docx-writer table_colspan_and_rowspan_emit_grid_span_and_vmerge: 1 passed
 doc-docx-writer table: 6 passed
+doc-semantic-ast: 13 passed
+doc-latex-reader figure: 2 passed
+doc-docx-writer image: 1 passed
+doc-docx-writer figure: 2 passed
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
@@ -828,15 +855,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T8：
+下一步建议进入 T9：
 
 ```text
-T8 图片尺寸表达式
+T9 兼容性分析器
 ```
 
 具体先做：
 
-1. 盘点 `doc-latex-reader` 当前 `\includegraphics` options 解析能力。
-2. 明确 `Block::Figure` / `DocumentGraph` 中图片尺寸表达式的承载位置，避免影响旧路径默认行为。
-3. 优先支持 `width=.8\textwidth`、`width=0.5\linewidth`、`scale=...` 的归一化。
-4. 跑 `cargo test -p doc-latex-reader figure`、`cargo test -p doc-docx-writer image` 与 paper3 三路径脚本。
+1. 盘点宏包、文档类、自定义宏、TikZ、minted/listings 等兼容性特征。
+2. 设计 `CompatibilityReport`、score、unsupported、warnings 数据结构。
+3. 优先在 `doc-compiler-engine` 内落地轻量扫描器，再评估是否拆出 `crates/compatibility-analyzer`。
+4. 跑 `cargo test -p doc-compiler-engine compatibility` 与 paper3 三路径脚本。

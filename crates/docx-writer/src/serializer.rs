@@ -7,7 +7,7 @@
 //! - 公式块走 `JOSCode` 居中纯文本（对齐 sh `clean_math`，非 OMML）
 //! - 21 个 JOS 样式由 `styles.rs` 单一来源生成
 
-use doc_semantic_ast::{AlgLine, Block, Document, Span, TextRun, TextStyle, TheoremLikeKind};
+use doc_semantic_ast::{AlgLine, Block, Document, FigureSizing, Span, TextRun, TextStyle, TheoremLikeKind};
 use doc_utils::ImageAssets;
 use image::GenericImageView;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
@@ -348,6 +348,8 @@ pub fn serialize_document(
             Block::Figure {
                 path,
                 caption,
+                scale,
+                sizing,
                 number,
                 ..
             } => {
@@ -409,7 +411,19 @@ pub fn serialize_document(
                             let media_name = format!("image{}.{}", fig_id, ext);
 
                             // 计算图片尺寸（EMU：914400 = 1 英寸）
-                            let (cx, cy) = calc_image_emu(&final_bytes, 4572000, 3429000);
+                            let (cx, cy) =
+                                if sizing.is_none() && (*scale - 1.0).abs() <= f32::EPSILON {
+                                    calc_image_emu(&final_bytes, 4572000, 3429000)
+                                } else {
+                                    calc_image_emu_for_figure(
+                                        &final_bytes,
+                                        4572000,
+                                        3429000,
+                                        *scale,
+                                        sizing.as_ref(),
+                                        page_setup,
+                                    )
+                                };
 
                             // 记录到 embedded_images 让 packer 把字节写入 word/media/ 并生成 rel
                             embedded_images.push(EmbeddedImage {
@@ -687,25 +701,193 @@ fn paragraph_starts_with_reference_marker(runs: &[TextRun]) -> bool {
 /// 算法：以 96 DPI 为基准（OOXML 渲染常用），将原始像素换算成 EMU。
 /// 等比缩放保证 `cx <= max_cx_emu`。
 fn calc_image_emu(bytes: &[u8], max_cx_emu: u64, default_cy_emu: u64) -> (u64, u64) {
+    calc_image_emu_for_figure(bytes, max_cx_emu, default_cy_emu, 1.0, None, None)
+}
+
+fn calc_image_emu_for_figure(
+    bytes: &[u8],
+    max_cx_emu: u64,
+    default_cy_emu: u64,
+    scale: f32,
+    sizing: Option<&FigureSizing>,
+    page_setup: Option<&PageSetup>,
+) -> (u64, u64) {
+    let Some((native_cx, native_cy)) = native_image_emu(bytes) else {
+        return (max_cx_emu, default_cy_emu);
+    };
+    if native_cx == 0 || native_cy == 0 {
+        return (max_cx_emu, default_cy_emu);
+    }
+
+    if let Some(sizing) = sizing {
+        let target_width = sizing
+            .width_expr
+            .as_deref()
+            .and_then(|expr| resolve_graphic_dimension_emu(expr, GraphicAxis::Width, page_setup));
+        let target_height = sizing
+            .height_expr
+            .as_deref()
+            .and_then(|expr| resolve_graphic_dimension_emu(expr, GraphicAxis::Height, page_setup));
+        match (target_width, target_height) {
+            (Some(cx), Some(cy)) => return (cx.max(1), cy.max(1)),
+            (Some(cx), None) => {
+                let cy = ((cx as f64) * native_cy as f64 / native_cx as f64) as u64;
+                return (cx.max(1), cy.max(1));
+            }
+            (None, Some(cy)) => {
+                let cx = ((cy as f64) * native_cx as f64 / native_cy as f64) as u64;
+                return (cx.max(1), cy.max(1));
+            }
+            (None, None) => {}
+        }
+
+        if let Some(scale_expr) = sizing.scale_expr.as_deref() {
+            if let Some(parsed_scale) = parse_graphic_number(scale_expr) {
+                return fit_image_emu(
+                    ((native_cx as f64) * parsed_scale as f64) as u64,
+                    ((native_cy as f64) * parsed_scale as f64) as u64,
+                    max_cx_emu,
+                );
+            }
+        }
+    }
+
+    if scale.is_finite() && scale > 0.0 && (scale - 1.0).abs() > f32::EPSILON {
+        return fit_image_emu(
+            ((native_cx as f64) * scale as f64) as u64,
+            ((native_cy as f64) * scale as f64) as u64,
+            max_cx_emu,
+        );
+    }
+
+    fit_image_emu(native_cx, native_cy, max_cx_emu)
+}
+
+fn native_image_emu(bytes: &[u8]) -> Option<(u64, u64)> {
     const EMU_PER_INCH: u64 = 914_400;
     const ASSUMED_DPI: u32 = 96;
     if let Ok(img) = image::load_from_memory(bytes) {
         let (w, h) = img.dimensions();
         if w == 0 || h == 0 {
-            return (max_cx_emu, default_cy_emu);
+            return None;
         }
         // 像素 → 96DPI EMU
-        let cx_emu = (w as u64) * EMU_PER_INCH / ASSUMED_DPI as u64;
-        let scale = if cx_emu > max_cx_emu {
-            max_cx_emu as f64 / cx_emu as f64
-        } else {
-            1.0
-        };
-        let cx = ((cx_emu as f64) * scale) as u64;
-        let cy = ((cx_emu as f64) * scale * (h as f64 / w as f64)) as u64;
-        (cx.max(1), cy.max(1))
+        Some((
+            (w as u64) * EMU_PER_INCH / ASSUMED_DPI as u64,
+            (h as u64) * EMU_PER_INCH / ASSUMED_DPI as u64,
+        ))
     } else {
-        (max_cx_emu, default_cy_emu)
+        None
+    }
+}
+
+fn fit_image_emu(cx_emu: u64, cy_emu: u64, max_cx_emu: u64) -> (u64, u64) {
+    if cx_emu == 0 || cy_emu == 0 {
+        return (max_cx_emu, max_cx_emu);
+    }
+    let scale = if cx_emu > max_cx_emu {
+        max_cx_emu as f64 / cx_emu as f64
+    } else {
+        1.0
+    };
+    (
+        ((cx_emu as f64) * scale) as u64,
+        ((cy_emu as f64) * scale) as u64,
+    )
+}
+
+#[derive(Clone, Copy)]
+enum GraphicAxis {
+    Width,
+    Height,
+}
+
+fn resolve_graphic_dimension_emu(
+    expr: &str,
+    axis: GraphicAxis,
+    page_setup: Option<&PageSetup>,
+) -> Option<u64> {
+    let compact = expr
+        .trim()
+        .trim_matches('{')
+        .trim_matches('}')
+        .split_whitespace()
+        .collect::<String>();
+    if compact.is_empty() {
+        return None;
+    }
+    for (unit, base) in relative_graphic_bases(axis, page_setup) {
+        if compact == unit {
+            return Some(base);
+        }
+    }
+    let (value, unit) = split_graphic_number_unit(&compact)?;
+    if unit.is_empty() {
+        return Some(((axis_base_emu(axis, page_setup) as f64) * value as f64) as u64);
+    }
+    for (relative_unit, base) in relative_graphic_bases(axis, page_setup) {
+        if unit == relative_unit {
+            return Some(((base as f64) * value as f64) as u64);
+        }
+    }
+    let emu_per_unit = match unit {
+        "in" => 914_400.0,
+        "cm" => 914_400.0 / 2.54,
+        "mm" => 914_400.0 / 25.4,
+        "pt" => 12_700.0,
+        "bp" => 914_400.0 / 72.0,
+        "pc" => 12.0 * 12_700.0,
+        _ => return None,
+    };
+    Some((value as f64 * emu_per_unit) as u64)
+}
+
+fn split_graphic_number_unit(value: &str) -> Option<(f32, &str)> {
+    let mut end = 0usize;
+    let mut seen_digit = false;
+    for (idx, ch) in value.char_indices() {
+        if ch.is_ascii_digit() {
+            seen_digit = true;
+            end = idx + ch.len_utf8();
+        } else if ch == '.' || ch == '+' {
+            end = idx + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if !seen_digit {
+        return None;
+    }
+    let number = value[..end].parse::<f32>().ok()?;
+    Some((number, &value[end..]))
+}
+
+fn parse_graphic_number(value: &str) -> Option<f32> {
+    split_graphic_number_unit(value.trim()).and_then(|(number, unit)| {
+        if unit.is_empty() { Some(number) } else { None }
+    })
+}
+
+fn relative_graphic_bases(axis: GraphicAxis, page_setup: Option<&PageSetup>) -> [(&'static str, u64); 4] {
+    [
+        ("\\textwidth", axis_base_emu(GraphicAxis::Width, page_setup)),
+        ("\\linewidth", axis_base_emu(GraphicAxis::Width, page_setup)),
+        ("\\columnwidth", axis_base_emu(GraphicAxis::Width, page_setup)),
+        ("\\textheight", axis_base_emu(axis, page_setup)),
+    ]
+}
+
+fn axis_base_emu(axis: GraphicAxis, page_setup: Option<&PageSetup>) -> u64 {
+    const EMU_PER_TWIP: u64 = 635;
+    let fallback = PageSetup::jos_paper3();
+    let ps = page_setup.unwrap_or(&fallback);
+    match axis {
+        GraphicAxis::Width => ps.text_width_twips() as u64 * EMU_PER_TWIP,
+        GraphicAxis::Height => {
+            let top = ps.margin_top.unwrap_or(0);
+            let bottom = ps.margin_bottom.unwrap_or(0);
+            ps.height_twips.saturating_sub(top + bottom) as u64 * EMU_PER_TWIP
+        }
     }
 }
 
@@ -2589,6 +2771,14 @@ mod tests {
     use super::*;
     use doc_semantic_ast::{AlgLine, Block, Document, Span, TextRun, TextStyle};
 
+    fn decodable_png_1x1() -> Vec<u8> {
+        let img: image::RgbImage = image::ImageBuffer::from_pixel(1, 1, image::Rgb([255, 0, 0]));
+        let mut out = Vec::new();
+        img.write_to(&mut std::io::Cursor::new(&mut out), image::ImageFormat::Png)
+            .unwrap();
+        out
+    }
+
     #[test]
     fn cjk_internal_spaces_are_collapsed_for_institutes() {
         assert_eq!(
@@ -3061,6 +3251,7 @@ mod tests {
                 path: "figures/fig1.png".to_string(),
                 caption: Some("测试图".to_string()),
                 scale: 1.0,
+                sizing: None,
                 number: Some("图 1".to_string()),
                 span: Span::default(),
             }],
@@ -3072,6 +3263,50 @@ mod tests {
         assert_eq!(
             embedded[0].bytes, PNG_1X1,
             "PNG bytes must be embedded unchanged (no JPEG re-encoding)"
+        );
+    }
+
+    #[test]
+    fn image_width_expr_uses_page_text_width() {
+        let mut assets = ImageAssets::default();
+        assets.insert("figures/fig1.png".to_string(), decodable_png_1x1());
+        let ps = PageSetup {
+            width_twips: 10000,
+            height_twips: 14000,
+            margin_top: Some(1000),
+            margin_right: Some(1000),
+            margin_bottom: Some(1000),
+            margin_left: Some(1000),
+            margin_header: None,
+            margin_footer: None,
+            cols_space: None,
+            cols_num: None,
+            header_text: None,
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: None,
+            even_header_text: None,
+            first_footer_indent_twips: None,
+        };
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Figure {
+                path: "figures/fig1.png".to_string(),
+                caption: None,
+                scale: 0.5,
+                sizing: FigureSizing::from_options(Some("width=.5\\textwidth".to_string())),
+                number: None,
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, Some(&assets), Some(&ps), &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        let expected = ps.text_width_twips() as u64 * 635 / 2;
+
+        assert!(
+            xml.contains(&format!(r#"<wp:extent cx="{expected}" cy="{expected}"/>"#)),
+            "image width should be half of page text width: {xml}"
         );
     }
 
@@ -3094,6 +3329,7 @@ mod tests {
                 path: "figures/fig1.png".to_string(),
                 caption: Some("测试图".to_string()),
                 scale: 1.0,
+                sizing: None,
                 number: Some("图 1".to_string()),
                 span: Span::default(),
             }],

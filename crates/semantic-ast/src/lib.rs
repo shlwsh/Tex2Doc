@@ -18,6 +18,135 @@ pub use mapping_loader::*;
 pub use span::{SourceId, Span};
 pub use standard::*;
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FigureSizing {
+    pub source_options: Option<String>,
+    pub width_expr: Option<String>,
+    pub height_expr: Option<String>,
+    pub scale_expr: Option<String>,
+    pub normalized_width_ratio: Option<f32>,
+    pub normalized_height_ratio: Option<f32>,
+}
+
+impl FigureSizing {
+    pub fn from_options(source_options: Option<String>) -> Option<Self> {
+        let source_options = source_options.and_then(|value| {
+            let trimmed = value.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+        let options = source_options.clone()?;
+        let mut sizing = Self {
+            source_options,
+            ..Self::default()
+        };
+
+        for part in split_option_list(&options) {
+            let Some((key, value)) = part.split_once('=') else {
+                continue;
+            };
+            let key = key.trim().to_ascii_lowercase();
+            let value = value.trim().trim_matches('{').trim_matches('}').to_string();
+            if value.is_empty() {
+                continue;
+            }
+            match key.as_str() {
+                "width" => {
+                    sizing.normalized_width_ratio = parse_relative_ratio(
+                        &value,
+                        &["\\textwidth", "\\linewidth", "\\columnwidth"],
+                    );
+                    sizing.width_expr = Some(value);
+                }
+                "height" => {
+                    sizing.normalized_height_ratio = parse_relative_ratio(
+                        &value,
+                        &["\\textheight", "\\paperheight", "\\pageheight"],
+                    );
+                    sizing.height_expr = Some(value);
+                }
+                "scale" => {
+                    sizing.scale_expr = Some(value.clone());
+                    if sizing.normalized_width_ratio.is_none() {
+                        sizing.normalized_width_ratio = parse_plain_number(&value);
+                    }
+                    if sizing.normalized_height_ratio.is_none() {
+                        sizing.normalized_height_ratio = parse_plain_number(&value);
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        Some(sizing)
+    }
+}
+
+fn split_option_list(options: &str) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0usize;
+    let mut brace_depth = 0i32;
+    let mut bracket_depth = 0i32;
+    for (idx, ch) in options.char_indices() {
+        match ch {
+            '{' => brace_depth += 1,
+            '}' => brace_depth -= 1,
+            '[' => bracket_depth += 1,
+            ']' => bracket_depth -= 1,
+            ',' if brace_depth == 0 && bracket_depth == 0 => {
+                parts.push(options[start..idx].trim());
+                start = idx + ch.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start <= options.len() {
+        parts.push(options[start..].trim());
+    }
+    parts
+}
+
+fn parse_relative_ratio(value: &str, bases: &[&str]) -> Option<f32> {
+    let compact = value.split_whitespace().collect::<String>();
+    for base in bases {
+        if let Some(prefix) = compact.strip_suffix(base) {
+            if prefix.is_empty() {
+                return Some(1.0);
+            }
+            if let Some(number) = parse_plain_number(prefix) {
+                return Some(number);
+            }
+        }
+    }
+    parse_plain_number(&compact).filter(|ratio| (0.0..=10.0).contains(ratio))
+}
+
+fn parse_plain_number(value: &str) -> Option<f32> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut end = 0usize;
+    let mut seen_digit = false;
+    for (idx, ch) in trimmed.char_indices() {
+        if ch.is_ascii_digit() {
+            seen_digit = true;
+            end = idx + ch.len_utf8();
+        } else if ch == '.' || ch == '+' {
+            end = idx + ch.len_utf8();
+        } else {
+            break;
+        }
+    }
+    if !seen_digit {
+        return None;
+    }
+    trimmed[..end].parse::<f32>().ok()
+}
+
 /// 文档元数据（V2：包含 JOS 期刊投稿所需的全部 front matter）。
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct MetaData {
@@ -96,6 +225,7 @@ pub enum Block {
         path: String,
         caption: Option<String>,
         scale: f32,
+        sizing: Option<FigureSizing>,
         /// Auto-generated figure number (e.g., "图 1").
         number: Option<String>,
         span: Span,

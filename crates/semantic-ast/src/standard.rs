@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{AlgLine, BibEntry, Block, Document, Span, TableRow, TextRun, TheoremLikeKind};
+use crate::{
+    AlgLine, BibEntry, Block, Document, FigureSizing, Span, TableRow, TextRun, TheoremLikeKind,
+};
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct StandardDocument {
@@ -277,6 +279,16 @@ impl ResourceIndex {
     }
 }
 
+fn figure_width_hint(scale: f32, sizing: Option<&FigureSizing>) -> Option<String> {
+    if let Some(ratio) = sizing.and_then(|s| s.normalized_width_ratio) {
+        return Some(format!("{ratio:.4}\\textwidth"));
+    }
+    if scale.is_finite() && (scale - 1.0).abs() > f32::EPSILON {
+        return Some(format!("{scale:.4}\\textwidth"));
+    }
+    sizing.and_then(|s| s.width_expr.clone())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ResourceRef {
     pub id: String,
@@ -392,6 +404,7 @@ impl BlockNode {
                 path,
                 caption,
                 scale,
+                sizing,
                 number,
                 span,
             } => Self {
@@ -400,6 +413,7 @@ impl BlockNode {
                     path: path.clone(),
                     caption: caption.clone(),
                     scale: *scale,
+                    sizing: sizing.clone(),
                 }),
                 source_span: Some(*span),
                 label: None,
@@ -412,7 +426,7 @@ impl BlockNode {
                     keep_next: true,
                     keep_lines: true,
                     allow_split: false,
-                    width: None,
+                    width: figure_width_hint(*scale, sizing.as_ref()),
                     alignment: Some("center".to_string()),
                     spacing: None,
                 },
@@ -574,6 +588,7 @@ pub struct FigureNode {
     pub path: String,
     pub caption: Option<String>,
     pub scale: f32,
+    pub sizing: Option<FigureSizing>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -899,6 +914,46 @@ mod tests {
             span: Span::new(0, 1, SourceId(0)),
         };
         assert_eq!(InlineNode::from_text_run(run).plain_text(), "x");
+    }
+
+    #[test]
+    fn standard_document_preserves_figure_sizing() {
+        let sizing = FigureSizing::from_options(Some("width=.8\\textwidth".to_string()));
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Figure {
+                path: "figures/a.png".to_string(),
+                caption: Some("Demo".to_string()),
+                scale: 0.8,
+                sizing: sizing.clone(),
+                number: Some("图 1".to_string()),
+                span: Span::new(0, 5, SourceId(0)),
+            }],
+        };
+        let standard = StandardDocument::from_legacy_document(
+            &doc,
+            SourceBundle {
+                main_path: "main.tex".to_string(),
+                files: vec![],
+            },
+            "jos-2025",
+        );
+
+        assert_eq!(
+            standard.blocks[0].layout.width.as_deref(),
+            Some("0.8000\\textwidth")
+        );
+        match &standard.blocks[0].kind {
+            BlockKind::Figure(fig) => {
+                assert_eq!(
+                    fig.sizing
+                        .as_ref()
+                        .and_then(|s| s.source_options.as_deref()),
+                    Some("width=.8\\textwidth")
+                );
+            }
+            _ => panic!("expected figure"),
+        }
     }
 
     #[test]
