@@ -11,6 +11,8 @@
 > 本轮开发报告：[Semantic TeX Engine 开发进展报告（20260620-124347）](./semantic-tex-engine-development-report-20260620-124347.md)
 >
 > Auto selector 开发报告：[Semantic TeX Engine Auto Selector 开发进展报告（20260620-125915）](./semantic-tex-engine-development-report-20260620-125915.md)
+>
+> 双引擎对比脚本开发报告：[Semantic TeX Engine 双引擎对比脚本开发报告（20260620-130628）](./semantic-tex-engine-development-report-20260620-130628.md)
 
 ## 1. 当前结论
 
@@ -128,6 +130,7 @@ DocxRender
 
 ```bash
 bash scripts/build_paper3_compiler_engine_docx.sh
+bash scripts/compare_paper3_dual_engines.sh
 bash scripts/compare_paper3_semantic_backends.sh
 bash scripts/build_paper3_three_docx.sh
 ```
@@ -170,6 +173,22 @@ semantic-engine
 examples/paper3/output/to-docx
 ```
 
+`scripts/compare_paper3_dual_engines.sh` 是旧 Rust 规则引擎与新 Semantic Engine 的双路径对比脚本，输出：
+
+```text
+rust-rule DOCX
+semantic-engine DOCX
+document.xml 文本摘要
+关键短语命中表
+document 文本 diff
+```
+
+到：
+
+```text
+examples/paper3/output/to-docx
+```
+
 2026-06-20 最新三路径验证结果：
 
 | 路径 | 文件 | 大小 | media |
@@ -194,6 +213,25 @@ backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available:
 | rule-based | rule-based |  | `paper3-20260620-125747-rule_based.docx` | 3,055,688 bytes | 10 |
 | xelatex-hook | xelatex-hook |  | `paper3-20260620-125747-xelatex_hook.docx` | 3,055,688 bytes | 10 |
 | luatex-node | rule-based | luatex-node | `paper3-20260620-125747-luatex_node.docx` | 3,055,688 bytes | 10 |
+
+2026-06-20 最新双引擎对比结果：
+
+| engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
+|---|---|---:|---:|---:|---:|---:|---:|
+| rust-rule | `v15-论文稿件-jos-20260620-130548-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-130548-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
+
+对比报告：
+
+```text
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-130548-dual-engines-comparison-report.md
+```
+
+结论：
+
+- `semantic_backend=auto` 在 paper3 上选择 `xelatex-hook`。
+- 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
+- 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
 ### 2.4 V2 质量闭环
 
@@ -336,7 +374,7 @@ bash scripts/build_paper3_three_docx.sh
 
 ### T2 双路径对比脚本与报告
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -346,10 +384,11 @@ bash scripts/build_paper3_three_docx.sh
 
 实现要点：
 
-- 新增 `scripts/compare_paper3_dual_engines.sh`。
-- 旧路径继续调用 `doc-core` 或现有 `doc-engine convert`。
-- 新路径调用 `doc-compiler-engine` example 或专用 CLI。
+- 已新增 `scripts/compare_paper3_dual_engines.sh`。
+- 旧路径继续调用现有 `doc-engine convert`，不依赖 `doc-compiler-engine`。
+- 新路径调用 `doc-compiler-engine` 的 `paper3_to_docx` example。
 - 报告输出到 `examples/paper3/output/to-docx`。
+- 报告包含 DOCX 文件大小、zip part 数、media 数、paragraph/table/drawing 数、document.xml 文本摘要、关键短语命中表和 unified diff。
 
 验收：
 
@@ -631,6 +670,7 @@ cargo test -p doc-compiler-engine
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-core
 bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_dual_engines.sh 15
 bash scripts/compare_paper3_semantic_backends.sh
 ```
 
@@ -641,6 +681,7 @@ doc-compiler-engine: 10 passed, 1 ignored
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-core: 5 passed
 paper3 three-docx: sh/rust-rule/semantic-engine generated
+paper3 dual engines: rust-rule/semantic-engine generated, comparison report and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -653,16 +694,14 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T2/T3：
+下一步建议进入 T3：
 
 ```text
-T2 双路径对比脚本与报告
 T3 Profile 规则表
 ```
 
 具体先做：
 
-1. 将三路径验证脚本中的摘要能力扩展为 `compare_paper3_dual_engines.sh`，补充 document.xml 文本摘要、关键短语命中和差异报告。
-2. 为 `EngineProfile` 增加 `ProfileSpec`，把 JOS、中文学术、医学期刊的页面、字体、caption、引用策略内聚到新语义路径。
-3. 保持 `doc-core`、`doc-engine convert` 旧路径不依赖 `doc-compiler-engine`。
-4. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。
+1. 为 `EngineProfile` 增加 `ProfileSpec`，把 JOS、中文学术、医学期刊的页面、字体、caption、引用策略内聚到新语义路径。
+2. 保持 `doc-core`、`doc-engine convert` 旧路径不依赖 `doc-compiler-engine`。
+3. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。

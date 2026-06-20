@@ -223,7 +223,7 @@ bash scripts/build_paper3_compiler_engine_docx.sh
 
 ### P3 双路径对比脚本
 
-状态：待开发
+状态：已完成初版
 
 目标：
 
@@ -236,6 +236,14 @@ bash scripts/build_paper3_compiler_engine_docx.sh
 ```bash
 scripts/compare_paper3_dual_engines.sh
 ```
+
+当前实现：
+
+- 旧 Rust 路径调用 `doc-engine convert`。
+- 新 Semantic Engine 路径调用 `doc-compiler-engine` 的 `paper3_to_docx` example。
+- 默认 `SEMANTIC_BACKEND=auto`，paper3 上自动选择 `xelatex-hook`。
+- 输出 DOCX 结构摘要、关键短语命中、document.xml 文本摘要、两份纯文本和 unified diff。
+- 报告写入 `examples/paper3/output/to-docx`。
 
 验证：
 
