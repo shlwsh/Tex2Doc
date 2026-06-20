@@ -17,6 +17,8 @@
 > ProfileSpec 开发报告：[Semantic TeX Engine ProfileSpec 开发报告（20260620-131521）](./semantic-tex-engine-development-report-20260620-131521.md)
 >
 > ReferenceGraph 开发报告：[Semantic TeX Engine ReferenceGraph 开发报告（20260620-132709）](./semantic-tex-engine-development-report-20260620-132709.md)
+>
+> DOCX bookmark/hyperlink 开发报告：[Semantic TeX Engine DOCX 引用链接开发报告（20260620-134723）](./semantic-tex-engine-development-report-20260620-134723.md)
 
 ## 1. 当前结论
 
@@ -28,7 +30,7 @@
 |---|---|---|
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
-| M3 结构增强 | 部分完成 | 表格、图片已有文本级/块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；bookmark、hyperlink、图片尺寸表达式尚未完成 |
+| M3 结构增强 | 部分完成 | 表格、图片已有文本级/块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版；图片尺寸表达式尚未完成 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；DOCX writer 块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
@@ -118,6 +120,7 @@ DocxRender
 8. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
 9. `StandardDocument::from_legacy_document` 生成标准文档图。
 10. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
+11. `doc-compiler-engine` 语义路径可选执行 DOCX 后处理，根据 `ReferenceGraph` 为目标段落写入 bookmark，并把已解析引用写为内部 hyperlink。
 
 当前双后端相关边界：
 
@@ -142,7 +145,8 @@ DocxRender
 - 新语义路径会从 VFS TeX 源和 runtime semantic events 合并 label/ref/eqref/autoref/cite。
 - `CompileReport` 会输出 label、cross-reference、citation、unresolved reference 计数。
 - 未解析引用会进入 `EngineDiagnostic`，code 为 `unresolved_reference`。
-- DOCX bookmark/hyperlink 尚未接入，仍由后续 T5 实现。
+- DOCX bookmark/hyperlink 已在新语义路径中接入初版：不修改 `doc-core` 与 `doc-docx-writer` 默认输出，而是在 `doc-compiler-engine` 打包后对 `word/document.xml` 做独立后处理。
+- `CompileReport` 已新增 `bookmark_count`、`hyperlink_count`。
 
 ### 2.3 paper3 样例
 
@@ -213,9 +217,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-132627.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-132626-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-132626-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-134613.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-134613-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-134613-semantic-engine-xelatex_hook.docx` | 3,056,724 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -224,6 +228,8 @@ reference-labels: 35
 reference-edges: 46
 citations: 36
 unresolved-references: 0
+bookmarks: 21
+hyperlinks: 30
 backend-requested: xelatex-hook
 backend-selected: xelatex-hook
 backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available: found /usr/bin/xelatex
@@ -244,13 +250,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-132544-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-132544-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
+| rust-rule | `v15-论文稿件-jos-20260620-134551-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-134551-dual-engines-semantic-engine-auto.docx` | 3,056,724 bytes | 10 | 653 | 12 | 20 | 42,744 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-132544-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-134551-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -258,6 +264,7 @@ examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-132544-dual-engines
 - `semantic_backend=auto` 在 paper3 上选择 `xelatex-hook`。
 - semantic log 已输出 `profile-id: jos-paper` 与 `profile-page-setup: jos-paper3`。
 - ReferenceGraph 统计为 `reference-labels=35`、`reference-edges=46`、`citations=36`、`unresolved-references=0`。
+- 语义 DOCX 链接统计为 `bookmarks=21`、`hyperlinks=30`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -316,7 +323,7 @@ MedicalJournal
 - 兼容性评分阈值。
 - YAML/TOML 外置规则。
 
-### 3.3 引用图已完成初版
+### 3.3 引用图与 DOCX 内部链接已完成初版
 
 当前 `.bbl/.bib` 可以影响引用编号和参考文献段落；新语义路径已经额外构建 `ReferenceGraph` 初版：
 
@@ -324,11 +331,17 @@ MedicalJournal
 - `label/ref/eqref/autoref/cite` 统一索引。
 - 未解析引用 diagnostics。
 
-尚未实现：
+当前已实现：
 
-- DOCX bookmark。
-- 内部 hyperlink。
-- 引用图驱动 DOCX 字段或链接渲染。
+- `ReferenceGraph` 驱动 DOCX bookmark 初版。
+- 已解析 `CrossReference` 驱动内部 hyperlink 初版。
+- 未解析引用继续走 diagnostics 与纯文本 fallback。
+
+仍待增强：
+
+- Word 字段型交叉引用。
+- heading/equation 的更精细目标定位。
+- 引用源位置到 DOCX 段落的确定性映射。
 
 ### 3.4 公式未完成端到端 OMML
 
@@ -486,7 +499,7 @@ cargo test -p doc-compiler-engine reference
 
 ### T5 DOCX bookmark/hyperlink
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -495,14 +508,21 @@ cargo test -p doc-compiler-engine reference
 
 实现要点：
 
-- 在 `doc-docx-writer` 增加 bookmark writer。
-- 增加关系与字段测试。
-- 对无法解析目标的引用保留纯文本 fallback。
+- 已选择独立后处理方案：只在 `doc-compiler-engine` 语义路径中处理 `word/document.xml`，不改变 `doc-docx-writer` 和 `doc-core` 默认输出。
+- 已新增 `CompileOptions.enable_reference_links`，默认在语义路径启用。
+- 已新增 `CompileReport.bookmark_count` 与 `CompileReport.hyperlink_count`。
+- 已实现两阶段链接：先按 caption/heading/equation 等目标段落写 bookmark，再把已解析引用写为 `w:hyperlink w:anchor`。
+- 已避免把 `<w:pgSz>` 等页设置标签误判为段落。
+- 已收紧 figure/table/algorithm/theorem/proposition 的引用匹配，避免裸数字误链接到文献引用。
+- 对无法解析目标的引用继续保留纯文本 fallback。
 
 验收：
 
 ```bash
-cargo test -p doc-docx-writer bookmark
+cargo test -p doc-compiler-engine bookmark
+cargo test -p doc-compiler-engine
+bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_dual_engines.sh 15
 ```
 
 ### T6 公式 OMML 端到端接入
@@ -725,12 +745,13 @@ bash scripts/compare_paper3_semantic_backends.sh
 ```text
 doc-compiler-engine profile: 2 passed
 doc-compiler-engine reference: 2 passed
-doc-compiler-engine: 14 passed, 1 ignored
+doc-compiler-engine bookmark: 1 passed
+doc-compiler-engine: 16 passed, 1 ignored
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
-paper3 three-docx: sh/rust-rule/semantic-engine generated
-paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts and text diff generated
+paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic bookmarks=21, hyperlinks=30
+paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts, bookmark/hyperlink counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -743,15 +764,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T5：
+下一步建议进入 T6：
 
 ```text
-T5 DOCX bookmark/hyperlink
+T6 公式 OMML 端到端
 ```
 
 具体先做：
 
-1. 在新语义路径中把 `ReferenceGraph.labels` 映射为 DOCX bookmark 计划。
-2. 将已解析 `CrossReference` 渲染为内部 hyperlink 或字段结构。
-3. 对无法解析目标的引用继续保留纯文本 fallback。
-4. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。
+1. 确认 `doc-mathml` 的 LaTeX math -> OMML 覆盖范围。
+2. 选择在 `doc-compiler-engine` 预渲染 OMML，还是让 `doc-docx-writer` 可选接入 `doc-mathml`。
+3. 保留 JOS 公式编号与文本 fallback。
+4. 增加 `\frac`、`\sqrt`、上下标、矩阵、cases 的 DOCX XML 断言。

@@ -346,6 +346,7 @@ pub struct CompileOptions {
     pub profile: EngineProfile,
     pub semantic_backend: SemanticBackendKind,
     pub allow_backend_fallback: bool,
+    pub enable_reference_links: bool,
     pub template_bytes: Option<Vec<u8>>,
     pub page_setup: Option<doc_docx_writer::PageSetup>,
     pub collect_standard_ast: bool,
@@ -358,6 +359,7 @@ impl Default for CompileOptions {
             profile: EngineProfile::ChineseAcademic,
             semantic_backend: SemanticBackendKind::Auto,
             allow_backend_fallback: true,
+            enable_reference_links: true,
             template_bytes: None,
             page_setup: None,
             collect_standard_ast: true,
@@ -477,13 +479,19 @@ impl SemanticTexEngine {
             ),
         );
 
-        let docx = doc_docx_writer::pack_with_page_setup(
+        let mut docx = doc_docx_writer::pack_with_page_setup(
             &graph.document,
             options.template_bytes.as_deref(),
             Some(&graph.image_assets),
             page_setup.as_ref(),
         )
         .map_err(|e| EngineError::Serialize(e.to_string()))?;
+        if options.enable_reference_links {
+            let linked = apply_reference_links_to_docx(docx, &graph.reference_graph)?;
+            graph.report.bookmark_count = linked.bookmarks;
+            graph.report.hyperlink_count = linked.hyperlinks;
+            docx = linked.docx;
+        }
         graph.report.docx_bytes = docx.len();
 
         Ok(CompileArtifact {
@@ -578,6 +586,8 @@ pub struct CompileReport {
     pub reference_edge_count: usize,
     pub citation_count: usize,
     pub unresolved_reference_count: usize,
+    pub bookmark_count: usize,
+    pub hyperlink_count: usize,
     pub docx_bytes: usize,
 }
 
@@ -597,6 +607,8 @@ impl CompileReport {
             reference_edge_count: 0,
             citation_count: 0,
             unresolved_reference_count: 0,
+            bookmark_count: 0,
+            hyperlink_count: 0,
             docx_bytes: 0,
         }
     }
@@ -2195,6 +2207,494 @@ fn next_reference_number(
     }
 }
 
+#[derive(Debug, Clone)]
+struct ReferenceLinkedDocx {
+    docx: Vec<u8>,
+    bookmarks: usize,
+    hyperlinks: usize,
+}
+
+fn apply_reference_links_to_docx(
+    docx: Vec<u8>,
+    reference_graph: &ReferenceGraph,
+) -> Result<ReferenceLinkedDocx, EngineError> {
+    if reference_graph.labels.is_empty() || reference_graph.references.is_empty() {
+        return Ok(ReferenceLinkedDocx {
+            docx,
+            bookmarks: 0,
+            hyperlinks: 0,
+        });
+    }
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx))
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+    let mut entries = Vec::with_capacity(archive.len());
+    let mut document_xml = None;
+
+    for idx in 0..archive.len() {
+        let mut file = archive
+            .by_index(idx)
+            .map_err(|err| EngineError::Zip(err.to_string()))?;
+        let name = file.name().to_string();
+        if file.is_dir() {
+            entries.push((name, None));
+            continue;
+        }
+        let mut bytes = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut bytes)
+            .map_err(|err| EngineError::Io(err.to_string()))?;
+        if name == "word/document.xml" {
+            document_xml = Some(String::from_utf8(bytes).map_err(|err| {
+                EngineError::Parse(format!("word/document.xml is not valid UTF-8: {err}"))
+            })?);
+        } else {
+            entries.push((name, Some(bytes)));
+        }
+    }
+
+    let Some(document_xml) = document_xml else {
+        return Ok(ReferenceLinkedDocx {
+            docx: archive.into_inner().into_inner(),
+            bookmarks: 0,
+            hyperlinks: 0,
+        });
+    };
+
+    let (linked_xml, bookmarks, hyperlinks) = link_document_xml(&document_xml, reference_graph);
+
+    let cursor = std::io::Cursor::new(Vec::<u8>::new());
+    let mut writer = zip::ZipWriter::new(cursor);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        if let Some(bytes) = bytes {
+            writer
+                .start_file(name, opts)
+                .map_err(|err| EngineError::Zip(err.to_string()))?;
+            std::io::Write::write_all(&mut writer, &bytes)
+                .map_err(|err| EngineError::Io(err.to_string()))?;
+        } else {
+            writer
+                .add_directory(name, opts)
+                .map_err(|err| EngineError::Zip(err.to_string()))?;
+        }
+    }
+    writer
+        .start_file("word/document.xml", opts)
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+    std::io::Write::write_all(&mut writer, linked_xml.as_bytes())
+        .map_err(|err| EngineError::Io(err.to_string()))?;
+    let cursor = writer
+        .finish()
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+
+    Ok(ReferenceLinkedDocx {
+        docx: cursor.into_inner(),
+        bookmarks,
+        hyperlinks,
+    })
+}
+
+fn link_document_xml(
+    document_xml: &str,
+    reference_graph: &ReferenceGraph,
+) -> (String, usize, usize) {
+    let bookmark_plan = build_bookmark_plan(reference_graph);
+    if bookmark_plan.is_empty() {
+        return (document_xml.to_string(), 0, 0);
+    }
+
+    let mut bookmarked_xml = String::with_capacity(document_xml.len() + bookmark_plan.len() * 96);
+    let mut pos = 0usize;
+    let mut bookmark_hits = HashSet::<String>::new();
+    let mut bookmark_id = 100usize;
+
+    while let Some(start) = find_next_paragraph(document_xml, pos) {
+        bookmarked_xml.push_str(&document_xml[pos..start]);
+        let Some(end_rel) = document_xml[start..].find("</w:p>") else {
+            bookmarked_xml.push_str(&document_xml[start..]);
+            return (bookmarked_xml, bookmark_hits.len(), 0);
+        };
+        let end = start + end_rel + "</w:p>".len();
+        let paragraph = &document_xml[start..end];
+        let paragraph_text = paragraph_text(paragraph);
+
+        let mut paragraph_xml = paragraph.to_string();
+        for plan in &bookmark_plan {
+            if !bookmark_hits.contains(&plan.key)
+                && plan
+                    .target_needles
+                    .iter()
+                    .any(|needle| !needle.is_empty() && paragraph_text.contains(needle))
+                && paragraph_matches_reference_target(paragraph, plan)
+            {
+                let id = bookmark_id;
+                bookmark_id += 1;
+                paragraph_xml = insert_bookmark_in_paragraph(&paragraph_xml, id, &plan.name);
+                bookmark_hits.insert(plan.key.clone());
+                break;
+            }
+        }
+
+        bookmarked_xml.push_str(&paragraph_xml);
+        pos = end;
+    }
+    bookmarked_xml.push_str(&document_xml[pos..]);
+
+    if bookmark_hits.is_empty() {
+        return (bookmarked_xml, 0, 0);
+    }
+
+    let mut linked_xml = String::with_capacity(bookmarked_xml.len() + bookmark_hits.len() * 128);
+    let mut pos = 0usize;
+    let mut hyperlink_hits = 0usize;
+    let mut reference_hits = HashSet::<usize>::new();
+
+    while let Some(start) = find_next_paragraph(&bookmarked_xml, pos) {
+        linked_xml.push_str(&bookmarked_xml[pos..start]);
+        let Some(end_rel) = bookmarked_xml[start..].find("</w:p>") else {
+            linked_xml.push_str(&bookmarked_xml[start..]);
+            return (linked_xml, bookmark_hits.len(), hyperlink_hits);
+        };
+        let end = start + end_rel + "</w:p>".len();
+        let mut paragraph_xml = bookmarked_xml[start..end].to_string();
+
+        for (reference_idx, reference) in reference_graph
+            .references
+            .iter()
+            .enumerate()
+            .filter(|(_, reference)| reference.resolved)
+        {
+            if reference_hits.contains(&reference_idx) {
+                continue;
+            }
+            let Some(plan) = bookmark_plan.iter().find(|plan| plan.key == reference.key) else {
+                continue;
+            };
+            if !bookmark_hits.contains(&plan.key) {
+                continue;
+            }
+            if let Some(updated) =
+                hyperlink_paragraph(&paragraph_xml, &plan.name, &reference_needles(reference))
+            {
+                paragraph_xml = updated;
+                reference_hits.insert(reference_idx);
+                hyperlink_hits += 1;
+            }
+        }
+
+        linked_xml.push_str(&paragraph_xml);
+        pos = end;
+    }
+    linked_xml.push_str(&bookmarked_xml[pos..]);
+
+    (linked_xml, bookmark_hits.len(), hyperlink_hits)
+}
+
+fn find_next_paragraph(xml: &str, from: usize) -> Option<usize> {
+    let mut search_from = from;
+    while let Some(rel) = xml[search_from..].find("<w:p") {
+        let start = search_from + rel;
+        match xml.as_bytes().get(start + "<w:p".len()).copied() {
+            Some(b'>') | Some(b' ' | b'\t' | b'\r' | b'\n') => return Some(start),
+            _ => search_from = start + "<w:p".len(),
+        }
+    }
+    None
+}
+
+#[derive(Debug, Clone)]
+struct BookmarkPlan {
+    key: String,
+    name: String,
+    kind: ReferenceTargetKind,
+    target_needles: Vec<String>,
+}
+
+fn build_bookmark_plan(reference_graph: &ReferenceGraph) -> Vec<BookmarkPlan> {
+    reference_graph
+        .labels
+        .iter()
+        .filter_map(|label| {
+            let name = bookmark_name_for_label(&label.key);
+            let target_needles = label
+                .number
+                .as_deref()
+                .map(|number| target_needles(label.kind, number))
+                .unwrap_or_default();
+            (!target_needles.is_empty()).then_some(BookmarkPlan {
+                key: label.key.clone(),
+                name,
+                kind: label.kind,
+                target_needles,
+            })
+        })
+        .collect()
+}
+
+fn bookmark_name_for_label(key: &str) -> String {
+    let mut out = String::from("ref_");
+    for ch in key.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch);
+        } else {
+            out.push('_');
+        }
+        if out.len() >= 40 {
+            break;
+        }
+    }
+    if out == "ref_" {
+        out.push_str("target");
+    }
+    out
+}
+
+fn target_needles(kind: ReferenceTargetKind, number: &str) -> Vec<String> {
+    match kind {
+        ReferenceTargetKind::Figure => vec![
+            format!("图 {number} "),
+            format!("图 {number}:"),
+            format!("Figure {number} "),
+            format!("Figure {number}:"),
+            format!("Fig. {number} "),
+            format!("Fig. {number}:"),
+        ],
+        ReferenceTargetKind::Table => vec![
+            format!("表 {number} "),
+            format!("表 {number}:"),
+            format!("Table {number} "),
+            format!("Table {number}:"),
+        ],
+        ReferenceTargetKind::Equation => vec![number.to_string(), format!("式 {number}")],
+        ReferenceTargetKind::Algorithm => {
+            vec![format!("算法 {number} "), format!("Algorithm {number} ")]
+        }
+        ReferenceTargetKind::Theorem => {
+            vec![format!("定理 {number} "), format!("Theorem {number} ")]
+        }
+        ReferenceTargetKind::Proposition => {
+            vec![format!("命题 {number} "), format!("Proposition {number} ")]
+        }
+        ReferenceTargetKind::Heading => vec![number.to_string()],
+        ReferenceTargetKind::Unknown => Vec::new(),
+    }
+}
+
+fn paragraph_matches_reference_target(paragraph: &str, plan: &BookmarkPlan) -> bool {
+    match plan.kind {
+        ReferenceTargetKind::Figure
+        | ReferenceTargetKind::Table
+        | ReferenceTargetKind::Algorithm
+        | ReferenceTargetKind::Theorem
+        | ReferenceTargetKind::Proposition => {
+            paragraph.contains(r#"<w:pStyle w:val="JOSCaption""#)
+                || paragraph.contains(r#"<w:pStyle w:val="AlgorithmCaption""#)
+        }
+        ReferenceTargetKind::Equation => {
+            paragraph.contains(r#"<w:pStyle w:val="JOSEquation""#)
+                || paragraph.contains(r#"<w:pStyle w:val="Equation""#)
+        }
+        ReferenceTargetKind::Heading => paragraph.contains(r#"<w:pStyle w:val="Heading"#),
+        ReferenceTargetKind::Unknown => false,
+    }
+}
+
+fn reference_needles(reference: &CrossReference) -> Vec<String> {
+    let Some(rendered) = reference.rendered.as_deref() else {
+        return Vec::new();
+    };
+    match reference
+        .target_kind
+        .unwrap_or(ReferenceTargetKind::Unknown)
+    {
+        ReferenceTargetKind::Figure => vec![
+            format!("图 {rendered}"),
+            format!("图{rendered}"),
+            format!("Figure {rendered}"),
+            format!("Fig. {rendered}"),
+        ],
+        ReferenceTargetKind::Table => vec![
+            format!("表 {rendered}"),
+            format!("表{rendered}"),
+            format!("Table {rendered}"),
+            format!("Tab. {rendered}"),
+        ],
+        ReferenceTargetKind::Equation => vec![format!("式 {rendered}"), rendered.to_string()],
+        ReferenceTargetKind::Algorithm => {
+            vec![
+                format!("算法 {rendered}"),
+                format!("算法{rendered}"),
+                format!("Algorithm {rendered}"),
+            ]
+        }
+        ReferenceTargetKind::Theorem => {
+            vec![
+                format!("定理 {rendered}"),
+                format!("定理{rendered}"),
+                format!("Theorem {rendered}"),
+            ]
+        }
+        ReferenceTargetKind::Proposition => vec![
+            format!("命题 {rendered}"),
+            format!("命题{rendered}"),
+            format!("Proposition {rendered}"),
+        ],
+        ReferenceTargetKind::Heading => vec![
+            format!("第{rendered}节"),
+            format!("Section {rendered}"),
+            format!("Sec. {rendered}"),
+        ],
+        ReferenceTargetKind::Unknown => Vec::new(),
+    }
+}
+
+fn insert_bookmark_in_paragraph(paragraph: &str, id: usize, name: &str) -> String {
+    let Some(open_end) = paragraph.find('>') else {
+        return paragraph.to_string();
+    };
+    let Some(close_start) = paragraph.rfind("</w:p>") else {
+        return paragraph.to_string();
+    };
+    format!(
+        "{}<w:bookmarkStart w:id=\"{}\" w:name=\"{}\"/>{}<w:bookmarkEnd w:id=\"{}\"/>{}",
+        &paragraph[..open_end + 1],
+        id,
+        escape_xml_attr(name),
+        &paragraph[open_end + 1..close_start],
+        id,
+        &paragraph[close_start..]
+    )
+}
+
+fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String]) -> Option<String> {
+    if paragraph.contains("<w:hyperlink") || paragraph.contains("<w:bookmarkStart") {
+        return None;
+    }
+    for needle in needles {
+        if needle.is_empty() {
+            continue;
+        }
+        if let Some(updated) = hyperlink_first_text_run(paragraph, anchor, needle) {
+            return Some(updated);
+        }
+    }
+    None
+}
+
+fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str) -> Option<String> {
+    let escaped_needle = escape_xml_text(needle);
+    let mut search_from = 0usize;
+    while let Some(rel) = paragraph[search_from..].find("<w:t") {
+        let tag_start = search_from + rel;
+        let tag_end = paragraph[tag_start..]
+            .find('>')
+            .map(|idx| tag_start + idx)?;
+        let close_start = paragraph[tag_end + 1..]
+            .find("</w:t>")
+            .map(|idx| tag_end + 1 + idx)?;
+        let text = &paragraph[tag_end + 1..close_start];
+        if let Some(match_start) = text.find(&escaped_needle) {
+            let match_end = match_start + escaped_needle.len();
+            let before = &text[..match_start];
+            let after = &text[match_end..];
+            let mut replacement = String::new();
+            if !before.is_empty() {
+                replacement.push_str(&text_run_xml(before));
+            }
+            replacement.push_str(&format!(
+                "<w:hyperlink w:anchor=\"{}\" w:history=\"1\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r></w:hyperlink>",
+                escape_xml_attr(anchor),
+                text_xml(&escaped_needle)
+            ));
+            if !after.is_empty() {
+                replacement.push_str(&text_run_xml(after));
+            }
+            let run_start = find_enclosing_run_start(paragraph, tag_start).unwrap_or(tag_start);
+            let run_end = paragraph[close_start + "</w:t>".len()..]
+                .find("</w:r>")
+                .map(|idx| close_start + "</w:t>".len() + idx + "</w:r>".len())
+                .unwrap_or(close_start + "</w:t>".len());
+            return Some(format!(
+                "{}{}{}",
+                &paragraph[..run_start],
+                replacement,
+                &paragraph[run_end..]
+            ));
+        }
+        search_from = close_start + "</w:t>".len();
+    }
+    None
+}
+
+fn find_enclosing_run_start(xml: &str, before: usize) -> Option<usize> {
+    let mut search_from = 0usize;
+    let mut last = None;
+    while search_from < before {
+        let Some(rel) = xml[search_from..before].find("<w:r") else {
+            break;
+        };
+        let start = search_from + rel;
+        match xml.as_bytes().get(start + "<w:r".len()).copied() {
+            Some(b'>') | Some(b' ' | b'\t' | b'\r' | b'\n') => last = Some(start),
+            _ => {}
+        }
+        search_from = start + "<w:r".len();
+    }
+    last
+}
+
+fn paragraph_text(paragraph: &str) -> String {
+    let mut out = String::new();
+    let mut search_from = 0usize;
+    while let Some(rel) = paragraph[search_from..].find("<w:t") {
+        let tag_start = search_from + rel;
+        let Some(tag_end) = paragraph[tag_start..].find('>').map(|idx| tag_start + idx) else {
+            break;
+        };
+        let Some(close_start) = paragraph[tag_end + 1..]
+            .find("</w:t>")
+            .map(|idx| tag_end + 1 + idx)
+        else {
+            break;
+        };
+        out.push_str(&unescape_xml_text(&paragraph[tag_end + 1..close_start]));
+        search_from = close_start + "</w:t>".len();
+    }
+    out
+}
+
+fn text_run_xml(escaped_text: &str) -> String {
+    format!("<w:r>{}</w:r>", text_xml(escaped_text))
+}
+
+fn text_xml(escaped_text: &str) -> String {
+    if escaped_text.starts_with(' ') || escaped_text.ends_with(' ') {
+        format!("<w:t xml:space=\"preserve\">{escaped_text}</w:t>")
+    } else {
+        format!("<w:t>{escaped_text}</w:t>")
+    }
+}
+
+fn escape_xml_text(input: &str) -> String {
+    input
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+fn escape_xml_attr(input: &str) -> String {
+    escape_xml_text(input).replace('"', "&quot;")
+}
+
+fn unescape_xml_text(input: &str) -> String {
+    input
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
+}
+
 fn lower_semantic_document(
     main_tex: &str,
     vfs: &VirtualFs,
@@ -2663,6 +3163,69 @@ See Figure~\ref{fig:a} and \ref{missing}.
             graph.reference_graph.unresolved_references[0].key,
             "missing"
         );
+    }
+
+    #[test]
+    fn docx_reference_links_add_bookmark_and_hyperlink() {
+        let source = r#"
+See Figure~\ref{fig:a}.
+\begin{figure}
+\caption{Demo}\label{fig:a}
+\end{figure}
+"#;
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", source.as_bytes().to_vec());
+        let graph = engine
+            .compile_vfs_to_graph("main.tex", &mut vfs, &options)
+            .expect("compile reference graph");
+        assert!(graph.reference_graph.references.iter().any(|reference| {
+            reference.key == "fig:a"
+                && reference.resolved
+                && reference.target_kind == Some(ReferenceTargetKind::Figure)
+                && reference.rendered.as_deref() == Some("1")
+        }));
+
+        let artifact = engine
+            .compile_source_to_docx("main.tex", source, &options)
+            .expect("compile linked docx");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(artifact.report.reference_label_count, 1);
+        assert_eq!(artifact.report.reference_edge_count, 1);
+        assert_eq!(artifact.report.unresolved_reference_count, 0);
+        assert!(
+            artifact.report.bookmark_count >= 1,
+            "expected bookmark count, xml: {document_xml}"
+        );
+        assert!(
+            artifact.report.hyperlink_count >= 1,
+            "expected hyperlink count, xml: {document_xml}"
+        );
+        assert!(document_xml.contains("<w:bookmarkStart"));
+        assert!(document_xml.contains(r#"w:name="ref_fig_a""#));
+        assert!(document_xml.contains("<w:hyperlink"));
+        assert!(document_xml.contains(r#"w:anchor="ref_fig_a""#));
+        assert!(
+            document_xml.find("<w:hyperlink").unwrap()
+                < document_xml.find("<w:bookmarkStart").unwrap()
+        );
+    }
+
+    #[test]
+    fn docx_reference_links_hyperlink_plain_text_run() {
+        let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
+        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")])
+            .expect("hyperlink text run");
+
+        assert!(updated.contains(r#"<w:hyperlink w:anchor="ref_fig_a""#));
+        assert!(updated.contains(r#"<w:t xml:space="preserve">See </w:t>"#));
+        assert!(updated.contains("<w:t>Figure 1</w:t>"));
+        assert!(updated.contains("<w:t>.</w:t>"));
     }
 
     #[test]

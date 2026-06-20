@@ -45,6 +45,8 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "unresolved-references: {}",
         artifact.report.unresolved_reference_count
     );
+    println!("bookmarks: {}", artifact.report.bookmark_count);
+    println!("hyperlinks: {}", artifact.report.hyperlink_count);
     println!(
         "backend-requested: {}",
         artifact.report.backend.requested.id()

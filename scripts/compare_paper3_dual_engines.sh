@@ -133,6 +133,8 @@ def read_backend_lines(path: Path) -> list[str]:
         "reference-edges:",
         "citations:",
         "unresolved-references:",
+        "bookmarks:",
+        "hyperlinks:",
     )
     return [
         line.strip()
