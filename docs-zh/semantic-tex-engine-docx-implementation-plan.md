@@ -1,5 +1,9 @@
 # Semantic TeX Engine：XeLaTeX/CTeX 到 DOCX 高保真实现方案
 
+> 当前实现进度、缺口和开发任务清单见：[semantic-tex-engine-progress-and-task-plan.md](./semantic-tex-engine-progress-and-task-plan.md)
+>
+> 最新独立双路径审核方案见：[Semantic TeX Engine 独立 DOCX 转换路径方案（20260620-112803）](./semantic-tex-engine-independent-docx-plan-20260620-112803.md)
+
 ## 1. 目标定位
 
 当前项目已经具备 `latex-reader -> semantic-ast -> docx-writer` 的基础链路，但它仍更像一个转换管线。新的目标是把它提升为可演进的语义化 TeX 编译器：
@@ -24,7 +28,7 @@ TeX/CTeX source
 | Document Graph | `StandardDocument` | 作为跨 renderer 的统一文档图 |
 | DOCX Renderer | `doc-docx-writer` | 负责 document.xml、styles.xml、rels、media、page setup |
 | VFS / Assets | `doc-utils` | 统一 zip、目录、内存文件输入 |
-| CLI / WASM / Server | `doc-core`、`cli`、`wasm`、`server` | 后续迁移为调用 `doc-compiler-engine` |
+| CLI / WASM / Server | `doc-core`、`cli`、`wasm`、`server` | 保持现有 Rust 转换路径不变；新语义引擎作为独立第二路径 |
 
 ## 3. 新增 crate
 
@@ -483,7 +487,7 @@ minted/listings
 - 阶段报告断言。
 - 标题语义块断言。
 
-## 14. 迁移计划
+## 14. 独立双路径计划
 
 第一步已经完成：
 
@@ -496,24 +500,24 @@ minted/listings
 第二步：
 
 ```text
-doc-core::convert_sync -> SemanticTexEngine::compile_source_to_docx
-doc-core::convert_zip  -> SemanticTexEngine::compile_zip_to_docx
-doc-core::convert_dir  -> SemanticTexEngine::compile_dir_to_docx
+保留 doc-core 现有转换引擎
+保留 doc-engine convert/build 默认路径
+为 doc-compiler-engine 建立独立 profile、renderer、测试和脚本
 ```
 
 第三步：
 
 ```text
-保持 ConvertOptions 兼容
-把 CoreError 适配 EngineError
-跑 paper3_e2e / oracle_compare / CLI build
+生成旧 Rust 引擎 DOCX 与新 Semantic Engine DOCX
+输出双路径差异报告
+以 paper3 作为首个高保真对照样例
 ```
 
 第四步：
 
 ```text
-把 parse_tex_with_vfs 私有逻辑下沉到 compiler-engine
-core 只保留 FFI/WASM/HTTP 友好封装
+在新路径内逐步实现 ReferenceGraph、OMML、兼容性分析、LuaHook/XDV
+旧路径只作为稳定基线维护，不参与新引擎能力迁移
 ```
 
 ## 15. 研发里程碑
