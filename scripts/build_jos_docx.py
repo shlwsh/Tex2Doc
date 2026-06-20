@@ -1503,7 +1503,9 @@ class DocxBuilder:
 def style(style_id: str, name: str, size: float, east: str, ascii_font: str = "Times New Roman",
           bold: bool = False, jc: str | None = None, first_line: int | None = None,
           left: int | None = None, hanging: int | None = None, before: int | None = None,
-          after: int | None = None, line: int | None = None) -> str:
+          after: int | None = None, line: int | None = None,
+          keep_next: bool = False, keep_lines: bool = False,
+          shd_fill: str | None = None, left_border: tuple[int, int, str] | None = None) -> str:
     ppr = [f"<w:jc w:val=\"{jc}\"/>"] if jc else []
     spacing_attrs = []
     if before is not None:
@@ -1523,6 +1525,18 @@ def style(style_id: str, name: str, size: float, east: str, ascii_font: str = "T
         ind_attrs.append(f'w:hanging="{hanging}"')
     if ind_attrs:
         ppr.append("<w:ind " + " ".join(ind_attrs) + "/>")
+    # v13.3 F1: 段落级装饰（底纹 / 左装饰条 / keepNext / keepLines）
+    if keep_next:
+        ppr.append("<w:keepNext/>")
+    if keep_lines:
+        ppr.append("<w:keepLines/>")
+    if shd_fill:
+        ppr.append(f'<w:shd w:val="clear" w:color="auto" w:fill="{shd_fill}"/>')
+    if left_border:
+        sz, space, color = left_border
+        ppr.append(
+            f'<w:pBdr><w:left w:val="single" w:sz="{sz}" w:space="{space}" w:color="{color}"/></w:pBdr>'
+        )
     rpr = (
         f'<w:rFonts w:ascii="{ascii_font}" w:hAnsi="{ascii_font}" w:eastAsia="{east}" w:cs="{ascii_font}"/>'
         f'<w:sz w:val="{int(size * 2)}"/><w:szCs w:val="{int(size * 2)}"/>'
@@ -1555,7 +1569,23 @@ def styles_xml() -> str:
         style("JOSCaption", "JOS caption from sample figure/table captions", 9, "宋体", jc="center", after=120),
         style("JOSImage", "JOS image paragraph with automatic line height", 9, "宋体", jc="center", before=80, after=80),
         style("JOSTableText", "JOS table text", 7.5, "宋体", jc="center", line=220),
-        style("JOSCode", "JOS algorithm/code text", 8, "宋体", ascii_font="Courier New", line=220),
+        # v13.3 F1: JOSCode 升级为"基于样式"的专业代码块视觉：
+        # 浅灰底纹 F5F5F5 + 灰色 3pt 左装饰条 + 段内行不断开 + 与下一段不分开
+        style(
+            "JOSCode",
+            "JOS algorithm/code text",
+            8,
+            "宋体",
+            ascii_font="Courier New",
+            jc="left",
+            line=220,
+            before=60,
+            after=60,
+            keep_next=True,
+            keep_lines=True,
+            shd_fill="F5F5F5",
+            left_border=(24, 12, "CCCCCC"),
+        ),
         style("JOSReferenceHeading", "JOS reference heading from sample style 126", 9, "黑体", bold=True, before=280),
         style("JOSReference", "JOS reference text from sample style 129", 7.5, "宋体", jc="both", left=420, hanging=420, line=260),
     ]

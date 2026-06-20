@@ -18,6 +18,12 @@ NS = {
     "wp": "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
 }
 
+
+def qn(tag: str) -> str:
+    """OOXML 命名空间限定的 ElementTree 标签名（与 lxml/python-docx 同款）。"""
+    prefix, _, local = tag.partition(":")
+    return f"{{{NS[prefix]}}}{local}"
+
 SECTION_FILES = [
     "latex/sections/zh/01_intro.tex",
     "latex/sections/zh/02_related.tex",
@@ -405,6 +411,13 @@ def pagination_keep_stats(root: ET.Element) -> dict[str, int]:
     algorithm_code_keep_lines = 0
     algorithm_code_keep_next_expected = 0
     algorithm_code_keep_next = 0
+    # v13.3 F1: 视觉装饰统计——验证 JOSCode 段落携带底纹/左装饰条
+    # 的实际段落数（值 0 即代表"基于样式"的视觉未生效）。
+    code_paragraph_total = 0
+    code_paragraph_shading = 0
+    code_paragraph_left_border = 0
+    code_paragraph_keep_next = 0
+    code_paragraph_keep_lines = 0
 
     for idx, para in enumerate(paras):
         style_id = paragraph_style(para)
@@ -432,6 +445,22 @@ def pagination_keep_stats(root: ET.Element) -> dict[str, int]:
                 if pos < len(code_indices) - 1:
                     algorithm_code_keep_next_expected += 1
                     algorithm_code_keep_next += int(code_para.find("w:pPr/w:keepNext", NS) is not None)
+        # v13.3 F1: 任何引用 JOSCode 样式的段落都应通过样式本身继承底纹/边框；
+        # 但同时也支持段落级 pPr/pBdr 显式覆盖。
+        if style_id == "JOSCode":
+            code_paragraph_total += 1
+            code_paragraph_shading += int(
+                para.find("w:pPr/w:shd", NS) is not None
+            )
+            code_paragraph_left_border += int(
+                para.find("w:pPr/w:pBdr/w:left", NS) is not None
+            )
+            code_paragraph_keep_next += int(
+                para.find("w:pPr/w:keepNext", NS) is not None
+            )
+            code_paragraph_keep_lines += int(
+                para.find("w:pPr/w:keepLines", NS) is not None
+            )
 
     table_rows = root.findall(".//w:tr", NS)
     return {
@@ -447,6 +476,12 @@ def pagination_keep_stats(root: ET.Element) -> dict[str, int]:
         "algorithm_code_keep_lines": algorithm_code_keep_lines,
         "algorithm_code_keep_next_expected": algorithm_code_keep_next_expected,
         "algorithm_code_keep_next": algorithm_code_keep_next,
+        # v13.3 F1: 视觉装饰统计（基于样式时通常为 0：装饰源自 styles.xml 而非段落 pPr）
+        "code_paragraph_total": code_paragraph_total,
+        "code_paragraph_shading": code_paragraph_shading,
+        "code_paragraph_left_border": code_paragraph_left_border,
+        "code_paragraph_keep_next": code_paragraph_keep_next,
+        "code_paragraph_keep_lines": code_paragraph_keep_lines,
     }
 
 
@@ -519,6 +554,42 @@ def reference_indent(docx: Path) -> dict[str, str]:
     styles = read_docx_xml(docx, "word/styles.xml")
     st = styles.find(".//w:style[@w:styleId='JOSReference']", NS)
     return wattrs(st.find("w:pPr/w:ind", NS)) if st is not None else {}
+
+
+def jos_code_style_visual(docx: Path) -> dict[str, object]:
+    """v13.3 F1: 读取 word/styles.xml，验证 JOSCode 样式包含"基于样式"的视觉装饰。
+
+    返回字段均直接来自 styles.xml 的 JOSCode 段落样式定义，与段落级 pPr 解耦。
+    任何字段为 False 都代表"基于样式"的视觉未生效。
+    """
+    styles = read_docx_xml(docx, "word/styles.xml")
+    st = styles.find(".//w:style[@w:styleId='JOSCode']", NS)
+    if st is None:
+        return {
+            "present": False,
+            "has_shading": False,
+            "has_left_border": False,
+            "has_keep_next": False,
+            "has_keep_lines": False,
+            "shading_fill": None,
+            "border_sz": None,
+            "border_color": None,
+        }
+    pPr = st.find("w:pPr", NS)
+    shd = pPr.find("w:shd", NS) if pPr is not None else None
+    pBdr_left = pPr.find("w:pBdr/w:left", NS) if pPr is not None else None
+    keep_next = pPr.find("w:keepNext", NS) if pPr is not None else None
+    keep_lines = pPr.find("w:keepLines", NS) if pPr is not None else None
+    return {
+        "present": True,
+        "has_shading": shd is not None,
+        "has_left_border": pBdr_left is not None,
+        "has_keep_next": keep_next is not None,
+        "has_keep_lines": keep_lines is not None,
+        "shading_fill": shd.get(qn("w:fill")) if shd is not None else None,
+        "border_sz": pBdr_left.get(qn("w:sz")) if pBdr_left is not None else None,
+        "border_color": pBdr_left.get(qn("w:color")) if pBdr_left is not None else None,
+    }
 
 
 def coverage(markers: list[str], docx_norm: str, pdf_norm: str) -> list[dict[str, object]]:
@@ -696,6 +767,7 @@ def main() -> int:
     )
     margins_ok = margins_without_footer_ok and actual_margins.get("footer") in allowed_footers
     ref_indent = reference_indent(docx)
+    code_visual = jos_code_style_visual(docx)
     leaked_config = any(
         x in dtext
         for x in ["leftmargin", "labelwidth", "itemindent", "nosep", "indent=-", "sep=4pt", "=0pt"]
@@ -942,6 +1014,30 @@ def main() -> int:
             "expected": f"{len(marker_rows)}/{len(marker_rows)}",
             "ok": all(r["in_docx"] for r in marker_rows),
         },
+        {
+            # v13.3 F1: "基于样式"的代码块视觉必须在 styles.xml 体现——
+            # 通过判断 4 个 pPr 子元素（keepNext/keepLines/shd/pBdr）一次性校验。
+            "name": "JOSCode 样式视觉装饰",
+            "actual": (
+                f"shd={code_visual['shading_fill'] or '缺失'} "
+                f"pBdr={code_visual['border_color'] or '缺失'}(sz={code_visual['border_sz']}) "
+                f"keepNext={code_visual['has_keep_next']} "
+                f"keepLines={code_visual['has_keep_lines']}"
+            ),
+            "expected": (
+                "shd=F5F5F5 pBdr=CCCCCC(24) keepNext=True keepLines=True"
+            ),
+            "ok": (
+                code_visual["present"]
+                and code_visual["has_shading"]
+                and code_visual["has_left_border"]
+                and code_visual["has_keep_next"]
+                and code_visual["has_keep_lines"]
+                and code_visual["shading_fill"] == "F5F5F5"
+                and code_visual["border_color"] == "CCCCCC"
+                and code_visual["border_sz"] == "24"
+            ),
+        },
     ]
     for item in checks:
         item["status"] = "通过" if item["ok"] else "失败"
@@ -960,6 +1056,8 @@ def main() -> int:
         "pdf_chars": pdf_chars,
         "char_ratio": ratio,
         "paragraphs": count_paragraphs(doc_root),
+        "code_visual": code_visual,
+        "pagination_keep": keep_stats,
     }
     report.parent.mkdir(parents=True, exist_ok=True)
     report.write_text(make_report(result), encoding="utf-8")

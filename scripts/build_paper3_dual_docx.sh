@@ -167,12 +167,37 @@ if [[ ! -f "$RUST_DOCX" ]]; then
 fi
 echo "✓ $(basename "$RUST_DOCX")"
 
+# ---------------------------------------------------------------------------
+# pandoc 路径：用 pandoc 直接把 LaTeX 项目转成 docx 作为对照基线。
+# pandoc 不是必需：缺失时跳过 pandoc 路径，不影响 sh/rust 双产物。
+# ---------------------------------------------------------------------------
+PANDOC_DOCX="$OUT_DIR/${BASE}-pandoc.docx"
+if command -v pandoc >/dev/null 2>&1; then
+  echo "=== generating pandoc DOCX ==="
+  bash "$ROOT/scripts/build_paper3_pandoc_docx.sh" "$VERSION" "$STAMP" \
+    >/dev/null 2>&1 || {
+      echo "❌ pandoc DOCX generation failed (continuing without it)" >&2
+    }
+  if [[ -f "$PANDOC_DOCX" ]]; then
+    echo "✓ $(basename "$PANDOC_DOCX")"
+  else
+    echo "⚠ pandoc DOCX not produced (skipped)" >&2
+  fi
+else
+  echo "⚠ pandoc not installed; skipping pandoc DOCX (apt install pandoc to enable)" >&2
+fi
+
 python3 - <<PY
 from pathlib import Path
 sh = Path(r"$SH_DOCX")
 rust = Path(r"$RUST_DOCX")
-print(f"sh  : {sh} ({sh.stat().st_size} bytes)")
-print(f"rust: {rust} ({rust.stat().st_size} bytes)")
+print(f"sh    : {sh} ({sh.stat().st_size} bytes)")
+print(f"rust  : {rust} ({rust.stat().st_size} bytes)")
+pandoc = Path(r"$PANDOC_DOCX")
+if pandoc.exists():
+    print(f"pandoc: {pandoc} ({pandoc.stat().st_size} bytes)")
+else:
+    print("pandoc: (skipped)")
 PY
 
 echo "=== done ==="
