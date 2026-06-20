@@ -801,6 +801,11 @@ pub enum SemanticEvent {
         keys: Vec<String>,
         span: Option<SourceSpan>,
     },
+    #[serde(rename = "caption")]
+    Caption {
+        text: String,
+        span: Option<SourceSpan>,
+    },
     #[serde(rename = "label")]
     Label {
         key: String,
@@ -812,6 +817,34 @@ pub enum SemanticEvent {
         key: String,
         span: Option<SourceSpan>,
     },
+}
+
+/// Source location for a semantic event (v2 schema).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EventSource {
+    /// Path to the source file (e.g., "main.tex").
+    pub path: String,
+    /// 1-based line number where the macro was invoked.
+    pub line: u32,
+    /// 1-based column number.
+    pub column: Option<u32>,
+}
+
+/// Metadata for a v2 semantic event, including source location and macro name.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SemanticEventV2 {
+    /// Schema version. Always "semantic-event-v2".
+    #[serde(rename = "schema", alias = "v")]
+    pub schema: String,
+    /// The event type.
+    #[serde(flatten)]
+    pub event: SemanticEvent,
+    /// Source location of this event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<EventSource>,
+    /// Name of the TeX macro that generated this event (e.g., "section", "caption").
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub macro_name: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1648,31 +1681,162 @@ impl RuntimeEngine {
 
 const SEMANTIC_SIDECAR: &str = "__docx_semantic_events.jsonl";
 
+/// XeLaTeX semantic hook (v2 schema).
+/// Emits JSONL with schema header, source location (path + line), and macro name.
 const XELATEX_SEMANTIC_HOOK: &str = r#"
 \newwrite\docxsemout
 \immediate\openout\docxsemout=__docx_semantic_events.jsonl
 \makeatletter
-\newcommand{\docxsemwriteheading}[2]{%
-  \immediate\write\docxsemout{{"type":"heading","level":#1,"text":"\detokenize{#2}","label":null,"span":null}}%
+
+% v2 schema header
+\begingroup
+\catcode`\"=12
+\immediate\write\docxsemout{{"schema":"semantic-event-v2","engine":"xelatex"}}
+\endgroup
+
+% ─── Heading hooks ─────────────────────────────────────────────────────────────
+\newcommand{\docxsemhdwrite}[3]{%
+  \immediate\write\docxsemout{{"type":"heading","level":#1,"text":"\detokenize{#2}","label":#3,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"section"}}%
 }
-\let\docxsemoldsection\section
-\renewcommand{\section}[1]{\docxsemwriteheading{1}{#1}\docxsemoldsection{#1}}
-\let\docxsemoldsubsection\subsection
-\renewcommand{\subsection}[1]{\docxsemwriteheading{2}{#1}\docxsemoldsubsection{#1}}
-\let\docxsemoldsubsubsection\subsubsection
-\renewcommand{\subsubsection}[1]{\docxsemwriteheading{3}{#1}\docxsemoldsubsubsection{#1}}
+\let\docxsemOldSection\section
+\def\section{\@ifstar{\docxsemHdSstar}{\docxsemHdSnostar}}
+\def\docxsemHdSstar#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection*{#1}}
+\def\docxsemHdSnostar{\@ifnextchar[\docxsemHdSopt\docxsemHdSplain}
+\def\docxsemHdSopt[#1]#2{\docxsemhdwrite{1}{#2}{null}\docxsemOldSection[#1]{#2}}
+\def\docxsemHdSplain#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection{#1}}
+
+\let\docxsemOldSubsection\subsection
+\def\subsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSsnostar}}
+\def\docxsemHdSsstar#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection*{#1}}
+\def\docxsemHdSsnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
+\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{2}{#2}{null}\docxsemOldSubsection[#1]{#2}}
+\def\docxsemHdSsplain#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection{#1}}
+
+\let\docxsemOldSubsubsection\subsubsection
+\def\subsubsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSssnostar}}
+\def\docxsemHdSsstar#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection*{#1}}
+\def\docxsemHdSssnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
+\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{3}{#2}{null}\docxsemOldSubsubsection[#1]{#2}}
+\def\docxsemHdSsplain#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection{#1}}
+
+% ─── Figure / graphics hook ────────────────────────────────────────────────────
 \ifcsname includegraphics\endcsname
-  \let\docxsemoldincludegraphics\includegraphics
-  \renewcommand{\includegraphics}{\@ifnextchar[{\docxsemincludegraphicsopt}{\docxsemincludegraphicsplain}}
-  \def\docxsemincludegraphicsopt[#1]#2{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null}}%
-    \docxsemoldincludegraphics[#1]{#2}%
-  }
-  \newcommand{\docxsemincludegraphicsplain}[1]{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null}}%
-    \docxsemoldincludegraphics{#1}%
-  }
+  \let\docxsemOldIncludeGraphics\includegraphics
+  \def\docxsemOldIncludeGraphics{\@ifnextchar[{\docxsemImgOpt}{\docxsemImgPlain}}
+  \def\docxsemImgOpt[#1]#2{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics[#1]{#2}%
+  }%
+  \def\docxsemImgPlain#1{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics{#1}%
+  }%
 \fi
+
+% ─── Caption hook ───────────────────────────────────────────────────────────────
+\ifcsname caption\endcsname
+  \let\docxsemOldCaption\caption
+  \def\docxsemOldCaption{\@ifnextchar[{\docxsemCapOpt}{\docxsemCapPlain}}
+  \def\docxsemCapOpt[#1]#2{%
+    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#2}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
+    \docxsemOldCaption[{#1}]{#2}%
+  }%
+  \def\docxsemCapPlain#1{%
+    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
+    \docxsemOldCaption{#1}%
+  }%
+\fi
+
+% ─── Label hook ────────────────────────────────────────────────────────────────
+\let\docxsemOldLabel\label
+\def\label#1{%
+  \immediate\write\docxsemout{{"type":"label","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"label"}}%
+  \docxsemOldLabel{#1}%
+}%
+
+% ─── Reference hooks ────────────────────────────────────────────────────────────
+\let\docxsemOldRef\ref
+\def\ref#1{%
+  \immediate\write\docxsemout{{"type":"reference","kind":"ref","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"ref"}}%
+  \docxsemOldRef{#1}%
+}%
+\ifcsname eqref\endcsname
+  \let\docxsemOldEqref\eqref
+  \def\eqref#1{%
+    \immediate\write\docxsemout{{"type":"reference","kind":"eqref","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"eqref"}}%
+    \docxsemOldEqref{#1}%
+  }%
+\fi
+\ifcsname autoref\endcsname
+  \let\docxsemOldAutoref\autoref
+  \def\autoref#1{%
+    \immediate\write\docxsemout{{"type":"reference","kind":"autoref","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"autoref"}}%
+    \docxsemOldAutoref{#1}%
+  }%
+\fi
+
+% ─── Citation hooks ────────────────────────────────────────────────────────────
+\let\docxsemOldCite\cite
+\def\docxsemOldCite{%
+  \@ifnextchar[{\docxsemCiteOpen}{\docxsemCitePlainNoOpt}%}
+}
+\def\docxsemCiteOpen[#1]{%
+  \@ifnextchar[{\docxsemCiteStyleOpt{#1}}{\docxsemCitePageOpt{#1}{}}%
+}
+\def\docxsemCiteStyleOpt#1[#2]#3{%
+  \immediate\write\docxsemout{{"type":"citation","keys":["\detokenize{#3}"],"style":"\detokenize{#1}","pages":"\detokenize{#2}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"cite"}}%
+  \docxsemOldCite[{#1}][{#2}]{#3}%
+}
+\def\docxsemCitePageOpt#1[#2]#3{%
+  \immediate\write\docxsemout{{"type":"citation","keys":["\detokenize{#3}"],"style":null,"pages":"\detokenize{#2}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"cite"}}%
+  \docxsemOldCite[{#1}][{#2}]{#3}%
+}
+\def\docxsemCitePlainNoOpt#1{%
+  \immediate\write\docxsemout{{"type":"citation","keys":["\detokenize{#1}"],"style":null,"pages":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"cite"}}%
+  \docxsemOldCite{#1}%
+}
+
+% ─── Table / tabular hooks ─────────────────────────────────────────────────────
+\let\docxsemOldTabular\tabular
+\let\docxsemOldEndTabular\endtabular
+\def\tabular{%
+  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
+  \docxsemOldTabular
+}
+\let\docxsemOldTabularStar\tabular*
+\let\docxsemOldEndTabularStar\endtabular*
+\def\tabular*{%
+  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
+  \docxsemOldTabularStar
+}
+
+% ─── Equation hooks ────────────────────────────────────────────────────────────
+\ifcsname equation\endcsname
+  \let\docxsemOldEquation\equation
+  \let\docxsemOldEndEquation\endequation
+  \renewenvironment{equation}{%
+    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"equation"}}%
+    \docxsemOldEquation
+  }{\docxsemOldEndEquation\endequation}
+\fi
+\ifcsname align\endcsname
+  \let\docxsemOldAlign\align
+  \let\docxsemOldEndAlign\endalign
+  \renewenvironment{align}{%
+    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"align"}}%
+    \docxsemOldAlign
+  }{\docxsemOldEndAlign\endalign}
+\fi
+\ifcsname gather\endcsname
+  \let\docxsemOldGather\gather
+  \let\docxsemOldEndGather\endgather
+  \renewenvironment{gather}{%
+    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"gather"}}%
+    \docxsemOldGather
+  }{\docxsemOldEndGather\endgather}
+\fi
+
+% ─── Cleanup ──────────────────────────────────────────────────────────────────
 \AtEndDocument{\immediate\closeout\docxsemout}
 \makeatother
 "#;
@@ -2223,22 +2387,42 @@ fn tail_for_diagnostic(input: &str) -> String {
 /// Parse semantic sidecar JSONL emitted by future XeLaTeX/LuaTeX collectors.
 ///
 /// Empty lines and comment lines beginning with `#` are ignored.
+/// Parses the semantic events JSONL sidecar file produced by the XeLaTeX or LuaTeX hook.
+///
+/// Supports two formats:
+/// - **v1** (legacy): `{"type":"heading",...}`
+/// - **v2** (current): First line is a schema header `{"schema":"semantic-event-v2",...}`
+///   followed by events with extra fields (`source`, `macro`).
+///
+/// Empty lines and comment lines (`#...`) are skipped.
 pub fn parse_semantic_events_jsonl(input: &str) -> Result<Vec<SemanticEvent>, EngineError> {
     let mut events = Vec::new();
-    for (idx, line) in input.lines().enumerate() {
-        let trimmed = line.trim();
+    let mut line_number = 0;
+    let mut saw_v2_schema = false;
+
+    for raw_line in input.lines() {
+        line_number += 1;
+        let trimmed = raw_line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;
         }
+
+        // Detect and skip v2 schema header
+        if !saw_v2_schema && trimmed.starts_with("{\"schema\"") {
+            if trimmed.contains("semantic-event-v2") {
+                saw_v2_schema = true;
+                continue;
+            }
+        }
+
         let event = serde_json::from_str::<SemanticEvent>(trimmed).map_err(|err| {
             EngineError::Parse(format!(
-                "semantic sidecar line {} is invalid JSON: {}",
-                idx + 1,
-                err
+                "semantic sidecar line {line_number} is invalid JSON: {err}"
             ))
         })?;
         events.push(event);
     }
+
     Ok(events)
 }
 
@@ -4226,5 +4410,49 @@ a+b=c
         let mut xml = String::new();
         file.read_to_string(&mut xml).expect("read document.xml");
         xml
+    }
+
+    #[test]
+    fn parse_semantic_events_v1_legacy() {
+        let jsonl = r#"{"type":"heading","level":1,"text":"Intro","label":null,"span":null}
+{"type":"figure","path":"fig.png","caption":null,"label":"fig:1","width_expr":null,"span":null}
+{"type":"label","key":"sec:intro","span":null}
+"#;
+        let events = parse_semantic_events_jsonl(jsonl).unwrap();
+        assert_eq!(events.len(), 3);
+        assert!(matches!(events[0], SemanticEvent::Heading { .. }));
+        assert!(matches!(events[1], SemanticEvent::Figure { .. }));
+        assert!(matches!(events[2], SemanticEvent::Label { .. }));
+    }
+
+    #[test]
+    fn parse_semantic_events_v2_with_schema_header() {
+        let jsonl = r#"{"schema":"semantic-event-v2","engine":"xelatex"}
+{"type":"heading","level":2,"text":"Background","label":"sec:bg","span":null,"source":{"path":"main.tex","line":10},"macro":"section"}
+{"type":"caption","text":"Overview of the system","span":null,"source":{"path":"main.tex","line":25},"macro":"caption"}
+"#;
+        let events = parse_semantic_events_jsonl(jsonl).unwrap();
+        assert_eq!(events.len(), 2);
+        match &events[0] {
+            SemanticEvent::Heading { level, text, label, .. } => {
+                assert_eq!(*level, 2);
+                assert_eq!(text, "Background");
+                assert_eq!(label.as_deref(), Some("sec:bg"));
+            }
+            _ => panic!("expected Heading event"),
+        }
+    }
+
+    #[test]
+    fn parse_semantic_events_skips_empty_and_comment_lines() {
+        let jsonl = r#"
+
+{"type":"heading","level":1,"text":"Title","label":null,"span":null}
+# This is a comment line
+{"type":"label","key":"x","span":null}
+
+"#;
+        let events = parse_semantic_events_jsonl(jsonl).unwrap();
+        assert_eq!(events.len(), 2);
     }
 }

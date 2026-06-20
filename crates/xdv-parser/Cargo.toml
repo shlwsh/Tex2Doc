@@ -1,0 +1,12 @@
+[package]
+name = "doc-xdv-parser"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "XDV/DVI bytecode parser for XeLaTeX layout extraction"
+
+[dependencies]
+thiserror = { workspace = true }
+serde     = { workspace = true }

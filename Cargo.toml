@@ -16,6 +16,7 @@ members = [
     "crates/docx-pdf",     # M1 新增（V2 路径 B：docx-pdf）
     "crates/quality",      # M1 新增（V2 路径 C：quality）
     "crates/cli",          # V2 子命令入口：convert / tex-compile / docx-to-pdf / verify-pdf / build
+    "crates/xdv-parser",   # T11 XDV/DVI parser for XeLaTeX layout extraction
 ]
 
 [workspace.package]
@@ -36,6 +37,7 @@ doc-docx-writer  = { path = "crates/docx-writer" }
 doc-bib          = { path = "crates/bib" }
 doc-mathml       = { path = "crates/mathml" }
 doc-compiler-engine = { path = "crates/compiler-engine" }
+doc-xdv-parser     = { path = "crates/xdv-parser" }
 
 # 错误 / 序列化
 thiserror = "1.0"
