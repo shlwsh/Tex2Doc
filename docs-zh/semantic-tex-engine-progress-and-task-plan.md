@@ -15,6 +15,8 @@
 > 双引擎对比脚本开发报告：[Semantic TeX Engine 双引擎对比脚本开发报告（20260620-130628）](./semantic-tex-engine-development-report-20260620-130628.md)
 >
 > ProfileSpec 开发报告：[Semantic TeX Engine ProfileSpec 开发报告（20260620-131521）](./semantic-tex-engine-development-report-20260620-131521.md)
+>
+> ReferenceGraph 开发报告：[Semantic TeX Engine ReferenceGraph 开发报告（20260620-132709）](./semantic-tex-engine-development-report-20260620-132709.md)
 
 ## 1. 当前结论
 
@@ -26,7 +28,7 @@
 |---|---|---|
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
-| M3 结构增强 | 部分完成 | 表格、图片、引用已有文本级/块级处理；显式 `ReferenceGraph`、bookmark、hyperlink、图片尺寸表达式尚未完成 |
+| M3 结构增强 | 部分完成 | 表格、图片已有文本级/块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；bookmark、hyperlink、图片尺寸表达式尚未完成 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；DOCX writer 块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
@@ -134,6 +136,14 @@ DocxRender
 - `CompileReport.profile_spec` 会输出本次编译使用的 profile 规则摘要。
 - 规则仍为 Rust 内置表，尚未外置到 YAML/TOML。
 
+当前引用图边界：
+
+- `doc-compiler-engine` 已定义 `ReferenceGraph`。
+- 新语义路径会从 VFS TeX 源和 runtime semantic events 合并 label/ref/eqref/autoref/cite。
+- `CompileReport` 会输出 label、cross-reference、citation、unresolved reference 计数。
+- 未解析引用会进入 `EngineDiagnostic`，code 为 `unresolved_reference`。
+- DOCX bookmark/hyperlink 尚未接入，仍由后续 T5 实现。
+
 ### 2.3 paper3 样例
 
 已存在脚本：
@@ -203,13 +213,17 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-131628.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-131627-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-131627-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-132627.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-132626-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-132626-semantic-engine-xelatex_hook.docx` | 3,055,688 bytes | 10 |
 
 semantic-engine 后端报告：
 
 ```text
+reference-labels: 35
+reference-edges: 46
+citations: 36
+unresolved-references: 0
 backend-requested: xelatex-hook
 backend-selected: xelatex-hook
 backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available: found /usr/bin/xelatex
@@ -230,19 +244,20 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-131459-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-131459-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
+| rust-rule | `v15-论文稿件-jos-20260620-132544-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-132544-dual-engines-semantic-engine-auto.docx` | 3,055,688 bytes | 10 | 653 | 12 | 20 | 42,744 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-131459-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-132544-dual-engines-comparison-report.md
 ```
 
 结论：
 
 - `semantic_backend=auto` 在 paper3 上选择 `xelatex-hook`。
 - semantic log 已输出 `profile-id: jos-paper` 与 `profile-page-setup: jos-paper3`。
+- ReferenceGraph 统计为 `reference-labels=35`、`reference-edges=46`、`citations=36`、`unresolved-references=0`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -301,15 +316,19 @@ MedicalJournal
 - 兼容性评分阈值。
 - YAML/TOML 外置规则。
 
-### 3.3 引用图未结构化
+### 3.3 引用图已完成初版
 
-当前 `.bbl/.bib` 可以影响引用编号和参考文献段落，但引用仍主要是段落文本。尚未实现：
+当前 `.bbl/.bib` 可以影响引用编号和参考文献段落；新语义路径已经额外构建 `ReferenceGraph` 初版：
 
 - `ReferenceGraph`。
 - `label/ref/eqref/autoref/cite` 统一索引。
+- 未解析引用 diagnostics。
+
+尚未实现：
+
 - DOCX bookmark。
 - 内部 hyperlink。
-- 未解析引用 diagnostics。
+- 引用图驱动 DOCX 字段或链接渲染。
 
 ### 3.4 公式未完成端到端 OMML
 
@@ -441,7 +460,7 @@ cargo test -p doc-compiler-engine profile
 
 ### T4 引用图与交叉引用
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -451,9 +470,12 @@ cargo test -p doc-compiler-engine profile
 
 实现要点：
 
-- 在 `doc-semantic-ast` 或 `doc-compiler-engine` 中定义 `ReferenceGraph`。
-- 将 `collect_label_map` 的结果提升到 Document Graph。
-- 保持当前文本替换能力不回退。
+- 已在 `doc-compiler-engine` 中定义 `ReferenceGraph`、`ReferenceLabel`、`CrossReference`、`CitationReference`、`UnresolvedReference`。
+- 已从 VFS TeX 源轻量扫描 `label/ref/eqref/autoref/cite`，并合并 runtime semantic events。
+- 已将 `ReferenceGraph` 挂到 `DocumentGraph`。
+- 已在 `CompileReport` 输出引用图统计。
+- 已对未解析引用输出 `unresolved_reference` diagnostics。
+- 当前文本级引用替换能力保持不回退。
 
 验收：
 
@@ -688,8 +710,10 @@ T13 AI fallback
 ```bash
 cargo fmt -p doc-compiler-engine
 cargo test -p doc-compiler-engine profile
+cargo test -p doc-compiler-engine reference
 cargo test -p doc-compiler-engine
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
+cargo test -p doc-latex-reader ref
 cargo test -p doc-core
 bash scripts/build_paper3_three_docx.sh 15
 bash scripts/compare_paper3_dual_engines.sh 15
@@ -700,11 +724,13 @@ bash scripts/compare_paper3_semantic_backends.sh
 
 ```text
 doc-compiler-engine profile: 2 passed
-doc-compiler-engine: 12 passed, 1 ignored
+doc-compiler-engine reference: 2 passed
+doc-compiler-engine: 14 passed, 1 ignored
 doc-compiler-engine luatex ignored integration: 1 passed
+doc-latex-reader ref: 9 passed
 doc-core: 5 passed
 paper3 three-docx: sh/rust-rule/semantic-engine generated
-paper3 dual engines: rust-rule/semantic-engine generated, comparison report and text diff generated
+paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -717,15 +743,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T4：
+下一步建议进入 T5：
 
 ```text
-T4 ReferenceGraph
+T5 DOCX bookmark/hyperlink
 ```
 
 具体先做：
 
-1. 在新语义路径中定义 `ReferenceGraph`，结构化 `label/ref/eqref/autoref/cite`。
-2. 将当前文本级引用替换能力保留为 fallback，不影响 `doc-core` 旧路径。
-3. 对未解析引用输出 diagnostics，为后续 bookmark/hyperlink 做准备。
+1. 在新语义路径中把 `ReferenceGraph.labels` 映射为 DOCX bookmark 计划。
+2. 将已解析 `CrossReference` 渲染为内部 hyperlink 或字段结构。
+3. 对无法解析目标的引用继续保留纯文本 fallback。
 4. 跑 `cargo test -p doc-core -p doc-compiler-engine` 与 paper3 脚本，确认新旧路径仍可独立验证。

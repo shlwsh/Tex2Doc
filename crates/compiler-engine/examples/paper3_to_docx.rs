@@ -36,6 +36,16 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("blocks: {}", artifact.report.block_count);
     println!("image-assets: {}", artifact.report.image_asset_count);
     println!(
+        "reference-labels: {}",
+        artifact.report.reference_label_count
+    );
+    println!("reference-edges: {}", artifact.report.reference_edge_count);
+    println!("citations: {}", artifact.report.citation_count);
+    println!(
+        "unresolved-references: {}",
+        artifact.report.unresolved_reference_count
+    );
+    println!(
         "backend-requested: {}",
         artifact.report.backend.requested.id()
     );

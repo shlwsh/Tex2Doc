@@ -129,6 +129,10 @@ def read_backend_lines(path: Path) -> list[str]:
         "backend-reason:",
         "profile-id:",
         "profile-page-setup:",
+        "reference-labels:",
+        "reference-edges:",
+        "citations:",
+        "unresolved-references:",
     )
     return [
         line.strip()

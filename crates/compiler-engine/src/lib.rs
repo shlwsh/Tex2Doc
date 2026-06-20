@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -508,11 +509,25 @@ impl SemanticTexEngine {
         );
 
         let mut artifact = collect_with_selected_backend(main_tex, vfs, options, &mut report)?;
+        let reference_graph = build_reference_graph(vfs, &artifact.events);
         report.semantic_event_count = artifact.events.len();
         report.layout_node_count = artifact
             .layout
             .as_ref()
             .map_or(0, |layout| layout.nodes.len());
+        report.reference_label_count = reference_graph.labels.len();
+        report.reference_edge_count = reference_graph.references.len();
+        report.citation_count = reference_graph.citations.len();
+        report.unresolved_reference_count = reference_graph.unresolved_references.len();
+        for unresolved in &reference_graph.unresolved_references {
+            report.diagnostics.push(EngineDiagnostic::warning(
+                "unresolved_reference",
+                format!(
+                    "{}{{{}}} has no matching label",
+                    unresolved.command, unresolved.key
+                ),
+            ));
+        }
         report.diagnostics.append(&mut artifact.diagnostics);
 
         Ok(DocumentGraph {
@@ -520,6 +535,7 @@ impl SemanticTexEngine {
             standard_document: artifact.standard_document,
             image_assets: artifact.image_assets,
             semantic_events: artifact.events,
+            reference_graph,
             layout: artifact.layout,
             report,
         })
@@ -542,6 +558,7 @@ pub struct DocumentGraph {
     pub standard_document: Option<StandardDocument>,
     pub image_assets: ImageAssets,
     pub semantic_events: Vec<SemanticEvent>,
+    pub reference_graph: ReferenceGraph,
     pub layout: Option<LayoutGraph>,
     pub report: CompileReport,
 }
@@ -557,6 +574,10 @@ pub struct CompileReport {
     pub image_asset_count: usize,
     pub semantic_event_count: usize,
     pub layout_node_count: usize,
+    pub reference_label_count: usize,
+    pub reference_edge_count: usize,
+    pub citation_count: usize,
+    pub unresolved_reference_count: usize,
     pub docx_bytes: usize,
 }
 
@@ -572,6 +593,10 @@ impl CompileReport {
             image_asset_count: 0,
             semantic_event_count: 0,
             layout_node_count: 0,
+            reference_label_count: 0,
+            reference_edge_count: 0,
+            citation_count: 0,
+            unresolved_reference_count: 0,
             docx_bytes: 0,
         }
     }
@@ -712,6 +737,70 @@ pub struct SourceSpan {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct LayoutGraph {
     pub nodes: Vec<LayoutNode>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferenceGraph {
+    pub labels: Vec<ReferenceLabel>,
+    pub references: Vec<CrossReference>,
+    pub citations: Vec<CitationReference>,
+    pub unresolved_references: Vec<UnresolvedReference>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferenceLabel {
+    pub key: String,
+    pub kind: ReferenceTargetKind,
+    pub number: Option<String>,
+    pub source: ReferenceSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CrossReference {
+    pub command: String,
+    pub key: String,
+    pub resolved: bool,
+    pub target_kind: Option<ReferenceTargetKind>,
+    pub rendered: Option<String>,
+    pub source: ReferenceSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CitationReference {
+    pub command: String,
+    pub keys: Vec<String>,
+    pub source: ReferenceSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct UnresolvedReference {
+    pub command: String,
+    pub key: String,
+    pub source: ReferenceSource,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct ReferenceSource {
+    pub path: Option<String>,
+    pub origin: ReferenceOrigin,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ReferenceOrigin {
+    SourceScan,
+    SemanticEvent,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub enum ReferenceTargetKind {
+    Heading,
+    Figure,
+    Table,
+    Equation,
+    Algorithm,
+    Theorem,
+    Proposition,
+    Unknown,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1716,6 +1805,396 @@ pub fn parse_semantic_events_jsonl(input: &str) -> Result<Vec<SemanticEvent>, En
     Ok(events)
 }
 
+fn build_reference_graph(vfs: &VirtualFs, events: &[SemanticEvent]) -> ReferenceGraph {
+    let mut graph = ReferenceGraph::default();
+    let mut label_keys = HashSet::<String>::new();
+    let mut numbering = HashMap::<ReferenceTargetKind, usize>::new();
+
+    collect_source_references(vfs, &mut graph, &mut label_keys, &mut numbering);
+    collect_event_references(events, &mut graph, &mut label_keys);
+    resolve_reference_graph(graph)
+}
+
+fn collect_source_references(
+    vfs: &VirtualFs,
+    graph: &mut ReferenceGraph,
+    label_keys: &mut HashSet<String>,
+    numbering: &mut HashMap<ReferenceTargetKind, usize>,
+) {
+    let mut paths = vfs
+        .paths()
+        .filter(|path| is_tex_like_path(path))
+        .map(|path| path.to_path_buf())
+        .collect::<Vec<_>>();
+    paths.sort();
+
+    for path in paths {
+        let Ok(bytes) = vfs.read(&path) else {
+            continue;
+        };
+        let Ok(raw) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        let text = strip_tex_comments(raw);
+        let source = ReferenceSource {
+            path: Some(path_to_posix(&path)),
+            origin: ReferenceOrigin::SourceScan,
+        };
+
+        for command in scan_tex_commands(&text, &["label"]) {
+            let key = command.argument.trim();
+            if key.is_empty() || !label_keys.insert(key.to_string()) {
+                continue;
+            }
+            let kind = reference_kind_from_key(key);
+            let number = next_reference_number(kind, numbering);
+            graph.labels.push(ReferenceLabel {
+                key: key.to_string(),
+                kind,
+                number,
+                source: source.clone(),
+            });
+        }
+
+        for command in scan_tex_commands(&text, &["autoref", "eqref", "ref"]) {
+            let key = command.argument.trim();
+            if key.is_empty() {
+                continue;
+            }
+            graph.references.push(CrossReference {
+                command: command.name,
+                key: key.to_string(),
+                resolved: false,
+                target_kind: None,
+                rendered: None,
+                source: source.clone(),
+            });
+        }
+
+        for command in scan_tex_commands(
+            &text,
+            &[
+                "citeauthor",
+                "citeyear",
+                "citealp",
+                "citealt",
+                "citep",
+                "citet",
+                "cite",
+            ],
+        ) {
+            let keys = split_citation_keys(&command.argument);
+            if keys.is_empty() {
+                continue;
+            }
+            graph.citations.push(CitationReference {
+                command: command.name,
+                keys,
+                source: source.clone(),
+            });
+        }
+    }
+}
+
+fn collect_event_references(
+    events: &[SemanticEvent],
+    graph: &mut ReferenceGraph,
+    label_keys: &mut HashSet<String>,
+) {
+    let source = ReferenceSource {
+        path: None,
+        origin: ReferenceOrigin::SemanticEvent,
+    };
+
+    for event in events {
+        match event {
+            SemanticEvent::Heading {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Heading,
+                source.clone(),
+            ),
+            SemanticEvent::Figure {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Figure,
+                source.clone(),
+            ),
+            SemanticEvent::Table {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Table,
+                source.clone(),
+            ),
+            SemanticEvent::Equation {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Equation,
+                source.clone(),
+            ),
+            SemanticEvent::Label { key, .. } => {
+                add_event_label(
+                    graph,
+                    label_keys,
+                    key,
+                    reference_kind_from_key(key),
+                    source.clone(),
+                );
+            }
+            SemanticEvent::Reference { kind, key, .. } => graph.references.push(CrossReference {
+                command: kind.clone(),
+                key: key.clone(),
+                resolved: false,
+                target_kind: None,
+                rendered: None,
+                source: source.clone(),
+            }),
+            SemanticEvent::Citation { keys, .. } => {
+                if !keys.is_empty() {
+                    graph.citations.push(CitationReference {
+                        command: "cite".to_string(),
+                        keys: keys.clone(),
+                        source: source.clone(),
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn add_event_label(
+    graph: &mut ReferenceGraph,
+    label_keys: &mut HashSet<String>,
+    key: &str,
+    kind: ReferenceTargetKind,
+    source: ReferenceSource,
+) {
+    let key = key.trim();
+    if key.is_empty() || !label_keys.insert(key.to_string()) {
+        return;
+    }
+    graph.labels.push(ReferenceLabel {
+        key: key.to_string(),
+        kind,
+        number: None,
+        source,
+    });
+}
+
+fn resolve_reference_graph(mut graph: ReferenceGraph) -> ReferenceGraph {
+    let label_map = graph
+        .labels
+        .iter()
+        .map(|label| {
+            (
+                label.key.clone(),
+                (
+                    label.kind,
+                    label.number.clone().unwrap_or_else(|| label.key.clone()),
+                ),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    let mut unresolved = Vec::new();
+    for reference in &mut graph.references {
+        if let Some((kind, rendered)) = label_map.get(&reference.key) {
+            reference.resolved = true;
+            reference.target_kind = Some(*kind);
+            reference.rendered = Some(rendered.clone());
+        } else {
+            unresolved.push(UnresolvedReference {
+                command: reference.command.clone(),
+                key: reference.key.clone(),
+                source: reference.source.clone(),
+            });
+        }
+    }
+    graph.unresolved_references = unresolved;
+    graph
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScannedTexCommand {
+    name: String,
+    argument: String,
+}
+
+fn scan_tex_commands(text: &str, commands: &[&str]) -> Vec<ScannedTexCommand> {
+    let mut found = Vec::new();
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        if bytes[i] != b'\\' {
+            i += 1;
+            continue;
+        }
+
+        let command_start = i + 1;
+        let Some(command) = commands
+            .iter()
+            .find(|command| tex_command_matches(text, command_start, command))
+        else {
+            i += 1;
+            continue;
+        };
+
+        let mut arg_pos = command_start + command.len();
+        arg_pos = skip_tex_space_and_options(text, arg_pos);
+        if text.as_bytes().get(arg_pos) != Some(&b'{') {
+            i += command.len() + 1;
+            continue;
+        }
+
+        if let Some(end) = doc_latex_reader::normalize::find_matching_brace(text, arg_pos) {
+            found.push(ScannedTexCommand {
+                name: (*command).to_string(),
+                argument: text[arg_pos + 1..end].trim().to_string(),
+            });
+            i = end + 1;
+        } else {
+            i += command.len() + 1;
+        }
+    }
+    found
+}
+
+fn tex_command_matches(text: &str, command_start: usize, command: &str) -> bool {
+    let end = command_start + command.len();
+    if text.get(command_start..end) != Some(command) {
+        return false;
+    }
+
+    let next = text.as_bytes().get(end).copied();
+    !matches!(next, Some(b'a'..=b'z' | b'A'..=b'Z' | b'@'))
+}
+
+fn skip_tex_space_and_options(text: &str, mut pos: usize) -> usize {
+    loop {
+        while pos < text.len() && text.as_bytes()[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        if text.as_bytes().get(pos) != Some(&b'[') {
+            return pos;
+        }
+
+        let Some(end) = find_matching_bracket(text, pos) else {
+            return pos;
+        };
+        pos = end + 1;
+    }
+}
+
+fn find_matching_bracket(text: &str, open_index: usize) -> Option<usize> {
+    if text.as_bytes().get(open_index) != Some(&b'[') {
+        return None;
+    }
+    let mut depth = 0i32;
+    let mut i = open_index;
+    while i < text.len() {
+        let b = text.as_bytes()[i];
+        let escaped = is_escaped(text.as_bytes(), i);
+        if b == b'[' && !escaped {
+            depth += 1;
+        } else if b == b']' && !escaped {
+            depth -= 1;
+            if depth == 0 {
+                return Some(i);
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn strip_tex_comments(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for line in input.split_inclusive('\n') {
+        let bytes = line.as_bytes();
+        let mut end = line.len();
+        for (idx, b) in bytes.iter().enumerate() {
+            if *b == b'%' && !is_escaped(bytes, idx) {
+                end = idx;
+                break;
+            }
+        }
+        out.push_str(&line[..end]);
+        if line.ends_with('\n') {
+            out.push('\n');
+        }
+    }
+    out
+}
+
+fn is_escaped(bytes: &[u8], idx: usize) -> bool {
+    let mut count = 0usize;
+    let mut cursor = idx;
+    while cursor > 0 && bytes[cursor - 1] == b'\\' {
+        count += 1;
+        cursor -= 1;
+    }
+    count % 2 == 1
+}
+
+fn split_citation_keys(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|key| !key.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn reference_kind_from_key(key: &str) -> ReferenceTargetKind {
+    let lower = key.to_ascii_lowercase();
+    if lower.starts_with("fig:") || lower.starts_with("figure:") {
+        ReferenceTargetKind::Figure
+    } else if lower.starts_with("tab:") || lower.starts_with("table:") {
+        ReferenceTargetKind::Table
+    } else if lower.starts_with("eq:") || lower.starts_with("equation:") {
+        ReferenceTargetKind::Equation
+    } else if lower.starts_with("alg:") || lower.starts_with("algorithm:") {
+        ReferenceTargetKind::Algorithm
+    } else if lower.starts_with("thm:") || lower.starts_with("theorem:") {
+        ReferenceTargetKind::Theorem
+    } else if lower.starts_with("prop:") || lower.starts_with("proposition:") {
+        ReferenceTargetKind::Proposition
+    } else if lower.starts_with("sec:") || lower.starts_with("section:") {
+        ReferenceTargetKind::Heading
+    } else {
+        ReferenceTargetKind::Unknown
+    }
+}
+
+fn next_reference_number(
+    kind: ReferenceTargetKind,
+    numbering: &mut HashMap<ReferenceTargetKind, usize>,
+) -> Option<String> {
+    if kind == ReferenceTargetKind::Unknown {
+        return None;
+    }
+    let next = numbering.entry(kind).or_insert(0);
+    *next += 1;
+    if kind == ReferenceTargetKind::Equation {
+        Some(format!("({next})"))
+    } else {
+        Some(next.to_string())
+    }
+}
+
 fn lower_semantic_document(
     main_tex: &str,
     vfs: &VirtualFs,
@@ -2096,6 +2575,94 @@ E = mc^2
             &events[3],
             SemanticEvent::Reference { kind, key, .. } if kind == "ref" && key == "sec:intro"
         ));
+    }
+
+    #[test]
+    fn builds_reference_graph_from_source_scan() {
+        let source = r#"
+Text cites \cite{smith2020,jones2019}, see Figure~\ref{fig:a}, Eq.~\eqref{eq:e}, and \ref{missing}.
+% \label{fig:commented}
+\begin{figure}
+\caption{A}\label{fig:a}
+\end{figure}
+\begin{equation}
+x=1\label{eq:e}
+\end{equation}
+"#;
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", source.as_bytes().to_vec());
+        let graph = build_reference_graph(&vfs, &[]);
+
+        assert_eq!(graph.labels.len(), 2);
+        assert!(graph.labels.iter().any(|label| {
+            label.key == "fig:a"
+                && label.kind == ReferenceTargetKind::Figure
+                && label.number.as_deref() == Some("1")
+        }));
+        assert!(graph.labels.iter().any(|label| {
+            label.key == "eq:e"
+                && label.kind == ReferenceTargetKind::Equation
+                && label.number.as_deref() == Some("(1)")
+        }));
+        assert!(!graph
+            .labels
+            .iter()
+            .any(|label| label.key == "fig:commented"));
+        assert_eq!(graph.references.len(), 3);
+        assert_eq!(graph.citations.len(), 1);
+        assert_eq!(
+            graph.citations[0].keys,
+            vec!["smith2020".to_string(), "jones2019".to_string()]
+        );
+        assert!(graph
+            .references
+            .iter()
+            .any(|reference| reference.key == "fig:a"
+                && reference.resolved
+                && reference.target_kind == Some(ReferenceTargetKind::Figure)
+                && reference.rendered.as_deref() == Some("1")));
+        assert!(graph
+            .references
+            .iter()
+            .any(|reference| reference.key == "eq:e"
+                && reference.resolved
+                && reference.target_kind == Some(ReferenceTargetKind::Equation)
+                && reference.rendered.as_deref() == Some("(1)")));
+        assert_eq!(graph.unresolved_references.len(), 1);
+        assert_eq!(graph.unresolved_references[0].key, "missing");
+    }
+
+    #[test]
+    fn compile_report_includes_reference_graph_counts() {
+        let source = r#"
+See Figure~\ref{fig:a} and \ref{missing}.
+\begin{figure}
+\caption{A}\label{fig:a}
+\end{figure}
+"#;
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", source.as_bytes().to_vec());
+        let graph = engine
+            .compile_vfs_to_graph("main.tex", &mut vfs, &options)
+            .expect("compile graph");
+
+        assert_eq!(graph.report.reference_label_count, 1);
+        assert_eq!(graph.report.reference_edge_count, 2);
+        assert_eq!(graph.report.unresolved_reference_count, 1);
+        assert!(graph
+            .report
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "unresolved_reference" && diag.message.contains("missing")));
+        assert_eq!(
+            graph.reference_graph.unresolved_references[0].key,
+            "missing"
+        );
     }
 
     #[test]
