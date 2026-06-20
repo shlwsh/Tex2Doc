@@ -36,6 +36,22 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     println!("blocks: {}", artifact.report.block_count);
     println!("image-assets: {}", artifact.report.image_asset_count);
     println!(
+        "compatibility-score: {}",
+        artifact.report.compatibility.score
+    );
+    println!(
+        "compatibility-unsupported: {}",
+        artifact.report.compatibility.unsupported.len()
+    );
+    println!(
+        "compatibility-warnings: {}",
+        artifact.report.compatibility.warnings.len()
+    );
+    println!(
+        "compatibility-custom-macros: {}",
+        artifact.report.compatibility.custom_macro_count
+    );
+    println!(
         "reference-labels: {}",
         artifact.report.reference_label_count
     );

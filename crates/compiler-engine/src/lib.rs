@@ -524,6 +524,31 @@ impl SemanticTexEngine {
             format!("mounted {} VFS entries", vfs.paths().count()),
         );
 
+        let compatibility = analyze_compatibility(vfs, options.profile);
+        report.push(
+            CompileStage::CompatibilityAnalyze,
+            StageStatus::Completed,
+            format!(
+                "compatibility score {}, unsupported {}, warnings {}",
+                compatibility.score,
+                compatibility.unsupported.len(),
+                compatibility.warnings.len()
+            ),
+        );
+        for issue in &compatibility.unsupported {
+            report.diagnostics.push(EngineDiagnostic::warning(
+                "compatibility_unsupported",
+                format!("{}: {}", issue.feature, issue.message),
+            ));
+        }
+        for issue in &compatibility.warnings {
+            report.diagnostics.push(EngineDiagnostic::warning(
+                "compatibility_warning",
+                format!("{}: {}", issue.feature, issue.message),
+            ));
+        }
+        report.compatibility = compatibility;
+
         let mut artifact = collect_with_selected_backend(main_tex, vfs, options, &mut report)?;
         let reference_graph = build_reference_graph(vfs, &artifact.events);
         report.semantic_event_count = artifact.events.len();
@@ -584,6 +609,7 @@ pub struct CompileReport {
     pub profile: EngineProfile,
     pub profile_spec: ProfileSpecReport,
     pub backend: BackendSelectionReport,
+    pub compatibility: CompatibilityReport,
     pub stages: Vec<StageReport>,
     pub diagnostics: Vec<EngineDiagnostic>,
     pub block_count: usize,
@@ -607,6 +633,7 @@ impl CompileReport {
             profile,
             profile_spec: ProfileSpecReport::from_spec(profile.spec()),
             backend: BackendSelectionReport::default(),
+            compatibility: CompatibilityReport::default(),
             stages: Vec::new(),
             diagnostics: Vec::new(),
             block_count: 0,
@@ -634,9 +661,42 @@ impl CompileReport {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompatibilityReport {
+    pub score: u8,
+    pub scanned_files: usize,
+    pub document_classes: Vec<String>,
+    pub packages: Vec<String>,
+    pub custom_macro_count: usize,
+    pub unsupported: Vec<CompatibilityIssue>,
+    pub warnings: Vec<CompatibilityIssue>,
+}
+
+impl Default for CompatibilityReport {
+    fn default() -> Self {
+        Self {
+            score: 100,
+            scanned_files: 0,
+            document_classes: Vec::new(),
+            packages: Vec::new(),
+            custom_macro_count: 0,
+            unsupported: Vec::new(),
+            warnings: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CompatibilityIssue {
+    pub code: String,
+    pub feature: String,
+    pub message: String,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileStage {
     SourceMount,
+    CompatibilityAnalyze,
     IncludeGraph,
     TexParse,
     SemanticCollect,
@@ -1773,6 +1833,253 @@ fn inject_hook_input(source: &str, hook_input: &str) -> String {
         out.push_str(hook_input);
         out
     }
+}
+
+fn analyze_compatibility(vfs: &VirtualFs, profile: EngineProfile) -> CompatibilityReport {
+    let mut report = CompatibilityReport::default();
+    let mut document_classes = HashSet::new();
+    let mut packages = HashSet::new();
+    let mut unsupported_seen = HashSet::new();
+    let mut warning_seen = HashSet::new();
+
+    for path in vfs.paths() {
+        if !is_tex_source_path(path) {
+            continue;
+        }
+
+        let Ok(bytes) = vfs.read(path) else {
+            continue;
+        };
+        let Ok(raw) = std::str::from_utf8(bytes) else {
+            continue;
+        };
+        let source = strip_tex_comments(raw);
+        report.scanned_files += 1;
+
+        for command in scan_tex_commands(&source, &["documentclass"]) {
+            for class in split_tex_name_list(&command.argument) {
+                document_classes.insert(class);
+            }
+        }
+
+        for command in scan_tex_commands(&source, &["usepackage", "RequirePackage"]) {
+            for package in split_tex_name_list(&command.argument) {
+                packages.insert(package);
+            }
+        }
+
+        report.custom_macro_count += count_custom_macro_definitions(&source);
+
+        if contains_tex_environment(&source, "tikzpicture") {
+            add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_environment",
+                "tikzpicture",
+                "TikZ graphics need rasterization or a semantic drawing plugin before high-fidelity DOCX output",
+            );
+        }
+        if contains_tex_environment(&source, "minted") {
+            add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_environment",
+                "minted",
+                "minted depends on external syntax highlighting and is not preserved by the semantic DOCX path yet",
+            );
+        }
+        if contains_tex_environment(&source, "lstlisting") {
+            add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "limited_environment",
+                "lstlisting",
+                "listings environments are downgraded to code-like text in the current semantic DOCX path",
+            );
+        }
+    }
+
+    report.document_classes = sorted_strings(document_classes);
+    report.packages = sorted_strings(packages);
+
+    for class in report.document_classes.clone() {
+        let class = class.as_str();
+        if matches!(class, "beamer" | "standalone") {
+            add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_document_class",
+                class,
+                "presentation or standalone drawing classes are outside the paper-oriented semantic profile",
+            );
+        } else if !profile_supports_document_class(profile, class) {
+            add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "profile_document_class_mismatch",
+                class,
+                "document class is outside the active profile and may need profile-specific lowering rules",
+            );
+        }
+    }
+
+    for package in report.packages.clone() {
+        match package.as_str() {
+            "tikz" | "pgf" | "pgfplots" | "circuitikz" => add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_package",
+                package.as_str(),
+                "PGF/TikZ graphics are not semantically converted to editable DOCX drawing objects yet",
+            ),
+            "pstricks" => add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_package",
+                package.as_str(),
+                "PSTricks output requires a PostScript rendering path that the semantic engine does not provide yet",
+            ),
+            "minted" => add_compatibility_issue(
+                &mut report.unsupported,
+                &mut unsupported_seen,
+                "unsupported_package",
+                package.as_str(),
+                "minted requires external Pygments processing and shell-escape semantics",
+            ),
+            "listings" => add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "limited_package",
+                package.as_str(),
+                "listings content is treated as code text; advanced styling is not preserved yet",
+            ),
+            "biblatex" => add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "limited_package",
+                package.as_str(),
+                "biblatex is detected; current bibliography support is strongest for BibTeX/bbl-style flows",
+            ),
+            "longtable" | "tabularx" | "tabulary" => add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "limited_package",
+                package.as_str(),
+                "advanced table layout is lowered semantically but may need renderer-specific refinement",
+            ),
+            "algorithm2e" | "algorithmicx" | "algpseudocode" => add_compatibility_issue(
+                &mut report.warnings,
+                &mut warning_seen,
+                "limited_package",
+                package.as_str(),
+                "algorithm packages currently rely on generic block lowering and may lose fine-grained styling",
+            ),
+            _ => {}
+        }
+    }
+
+    if report.custom_macro_count > 0 {
+        add_compatibility_issue(
+            &mut report.warnings,
+            &mut warning_seen,
+            "custom_macros",
+            "custom macros",
+            format!(
+                "{} custom macro definitions detected; unknown macro semantics may require explicit rules",
+                report.custom_macro_count
+            ),
+        );
+    }
+
+    apply_compatibility_score(&mut report);
+    report
+}
+
+fn is_tex_source_path(path: &Path) -> bool {
+    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
+        return false;
+    };
+    matches!(
+        ext.to_ascii_lowercase().as_str(),
+        "tex" | "sty" | "cls" | "ltx"
+    )
+}
+
+fn split_tex_name_list(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(normalize_tex_name)
+        .filter(|name| !name.is_empty())
+        .collect()
+}
+
+fn normalize_tex_name(raw: &str) -> String {
+    raw.trim()
+        .trim_matches('{')
+        .trim_matches('}')
+        .trim()
+        .trim_start_matches('\\')
+        .to_ascii_lowercase()
+}
+
+fn count_custom_macro_definitions(source: &str) -> usize {
+    scan_tex_commands(
+        source,
+        &[
+            "newcommand",
+            "renewcommand",
+            "providecommand",
+            "DeclareRobustCommand",
+            "NewDocumentCommand",
+            "RenewDocumentCommand",
+        ],
+    )
+    .len()
+        + source.matches("\\def\\").count()
+}
+
+fn contains_tex_environment(source: &str, environment: &str) -> bool {
+    source.contains(&format!("\\begin{{{environment}}}"))
+}
+
+fn sorted_strings(set: HashSet<String>) -> Vec<String> {
+    let mut values = set.into_iter().collect::<Vec<_>>();
+    values.sort();
+    values
+}
+
+fn profile_supports_document_class(profile: EngineProfile, class: &str) -> bool {
+    profile
+        .spec()
+        .document_classes
+        .iter()
+        .any(|supported| supported.eq_ignore_ascii_case(class))
+}
+
+fn add_compatibility_issue(
+    issues: &mut Vec<CompatibilityIssue>,
+    seen: &mut HashSet<String>,
+    code: impl Into<String>,
+    feature: impl Into<String>,
+    message: impl Into<String>,
+) {
+    let code = code.into();
+    let feature = feature.into();
+    let key = format!("{code}:{feature}");
+    if seen.insert(key) {
+        issues.push(CompatibilityIssue {
+            code,
+            feature,
+            message: message.into(),
+        });
+    }
+}
+
+fn apply_compatibility_score(report: &mut CompatibilityReport) {
+    let unsupported_penalty = report.unsupported.len() * 18;
+    let warning_penalty = report.warnings.len() * 6;
+    let macro_penalty = (report.custom_macro_count * 2).min(12);
+    let penalty = (unsupported_penalty + warning_penalty + macro_penalty).min(100);
+    report.score = 100usize.saturating_sub(penalty) as u8;
 }
 
 fn run_latex_runtime(
@@ -3399,6 +3706,89 @@ x=1\label{eq:e}
                 && reference.rendered.as_deref() == Some("(1)")));
         assert_eq!(graph.unresolved_references.len(), 1);
         assert_eq!(graph.unresolved_references[0].key, "missing");
+    }
+
+    #[test]
+    fn compatibility_analyzer_flags_unsupported_features() {
+        let source = r#"
+\documentclass{article}
+\usepackage{tikz,minted,listings}
+\newcommand{\mysection}[1]{\section{#1}}
+\begin{tikzpicture}
+\end{tikzpicture}
+\begin{minted}{rust}
+fn main() {}
+\end{minted}
+\begin{lstlisting}
+let x = 1;
+\end{lstlisting}
+"#;
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", source.as_bytes().to_vec());
+
+        let report = analyze_compatibility(&vfs, EngineProfile::GenericArticle);
+
+        assert_eq!(report.scanned_files, 1);
+        assert!(report.document_classes.contains(&"article".to_string()));
+        assert!(report.packages.contains(&"tikz".to_string()));
+        assert!(report.packages.contains(&"minted".to_string()));
+        assert_eq!(report.custom_macro_count, 1);
+        assert!(report.score < 100);
+        assert!(report
+            .unsupported
+            .iter()
+            .any(|issue| { issue.code == "unsupported_package" && issue.feature == "tikz" }));
+        assert!(report
+            .unsupported
+            .iter()
+            .any(|issue| { issue.code == "unsupported_package" && issue.feature == "minted" }));
+        assert!(report.unsupported.iter().any(|issue| {
+            issue.code == "unsupported_environment" && issue.feature == "tikzpicture"
+        }));
+        assert!(report
+            .warnings
+            .iter()
+            .any(|issue| { issue.code == "limited_package" && issue.feature == "listings" }));
+        assert!(report
+            .warnings
+            .iter()
+            .any(|issue| issue.code == "custom_macros"));
+    }
+
+    #[test]
+    fn compile_report_includes_compatibility_analysis() {
+        let source = r#"
+\documentclass{article}
+\usepackage{minted}
+\begin{document}
+Body text.
+\end{document}
+"#;
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", source.as_bytes().to_vec());
+        let graph = engine
+            .compile_vfs_to_graph("main.tex", &mut vfs, &options)
+            .expect("compile graph");
+
+        assert!(graph.report.stages.iter().any(|stage| {
+            stage.stage == CompileStage::CompatibilityAnalyze
+                && stage.status == StageStatus::Completed
+        }));
+        assert!(graph.report.compatibility.score < 100);
+        assert!(graph
+            .report
+            .compatibility
+            .unsupported
+            .iter()
+            .any(|issue| issue.feature == "minted"));
+        assert!(graph.report.diagnostics.iter().any(|diag| {
+            diag.code == "compatibility_unsupported" && diag.message.contains("minted")
+        }));
     }
 
     #[test]

@@ -25,6 +25,8 @@
 > 表格 span 渲染开发报告：[Semantic TeX Engine 表格 span 渲染开发报告（20260620-182504）](./semantic-tex-engine-development-report-20260620-182504.md)
 >
 > 图片尺寸表达式开发报告：[Semantic TeX Engine 图片尺寸表达式开发报告（20260620-184710）](./semantic-tex-engine-development-report-20260620-184710.md)
+>
+> 兼容性分析器开发报告：[Semantic TeX Engine 兼容性分析器开发报告（20260620-190143）](./semantic-tex-engine-development-report-20260620-190143.md)
 
 ## 1. 当前结论
 
@@ -39,7 +41,7 @@
 | M3 结构增强 | 部分完成 | 表格已支持 `multicolumn` 与基础 `multirow` 到 DOCX `gridSpan/vMerge`；图片已支持 `includegraphics` 尺寸表达式采集、Graph 元数据和 DOCX EMU 换算初版；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；新语义路径已在 DOCX 后处理阶段接入块级公式 OMML 初版；旧 `doc-docx-writer` 默认块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
-| M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
+| M6 兼容性与 AI fallback | 部分完成 | `doc-compiler-engine` 已有内置轻量兼容性扫描器，输出 score、unsupported、warnings；独立 `compatibility-analyzer` crate、rule engine、LLM fallback 尚未实现 |
 
 ## 2. 已落地内容
 
@@ -107,6 +109,7 @@ compile_vfs_to_docx
 
 ```text
 SourceMount
+CompatibilityAnalyze
 IncludeGraph
 TexParse
 SemanticCollect
@@ -117,16 +120,17 @@ DocxRender
 当前实现方式：
 
 1. 输入统一挂载到 `VirtualFs`。
-2. `SemanticBackendKind::Auto` 扫描 `.tex/.sty/.cls/.ltx` 的模板特征，并结合 `xelatex` / `lualatex` 可用性选择 backend。
-3. `ctex` / `xeCJK` / `fontspec` / XeTeX 字体命令优先选择 `XeLaTeXHookBackend`。
-4. LuaTeX 特征或通用 LaTeX 在 `lualatex` 可用时优先选择 `LuaTeXNodeBackend`。
-5. runtime 不可用或失败且允许 fallback 时，回退 `RuleBasedBackend`。
-6. `RuleBasedBackend` 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
-7. `parse_tex` 使用现有 Logos/Rowan 解析器。
-8. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
-9. `StandardDocument::from_legacy_document` 生成标准文档图。
-10. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
-11. `doc-compiler-engine` 语义路径可选执行 DOCX 后处理，把块级公式段落替换为 OMML，并根据 `ReferenceGraph` 为目标段落写入 bookmark、把已解析引用写为内部 hyperlink。
+2. 编译前执行 `CompatibilityAnalyze`，扫描文档类、宏包、自定义宏和高风险环境，写入 `CompileReport.compatibility`。
+3. `SemanticBackendKind::Auto` 扫描 `.tex/.sty/.cls/.ltx` 的模板特征，并结合 `xelatex` / `lualatex` 可用性选择 backend。
+4. `ctex` / `xeCJK` / `fontspec` / XeTeX 字体命令优先选择 `XeLaTeXHookBackend`。
+5. LuaTeX 特征或通用 LaTeX 在 `lualatex` 可用时优先选择 `LuaTeXNodeBackend`。
+6. runtime 不可用或失败且允许 fallback 时，回退 `RuleBasedBackend`。
+7. `RuleBasedBackend` 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
+8. `parse_tex` 使用现有 Logos/Rowan 解析器。
+9. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
+10. `StandardDocument::from_legacy_document` 生成标准文档图。
+11. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
+12. `doc-compiler-engine` 语义路径可选执行 DOCX 后处理，把块级公式段落替换为 OMML，并根据 `ReferenceGraph` 为目标段落写入 bookmark、把已解析引用写为内部 hyperlink。
 
 当前双后端相关边界：
 
@@ -180,6 +184,15 @@ DocxRender
 - `doc-docx-writer` 已按 `PageSetup` 将 `\textwidth`、`\linewidth`、`\columnwidth`、`\textheight` 以及 `in/cm/mm/pt/bp/pc` 转为 EMU。
 - `XeLaTeXHookBackend` 的 hook 已补充 `includegraphics` figure event，`width_expr` 与 LuaTeX sidecar 协议对齐。
 - 无法解析尺寸表达式时仍回退旧的图片默认尺寸策略。
+
+当前兼容性分析边界：
+
+- `doc-compiler-engine` 已内置 `CompatibilityReport` 和 `CompatibilityIssue`。
+- 编译前会扫描 `.tex/.sty/.cls/.ltx`，识别 `\documentclass`、`\usepackage` / `\RequirePackage`、常见自定义宏命令、`tikzpicture`、`minted`、`lstlisting`。
+- 报告字段包含 `score`、`scanned_files`、`document_classes`、`packages`、`custom_macro_count`、`unsupported`、`warnings`。
+- 当前会把 TikZ/PGF、PSTricks、minted、beamer/standalone 等标为 unsupported，把 listings、biblatex、longtable/tabularx、algorithm 包、自定义宏等标为 warning。
+- `CompileStage` 已新增 `CompatibilityAnalyze`，相关 warning 会进入 `EngineDiagnostic`。
+- 该能力目前仍在 `doc-compiler-engine` 内部，尚未拆出 `crates/compatibility-analyzer`；它只影响报告和诊断，不改变旧 `doc-core` 路径和 DOCX 渲染行为。
 
 ### 2.3 paper3 样例
 
@@ -250,13 +263,17 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-184633.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-184633-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-184633-semantic-engine-xelatex_hook.docx` | 3,057,574 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-190110.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-190109-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-190109-semantic-engine-xelatex_hook.docx` | 3,057,574 bytes | 10 |
 
 semantic-engine 后端报告：
 
 ```text
+compatibility-score: 76
+compatibility-unsupported: 0
+compatibility-warnings: 2
+compatibility-custom-macros: 46
 reference-labels: 35
 reference-edges: 46
 citations: 36
@@ -285,13 +302,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-184633-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-184633-dual-engines-semantic-engine-auto.docx` | 3,057,574 bytes | 10 | 653 | 12 | 20 | 42,535 |
+| rust-rule | `v15-论文稿件-jos-20260620-190053-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-190053-dual-engines-semantic-engine-auto.docx` | 3,057,574 bytes | 10 | 653 | 12 | 20 | 42,535 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-184633-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-190053-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -301,6 +318,7 @@ examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-184633-dual-engines
 - ReferenceGraph 统计为 `reference-labels=35`、`reference-edges=46`、`citations=36`、`unresolved-references=0`。
 - 语义 DOCX 链接统计为 `bookmarks=25`、`hyperlinks=35`。
 - 语义 DOCX 公式统计为 `omml-equations=4`、`omml-equation-fallbacks=0`。
+- 兼容性分析统计为 `compatibility-score=76`、`compatibility-unsupported=0`、`compatibility-warnings=2`、`compatibility-custom-macros=46`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -396,7 +414,7 @@ MedicalJournal
 - inline math 尚未接入 OMML。
 - 复杂公式 parser 仍会降级为 `MathExpr::Raw` 或简化 AST，后续需要提升覆盖率。
 
-### 3.5 LuaHook/XDV/兼容性分析缺口
+### 3.5 LuaHook/XDV/独立兼容性 crate 缺口
 
 尚无以下 crate：
 
@@ -414,7 +432,7 @@ crates/compatibility-analyzer
 - `XdvLayoutCollector`。
 - AI-assisted macro inference。
 
-注意：`doc-compiler-engine` 内部已经有可运行的 `SemanticBackend` trait、`RuleBasedBackend`、`XeLaTeXHookBackend`、`LuaTeXNodeBackend` 原型，但它们仍属于 engine 内部实现，尚未稳定为独立 collector crate。
+注意：`doc-compiler-engine` 内部已经有可运行的 `SemanticBackend` trait、`RuleBasedBackend`、`XeLaTeXHookBackend`、`LuaTeXNodeBackend` 原型，以及轻量 `CompatibilityReport` 扫描器；它们仍属于 engine 内部实现，尚未稳定为独立 collector / compatibility analyzer crate。
 
 ## 4. 开发任务拆解
 
@@ -662,18 +680,31 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 ### T9 兼容性分析器
 
-状态：待实现
+状态：已完成内置初版
 
 目标：
 
-- 新增 `crates/compatibility-analyzer`。
+- 新增或预备拆分 `crates/compatibility-analyzer`。
 - 编译前扫描宏包、文档类、自定义宏、TikZ、minted/listings。
 - 输出 score、unsupported、warnings。
+
+实现要点：
+
+- 已先在 `doc-compiler-engine` 内实现轻量扫描器，保持新语义引擎路径独立，不影响旧 `doc-core` / Rust rule 输出。
+- 已新增 `CompatibilityReport`、`CompatibilityIssue`、`CompileReport.compatibility`。
+- 已新增 `CompileStage::CompatibilityAnalyze`。
+- 已识别文档类、宏包、自定义宏、TikZ/PGF、PSTricks、minted、listings、biblatex、longtable/tabularx、algorithm 包等兼容性信号。
+- unsupported / warning 会写入 `EngineDiagnostic`，便于 CLI 或报告层展示。
+- `paper3_to_docx` example、双引擎对比脚本、三路径验证脚本已输出 compatibility 摘要。
+- 独立 `crates/compatibility-analyzer` 尚未拆分；当前数据结构可作为后续 crate API 原型。
 
 验收：
 
 ```bash
-cargo test -p doc-compatibility-analyzer
+cargo test -p doc-compiler-engine compatibility -- --nocapture
+cargo test -p doc-compiler-engine
+bash scripts/compare_paper3_dual_engines.sh 15
+bash scripts/build_paper3_three_docx.sh 15
 ```
 
 ### T10 Semantic Collector trait
@@ -812,6 +843,7 @@ cargo test -p doc-semantic-ast
 cargo test -p doc-latex-reader figure -- --nocapture
 cargo test -p doc-docx-writer image -- --nocapture
 cargo test -p doc-docx-writer figure
+cargo test -p doc-compiler-engine compatibility -- --nocapture
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-latex-reader ref
 cargo test -p doc-core
@@ -827,7 +859,8 @@ doc-compiler-engine profile: 2 passed
 doc-compiler-engine reference: 2 passed
 doc-compiler-engine bookmark: 1 passed
 doc-compiler-engine omml: 1 passed
-doc-compiler-engine: 17 passed, 1 ignored
+doc-compiler-engine compatibility: 2 passed
+doc-compiler-engine: 19 passed, 1 ignored
 doc-mathml: 19 passed
 doc-docx-writer block equation legacy behavior: 1 passed
 doc-latex-reader multi: 7 passed
@@ -841,8 +874,8 @@ doc-docx-writer figure: 2 passed
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
-paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
-paper3 dual engines: rust-rule/semantic-engine generated, paragraphs=653, tables=12, drawings=20 on both paths; comparison report, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
+paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic compatibility-score=76, unsupported=0, warnings=2, custom-macros=46, bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
+paper3 dual engines: rust-rule/semantic-engine generated, paragraphs=653, tables=12, drawings=20 on both paths; comparison report, compatibility counts, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -855,15 +888,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T9：
+下一步建议进入 T10：
 
 ```text
-T9 兼容性分析器
+T10 Semantic Collector trait
 ```
 
 具体先做：
 
-1. 盘点宏包、文档类、自定义宏、TikZ、minted/listings 等兼容性特征。
-2. 设计 `CompatibilityReport`、score、unsupported、warnings 数据结构。
-3. 优先在 `doc-compiler-engine` 内落地轻量扫描器，再评估是否拆出 `crates/compatibility-analyzer`。
-4. 跑 `cargo test -p doc-compiler-engine compatibility` 与 paper3 三路径脚本。
+1. 梳理当前 `SemanticBackend` 与 collector 责任边界。
+2. 设计 `CollectedDocument` / `SemanticCollector` 的最小 trait。
+3. 优先在 `doc-compiler-engine` 内把规则降级、XeLaTeX hook、LuaTeX node 的公共输出结构收敛，再评估是否拆出 `crates/semantic-collector`。
+4. 继续保持旧 `doc-core` 路径不依赖新语义引擎。
