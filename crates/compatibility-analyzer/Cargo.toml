@@ -1,0 +1,21 @@
+[package]
+name = "doc-compatibility-analyzer"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "LaTeX compatibility analysis: package detection, unsupported feature reporting, scoring"
+
+[dependencies]
+doc-utils               = { workspace = true }
+doc-semantic-collector  = { workspace = true }
+doc-latex-reader        = { workspace = true }
+
+thiserror = { workspace = true }
+serde     = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+doc-utils = { workspace = true }
+doc-semantic-collector = { workspace = true }

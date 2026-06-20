@@ -82,6 +82,9 @@ fn dump_paper3_blocks() {
             }
             doc_semantic_ast::Block::Bibliography { .. } => "B".to_string(),
             doc_semantic_ast::Block::Algorithm { .. } => "Alg".to_string(),
+            doc_semantic_ast::Block::CodeBlock { language, code, .. } => {
+                format!("CB({})={}", language.as_deref().unwrap_or("text"), code.chars().take(30).collect::<String>())
+            }
             doc_semantic_ast::Block::RawFallback { text, .. } => format!(
                 "R({})={}",
                 text.chars().count(),

@@ -1,0 +1,19 @@
+[package]
+name = "doc-rule-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Rule engine for Tex2Doc: macro rule registry, audit cache, and optional AI inference"
+
+[dependencies]
+doc-utils              = { workspace = true }
+doc-semantic-collector = { workspace = true }
+
+thiserror = { workspace = true }
+serde     = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+doc-utils = { workspace = true }

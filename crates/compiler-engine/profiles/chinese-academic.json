@@ -1,0 +1,30 @@
+{
+  "id": "chinese-academic",
+  "display_name": "Chinese Academic Paper",
+  "document_classes": [
+    "ctexart",
+    "ctexrep",
+    "ctexbook",
+    "article"
+  ],
+  "page_setup": {
+    "kind": "a4"
+  },
+  "font_policy": {
+    "latin_main": "Times New Roman",
+    "cjk_main": "SimSun",
+    "math": "Cambria Math",
+    "notes": "CTeX-oriented Chinese academic font policy"
+  },
+  "caption_policy": {
+    "figure_prefix": "图",
+    "table_prefix": "表",
+    "equation_prefix": "式",
+    "numbering": "chapter-or-section"
+  },
+  "citation_policy": {
+    "style": "numeric-compressed",
+    "bibliography_style": "gbt7714-like",
+    "reference_section_title": "参考文献"
+  }
+}

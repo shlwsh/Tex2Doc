@@ -330,6 +330,7 @@ pub fn convert_zip(
                 doc_semantic_ast::Block::TheoremLike { .. } => "M",
                 doc_semantic_ast::Block::Bibliography { .. } => "B",
                 doc_semantic_ast::Block::Algorithm { .. } => "A",
+                doc_semantic_ast::Block::CodeBlock { .. } => "C",
                 doc_semantic_ast::Block::RawFallback { .. } => "R",
             })
             .collect::<Vec<_>>()

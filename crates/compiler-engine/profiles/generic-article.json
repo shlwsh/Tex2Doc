@@ -1,0 +1,29 @@
+{
+  "id": "generic-article",
+  "display_name": "Generic Article",
+  "document_classes": [
+    "article",
+    "report",
+    "book"
+  ],
+  "page_setup": {
+    "kind": "default"
+  },
+  "font_policy": {
+    "latin_main": "Times New Roman",
+    "cjk_main": "",
+    "math": "Cambria Math",
+    "notes": "Default Word-compatible article font policy"
+  },
+  "caption_policy": {
+    "figure_prefix": "Figure",
+    "table_prefix": "Table",
+    "equation_prefix": "Equation",
+    "numbering": "arabic"
+  },
+  "citation_policy": {
+    "style": "numeric",
+    "bibliography_style": "plain",
+    "reference_section_title": "References"
+  }
+}

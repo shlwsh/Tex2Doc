@@ -568,13 +568,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-compatibility-analyzer"
+version = "0.1.0"
+dependencies = [
+ "doc-latex-reader",
+ "doc-semantic-collector",
+ "doc-utils",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "doc-compiler-engine"
 version = "0.1.0"
 dependencies = [
+ "doc-compatibility-analyzer",
  "doc-docx-writer",
  "doc-latex-reader",
  "doc-mathml",
  "doc-semantic-ast",
+ "doc-semantic-collector",
  "doc-utils",
  "image",
  "pdfium-render",
@@ -719,12 +733,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "doc-rule-engine"
+version = "0.1.0"
+dependencies = [
+ "doc-semantic-collector",
+ "doc-utils",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "doc-semantic-ast"
 version = "0.1.0"
 dependencies = [
  "serde",
  "serde_json",
  "serde_yaml",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "doc-semantic-collector"
+version = "0.1.0"
+dependencies = [
+ "doc-latex-reader",
+ "doc-semantic-ast",
+ "doc-utils",
+ "serde",
+ "serde_json",
  "thiserror 1.0.69",
 ]
 

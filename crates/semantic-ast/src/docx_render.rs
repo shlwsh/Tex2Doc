@@ -394,6 +394,7 @@ fn render_text(kind: &BlockKind) -> Option<String> {
         }
         BlockKind::Bibliography(bib) => Some(format!("{} bibliography entries", bib.entries.len())),
         BlockKind::List(list) => Some(format!("{} list items", list.item_count)),
+        BlockKind::CodeBlock(node) => Some(format!("[{} code block]", node.language.as_deref().unwrap_or("text"))),
         BlockKind::RawFallback { raw, .. } => Some(raw.clone()),
         BlockKind::FrontMatter(_) | BlockKind::AuthorBio(_) => None,
     }

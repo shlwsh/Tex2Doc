@@ -7,7 +7,9 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::{HashMap, HashSet};
+mod profiles;
+
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
@@ -23,6 +25,32 @@ use doc_semantic_ast::{
 use doc_utils::{ImageAssets, VirtualFs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// Re-export types and functions from doc_semantic_collector
+pub use doc_semantic_collector::{
+    BackendAvailability, BackendSelectionReport, BuildSidecar, build_reference_graph,
+    CitationReference, CollectedDocument as SemanticCollectorDocument, CrossReference, EventSource,
+    is_tex_like_path, LayoutGraph, LayoutNode, parse_semantic_events_jsonl, path_to_posix,
+    ReferenceGraph, ReferenceLabel, ReferenceOrigin, ReferenceSource, ReferenceTargetKind,
+    scan_tex_commands, SemanticBackendKind, SemanticEvent, SemanticEventV2, SourceSpan,
+    strip_tex_comments, UnresolvedReference,
+};
+
+// Re-export types from doc_compatibility_analyzer
+pub use doc_compatibility_analyzer::{
+    CompatibilityAnalyzer, CompatibilityIssue, CompatibilityReport, ProfileKind,
+};
+
+impl From<EngineProfile> for ProfileKind {
+    fn from(ep: EngineProfile) -> Self {
+        match ep {
+            EngineProfile::GenericArticle => ProfileKind::GenericArticle,
+            EngineProfile::ChineseAcademic => ProfileKind::ChineseAcademic,
+            EngineProfile::JosPaper => ProfileKind::JosPaper,
+            EngineProfile::MedicalJournal => ProfileKind::MedicalJournal,
+        }
+    }
+}
 
 /// Built-in conversion profiles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -273,72 +301,6 @@ impl ProfileSpecReport {
 ///
 /// `Auto` scans template features and available TeX runtimes before selecting
 /// a concrete semantic backend.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SemanticBackendKind {
-    #[default]
-    Auto,
-    RuleBased,
-    XeLaTeXHook,
-    LuaTeXNode,
-}
-
-impl SemanticBackendKind {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::RuleBased => "rule-based",
-            Self::XeLaTeXHook => "xelatex-hook",
-            Self::LuaTeXNode => "luatex-node",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackendSelectionReport {
-    pub requested: SemanticBackendKind,
-    pub selected: SemanticBackendKind,
-    pub fallback_from: Option<SemanticBackendKind>,
-    pub reason: String,
-}
-
-impl BackendSelectionReport {
-    fn new(
-        requested: SemanticBackendKind,
-        selected: SemanticBackendKind,
-        reason: impl Into<String>,
-    ) -> Self {
-        Self {
-            requested,
-            selected,
-            fallback_from: None,
-            reason: reason.into(),
-        }
-    }
-
-    fn fallback(
-        requested: SemanticBackendKind,
-        fallback_from: SemanticBackendKind,
-        selected: SemanticBackendKind,
-        reason: impl Into<String>,
-    ) -> Self {
-        Self {
-            requested,
-            selected,
-            fallback_from: Some(fallback_from),
-            reason: reason.into(),
-        }
-    }
-}
-
-impl Default for BackendSelectionReport {
-    fn default() -> Self {
-        Self::new(
-            SemanticBackendKind::Auto,
-            SemanticBackendKind::RuleBased,
-            "default rule-based backend",
-        )
-    }
-}
 
 /// Options controlling semantic collection and DOCX rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -524,7 +486,7 @@ impl SemanticTexEngine {
             format!("mounted {} VFS entries", vfs.paths().count()),
         );
 
-        let compatibility = analyze_compatibility(vfs, options.profile);
+        let compatibility = CompatibilityAnalyzer::new().analyze(vfs, options.profile.into());
         report.push(
             CompileStage::CompatibilityAnalyze,
             StageStatus::Completed,
@@ -664,38 +626,6 @@ impl CompileReport {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompatibilityReport {
-    pub score: u8,
-    pub scanned_files: usize,
-    pub document_classes: Vec<String>,
-    pub packages: Vec<String>,
-    pub custom_macro_count: usize,
-    pub unsupported: Vec<CompatibilityIssue>,
-    pub warnings: Vec<CompatibilityIssue>,
-}
-
-impl Default for CompatibilityReport {
-    fn default() -> Self {
-        Self {
-            score: 100,
-            scanned_files: 0,
-            document_classes: Vec::new(),
-            packages: Vec::new(),
-            custom_macro_count: 0,
-            unsupported: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompatibilityIssue {
-    pub code: String,
-    pub feature: String,
-    pub message: String,
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileStage {
     SourceMount,
@@ -760,182 +690,8 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum SemanticEvent {
-    #[serde(rename = "heading")]
-    Heading {
-        level: u8,
-        text: String,
-        label: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "paragraph")]
-    Paragraph {
-        text: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "figure")]
-    Figure {
-        path: String,
-        caption: Option<String>,
-        label: Option<String>,
-        width_expr: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "table")]
-    Table {
-        caption: Option<String>,
-        label: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "equation")]
-    Equation {
-        latex: String,
-        label: Option<String>,
-        display: bool,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "citation")]
-    Citation {
-        keys: Vec<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "caption")]
-    Caption {
-        text: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "label")]
-    Label {
-        key: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "reference")]
-    Reference {
-        kind: String,
-        key: String,
-        span: Option<SourceSpan>,
-    },
-}
-
-/// Source location for a semantic event (v2 schema).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EventSource {
-    /// Path to the source file (e.g., "main.tex").
-    pub path: String,
-    /// 1-based line number where the macro was invoked.
-    pub line: u32,
-    /// 1-based column number.
-    pub column: Option<u32>,
-}
-
-/// Metadata for a v2 semantic event, including source location and macro name.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SemanticEventV2 {
-    /// Schema version. Always "semantic-event-v2".
-    #[serde(rename = "schema", alias = "v")]
-    pub schema: String,
-    /// The event type.
-    #[serde(flatten)]
-    pub event: SemanticEvent,
-    /// Source location of this event.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<EventSource>,
-    /// Name of the TeX macro that generated this event (e.g., "section", "caption").
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SourceSpan {
-    pub path: Option<String>,
-    pub start: Option<u32>,
-    pub end: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LayoutGraph {
-    pub nodes: Vec<LayoutNode>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceGraph {
-    pub labels: Vec<ReferenceLabel>,
-    pub references: Vec<CrossReference>,
-    pub citations: Vec<CitationReference>,
-    pub unresolved_references: Vec<UnresolvedReference>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceLabel {
-    pub key: String,
-    pub kind: ReferenceTargetKind,
-    pub number: Option<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CrossReference {
-    pub command: String,
-    pub key: String,
-    pub resolved: bool,
-    pub target_kind: Option<ReferenceTargetKind>,
-    pub rendered: Option<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CitationReference {
-    pub command: String,
-    pub keys: Vec<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UnresolvedReference {
-    pub command: String,
-    pub key: String,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceSource {
-    pub path: Option<String>,
-    pub origin: ReferenceOrigin,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ReferenceOrigin {
-    SourceScan,
-    SemanticEvent,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ReferenceTargetKind {
-    Heading,
-    Figure,
-    Table,
-    Equation,
-    Algorithm,
-    Theorem,
-    Proposition,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LayoutNode {
-    pub id: String,
-    pub kind: String,
-    pub page: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackendAvailability {
-    pub available: bool,
-    pub reason: String,
-}
-
+/// NOTE: compiler-engine has its OWN version of CollectedDocument (with EngineDiagnostic).
+/// Do NOT replace it with doc_semantic_collector's version.
 #[derive(Debug, Clone)]
 pub struct CollectedDocument {
     pub document: Document,
@@ -966,27 +722,6 @@ impl CollectedDocument {
 }
 
 pub type SemanticBackendArtifact = CollectedDocument;
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BuildSidecar {
-    pub kind: String,
-    pub path: Option<String>,
-    pub description: String,
-}
-
-impl BuildSidecar {
-    pub fn new(
-        kind: impl Into<String>,
-        path: Option<impl Into<String>>,
-        description: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind: kind.into(),
-            path: path.map(Into::into),
-            description: description.into(),
-        }
-    }
-}
 
 pub struct SemanticCollectorInput<'a> {
     pub main_tex: &'a str,
@@ -1234,6 +969,16 @@ impl From<std::io::Error> for EngineError {
     }
 }
 
+impl From<doc_semantic_collector::CollectorError> for EngineError {
+    fn from(err: doc_semantic_collector::CollectorError) -> Self {
+        match err {
+            doc_semantic_collector::CollectorError::Io(e) => Self::Io(e),
+            doc_semantic_collector::CollectorError::Parse(e) => Self::Parse(e),
+            doc_semantic_collector::CollectorError::Runtime(e) => Self::Parse(e),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct TemplateSignals {
     has_tex_source: bool,
@@ -1342,18 +1087,6 @@ fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
         signals.observe(text);
     }
     signals
-}
-
-fn is_tex_like_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "tex" | "sty" | "cls" | "ltx"
-            )
-        })
-        .unwrap_or(false)
 }
 
 fn select_auto_backend_with_availability(
@@ -1694,67 +1427,13 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
 \immediate\write\docxsemout{{"schema":"semantic-event-v2","engine":"xelatex"}}
 \endgroup
 
-% ─── Heading hooks ─────────────────────────────────────────────────────────────
-\newcommand{\docxsemhdwrite}[3]{%
-  \immediate\write\docxsemout{{"type":"heading","level":#1,"text":"\detokenize{#2}","label":#3,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"section"}}%
-}
-\let\docxsemOldSection\section
-\def\section{\@ifstar{\docxsemHdSstar}{\docxsemHdSnostar}}
-\def\docxsemHdSstar#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection*{#1}}
-\def\docxsemHdSnostar{\@ifnextchar[\docxsemHdSopt\docxsemHdSplain}
-\def\docxsemHdSopt[#1]#2{\docxsemhdwrite{1}{#2}{null}\docxsemOldSection[#1]{#2}}
-\def\docxsemHdSplain#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection{#1}}
-
-\let\docxsemOldSubsection\subsection
-\def\subsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSsnostar}}
-\def\docxsemHdSsstar#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection*{#1}}
-\def\docxsemHdSsnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
-\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{2}{#2}{null}\docxsemOldSubsection[#1]{#2}}
-\def\docxsemHdSsplain#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection{#1}}
-
-\let\docxsemOldSubsubsection\subsubsection
-\def\subsubsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSssnostar}}
-\def\docxsemHdSsstar#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection*{#1}}
-\def\docxsemHdSssnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
-\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{3}{#2}{null}\docxsemOldSubsubsection[#1]{#2}}
-\def\docxsemHdSsplain#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection{#1}}
-
-% ─── Figure / graphics hook ────────────────────────────────────────────────────
-\ifcsname includegraphics\endcsname
-  \let\docxsemOldIncludeGraphics\includegraphics
-  \def\docxsemOldIncludeGraphics{\@ifnextchar[{\docxsemImgOpt}{\docxsemImgPlain}}
-  \def\docxsemImgOpt[#1]#2{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
-    \docxsemOldIncludeGraphics[#1]{#2}%
-  }%
-  \def\docxsemImgPlain#1{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
-    \docxsemOldIncludeGraphics{#1}%
-  }%
-\fi
-
-% ─── Caption hook ───────────────────────────────────────────────────────────────
-\ifcsname caption\endcsname
-  \let\docxsemOldCaption\caption
-  \def\docxsemOldCaption{\@ifnextchar[{\docxsemCapOpt}{\docxsemCapPlain}}
-  \def\docxsemCapOpt[#1]#2{%
-    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#2}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
-    \docxsemOldCaption[{#1}]{#2}%
-  }%
-  \def\docxsemCapPlain#1{%
-    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
-    \docxsemOldCaption{#1}%
-  }%
-\fi
-
-% ─── Label hook ────────────────────────────────────────────────────────────────
+% ─── Label / reference hooks — \label and \ref are defined by the LaTeX kernel
+%     before the preamble runs, so this is safe in the preamble.
 \let\docxsemOldLabel\label
 \def\label#1{%
   \immediate\write\docxsemout{{"type":"label","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"label"}}%
   \docxsemOldLabel{#1}%
 }%
-
-% ─── Reference hooks ────────────────────────────────────────────────────────────
 \let\docxsemOldRef\ref
 \def\ref#1{%
   \immediate\write\docxsemout{{"type":"reference","kind":"ref","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"ref"}}%
@@ -1775,7 +1454,7 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
   }%
 \fi
 
-% ─── Citation hooks ────────────────────────────────────────────────────────────
+% ─── Citation hooks — \cite is a LaTeX kernel command defined before the preamble.
 \let\docxsemOldCite\cite
 \def\docxsemOldCite{%
   \@ifnextchar[{\docxsemCiteOpen}{\docxsemCitePlainNoOpt}%}
@@ -1796,46 +1475,27 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
   \docxsemOldCite{#1}%
 }
 
-% ─── Table / tabular hooks ─────────────────────────────────────────────────────
-\let\docxsemOldTabular\tabular
-\let\docxsemOldEndTabular\endtabular
-\def\tabular{%
-  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
-  \docxsemOldTabular
-}
-\let\docxsemOldTabularStar\tabular*
-\let\docxsemOldEndTabularStar\endtabular*
-\def\tabular*{%
-  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
-  \docxsemOldTabularStar
-}
-
-% ─── Equation hooks ────────────────────────────────────────────────────────────
-\ifcsname equation\endcsname
-  \let\docxsemOldEquation\equation
-  \let\docxsemOldEndEquation\endequation
-  \renewenvironment{equation}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"equation"}}%
-    \docxsemOldEquation
-  }{\docxsemOldEndEquation\endequation}
-\fi
-\ifcsname align\endcsname
-  \let\docxsemOldAlign\align
-  \let\docxsemOldEndAlign\endalign
-  \renewenvironment{align}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"align"}}%
-    \docxsemOldAlign
-  }{\docxsemOldEndAlign\endalign}
-\fi
-\ifcsname gather\endcsname
-  \let\docxsemOldGather\gather
-  \let\docxsemOldEndGather\endgather
-  \renewenvironment{gather}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"gather"}}%
-    \docxsemOldGather
-  }{\docxsemOldEndGather\endgather}
+% ─── Figure / graphics hook — \includegraphics is defined in the LaTeX kernel graphics package.
+\ifcsname includegraphics\endcsname
+  \let\docxsemOldIncludeGraphics\includegraphics
+  \def\docxsemOldIncludeGraphics{\@ifnextchar[{\docxsemImgOpt}{\docxsemImgPlain}}
+  \def\docxsemImgOpt[#1]#2{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics[#1]{#2}%
+  }%
+  \def\docxsemImgPlain#1{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics{#1}%
+  }%
 \fi
 
+% ─── Hook coverage notes ─────────────────────────────────────────────────────────
+%     The following semantic events are intentionally omitted from this hook:
+%     - headings (section/subsection/...): captured by latex-reader from source
+%     - tabular/table environments: complex macro layers, captured by latex-reader
+%     - equation/align environments: complex macro layers, captured by latex-reader
+%     - caption: hyperref may redefine, captured by latex-reader from source
+%
 % ─── Cleanup ──────────────────────────────────────────────────────────────────
 \AtEndDocument{\immediate\closeout\docxsemout}
 \makeatother
@@ -2042,7 +1702,7 @@ fn collect_runtime_events(
             e
         ))
     })?;
-    parse_semantic_events_jsonl(&sidecar)
+    Ok(parse_semantic_events_jsonl(&sidecar)?)
 }
 
 fn materialize_vfs(vfs: &VirtualFs, root: &Path) -> Result<(), EngineError> {
@@ -2093,253 +1753,6 @@ fn inject_hook_input(source: &str, hook_input: &str) -> String {
     }
 }
 
-fn analyze_compatibility(vfs: &VirtualFs, profile: EngineProfile) -> CompatibilityReport {
-    let mut report = CompatibilityReport::default();
-    let mut document_classes = HashSet::new();
-    let mut packages = HashSet::new();
-    let mut unsupported_seen = HashSet::new();
-    let mut warning_seen = HashSet::new();
-
-    for path in vfs.paths() {
-        if !is_tex_source_path(path) {
-            continue;
-        }
-
-        let Ok(bytes) = vfs.read(path) else {
-            continue;
-        };
-        let Ok(raw) = std::str::from_utf8(bytes) else {
-            continue;
-        };
-        let source = strip_tex_comments(raw);
-        report.scanned_files += 1;
-
-        for command in scan_tex_commands(&source, &["documentclass"]) {
-            for class in split_tex_name_list(&command.argument) {
-                document_classes.insert(class);
-            }
-        }
-
-        for command in scan_tex_commands(&source, &["usepackage", "RequirePackage"]) {
-            for package in split_tex_name_list(&command.argument) {
-                packages.insert(package);
-            }
-        }
-
-        report.custom_macro_count += count_custom_macro_definitions(&source);
-
-        if contains_tex_environment(&source, "tikzpicture") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_environment",
-                "tikzpicture",
-                "TikZ graphics need rasterization or a semantic drawing plugin before high-fidelity DOCX output",
-            );
-        }
-        if contains_tex_environment(&source, "minted") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_environment",
-                "minted",
-                "minted depends on external syntax highlighting and is not preserved by the semantic DOCX path yet",
-            );
-        }
-        if contains_tex_environment(&source, "lstlisting") {
-            add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_environment",
-                "lstlisting",
-                "listings environments are downgraded to code-like text in the current semantic DOCX path",
-            );
-        }
-    }
-
-    report.document_classes = sorted_strings(document_classes);
-    report.packages = sorted_strings(packages);
-
-    for class in report.document_classes.clone() {
-        let class = class.as_str();
-        if matches!(class, "beamer" | "standalone") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_document_class",
-                class,
-                "presentation or standalone drawing classes are outside the paper-oriented semantic profile",
-            );
-        } else if !profile_supports_document_class(profile, class) {
-            add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "profile_document_class_mismatch",
-                class,
-                "document class is outside the active profile and may need profile-specific lowering rules",
-            );
-        }
-    }
-
-    for package in report.packages.clone() {
-        match package.as_str() {
-            "tikz" | "pgf" | "pgfplots" | "circuitikz" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "PGF/TikZ graphics are not semantically converted to editable DOCX drawing objects yet",
-            ),
-            "pstricks" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "PSTricks output requires a PostScript rendering path that the semantic engine does not provide yet",
-            ),
-            "minted" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "minted requires external Pygments processing and shell-escape semantics",
-            ),
-            "listings" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "listings content is treated as code text; advanced styling is not preserved yet",
-            ),
-            "biblatex" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "biblatex is detected; current bibliography support is strongest for BibTeX/bbl-style flows",
-            ),
-            "longtable" | "tabularx" | "tabulary" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "advanced table layout is lowered semantically but may need renderer-specific refinement",
-            ),
-            "algorithm2e" | "algorithmicx" | "algpseudocode" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "algorithm packages currently rely on generic block lowering and may lose fine-grained styling",
-            ),
-            _ => {}
-        }
-    }
-
-    if report.custom_macro_count > 0 {
-        add_compatibility_issue(
-            &mut report.warnings,
-            &mut warning_seen,
-            "custom_macros",
-            "custom macros",
-            format!(
-                "{} custom macro definitions detected; unknown macro semantics may require explicit rules",
-                report.custom_macro_count
-            ),
-        );
-    }
-
-    apply_compatibility_score(&mut report);
-    report
-}
-
-fn is_tex_source_path(path: &Path) -> bool {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return false;
-    };
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "tex" | "sty" | "cls" | "ltx"
-    )
-}
-
-fn split_tex_name_list(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(normalize_tex_name)
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
-fn normalize_tex_name(raw: &str) -> String {
-    raw.trim()
-        .trim_matches('{')
-        .trim_matches('}')
-        .trim()
-        .trim_start_matches('\\')
-        .to_ascii_lowercase()
-}
-
-fn count_custom_macro_definitions(source: &str) -> usize {
-    scan_tex_commands(
-        source,
-        &[
-            "newcommand",
-            "renewcommand",
-            "providecommand",
-            "DeclareRobustCommand",
-            "NewDocumentCommand",
-            "RenewDocumentCommand",
-        ],
-    )
-    .len()
-        + source.matches("\\def\\").count()
-}
-
-fn contains_tex_environment(source: &str, environment: &str) -> bool {
-    source.contains(&format!("\\begin{{{environment}}}"))
-}
-
-fn sorted_strings(set: HashSet<String>) -> Vec<String> {
-    let mut values = set.into_iter().collect::<Vec<_>>();
-    values.sort();
-    values
-}
-
-fn profile_supports_document_class(profile: EngineProfile, class: &str) -> bool {
-    profile
-        .spec()
-        .document_classes
-        .iter()
-        .any(|supported| supported.eq_ignore_ascii_case(class))
-}
-
-fn add_compatibility_issue(
-    issues: &mut Vec<CompatibilityIssue>,
-    seen: &mut HashSet<String>,
-    code: impl Into<String>,
-    feature: impl Into<String>,
-    message: impl Into<String>,
-) {
-    let code = code.into();
-    let feature = feature.into();
-    let key = format!("{code}:{feature}");
-    if seen.insert(key) {
-        issues.push(CompatibilityIssue {
-            code,
-            feature,
-            message: message.into(),
-        });
-    }
-}
-
-fn apply_compatibility_score(report: &mut CompatibilityReport) {
-    let unsupported_penalty = report.unsupported.len() * 18;
-    let warning_penalty = report.warnings.len() * 6;
-    let macro_penalty = (report.custom_macro_count * 2).min(12);
-    let penalty = (unsupported_penalty + warning_penalty + macro_penalty).min(100);
-    report.score = 100usize.saturating_sub(penalty) as u8;
-}
-
 fn run_latex_runtime(
     engine: RuntimeEngine,
     workdir: &Path,
@@ -2382,438 +1795,6 @@ fn tail_for_diagnostic(input: &str) -> String {
     let mut chars = input.chars().rev().take(MAX).collect::<Vec<_>>();
     chars.reverse();
     chars.into_iter().collect::<String>()
-}
-
-/// Parse semantic sidecar JSONL emitted by future XeLaTeX/LuaTeX collectors.
-///
-/// Empty lines and comment lines beginning with `#` are ignored.
-/// Parses the semantic events JSONL sidecar file produced by the XeLaTeX or LuaTeX hook.
-///
-/// Supports two formats:
-/// - **v1** (legacy): `{"type":"heading",...}`
-/// - **v2** (current): First line is a schema header `{"schema":"semantic-event-v2",...}`
-///   followed by events with extra fields (`source`, `macro`).
-///
-/// Empty lines and comment lines (`#...`) are skipped.
-pub fn parse_semantic_events_jsonl(input: &str) -> Result<Vec<SemanticEvent>, EngineError> {
-    let mut events = Vec::new();
-    let mut line_number = 0;
-    let mut saw_v2_schema = false;
-
-    for raw_line in input.lines() {
-        line_number += 1;
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        // Detect and skip v2 schema header
-        if !saw_v2_schema && trimmed.starts_with("{\"schema\"") {
-            if trimmed.contains("semantic-event-v2") {
-                saw_v2_schema = true;
-                continue;
-            }
-        }
-
-        let event = serde_json::from_str::<SemanticEvent>(trimmed).map_err(|err| {
-            EngineError::Parse(format!(
-                "semantic sidecar line {line_number} is invalid JSON: {err}"
-            ))
-        })?;
-        events.push(event);
-    }
-
-    Ok(events)
-}
-
-fn build_reference_graph(vfs: &VirtualFs, events: &[SemanticEvent]) -> ReferenceGraph {
-    let mut graph = ReferenceGraph::default();
-    let mut label_keys = HashSet::<String>::new();
-    let mut numbering = HashMap::<ReferenceTargetKind, usize>::new();
-
-    collect_source_references(vfs, &mut graph, &mut label_keys, &mut numbering);
-    collect_event_references(events, &mut graph, &mut label_keys);
-    resolve_reference_graph(graph)
-}
-
-fn collect_source_references(
-    vfs: &VirtualFs,
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-    numbering: &mut HashMap<ReferenceTargetKind, usize>,
-) {
-    let mut paths = vfs
-        .paths()
-        .filter(|path| is_tex_like_path(path))
-        .map(|path| path.to_path_buf())
-        .collect::<Vec<_>>();
-    paths.sort();
-
-    for path in paths {
-        let Ok(bytes) = vfs.read(&path) else {
-            continue;
-        };
-        let Ok(raw) = std::str::from_utf8(bytes) else {
-            continue;
-        };
-        let text = strip_tex_comments(raw);
-        let source = ReferenceSource {
-            path: Some(path_to_posix(&path)),
-            origin: ReferenceOrigin::SourceScan,
-        };
-
-        for command in scan_tex_commands(&text, &["label"]) {
-            let key = command.argument.trim();
-            if key.is_empty() || !label_keys.insert(key.to_string()) {
-                continue;
-            }
-            let kind = reference_kind_from_key(key);
-            let number = next_reference_number(kind, numbering);
-            graph.labels.push(ReferenceLabel {
-                key: key.to_string(),
-                kind,
-                number,
-                source: source.clone(),
-            });
-        }
-
-        for command in scan_tex_commands(&text, &["autoref", "eqref", "ref"]) {
-            let key = command.argument.trim();
-            if key.is_empty() {
-                continue;
-            }
-            graph.references.push(CrossReference {
-                command: command.name,
-                key: key.to_string(),
-                resolved: false,
-                target_kind: None,
-                rendered: None,
-                source: source.clone(),
-            });
-        }
-
-        for command in scan_tex_commands(
-            &text,
-            &[
-                "citeauthor",
-                "citeyear",
-                "citealp",
-                "citealt",
-                "citep",
-                "citet",
-                "cite",
-            ],
-        ) {
-            let keys = split_citation_keys(&command.argument);
-            if keys.is_empty() {
-                continue;
-            }
-            graph.citations.push(CitationReference {
-                command: command.name,
-                keys,
-                source: source.clone(),
-            });
-        }
-    }
-}
-
-fn collect_event_references(
-    events: &[SemanticEvent],
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-) {
-    let source = ReferenceSource {
-        path: None,
-        origin: ReferenceOrigin::SemanticEvent,
-    };
-
-    for event in events {
-        match event {
-            SemanticEvent::Heading {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Heading,
-                source.clone(),
-            ),
-            SemanticEvent::Figure {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Figure,
-                source.clone(),
-            ),
-            SemanticEvent::Table {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Table,
-                source.clone(),
-            ),
-            SemanticEvent::Equation {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Equation,
-                source.clone(),
-            ),
-            SemanticEvent::Label { key, .. } => {
-                add_event_label(
-                    graph,
-                    label_keys,
-                    key,
-                    reference_kind_from_key(key),
-                    source.clone(),
-                );
-            }
-            SemanticEvent::Reference { kind, key, .. } => graph.references.push(CrossReference {
-                command: kind.clone(),
-                key: key.clone(),
-                resolved: false,
-                target_kind: None,
-                rendered: None,
-                source: source.clone(),
-            }),
-            SemanticEvent::Citation { keys, .. } => {
-                if !keys.is_empty() {
-                    graph.citations.push(CitationReference {
-                        command: "cite".to_string(),
-                        keys: keys.clone(),
-                        source: source.clone(),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn add_event_label(
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-    key: &str,
-    kind: ReferenceTargetKind,
-    source: ReferenceSource,
-) {
-    let key = key.trim();
-    if key.is_empty() || !label_keys.insert(key.to_string()) {
-        return;
-    }
-    graph.labels.push(ReferenceLabel {
-        key: key.to_string(),
-        kind,
-        number: None,
-        source,
-    });
-}
-
-fn resolve_reference_graph(mut graph: ReferenceGraph) -> ReferenceGraph {
-    let label_map = graph
-        .labels
-        .iter()
-        .map(|label| {
-            (
-                label.key.clone(),
-                (
-                    label.kind,
-                    label.number.clone().unwrap_or_else(|| label.key.clone()),
-                ),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-
-    let mut unresolved = Vec::new();
-    for reference in &mut graph.references {
-        if let Some((kind, rendered)) = label_map.get(&reference.key) {
-            reference.resolved = true;
-            reference.target_kind = Some(*kind);
-            reference.rendered = Some(rendered.clone());
-        } else {
-            unresolved.push(UnresolvedReference {
-                command: reference.command.clone(),
-                key: reference.key.clone(),
-                source: reference.source.clone(),
-            });
-        }
-    }
-    graph.unresolved_references = unresolved;
-    graph
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ScannedTexCommand {
-    name: String,
-    argument: String,
-}
-
-fn scan_tex_commands(text: &str, commands: &[&str]) -> Vec<ScannedTexCommand> {
-    let mut found = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] != b'\\' {
-            i += 1;
-            continue;
-        }
-
-        let command_start = i + 1;
-        let Some(command) = commands
-            .iter()
-            .find(|command| tex_command_matches(text, command_start, command))
-        else {
-            i += 1;
-            continue;
-        };
-
-        let mut arg_pos = command_start + command.len();
-        arg_pos = skip_tex_space_and_options(text, arg_pos);
-        if text.as_bytes().get(arg_pos) != Some(&b'{') {
-            i += command.len() + 1;
-            continue;
-        }
-
-        if let Some(end) = doc_latex_reader::normalize::find_matching_brace(text, arg_pos) {
-            found.push(ScannedTexCommand {
-                name: (*command).to_string(),
-                argument: text[arg_pos + 1..end].trim().to_string(),
-            });
-            i = end + 1;
-        } else {
-            i += command.len() + 1;
-        }
-    }
-    found
-}
-
-fn tex_command_matches(text: &str, command_start: usize, command: &str) -> bool {
-    let end = command_start + command.len();
-    if text.get(command_start..end) != Some(command) {
-        return false;
-    }
-
-    let next = text.as_bytes().get(end).copied();
-    !matches!(next, Some(b'a'..=b'z' | b'A'..=b'Z' | b'@'))
-}
-
-fn skip_tex_space_and_options(text: &str, mut pos: usize) -> usize {
-    loop {
-        while pos < text.len() && text.as_bytes()[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        if text.as_bytes().get(pos) != Some(&b'[') {
-            return pos;
-        }
-
-        let Some(end) = find_matching_bracket(text, pos) else {
-            return pos;
-        };
-        pos = end + 1;
-    }
-}
-
-fn find_matching_bracket(text: &str, open_index: usize) -> Option<usize> {
-    if text.as_bytes().get(open_index) != Some(&b'[') {
-        return None;
-    }
-    let mut depth = 0i32;
-    let mut i = open_index;
-    while i < text.len() {
-        let b = text.as_bytes()[i];
-        let escaped = is_escaped(text.as_bytes(), i);
-        if b == b'[' && !escaped {
-            depth += 1;
-        } else if b == b']' && !escaped {
-            depth -= 1;
-            if depth == 0 {
-                return Some(i);
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-fn strip_tex_comments(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for line in input.split_inclusive('\n') {
-        let bytes = line.as_bytes();
-        let mut end = line.len();
-        for (idx, b) in bytes.iter().enumerate() {
-            if *b == b'%' && !is_escaped(bytes, idx) {
-                end = idx;
-                break;
-            }
-        }
-        out.push_str(&line[..end]);
-        if line.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-    out
-}
-
-fn is_escaped(bytes: &[u8], idx: usize) -> bool {
-    let mut count = 0usize;
-    let mut cursor = idx;
-    while cursor > 0 && bytes[cursor - 1] == b'\\' {
-        count += 1;
-        cursor -= 1;
-    }
-    count % 2 == 1
-}
-
-fn split_citation_keys(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn reference_kind_from_key(key: &str) -> ReferenceTargetKind {
-    let lower = key.to_ascii_lowercase();
-    if lower.starts_with("fig:") || lower.starts_with("figure:") {
-        ReferenceTargetKind::Figure
-    } else if lower.starts_with("tab:") || lower.starts_with("table:") {
-        ReferenceTargetKind::Table
-    } else if lower.starts_with("eq:") || lower.starts_with("equation:") {
-        ReferenceTargetKind::Equation
-    } else if lower.starts_with("alg:") || lower.starts_with("algorithm:") {
-        ReferenceTargetKind::Algorithm
-    } else if lower.starts_with("thm:") || lower.starts_with("theorem:") {
-        ReferenceTargetKind::Theorem
-    } else if lower.starts_with("prop:") || lower.starts_with("proposition:") {
-        ReferenceTargetKind::Proposition
-    } else if lower.starts_with("sec:") || lower.starts_with("section:") {
-        ReferenceTargetKind::Heading
-    } else {
-        ReferenceTargetKind::Unknown
-    }
-}
-
-fn next_reference_number(
-    kind: ReferenceTargetKind,
-    numbering: &mut HashMap<ReferenceTargetKind, usize>,
-) -> Option<String> {
-    if kind == ReferenceTargetKind::Unknown {
-        return None;
-    }
-    let next = numbering.entry(kind).or_insert(0);
-    *next += 1;
-    if kind == ReferenceTargetKind::Equation {
-        Some(format!("({next})"))
-    } else {
-        Some(next.to_string())
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -3735,10 +2716,6 @@ fn relative_to_root(root: &Path, path: &Path) -> Result<PathBuf, EngineError> {
     }
 }
 
-fn path_to_posix(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4004,7 +2981,7 @@ let x = 1;
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", source.as_bytes().to_vec());
 
-        let report = analyze_compatibility(&vfs, EngineProfile::GenericArticle);
+        let report = CompatibilityAnalyzer::new().analyze(&vfs, ProfileKind::GenericArticle);
 
         assert_eq!(report.scanned_files, 1);
         assert!(report.document_classes.contains(&"article".to_string()));

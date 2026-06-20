@@ -17,7 +17,7 @@ use crate::model::{merge_adjacent_runs, Paragraph, Run};
 use crate::page_setup::PageSetup;
 use crate::styles::{
     STYLE_ABSTRACT_EN, STYLE_ABSTRACT_ZH, STYLE_AUTHOR_ZH, STYLE_BODY, STYLE_BODY_NO_INDENT,
-    STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
+    STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_COMMENT, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
     STYLE_HEADING3, STYLE_IMAGE, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS, STYLE_REFERENCE,
     STYLE_REFERENCE_HEADING, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
 };
@@ -85,6 +85,14 @@ pub fn serialize_document(
     root.push_attribute((
         "xmlns:m",
         "http://schemas.openxmlformats.org/officeDocument/2006/math",
+    ));
+    root.push_attribute((
+        "xmlns:a",
+        "http://schemas.openxmlformats.org/drawingml/2006/main",
+    ));
+    root.push_attribute((
+        "xmlns:wp",
+        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     ));
     root.push_attribute((
         "xmlns:wp",
@@ -437,8 +445,9 @@ pub fn serialize_document(
                             // 1. <wp:cNvGraphicFramePr> + <a:graphicFrameLocks> 是 soffice 正确渲染的必要条件
                             // 2. xmlns:a / xmlns:pic 必须声明在 wp:inline 上（即使 w:document 已声明，
                             //    soffice 24.x 严格按「首次声明优先」处理 inline XML 片段）
+                            // 3. xmlns:m 用于内联公式 OMML（m:oMath）
                             let drawing = format!(
-                                r#"<w:drawing><wp:inline xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{}" cy="{}"/><wp:docPr id="{}" name="Picture {}" descr="{}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{}" name="{}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg{}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"#,
+                                r#"<w:drawing><wp:inline xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" distT="0" distB="0" distL="0" distR="0"><wp:extent cx="{}" cy="{}"/><wp:docPr id="{}" name="Picture {}" descr="{}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="{}" name="{}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rIdImg{}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="{}" cy="{}"/></a:xfrm><a:prstGeom prst="rect"/></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing>"#,
                                 cx,
                                 cy,
                                 fig_id,
@@ -616,6 +625,36 @@ pub fn serialize_document(
                     number.as_deref(),
                     text_width,
                 );
+            }
+            Block::CodeBlock { language, code, .. } => {
+                // Render as a shaded code block using a single-cell table with
+                // Courier New font, light shading, and a monospace run.
+                let lang_label = language.as_deref().unwrap_or("text");
+                let para = Paragraph {
+                    style_id: Some(STYLE_CODE.to_string()),
+                    runs: vec![Run {
+                        text: code.clone(),
+                        style_id: None,
+                        style: TextStyle::Code,
+                        bold: false,
+                        italic: false,
+                        font_ascii: Some("Courier New".to_string()),
+                        font_east: Some("Courier New".to_string()),
+                    }],
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
+                };
+                write_paragraph(&mut w, &para);
+                // Write language label as a small comment below
+                let label_para = Paragraph {
+                    style_id: Some(STYLE_COMMENT.to_string()),
+                    runs: vec![Run::plain(format!("// language: {lang_label}"))],
+                    jc: None,
+                    keep_next: false,
+                    keep_lines: false,
+                };
+                write_paragraph(&mut w, &label_para);
             }
         }
     }
@@ -2090,6 +2129,24 @@ fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
     write_paragraph_with_opts(w, p, false, 0)
 }
 
+/// Write a single inline math run as OMML (`<m:oMath>...</m:oMath>`).
+/// The LaTeX content is already "cleaned" (subscripts/superscripts converted to _/^).
+fn write_inline_math_run(w: &mut Writer<Vec<u8>>, latex: &str) {
+    w.write_event(Event::Start(BytesStart::new("w:r"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMath"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMathPara"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMathParaPr"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:oMathParaPr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:t"))).unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(latex))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:t"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:oMathPara"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:oMath"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
+}
+
 /// v13.2.7: 正文段落 run 归一化——合并 plain run 并清理 CJK 内部空格（对齐 sh latex_to_text）。
 fn normalize_body_runs(runs: Vec<Run>) -> Vec<Run> {
     let has_script = runs
@@ -2215,7 +2272,11 @@ fn write_paragraph_with_opts(
     }
 
     for run in &p.runs {
-        write_run(w, run, force_table_cell_font, cell_font_half_points);
+        if matches!(run.style, TextStyle::MathInline) {
+            write_inline_math_run(w, &run.text);
+        } else {
+            write_run(w, run, force_table_cell_font, cell_font_half_points);
+        }
     }
     w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
 }

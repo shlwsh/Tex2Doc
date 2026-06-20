@@ -34,6 +34,7 @@ pub const STYLE_TABLE_TEXT: &str = "JOSTableText";
 pub const STYLE_CODE: &str = "JOSCode";
 pub const STYLE_REFERENCE_HEADING: &str = "JOSReferenceHeading";
 pub const STYLE_REFERENCE: &str = "JOSReference";
+pub const STYLE_COMMENT: &str = "Comment";
 
 /// 简单 List 段落样式（V1 兼容）：保留 V1 的 list_bullet / list_number ID。
 pub const STYLE_LIST_BULLET: &str = "ListBullet";
