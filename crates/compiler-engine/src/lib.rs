@@ -347,6 +347,7 @@ pub struct CompileOptions {
     pub semantic_backend: SemanticBackendKind,
     pub allow_backend_fallback: bool,
     pub enable_reference_links: bool,
+    pub enable_omml_equations: bool,
     pub template_bytes: Option<Vec<u8>>,
     pub page_setup: Option<doc_docx_writer::PageSetup>,
     pub collect_standard_ast: bool,
@@ -360,6 +361,7 @@ impl Default for CompileOptions {
             semantic_backend: SemanticBackendKind::Auto,
             allow_backend_fallback: true,
             enable_reference_links: true,
+            enable_omml_equations: true,
             template_bytes: None,
             page_setup: None,
             collect_standard_ast: true,
@@ -486,6 +488,12 @@ impl SemanticTexEngine {
             page_setup.as_ref(),
         )
         .map_err(|e| EngineError::Serialize(e.to_string()))?;
+        if options.enable_omml_equations {
+            let omml = apply_omml_equations_to_docx(docx, &graph.document)?;
+            graph.report.omml_equation_count = omml.converted;
+            graph.report.omml_equation_fallback_count = omml.fallbacks;
+            docx = omml.docx;
+        }
         if options.enable_reference_links {
             let linked = apply_reference_links_to_docx(docx, &graph.reference_graph)?;
             graph.report.bookmark_count = linked.bookmarks;
@@ -588,6 +596,8 @@ pub struct CompileReport {
     pub unresolved_reference_count: usize,
     pub bookmark_count: usize,
     pub hyperlink_count: usize,
+    pub omml_equation_count: usize,
+    pub omml_equation_fallback_count: usize,
     pub docx_bytes: usize,
 }
 
@@ -609,6 +619,8 @@ impl CompileReport {
             unresolved_reference_count: 0,
             bookmark_count: 0,
             hyperlink_count: 0,
+            omml_equation_count: 0,
+            omml_equation_fallback_count: 0,
             docx_bytes: 0,
         }
     }
@@ -2208,6 +2220,250 @@ fn next_reference_number(
 }
 
 #[derive(Debug, Clone)]
+struct OmmlEquationDocx {
+    docx: Vec<u8>,
+    converted: usize,
+    fallbacks: usize,
+}
+
+#[derive(Debug, Clone)]
+struct OmmlEquationPlan {
+    latex: String,
+    number: String,
+}
+
+fn apply_omml_equations_to_docx(
+    docx: Vec<u8>,
+    document: &Document,
+) -> Result<OmmlEquationDocx, EngineError> {
+    let plans = build_omml_equation_plans(document);
+    if plans.is_empty() {
+        return Ok(OmmlEquationDocx {
+            docx,
+            converted: 0,
+            fallbacks: 0,
+        });
+    }
+
+    let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx))
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+    let mut entries = Vec::with_capacity(archive.len());
+    let mut document_xml = None;
+
+    for idx in 0..archive.len() {
+        let mut file = archive
+            .by_index(idx)
+            .map_err(|err| EngineError::Zip(err.to_string()))?;
+        let name = file.name().to_string();
+        if file.is_dir() {
+            entries.push((name, None));
+            continue;
+        }
+        let mut bytes = Vec::with_capacity(file.size() as usize);
+        file.read_to_end(&mut bytes)
+            .map_err(|err| EngineError::Io(err.to_string()))?;
+        if name == "word/document.xml" {
+            document_xml = Some(String::from_utf8(bytes).map_err(|err| {
+                EngineError::Parse(format!("word/document.xml is not valid UTF-8: {err}"))
+            })?);
+        } else {
+            entries.push((name, Some(bytes)));
+        }
+    }
+
+    let Some(document_xml) = document_xml else {
+        return Ok(OmmlEquationDocx {
+            docx: archive.into_inner().into_inner(),
+            converted: 0,
+            fallbacks: plans.len(),
+        });
+    };
+
+    let (linked_xml, converted, fallbacks) = link_omml_equations_xml(&document_xml, &plans);
+
+    let cursor = std::io::Cursor::new(Vec::<u8>::new());
+    let mut writer = zip::ZipWriter::new(cursor);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated);
+    for (name, bytes) in entries {
+        if let Some(bytes) = bytes {
+            writer
+                .start_file(name, opts)
+                .map_err(|err| EngineError::Zip(err.to_string()))?;
+            std::io::Write::write_all(&mut writer, &bytes)
+                .map_err(|err| EngineError::Io(err.to_string()))?;
+        } else {
+            writer
+                .add_directory(name, opts)
+                .map_err(|err| EngineError::Zip(err.to_string()))?;
+        }
+    }
+    writer
+        .start_file("word/document.xml", opts)
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+    std::io::Write::write_all(&mut writer, linked_xml.as_bytes())
+        .map_err(|err| EngineError::Io(err.to_string()))?;
+    let cursor = writer
+        .finish()
+        .map_err(|err| EngineError::Zip(err.to_string()))?;
+
+    Ok(OmmlEquationDocx {
+        docx: cursor.into_inner(),
+        converted,
+        fallbacks,
+    })
+}
+
+fn build_omml_equation_plans(document: &Document) -> Vec<OmmlEquationPlan> {
+    let mut plans = Vec::new();
+    let mut number = 0usize;
+    collect_omml_equation_plans(&document.blocks, &mut number, &mut plans);
+    plans
+}
+
+fn collect_omml_equation_plans(
+    blocks: &[Block],
+    number: &mut usize,
+    plans: &mut Vec<OmmlEquationPlan>,
+) {
+    for block in blocks {
+        match block {
+            Block::Equation {
+                latex, is_block, ..
+            } if *is_block => {
+                *number += 1;
+                plans.push(OmmlEquationPlan {
+                    latex: latex.clone(),
+                    number: format!("({number})"),
+                });
+            }
+            Block::List { items, .. } => {
+                for item in items {
+                    collect_omml_equation_plans(item, number, plans);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn link_omml_equations_xml(
+    document_xml: &str,
+    plans: &[OmmlEquationPlan],
+) -> (String, usize, usize) {
+    let mut out = String::with_capacity(document_xml.len() + plans.len() * 160);
+    let mut pos = 0usize;
+    let mut plan_idx = 0usize;
+    let mut converted = 0usize;
+    let mut fallbacks = 0usize;
+
+    while let Some(start) = find_next_paragraph(document_xml, pos) {
+        out.push_str(&document_xml[pos..start]);
+        let Some(end_rel) = document_xml[start..].find("</w:p>") else {
+            out.push_str(&document_xml[start..]);
+            fallbacks += plans.len().saturating_sub(plan_idx);
+            return (out, converted, fallbacks);
+        };
+        let end = start + end_rel + "</w:p>".len();
+        let paragraph = &document_xml[start..end];
+
+        if plan_idx < plans.len() && paragraph_is_equation_text(paragraph) {
+            let plan = &plans[plan_idx];
+            let math_latex = normalize_omml_latex(&plan.latex);
+            if math_latex.trim().is_empty() {
+                out.push_str(paragraph);
+                fallbacks += 1;
+            } else {
+                let expr = doc_mathml::parse_latex_math(&math_latex);
+                let omml = String::from_utf8_lossy(&doc_mathml::to_omml(&expr)).to_string();
+                let omml = strip_xml_decl(&omml);
+                out.push_str(&omml_equation_paragraph(paragraph, omml, &plan.number));
+                converted += 1;
+            }
+            plan_idx += 1;
+        } else {
+            out.push_str(paragraph);
+        }
+        pos = end;
+    }
+    out.push_str(&document_xml[pos..]);
+
+    fallbacks += plans.len().saturating_sub(plan_idx);
+    (out, converted, fallbacks)
+}
+
+fn paragraph_is_equation_text(paragraph: &str) -> bool {
+    paragraph.contains(r#"<w:pStyle w:val="JOSCode""#)
+}
+
+fn normalize_omml_latex(latex: &str) -> String {
+    let mut out = String::new();
+    let mut i = 0usize;
+    while i < latex.len() {
+        if latex[i..].starts_with("\\label") {
+            let arg_start = i + "\\label".len();
+            let arg_start = skip_latex_space(latex, arg_start);
+            if latex.as_bytes().get(arg_start) == Some(&b'{') {
+                if let Some(end) =
+                    doc_latex_reader::normalize::find_matching_brace(latex, arg_start)
+                {
+                    i = end + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = latex[i..].chars().next().unwrap_or_default();
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out.replace("\\\\", " ").replace('\n', " ")
+}
+
+fn skip_latex_space(input: &str, mut pos: usize) -> usize {
+    while pos < input.len() && input.as_bytes()[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
+fn strip_xml_decl(xml: &str) -> &str {
+    let trimmed = xml.trim_start();
+    if trimmed.starts_with("<?xml") {
+        if let Some(end) = trimmed.find("?>") {
+            return trimmed[end + "?>".len()..].trim_start();
+        }
+    }
+    trimmed
+}
+
+fn omml_equation_paragraph(paragraph: &str, omml: &str, number: &str) -> String {
+    let Some(open_end) = paragraph.find('>') else {
+        return paragraph.to_string();
+    };
+    let Some(close_start) = paragraph.rfind("</w:p>") else {
+        return paragraph.to_string();
+    };
+    let inner = &paragraph[open_end + 1..close_start];
+    let ppr = if inner.starts_with("<w:pPr>") {
+        inner
+            .find("</w:pPr>")
+            .map(|end| &inner[..end + "</w:pPr>".len()])
+            .unwrap_or("")
+    } else {
+        ""
+    };
+    let escaped_number = escape_xml_text(&format!("    {number}"));
+    format!(
+        "{}{}{}<w:r>{}</w:r>{}",
+        &paragraph[..open_end + 1],
+        ppr,
+        omml,
+        text_xml(&escaped_number),
+        &paragraph[close_start..]
+    )
+}
+
+#[derive(Debug, Clone)]
 struct ReferenceLinkedDocx {
     docx: Vec<u8>,
     bookmarks: usize,
@@ -2494,6 +2750,7 @@ fn paragraph_matches_reference_target(paragraph: &str, plan: &BookmarkPlan) -> b
         ReferenceTargetKind::Equation => {
             paragraph.contains(r#"<w:pStyle w:val="JOSEquation""#)
                 || paragraph.contains(r#"<w:pStyle w:val="Equation""#)
+                || paragraph.contains(r#"<w:pStyle w:val="JOSCode""#)
         }
         ReferenceTargetKind::Heading => paragraph.contains(r#"<w:pStyle w:val="Heading"#),
         ReferenceTargetKind::Unknown => false,
@@ -3226,6 +3483,38 @@ See Figure~\ref{fig:a}.
         assert!(updated.contains(r#"<w:t xml:space="preserve">See </w:t>"#));
         assert!(updated.contains("<w:t>Figure 1</w:t>"));
         assert!(updated.contains("<w:t>.</w:t>"));
+    }
+
+    #[test]
+    fn docx_omml_equation_renders_fraction_and_bookmark() {
+        let source = r#"
+See Eq.~\eqref{eq:f}.
+\begin{equation}
+\frac{a+b}{c+d}\label{eq:f}
+\end{equation}
+"#;
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
+        let artifact = engine
+            .compile_source_to_docx("main.tex", source, &options)
+            .expect("compile omml docx");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(artifact.report.reference_label_count, 1);
+        assert_eq!(artifact.report.reference_edge_count, 1);
+        assert_eq!(artifact.report.unresolved_reference_count, 0);
+        assert_eq!(artifact.report.omml_equation_count, 1);
+        assert_eq!(artifact.report.omml_equation_fallback_count, 0);
+        assert!(document_xml.contains("<m:oMath"));
+        assert!(document_xml.contains("<m:f>"));
+        assert!(document_xml.contains("<m:num>"));
+        assert!(document_xml.contains("<m:den>"));
+        assert!(document_xml.contains(r#"<w:t xml:space="preserve">    (1)</w:t>"#));
+        assert!(document_xml.contains(r#"w:name="ref_eq_f""#));
+        assert_eq!(document_xml.matches("<?xml").count(), 1);
     }
 
     #[test]

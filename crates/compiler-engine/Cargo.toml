@@ -12,6 +12,7 @@ doc-utils        = { workspace = true }
 doc-semantic-ast = { workspace = true }
 doc-latex-reader = { workspace = true }
 doc-docx-writer  = { workspace = true }
+doc-mathml       = { workspace = true }
 
 thiserror = { workspace = true }
 serde     = { workspace = true }

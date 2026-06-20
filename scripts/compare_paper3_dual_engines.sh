@@ -135,6 +135,8 @@ def read_backend_lines(path: Path) -> list[str]:
         "unresolved-references:",
         "bookmarks:",
         "hyperlinks:",
+        "omml-equations:",
+        "omml-equation-fallbacks:",
     )
     return [
         line.strip()

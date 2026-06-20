@@ -573,6 +573,7 @@ version = "0.1.0"
 dependencies = [
  "doc-docx-writer",
  "doc-latex-reader",
+ "doc-mathml",
  "doc-semantic-ast",
  "doc-utils",
  "image",

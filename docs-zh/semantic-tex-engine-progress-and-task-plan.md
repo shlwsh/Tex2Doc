@@ -19,6 +19,8 @@
 > ReferenceGraph 开发报告：[Semantic TeX Engine ReferenceGraph 开发报告（20260620-132709）](./semantic-tex-engine-development-report-20260620-132709.md)
 >
 > DOCX bookmark/hyperlink 开发报告：[Semantic TeX Engine DOCX 引用链接开发报告（20260620-134723）](./semantic-tex-engine-development-report-20260620-134723.md)
+>
+> OMML 公式接入开发报告：[Semantic TeX Engine OMML 公式接入开发报告（20260620-135937）](./semantic-tex-engine-development-report-20260620-135937.md)
 
 ## 1. 当前结论
 
@@ -31,7 +33,7 @@
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
 | M3 结构增强 | 部分完成 | 表格、图片已有文本级/块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版；图片尺寸表达式尚未完成 |
-| M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；DOCX writer 块公式仍走文本化输出 |
+| M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；新语义路径已在 DOCX 后处理阶段接入块级公式 OMML 初版；旧 `doc-docx-writer` 默认块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
 
@@ -120,7 +122,7 @@ DocxRender
 8. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
 9. `StandardDocument::from_legacy_document` 生成标准文档图。
 10. `doc_docx_writer::pack_with_page_setup` 输出 DOCX。
-11. `doc-compiler-engine` 语义路径可选执行 DOCX 后处理，根据 `ReferenceGraph` 为目标段落写入 bookmark，并把已解析引用写为内部 hyperlink。
+11. `doc-compiler-engine` 语义路径可选执行 DOCX 后处理，把块级公式段落替换为 OMML，并根据 `ReferenceGraph` 为目标段落写入 bookmark、把已解析引用写为内部 hyperlink。
 
 当前双后端相关边界：
 
@@ -147,6 +149,15 @@ DocxRender
 - 未解析引用会进入 `EngineDiagnostic`，code 为 `unresolved_reference`。
 - DOCX bookmark/hyperlink 已在新语义路径中接入初版：不修改 `doc-core` 与 `doc-docx-writer` 默认输出，而是在 `doc-compiler-engine` 打包后对 `word/document.xml` 做独立后处理。
 - `CompileReport` 已新增 `bookmark_count`、`hyperlink_count`。
+
+当前公式 OMML 边界：
+
+- `doc-compiler-engine` 已直接依赖 `doc-mathml`。
+- 新语义路径已新增 `CompileOptions.enable_omml_equations`，默认启用。
+- 块级 `Block::Equation { is_block: true }` 会在打包后从 `JOSCode` 公式段替换为 `<m:oMath>`。
+- 公式编号继续以普通 `w:t` 文本保留，方便 Word 显示和后续引用目标定位。
+- 旧 `doc-docx-writer` 默认 `write_equation` 行为不变，旧 `doc-core` 路径仍输出 JOSCode 纯文本公式。
+- `CompileReport` 已新增 `omml_equation_count`、`omml_equation_fallback_count`。
 
 ### 2.3 paper3 样例
 
@@ -217,9 +228,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-134613.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-134613-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-134613-semantic-engine-xelatex_hook.docx` | 3,056,724 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-135900.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-135859-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-135859-semantic-engine-xelatex_hook.docx` | 3,057,535 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -228,8 +239,10 @@ reference-labels: 35
 reference-edges: 46
 citations: 36
 unresolved-references: 0
-bookmarks: 21
-hyperlinks: 30
+bookmarks: 25
+hyperlinks: 35
+omml-equations: 4
+omml-equation-fallbacks: 0
 backend-requested: xelatex-hook
 backend-selected: xelatex-hook
 backend-reason: XeLaTeXHookBackend explicitly requested; xelatex-hook available: found /usr/bin/xelatex
@@ -250,13 +263,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-134551-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-134551-dual-engines-semantic-engine-auto.docx` | 3,056,724 bytes | 10 | 653 | 12 | 20 | 42,744 |
+| rust-rule | `v15-论文稿件-jos-20260620-135835-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-135835-dual-engines-semantic-engine-auto.docx` | 3,057,535 bytes | 10 | 653 | 12 | 20 | 42,535 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-134551-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-135835-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -264,7 +277,8 @@ examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-134551-dual-engines
 - `semantic_backend=auto` 在 paper3 上选择 `xelatex-hook`。
 - semantic log 已输出 `profile-id: jos-paper` 与 `profile-page-setup: jos-paper3`。
 - ReferenceGraph 统计为 `reference-labels=35`、`reference-edges=46`、`citations=36`、`unresolved-references=0`。
-- 语义 DOCX 链接统计为 `bookmarks=21`、`hyperlinks=30`。
+- 语义 DOCX 链接统计为 `bookmarks=25`、`hyperlinks=35`。
+- 语义 DOCX 公式统计为 `omml-equations=4`、`omml-equation-fallbacks=0`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -343,7 +357,7 @@ MedicalJournal
 - heading/equation 的更精细目标定位。
 - 引用源位置到 DOCX 段落的确定性映射。
 
-### 3.4 公式未完成端到端 OMML
+### 3.4 公式 OMML 已完成语义路径初版
 
 `doc-mathml` 已有：
 
@@ -352,7 +366,13 @@ MedicalJournal
 - MathML 输出。
 - OMML 输出。
 
-但 `doc-docx-writer` 的块级公式当前仍是 JOS 风格文本段，不直接调用 `doc-mathml::to_omml`。因此 M4 只能算“基础能力已具备，端到端未接通”。
+当前新语义路径已经在 `doc-compiler-engine` 中把块级 `Block::Equation` 接入 `doc-mathml::to_omml`，通过 DOCX 后处理替换 `JOSCode` 公式段。
+
+仍保留的边界：
+
+- `doc-docx-writer` 默认块级公式仍是 JOS 风格文本段，用于保持旧 `doc-core` 路径不变。
+- inline math 尚未接入 OMML。
+- 复杂公式 parser 仍会降级为 `MathExpr::Raw` 或简化 AST，后续需要提升覆盖率。
 
 ### 3.5 LuaHook/XDV/兼容性分析缺口
 
@@ -527,7 +547,7 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 ### T6 公式 OMML 端到端接入
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
@@ -536,15 +556,23 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 实现要点：
 
-- 让 `doc-docx-writer` 依赖 `doc-mathml`，或在 `doc-compiler-engine` 阶段预渲染公式。
-- 保留 JOS 公式编号。
-- 增加 `\frac`、`\sqrt`、上下标、矩阵、cases 的 DOCX XML 断言。
+- 已选择在 `doc-compiler-engine` 阶段做 DOCX 后处理，避免改变旧 `doc-docx-writer` 默认行为。
+- 已新增 `CompileOptions.enable_omml_equations`，默认启用。
+- 已新增 `CompileReport.omml_equation_count`、`CompileReport.omml_equation_fallback_count`。
+- 已将块级 `Block::Equation` 通过 `doc_mathml::parse_latex_math` 与 `doc_mathml::to_omml` 生成 `<m:oMath>`。
+- 已保留 JOS 公式编号为普通 `w:t` 文本。
+- 已让 equation bookmark 目标匹配接受 `JOSCode` 公式段，使 OMML 公式段可作为引用目标。
+- 已补充 `\frac` 的 DOCX XML 断言；`\sqrt`、上下标、矩阵已有 `doc-mathml` 单元测试，DOCX XML 断言后续继续扩展。
 
 验收：
 
 ```bash
+cargo test -p doc-compiler-engine omml
+cargo test -p doc-compiler-engine
 cargo test -p doc-mathml
-cargo test -p doc-docx-writer equation
+cargo test -p doc-docx-writer block_equation_uses_jos_code_plain_text
+bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_dual_engines.sh 15
 ```
 
 ### T7 表格增强
@@ -729,9 +757,13 @@ T13 AI fallback
 
 ```bash
 cargo fmt -p doc-compiler-engine
+cargo check -p doc-compiler-engine
 cargo test -p doc-compiler-engine profile
 cargo test -p doc-compiler-engine reference
+cargo test -p doc-compiler-engine omml -- --nocapture
 cargo test -p doc-compiler-engine
+cargo test -p doc-mathml
+cargo test -p doc-docx-writer block_equation_uses_jos_code_plain_text
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-latex-reader ref
 cargo test -p doc-core
@@ -746,33 +778,36 @@ bash scripts/compare_paper3_semantic_backends.sh
 doc-compiler-engine profile: 2 passed
 doc-compiler-engine reference: 2 passed
 doc-compiler-engine bookmark: 1 passed
-doc-compiler-engine: 16 passed, 1 ignored
+doc-compiler-engine omml: 1 passed
+doc-compiler-engine: 17 passed, 1 ignored
+doc-mathml: 19 passed
+doc-docx-writer block equation legacy behavior: 1 passed
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
-paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic bookmarks=21, hyperlinks=30
-paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts, bookmark/hyperlink counts and text diff generated
+paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
+paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
 已知 warning：
 
 - `doc-latex-reader` 存在 unused/dead_code warning。
-- `doc-docx-writer` 存在公式相关 unused warning。
+- `doc-docx-writer` 存在 `formula_runs` / `clean_formula_latex` unused warning。
 
-这些 warning 不阻塞当前测试，但应在 T6 公式端到端接入时清理。
+这些 warning 不阻塞当前测试；旧 writer 的公式纯文本路径仍保留，因此 unused helper 是否删除需要后续单独评估。
 
 ## 7. 下一步执行项
 
-下一步建议进入 T6：
+下一步建议进入 T7：
 
 ```text
-T6 公式 OMML 端到端
+T7 表格增强
 ```
 
 具体先做：
 
-1. 确认 `doc-mathml` 的 LaTeX math -> OMML 覆盖范围。
-2. 选择在 `doc-compiler-engine` 预渲染 OMML，还是让 `doc-docx-writer` 可选接入 `doc-mathml`。
-3. 保留 JOS 公式编号与文本 fallback。
-4. 增加 `\frac`、`\sqrt`、上下标、矩阵、cases 的 DOCX XML 断言。
+1. 盘点 `doc-latex-reader` 当前 `tabular` / `array` / `booktabs` / `multicolumn` 解析能力。
+2. 明确 `TableCell` 是否已有 `grid_span` / `v_merge` 元数据，以及旧路径依赖范围。
+3. 优先在新语义路径中验证 `multicolumn` 到 `w:gridSpan` 的最小闭环。
+4. 跑 `cargo test -p doc-latex-reader table`、`cargo test -p doc-docx-writer table` 与 paper3 三路径脚本。

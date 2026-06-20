@@ -47,6 +47,11 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
     );
     println!("bookmarks: {}", artifact.report.bookmark_count);
     println!("hyperlinks: {}", artifact.report.hyperlink_count);
+    println!("omml-equations: {}", artifact.report.omml_equation_count);
+    println!(
+        "omml-equation-fallbacks: {}",
+        artifact.report.omml_equation_fallback_count
+    );
     println!(
         "backend-requested: {}",
         artifact.report.backend.requested.id()
