@@ -1785,7 +1785,11 @@ fn write_table(
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("w:tblPr"))).unwrap();
 
-    let ncols = rows.iter().map(|r| r.cells.len()).max().unwrap_or(1);
+    let ncols = rows
+        .iter()
+        .map(table_row_logical_columns)
+        .max()
+        .unwrap_or(1);
     w.write_event(Event::Start(BytesStart::new("w:tblGrid")))
         .unwrap();
     // v13.2 F8: cell 宽度 = text_width / ncols（替代硬编码 9000/ncols）。
@@ -1817,8 +1821,10 @@ fn write_table(
             w.write_event(Event::Start(BytesStart::new("w:tcPr")))
                 .unwrap();
             // v13.2.4 R5: cell 宽度
+            let cell_w = col_w * cell.colspan.max(1) as i64;
+            let cell_w_str = cell_w.to_string();
             let mut tc_w = BytesStart::new("w:tcW");
-            tc_w.push_attribute(("w:w", col_w_str.as_str()));
+            tc_w.push_attribute(("w:w", cell_w_str.as_str()));
             tc_w.push_attribute(("w:type", "dxa"));
             w.write_event(Event::Empty(tc_w)).unwrap();
             // gridSpan for colspan
@@ -1826,6 +1832,15 @@ fn write_table(
                 let mut gs = BytesStart::new("w:gridSpan");
                 gs.push_attribute(("w:val", cell.colspan.to_string().as_str()));
                 w.write_event(Event::Empty(gs)).unwrap();
+            }
+            if cell.rowspan > 1 {
+                let mut vm = BytesStart::new("w:vMerge");
+                vm.push_attribute(("w:val", "restart"));
+                w.write_event(Event::Empty(vm)).unwrap();
+            } else if cell.rowspan == 0 {
+                let mut vm = BytesStart::new("w:vMerge");
+                vm.push_attribute(("w:val", "continue"));
+                w.write_event(Event::Empty(vm)).unwrap();
             }
             // Background color
             if let Some(ref color) = cell.bg_color {
@@ -1878,6 +1893,14 @@ fn write_table(
     }
 
     w.write_event(Event::End(BytesEnd::new("w:tbl"))).unwrap();
+}
+
+fn table_row_logical_columns(row: &doc_semantic_ast::TableRow) -> usize {
+    row.cells
+        .iter()
+        .map(|cell| cell.colspan.max(1) as usize)
+        .sum::<usize>()
+        .max(1)
 }
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
@@ -2851,6 +2874,85 @@ mod tests {
                 r#"<w:tcW w:w="{expected_cell}" w:type="dxa"/>"#
             )),
             "tcW must be text_width/ncols = {expected_cell}: {xml}"
+        );
+    }
+
+    #[test]
+    fn table_colspan_and_rowspan_emit_grid_span_and_vmerge() {
+        use crate::page_setup::PageSetup;
+        use doc_semantic_ast::{TableCell, TableRow};
+
+        let cell = |text: &str, colspan: u32, rowspan: u32| TableCell {
+            runs: if text.is_empty() {
+                vec![]
+            } else {
+                vec![TextRun {
+                    text: text.to_string(),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }]
+            },
+            colspan,
+            rowspan,
+            bg_color: None,
+        };
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Table {
+                rows: vec![
+                    TableRow {
+                        cells: vec![cell("Merged", 2, 1), cell("C", 1, 1)],
+                    },
+                    TableRow {
+                        cells: vec![cell("R", 1, 2), cell("B", 1, 1), cell("C", 1, 1)],
+                    },
+                    TableRow {
+                        cells: vec![cell("", 1, 0), cell("D", 1, 1), cell("E", 1, 1)],
+                    },
+                ],
+                caption: None,
+                number: None,
+                span: Span::default(),
+            }],
+        };
+        let ps = PageSetup {
+            width_twips: 10000,
+            height_twips: 14000,
+            margin_top: Some(1000),
+            margin_right: Some(1000),
+            margin_bottom: Some(1000),
+            margin_left: Some(1000),
+            margin_header: None,
+            margin_footer: None,
+            cols_space: None,
+            cols_num: None,
+            header_text: None,
+            footer_text: None,
+            first_header_text: None,
+            first_footer_text: None,
+            even_header_text: None,
+            first_footer_indent_twips: None,
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, Some(&ps), &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        let col_w = ps.text_width_twips() / 3;
+
+        assert!(
+            xml.contains(r#"<w:gridSpan w:val="2"/>"#),
+            "missing gridSpan: {xml}"
+        );
+        assert!(
+            xml.contains(&format!(r#"<w:tcW w:w="{}" w:type="dxa"/>"#, col_w * 2)),
+            "colspan cell width should span two grid columns: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:vMerge w:val="restart"/>"#),
+            "missing vMerge restart: {xml}"
+        );
+        assert!(
+            xml.contains(r#"<w:vMerge w:val="continue"/>"#),
+            "missing vMerge continue: {xml}"
         );
     }
 

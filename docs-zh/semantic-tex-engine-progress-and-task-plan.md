@@ -21,6 +21,8 @@
 > DOCX bookmark/hyperlink 开发报告：[Semantic TeX Engine DOCX 引用链接开发报告（20260620-134723）](./semantic-tex-engine-development-report-20260620-134723.md)
 >
 > OMML 公式接入开发报告：[Semantic TeX Engine OMML 公式接入开发报告（20260620-135937）](./semantic-tex-engine-development-report-20260620-135937.md)
+>
+> 表格 span 渲染开发报告：[Semantic TeX Engine 表格 span 渲染开发报告（20260620-182504）](./semantic-tex-engine-development-report-20260620-182504.md)
 
 ## 1. 当前结论
 
@@ -32,7 +34,7 @@
 |---|---|---|
 | M1 语义编译 facade | 已完成 | `doc-compiler-engine` 已支持 source/dir/zip/VFS 到 DOCX，并输出阶段报告 |
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
-| M3 结构增强 | 部分完成 | 表格、图片已有文本级/块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版；图片尺寸表达式尚未完成 |
+| M3 结构增强 | 部分完成 | 表格已支持 `multicolumn` 与基础 `multirow` 到 DOCX `gridSpan/vMerge`；图片已有块级处理；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版；图片尺寸表达式尚未完成 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；新语义路径已在 DOCX 后处理阶段接入块级公式 OMML 初版；旧 `doc-docx-writer` 默认块公式仍走文本化输出 |
 | M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 未开始 | 尚无 `compatibility-analyzer`、rule engine、LLM fallback |
@@ -159,6 +161,15 @@ DocxRender
 - 旧 `doc-docx-writer` 默认 `write_equation` 行为不变，旧 `doc-core` 路径仍输出 JOSCode 纯文本公式。
 - `CompileReport` 已新增 `omml_equation_count`、`omml_equation_fallback_count`。
 
+当前表格 span 边界：
+
+- `TableCell` 已有 `colspan` / `rowspan` 字段，本轮没有修改 AST 结构。
+- `doc-latex-reader::lower_table` 已支持 `\multicolumn{n}{spec}{text}` 和基础 `\multirow{n}{width}{text}`。
+- `\multirow` 首行写入 `rowspan=n`，后续空占位单元格写入 `rowspan=0`，作为 DOCX `vMerge continue` 语义。
+- `doc-docx-writer` 已按逻辑列数推断 `tblGrid`，并为跨列单元格输出加宽后的 `w:tcW` 与 `w:gridSpan`。
+- `doc-docx-writer` 已输出 `w:vMerge w:val="restart"` / `continue`。
+- 复杂 `multirow` 变体、跨行跨列组合冲突、表格内多段落与脚注仍待后续增强。
+
 ### 2.3 paper3 样例
 
 已存在脚本：
@@ -228,9 +239,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-135900.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-135859-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-135859-semantic-engine-xelatex_hook.docx` | 3,057,535 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-182407.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-182406-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-182406-semantic-engine-xelatex_hook.docx` | 3,057,541 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -263,13 +274,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-135835-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-135835-dual-engines-semantic-engine-auto.docx` | 3,057,535 bytes | 10 | 653 | 12 | 20 | 42,535 |
+| rust-rule | `v15-论文稿件-jos-20260620-182406-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-182406-dual-engines-semantic-engine-auto.docx` | 3,057,541 bytes | 10 | 653 | 12 | 20 | 42,535 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-135835-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-182406-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -577,25 +588,35 @@ bash scripts/compare_paper3_dual_engines.sh 15
 
 ### T7 表格增强
 
-状态：待实现
+状态：已完成初版
 
 目标：
 
-- 完整支持 `multicolumn`、基础 `multirow`。
+- 支持 `multicolumn`、基础 `multirow`。
 - 改善列宽推断。
 - 表格内公式、段落、脚注可降级保留。
 
 实现要点：
 
-- 扩展 `TableCell` 结构，明确 `grid_span`、`v_merge`。
-- DOCX writer 输出 `w:gridSpan`、`w:vMerge`。
-- 保持 booktabs/hline 基础边框策略。
+- 未修改 `TableCell` 结构，复用已有 `colspan` / `rowspan` 字段，保持旧 `doc-core` 路径模型兼容。
+- `doc-latex-reader::lower_table` 已支持 `\multicolumn{n}{spec}{text}` 的列索引推进。
+- `doc-latex-reader::lower_table` 已新增基础 `\multirow{n}{width}{text}` 解析，后续空占位单元格用 `rowspan=0` 表示 `vMerge continue`。
+- `doc-docx-writer::write_table` 已按逻辑列数计算 `tblGrid`，跨列单元格宽度按 `colspan` 放大。
+- DOCX writer 已输出 `w:gridSpan`、`w:vMerge restart/continue`。
+- booktabs/hline 基础边框策略保持不变。
+- 表格内复杂多段落、脚注与复杂跨行跨列组合仍是后续增强项。
 
 验收：
 
 ```bash
+cargo test -p doc-latex-reader multi -- --nocapture
 cargo test -p doc-latex-reader table
+cargo test -p doc-docx-writer table_colspan_and_rowspan_emit_grid_span_and_vmerge -- --nocapture
 cargo test -p doc-docx-writer table
+cargo test -p doc-core
+cargo test -p doc-compiler-engine
+bash scripts/build_paper3_three_docx.sh 15
+bash scripts/compare_paper3_dual_engines.sh 15
 ```
 
 ### T8 图片尺寸表达式
@@ -764,6 +785,10 @@ cargo test -p doc-compiler-engine omml -- --nocapture
 cargo test -p doc-compiler-engine
 cargo test -p doc-mathml
 cargo test -p doc-docx-writer block_equation_uses_jos_code_plain_text
+cargo test -p doc-latex-reader multi -- --nocapture
+cargo test -p doc-latex-reader table
+cargo test -p doc-docx-writer table_colspan_and_rowspan_emit_grid_span_and_vmerge -- --nocapture
+cargo test -p doc-docx-writer table
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-latex-reader ref
 cargo test -p doc-core
@@ -782,11 +807,15 @@ doc-compiler-engine omml: 1 passed
 doc-compiler-engine: 17 passed, 1 ignored
 doc-mathml: 19 passed
 doc-docx-writer block equation legacy behavior: 1 passed
+doc-latex-reader multi: 7 passed
+doc-latex-reader table: 7 unit tests plus snapshot_table passed
+doc-docx-writer table_colspan_and_rowspan_emit_grid_span_and_vmerge: 1 passed
+doc-docx-writer table: 6 passed
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
 paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
-paper3 dual engines: rust-rule/semantic-engine generated, comparison report, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
+paper3 dual engines: rust-rule/semantic-engine generated, paragraphs=653, tables=12, drawings=20 on both paths; comparison report, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -799,15 +828,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T7：
+下一步建议进入 T8：
 
 ```text
-T7 表格增强
+T8 图片尺寸表达式
 ```
 
 具体先做：
 
-1. 盘点 `doc-latex-reader` 当前 `tabular` / `array` / `booktabs` / `multicolumn` 解析能力。
-2. 明确 `TableCell` 是否已有 `grid_span` / `v_merge` 元数据，以及旧路径依赖范围。
-3. 优先在新语义路径中验证 `multicolumn` 到 `w:gridSpan` 的最小闭环。
-4. 跑 `cargo test -p doc-latex-reader table`、`cargo test -p doc-docx-writer table` 与 paper3 三路径脚本。
+1. 盘点 `doc-latex-reader` 当前 `\includegraphics` options 解析能力。
+2. 明确 `Block::Figure` / `DocumentGraph` 中图片尺寸表达式的承载位置，避免影响旧路径默认行为。
+3. 优先支持 `width=.8\textwidth`、`width=0.5\linewidth`、`scale=...` 的归一化。
+4. 跑 `cargo test -p doc-latex-reader figure`、`cargo test -p doc-docx-writer image` 与 paper3 三路径脚本。

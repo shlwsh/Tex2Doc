@@ -2020,6 +2020,7 @@ fn lower_table(
     // 主体可能被 `\\` 分行
     let rows_text: Vec<&str> = body.split("\\\\").collect();
     let mut rows: Vec<TableRow> = Vec::new();
+    let mut active_rowspans: Vec<usize> = Vec::new();
     for row in rows_text {
         // v13.2.2 R4: 过滤 phantom 行（\bottomrule 等单独成行 → 1 个空 cell）
         let cells_probe: Vec<&str> = row.split('&').collect();
@@ -2076,7 +2077,23 @@ fn lower_table(
             continue;
         }
         let mut cells: Vec<TableCell> = Vec::new();
+        let mut col_idx = 0usize;
         for c in cells_text {
+            let raw_cell_text = c.trim();
+            if active_rowspans.get(col_idx).copied().unwrap_or(0) > 0 && raw_cell_text.is_empty() {
+                cells.push(TableCell {
+                    runs: vec![],
+                    colspan: 1,
+                    rowspan: 0,
+                    bg_color: current_row_color.clone(),
+                });
+                if let Some(remaining) = active_rowspans.get_mut(col_idx) {
+                    *remaining = remaining.saturating_sub(1);
+                }
+                col_idx += 1;
+                continue;
+            }
+
             let mut cell_bg_color = current_row_color.clone();
 
             // Check for \rowcolor{color} or \rowcolor[model]{color} in this cell (before strip_inline removes it)
@@ -2145,6 +2162,43 @@ fn lower_table(
                     rowspan: 1,
                     bg_color: cell_bg_color,
                 });
+                col_idx += n;
+                continue;
+            }
+
+            if let Some((n, cell_text)) = parse_multirow(raw_for_multicolumn) {
+                let normalized =
+                    crate::normalize::latex_to_text(&cell_text, cite_numbers, label_map);
+                let runs: Vec<TextRun> = if normalized.runs.is_empty() {
+                    vec![TextRun {
+                        text: cell_text,
+                        style: TextStyle::Plain,
+                        span,
+                    }]
+                } else {
+                    normalized
+                        .runs
+                        .into_iter()
+                        .map(|r| TextRun {
+                            text: r.text,
+                            style: r.style,
+                            span,
+                        })
+                        .collect()
+                };
+                if n > 1 {
+                    if active_rowspans.len() <= col_idx {
+                        active_rowspans.resize(col_idx + 1, 0);
+                    }
+                    active_rowspans[col_idx] = n - 1;
+                }
+                cells.push(TableCell {
+                    runs,
+                    colspan: 1,
+                    rowspan: n as u32,
+                    bg_color: cell_bg_color,
+                });
+                col_idx += 1;
                 continue;
             }
 
@@ -2155,6 +2209,7 @@ fn lower_table(
                     rowspan: 1,
                     bg_color: cell_bg_color,
                 });
+                col_idx += 1;
                 continue;
             }
             // 嵌套表格检测
@@ -2232,6 +2287,7 @@ fn lower_table(
                 rowspan: 1,
                 bg_color: cell_bg_color,
             });
+            col_idx += 1;
         }
         rows.push(TableRow { cells });
     }
@@ -2321,6 +2377,48 @@ pub fn parse_multicolumn(cell_text: &str) -> Option<(usize, String)> {
     }
     let cell_text = rest[..end].trim().to_string();
     Some((n, cell_text))
+}
+
+/// Parse \multirow{n}{width}{text} → (n, cell_text).
+pub fn parse_multirow(cell_text: &str) -> Option<(usize, String)> {
+    let prefix = "\\multirow";
+    if !cell_text.starts_with(prefix) {
+        return None;
+    }
+    let mut pos = prefix.len();
+    pos = skip_ws(cell_text, pos);
+    if cell_text.as_bytes().get(pos) == Some(&b'[') {
+        let end = cell_text[pos..].find(']')?;
+        pos += end + 1;
+        pos = skip_ws(cell_text, pos);
+    }
+    let (n_raw, next) = read_braced_arg(cell_text, pos)?;
+    let n = n_raw.trim().trim_start_matches('+').parse::<usize>().ok()?;
+    if n == 0 {
+        return None;
+    }
+    pos = skip_ws(cell_text, next);
+    let (_, next) = read_braced_arg(cell_text, pos)?;
+    pos = skip_ws(cell_text, next);
+    let (cell_text, _) = read_braced_arg(cell_text, pos)?;
+    Some((n, cell_text.trim().to_string()))
+}
+
+fn skip_ws(text: &str, mut pos: usize) -> usize {
+    while pos < text.len() && text.as_bytes()[pos].is_ascii_whitespace() {
+        pos += 1;
+    }
+    pos
+}
+
+fn read_braced_arg(text: &str, open: usize) -> Option<(String, usize)> {
+    if text.as_bytes().get(open) != Some(&b'{') {
+        return None;
+    }
+    let inner_len = find_matching_brace(text, open)?;
+    let inner_start = open + 1;
+    let inner_end = inner_start + inner_len;
+    Some((text[inner_start..inner_end].to_string(), inner_end + 1))
 }
 
 /// 从单元格文本中提取嵌套 tabular 环境内容。
@@ -4003,6 +4101,23 @@ mod tests {
                 // First cell of first row should have colspan=2
                 assert_eq!(rows[0].cells[0].colspan, 2);
                 assert_eq!(rows[0].cells[0].runs[0].text, "Merged");
+            }
+            _ => panic!("expected table"),
+        }
+    }
+
+    #[test]
+    fn lower_multirow() {
+        let src = "\\begin{tabular}{cc}\\multirow{2}{*}{Merged} & B \\\\ & C \\\\ \\end{tabular}";
+        let p = parse(src);
+        let doc = lower_to_document(&p, None);
+        match &doc.blocks[0] {
+            Block::Table { rows, .. } => {
+                assert_eq!(rows.len(), 2);
+                assert_eq!(rows[0].cells[0].rowspan, 2);
+                assert_eq!(rows[0].cells[0].runs[0].text, "Merged");
+                assert_eq!(rows[1].cells[0].rowspan, 0);
+                assert!(rows[1].cells[0].runs.is_empty());
             }
             _ => panic!("expected table"),
         }
