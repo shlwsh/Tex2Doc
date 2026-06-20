@@ -51,6 +51,7 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
         "compatibility-custom-macros: {}",
         artifact.report.compatibility.custom_macro_count
     );
+    println!("sidecars: {}", artifact.report.sidecar_count);
     println!(
         "reference-labels: {}",
         artifact.report.reference_label_count

@@ -556,6 +556,7 @@ impl SemanticTexEngine {
             .layout
             .as_ref()
             .map_or(0, |layout| layout.nodes.len());
+        report.sidecar_count = artifact.sidecars.len();
         report.reference_label_count = reference_graph.labels.len();
         report.reference_edge_count = reference_graph.references.len();
         report.citation_count = reference_graph.citations.len();
@@ -616,6 +617,7 @@ pub struct CompileReport {
     pub image_asset_count: usize,
     pub semantic_event_count: usize,
     pub layout_node_count: usize,
+    pub sidecar_count: usize,
     pub reference_label_count: usize,
     pub reference_edge_count: usize,
     pub citation_count: usize,
@@ -640,6 +642,7 @@ impl CompileReport {
             image_asset_count: 0,
             semantic_event_count: 0,
             layout_node_count: 0,
+            sidecar_count: 0,
             reference_label_count: 0,
             reference_edge_count: 0,
             citation_count: 0,
@@ -901,13 +904,71 @@ pub struct BackendAvailability {
 }
 
 #[derive(Debug, Clone)]
-pub struct SemanticBackendArtifact {
+pub struct CollectedDocument {
     pub document: Document,
     pub standard_document: Option<StandardDocument>,
     pub image_assets: ImageAssets,
     pub events: Vec<SemanticEvent>,
     pub layout: Option<LayoutGraph>,
     pub diagnostics: Vec<EngineDiagnostic>,
+    pub sidecars: Vec<BuildSidecar>,
+}
+
+impl CollectedDocument {
+    pub fn new(
+        document: Document,
+        standard_document: Option<StandardDocument>,
+        image_assets: ImageAssets,
+    ) -> Self {
+        Self {
+            document,
+            standard_document,
+            image_assets,
+            events: Vec::new(),
+            layout: None,
+            diagnostics: Vec::new(),
+            sidecars: Vec::new(),
+        }
+    }
+}
+
+pub type SemanticBackendArtifact = CollectedDocument;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BuildSidecar {
+    pub kind: String,
+    pub path: Option<String>,
+    pub description: String,
+}
+
+impl BuildSidecar {
+    pub fn new(
+        kind: impl Into<String>,
+        path: Option<impl Into<String>>,
+        description: impl Into<String>,
+    ) -> Self {
+        Self {
+            kind: kind.into(),
+            path: path.map(Into::into),
+            description: description.into(),
+        }
+    }
+}
+
+pub struct SemanticCollectorInput<'a> {
+    pub main_tex: &'a str,
+    pub vfs: &'a mut VirtualFs,
+    pub options: &'a CompileOptions,
+}
+
+pub trait SemanticCollector {
+    fn name(&self) -> &'static str;
+
+    fn collect(
+        &self,
+        input: &mut SemanticCollectorInput<'_>,
+        report: &mut CompileReport,
+    ) -> Result<CollectedDocument, EngineError>;
 }
 
 pub trait SemanticBackend {
@@ -922,6 +983,79 @@ pub trait SemanticBackend {
         options: &CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError>;
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+pub struct RuleBasedCollector;
+
+impl SemanticCollector for RuleBasedCollector {
+    fn name(&self) -> &'static str {
+        "rule-based"
+    }
+
+    fn collect(
+        &self,
+        input: &mut SemanticCollectorInput<'_>,
+        report: &mut CompileReport,
+    ) -> Result<CollectedDocument, EngineError> {
+        let graph = IncludeGraph::build(input.vfs, Path::new(input.main_tex))?;
+        let joined = graph.join(input.vfs)?;
+        report.push(
+            CompileStage::IncludeGraph,
+            StageStatus::Completed,
+            format!("joined source stream has {} bytes", joined.text.len()),
+        );
+
+        let parse = parse_tex(&joined.text);
+        report.push(
+            CompileStage::TexParse,
+            StageStatus::Completed,
+            "parsed TeX stream with the current Logos/Rowan reader",
+        );
+
+        let document =
+            lower_semantic_document(input.main_tex, input.vfs, &parse, &joined, input.options)?;
+        report.block_count = document.blocks.len();
+        report.push(
+            CompileStage::SemanticCollect,
+            StageStatus::Completed,
+            format!("collected {} semantic blocks", document.blocks.len()),
+        );
+
+        let image_assets = collect_image_assets_from_vfs(input.vfs);
+        report.image_asset_count = image_assets.len();
+
+        let source = source_bundle(input.main_tex, input.vfs);
+        let standard_document = if input.options.collect_standard_ast {
+            let standard = StandardDocument::from_legacy_document(
+                &document,
+                source,
+                input.options.profile.id(),
+            );
+            report.push(
+                CompileStage::DocumentGraph,
+                StageStatus::Completed,
+                format!(
+                    "document graph contains {} block nodes",
+                    standard.blocks.len()
+                ),
+            );
+            Some(standard)
+        } else {
+            report.push(
+                CompileStage::DocumentGraph,
+                StageStatus::Skipped,
+                "standard AST collection disabled",
+            );
+            None
+        };
+
+        Ok(CollectedDocument::new(
+            document,
+            standard_document,
+            image_assets,
+        ))
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -946,62 +1080,12 @@ impl SemanticBackend for RuleBasedBackend {
         options: &CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
-        let graph = IncludeGraph::build(vfs, Path::new(main_tex))?;
-        let joined = graph.join(vfs)?;
-        report.push(
-            CompileStage::IncludeGraph,
-            StageStatus::Completed,
-            format!("joined source stream has {} bytes", joined.text.len()),
-        );
-
-        let parse = parse_tex(&joined.text);
-        report.push(
-            CompileStage::TexParse,
-            StageStatus::Completed,
-            "parsed TeX stream with the current Logos/Rowan reader",
-        );
-
-        let document = lower_semantic_document(main_tex, vfs, &parse, &joined, options)?;
-        report.block_count = document.blocks.len();
-        report.push(
-            CompileStage::SemanticCollect,
-            StageStatus::Completed,
-            format!("collected {} semantic blocks", document.blocks.len()),
-        );
-
-        let image_assets = collect_image_assets_from_vfs(vfs);
-        report.image_asset_count = image_assets.len();
-
-        let source = source_bundle(main_tex, vfs);
-        let standard_document = if options.collect_standard_ast {
-            let standard =
-                StandardDocument::from_legacy_document(&document, source, options.profile.id());
-            report.push(
-                CompileStage::DocumentGraph,
-                StageStatus::Completed,
-                format!(
-                    "document graph contains {} block nodes",
-                    standard.blocks.len()
-                ),
-            );
-            Some(standard)
-        } else {
-            report.push(
-                CompileStage::DocumentGraph,
-                StageStatus::Skipped,
-                "standard AST collection disabled",
-            );
-            None
+        let mut input = SemanticCollectorInput {
+            main_tex,
+            vfs,
+            options,
         };
-
-        Ok(SemanticBackendArtifact {
-            document,
-            standard_document,
-            image_assets,
-            events: Vec::new(),
-            layout: None,
-            diagnostics: Vec::new(),
-        })
+        RuleBasedCollector.collect(&mut input, report)
     }
 }
 
@@ -1028,6 +1112,11 @@ impl SemanticBackend for XeLaTeXHookBackend {
         let event_count = events.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
         artifact.events = events;
+        artifact.sidecars.push(BuildSidecar::new(
+            "semantic-events-jsonl",
+            Some(SEMANTIC_SIDECAR),
+            "semantic events collected from the XeLaTeX hook sidecar",
+        ));
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
             format!("XeLaTeXHookBackend collected {event_count} semantic events"),
@@ -1065,6 +1154,11 @@ impl SemanticBackend for LuaTeXNodeBackend {
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
         artifact.events = events;
         artifact.layout = Some(LayoutGraph::default());
+        artifact.sidecars.push(BuildSidecar::new(
+            "semantic-events-jsonl",
+            Some(SEMANTIC_SIDECAR),
+            "semantic events collected from the LuaTeX node sidecar",
+        ));
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
             format!("LuaTeXNodeBackend collected {event_count} semantic events"),
@@ -3789,6 +3883,52 @@ Body text.
         assert!(graph.report.diagnostics.iter().any(|diag| {
             diag.code == "compatibility_unsupported" && diag.message.contains("minted")
         }));
+    }
+
+    #[test]
+    fn rule_based_collector_outputs_collected_document() {
+        let options = CompileOptions {
+            semantic_backend: SemanticBackendKind::RuleBased,
+            ..CompileOptions::default()
+        };
+        let mut vfs = VirtualFs::new();
+        vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
+        let mut input = SemanticCollectorInput {
+            main_tex: "main.tex",
+            vfs: &mut vfs,
+            options: &options,
+        };
+        let mut report = CompileReport::new(options.profile);
+
+        let collected = RuleBasedCollector
+            .collect(&mut input, &mut report)
+            .expect("collect rule-based document");
+
+        assert_eq!(RuleBasedCollector.name(), "rule-based");
+        assert!(collected.document.blocks.iter().any(|block| {
+            matches!(block, Block::Heading { text, .. } if text == "Introduction")
+        }));
+        assert!(collected.standard_document.is_some());
+        assert!(collected.events.is_empty());
+        assert!(collected.sidecars.is_empty());
+        assert_eq!(report.block_count, collected.document.blocks.len());
+        assert!(report
+            .stages
+            .iter()
+            .any(|stage| stage.stage == CompileStage::SemanticCollect));
+    }
+
+    #[test]
+    fn build_sidecar_preserves_metadata() {
+        let sidecar = BuildSidecar::new(
+            "semantic-events-jsonl",
+            Some(SEMANTIC_SIDECAR),
+            "runtime semantic event stream",
+        );
+
+        assert_eq!(sidecar.kind, "semantic-events-jsonl");
+        assert_eq!(sidecar.path.as_deref(), Some(SEMANTIC_SIDECAR));
+        assert_eq!(sidecar.description, "runtime semantic event stream");
     }
 
     #[test]

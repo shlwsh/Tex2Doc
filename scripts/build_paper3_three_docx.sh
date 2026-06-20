@@ -231,7 +231,7 @@ append_report_row "semantic-engine" "$SEMANTIC_DOCX" "$SEMANTIC_LOG"
   echo
   echo "## Semantic Backend"
   echo
-  grep -E '^(backend-(requested|selected|fallback-from|reason)|compatibility-(score|unsupported|warnings|custom-macros)|profile-(id|page-setup)|reference-(labels|edges)|citations|unresolved-references|bookmarks|hyperlinks|omml-equations|omml-equation-fallbacks):' "$SEMANTIC_LOG" || true
+  grep -E '^(backend-(requested|selected|fallback-from|reason)|compatibility-(score|unsupported|warnings|custom-macros)|sidecars|profile-(id|page-setup)|reference-(labels|edges)|citations|unresolved-references|bookmarks|hyperlinks|omml-equations|omml-equation-fallbacks):' "$SEMANTIC_LOG" || true
 } >>"$REPORT"
 
 echo "=== done ==="

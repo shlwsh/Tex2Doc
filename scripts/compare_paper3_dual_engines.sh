@@ -131,6 +131,7 @@ def read_backend_lines(path: Path) -> list[str]:
         "compatibility-unsupported:",
         "compatibility-warnings:",
         "compatibility-custom-macros:",
+        "sidecars:",
         "profile-id:",
         "profile-page-setup:",
         "reference-labels:",

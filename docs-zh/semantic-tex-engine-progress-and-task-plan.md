@@ -27,6 +27,8 @@
 > 图片尺寸表达式开发报告：[Semantic TeX Engine 图片尺寸表达式开发报告（20260620-184710）](./semantic-tex-engine-development-report-20260620-184710.md)
 >
 > 兼容性分析器开发报告：[Semantic TeX Engine 兼容性分析器开发报告（20260620-190143）](./semantic-tex-engine-development-report-20260620-190143.md)
+>
+> Semantic Collector trait 开发报告：[Semantic TeX Engine Collector 输出模型开发报告（20260620-192816）](./semantic-tex-engine-development-report-20260620-192816.md)
 
 ## 1. 当前结论
 
@@ -40,7 +42,7 @@
 | M2 Profile 化 | 部分完成 | 已有 `ProfileSpec` 初版，JOS/中文学术/医学期刊具备页面、字体、caption、引用策略；规则尚未 YAML/TOML 外置 |
 | M3 结构增强 | 部分完成 | 表格已支持 `multicolumn` 与基础 `multirow` 到 DOCX `gridSpan/vMerge`；图片已支持 `includegraphics` 尺寸表达式采集、Graph 元数据和 DOCX EMU 换算初版；`ReferenceGraph` 初版已结构化 label/ref/eqref/autoref/cite；语义 DOCX 后处理已支持 bookmark/hyperlink 初版 |
 | M4 公式引擎 | 部分完成 | `doc-mathml` 有 Math AST 与 OMML 输出；新语义路径已在 DOCX 后处理阶段接入块级公式 OMML 初版；旧 `doc-docx-writer` 默认块公式仍走文本化输出 |
-| M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
+| M5 LuaHook/XDV | 部分完成 | 已在 `doc-compiler-engine` 内实现 backend trait、collector trait、`CollectedDocument` 输出模型、XeLaTeX hook sidecar、LuaTeX node/macro sidecar 原型、Auto selector 和 fallback；尚未拆出 `semantic-collector`、`xdv-parser` crate |
 | M6 兼容性与 AI fallback | 部分完成 | `doc-compiler-engine` 已有内置轻量兼容性扫描器，输出 score、unsupported、warnings；独立 `compatibility-analyzer` crate、rule engine、LLM fallback 尚未实现 |
 
 ## 2. 已落地内容
@@ -90,6 +92,11 @@ CompileReport
 EngineProfile
 SemanticBackend
 SemanticBackendKind
+SemanticCollector
+SemanticCollectorInput
+CollectedDocument
+BuildSidecar
+RuleBasedCollector
 RuleBasedBackend
 XeLaTeXHookBackend
 LuaTeXNodeBackend
@@ -125,7 +132,7 @@ DocxRender
 4. `ctex` / `xeCJK` / `fontspec` / XeTeX 字体命令优先选择 `XeLaTeXHookBackend`。
 5. LuaTeX 特征或通用 LaTeX 在 `lualatex` 可用时优先选择 `LuaTeXNodeBackend`。
 6. runtime 不可用或失败且允许 fallback 时，回退 `RuleBasedBackend`。
-7. `RuleBasedBackend` 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
+7. `RuleBasedBackend` 委托 `RuleBasedCollector`，由 collector 使用 `IncludeGraph::build/join` 展开 `\input` / `\include`。
 8. `parse_tex` 使用现有 Logos/Rowan 解析器。
 9. `lower_to_document` 或 `lower_to_document_with_cite_map` 生成旧 `Document`。
 10. `StandardDocument::from_legacy_document` 生成标准文档图。
@@ -140,6 +147,16 @@ DocxRender
 - 用户显式指定 runtime backend 且允许 fallback 时，runtime 失败会回退到 `RuleBasedBackend`，并输出 `backend_fallback` warning。
 - 用户显式指定 runtime backend 且关闭 fallback 时，runtime 失败会返回错误，用于验证该 backend 是否真的可用。
 - 已提供 `parse_semantic_events_jsonl`，作为 XeLaTeX/LuaTeX sidecar 协议解析入口。
+
+当前 collector 输出模型边界：
+
+- `doc-compiler-engine` 已新增 `SemanticCollector` trait 和 `SemanticCollectorInput`。
+- 已新增统一中间输出 `CollectedDocument`，包含 legacy `Document`、可选 `StandardDocument`、图片资产、semantic events、layout、diagnostics、sidecars。
+- 旧名 `SemanticBackendArtifact` 暂时作为 `CollectedDocument` 的类型别名保留，降低迁移风险。
+- `RuleBasedCollector` 已承接原 `RuleBasedBackend.collect` 内的 include graph、TeX parse、lowering、标准文档图构建流程。
+- `RuleBasedBackend` 现在只负责适配 `SemanticBackend`，不再直接绑定 `doc-latex-reader` lowering 细节。
+- runtime backend 会把 `__docx_semantic_events.jsonl` 记录为 `BuildSidecar`，`CompileReport.sidecar_count` 会输出 sidecar 数量。
+- 独立 `crates/semantic-collector` 尚未拆分；当前 trait 和输出结构是后续拆 crate 的 API 原型。
 
 当前 profile 规则边界：
 
@@ -263,9 +280,9 @@ examples/paper3/output/to-docx
 
 | 路径 | 文件 | 大小 | media |
 |---|---|---:|---:|
-| sh | `v15-论文稿件-jos-sh-20260620-190110.docx` | 3,079,377 bytes | 10 |
-| rust-rule | `v15-论文稿件-jos-20260620-190109-rust-rule.docx` | 3,055,363 bytes | 10 |
-| semantic-engine | `v15-论文稿件-jos-20260620-190109-semantic-engine-xelatex_hook.docx` | 3,057,574 bytes | 10 |
+| sh | `v15-论文稿件-jos-sh-20260620-192754.docx` | 3,079,377 bytes | 10 |
+| rust-rule | `v15-论文稿件-jos-20260620-192754-rust-rule.docx` | 3,055,363 bytes | 10 |
+| semantic-engine | `v15-论文稿件-jos-20260620-192754-semantic-engine-xelatex_hook.docx` | 3,057,574 bytes | 10 |
 
 semantic-engine 后端报告：
 
@@ -274,6 +291,7 @@ compatibility-score: 76
 compatibility-unsupported: 0
 compatibility-warnings: 2
 compatibility-custom-macros: 46
+sidecars: 1
 reference-labels: 35
 reference-edges: 46
 citations: 36
@@ -302,13 +320,13 @@ profile-page-setup: jos-paper3
 
 | engine | 文件 | 大小 | media | paragraphs | tables | drawings | text chars |
 |---|---|---:|---:|---:|---:|---:|---:|
-| rust-rule | `v15-论文稿件-jos-20260620-190053-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
-| semantic-engine auto | `v15-论文稿件-jos-20260620-190053-dual-engines-semantic-engine-auto.docx` | 3,057,574 bytes | 10 | 653 | 12 | 20 | 42,535 |
+| rust-rule | `v15-论文稿件-jos-20260620-192735-dual-engines-rust-rule.docx` | 3,055,363 bytes | 10 | 653 | 12 | 20 | 41,963 |
+| semantic-engine auto | `v15-论文稿件-jos-20260620-192735-dual-engines-semantic-engine-auto.docx` | 3,057,574 bytes | 10 | 653 | 12 | 20 | 42,535 |
 
 对比报告：
 
 ```text
-examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-190053-dual-engines-comparison-report.md
+examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-192735-dual-engines-comparison-report.md
 ```
 
 结论：
@@ -319,6 +337,7 @@ examples/paper3/output/to-docx/v15-论文稿件-jos-20260620-190053-dual-engines
 - 语义 DOCX 链接统计为 `bookmarks=25`、`hyperlinks=35`。
 - 语义 DOCX 公式统计为 `omml-equations=4`、`omml-equation-fallbacks=0`。
 - 兼容性分析统计为 `compatibility-score=76`、`compatibility-unsupported=0`、`compatibility-warnings=2`、`compatibility-custom-macros=46`。
+- collector sidecar 统计为 `sidecars=1`。
 - 关键短语 `基于动态关注清单`、`微服务日志`、`Dynamic Attention List`、`DASM`、`Loki`、`DSB-Lite`、`系统总体设计`、`实验与分析` 在两条路径中均命中。
 - 两条路径的段落数、表格数、图片数一致；文本 diff 已输出到 `*-document-text.diff`，用于后续差异分析。
 
@@ -709,7 +728,7 @@ bash scripts/build_paper3_three_docx.sh 15
 
 ### T10 Semantic Collector trait
 
-状态：部分完成
+状态：已完成内置初版
 
 目标：
 
@@ -724,6 +743,11 @@ bash scripts/build_paper3_three_docx.sh 15
 当前落地：
 
 - 已在 `doc-compiler-engine` 内定义 `SemanticBackend` trait。
+- 已在 `doc-compiler-engine` 内定义 `SemanticCollector` trait 和 `SemanticCollectorInput`。
+- 已新增 `CollectedDocument` 统一输出模型。
+- 已新增 `BuildSidecar`，用于记录 runtime sidecar 产物。
+- 已新增 `CompileReport.sidecar_count`。
+- 已将原 `RuleBasedBackend.collect` 的核心 lowering 链路迁入 `RuleBasedCollector`。
 - 已将现有规则解析链封装为 `RuleBasedBackend`。
 - 已实现 `XeLaTeXHookBackend` 最小可运行原型。
 - 已实现 `LuaTeXNodeBackend` 最小可运行原型。
@@ -733,7 +757,11 @@ bash scripts/build_paper3_three_docx.sh 15
 验收：
 
 ```bash
-cargo test -p doc-compiler-engine collector
+cargo test -p doc-compiler-engine collector -- --nocapture
+cargo test -p doc-compiler-engine sidecar -- --nocapture
+cargo test -p doc-compiler-engine
+bash scripts/compare_paper3_dual_engines.sh 15
+bash scripts/build_paper3_three_docx.sh 15
 ```
 
 ## 4.1 双后端计划状态（2026-06-20 更新）
@@ -743,7 +771,7 @@ cargo test -p doc-compiler-engine collector
 | 编号 | 状态 | 当前实现 |
 |---|---|---|
 | B0 方案审核 | 已完成文档草案 | 已输出带时间戳的双后端设计方案，明确新路径独立于 `doc-core` |
-| B1 Backend trait 与报告字段 | 已完成初版 | `SemanticBackend`、`SemanticBackendKind`、`BackendSelectionReport`、`CompileReport.backend` 已落地 |
+| B1 Backend/Collector trait 与报告字段 | 已完成初版 | `SemanticBackend`、`SemanticCollector`、`CollectedDocument`、`BuildSidecar`、`SemanticBackendKind`、`BackendSelectionReport`、`CompileReport.backend`、`CompileReport.sidecar_count` 已落地 |
 | B2 XeLaTeXHookBackend 原型 | 已完成初版 | 已生成 hook tex、调用 `xelatex`、解析 sidecar；paper3 严格选中 `xelatex-hook` |
 | B3 LuaTeXNodeBackend 原型 | 已完成初版 | 已生成 Lua collector、调用 `lualatex`、采集 heading/paragraph/label/ref/cite/equation 等事件；paper3 因 `xeCJK` 强制 XeTeX 按设计 fallback |
 | B4 Auto selector | 已完成初版 | `Auto` 已根据模板特征和 runtime 可用性选择 `XeLaTeXHookBackend` / `LuaTeXNodeBackend` / `RuleBasedBackend`；paper3 自动选择 `xelatex-hook` |
@@ -844,6 +872,8 @@ cargo test -p doc-latex-reader figure -- --nocapture
 cargo test -p doc-docx-writer image -- --nocapture
 cargo test -p doc-docx-writer figure
 cargo test -p doc-compiler-engine compatibility -- --nocapture
+cargo test -p doc-compiler-engine collector -- --nocapture
+cargo test -p doc-compiler-engine sidecar -- --nocapture
 cargo test -p doc-compiler-engine luatex_runtime_collects_semantic_events -- --ignored --nocapture
 cargo test -p doc-latex-reader ref
 cargo test -p doc-core
@@ -860,7 +890,9 @@ doc-compiler-engine reference: 2 passed
 doc-compiler-engine bookmark: 1 passed
 doc-compiler-engine omml: 1 passed
 doc-compiler-engine compatibility: 2 passed
-doc-compiler-engine: 19 passed, 1 ignored
+doc-compiler-engine collector: 1 passed
+doc-compiler-engine sidecar: 1 passed
+doc-compiler-engine: 21 passed, 1 ignored
 doc-mathml: 19 passed
 doc-docx-writer block equation legacy behavior: 1 passed
 doc-latex-reader multi: 7 passed
@@ -874,8 +906,8 @@ doc-docx-writer figure: 2 passed
 doc-compiler-engine luatex ignored integration: 1 passed
 doc-latex-reader ref: 9 passed
 doc-core: 5 passed
-paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic compatibility-score=76, unsupported=0, warnings=2, custom-macros=46, bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
-paper3 dual engines: rust-rule/semantic-engine generated, paragraphs=653, tables=12, drawings=20 on both paths; comparison report, compatibility counts, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
+paper3 three-docx: sh/rust-rule/semantic-engine generated, semantic compatibility-score=76, unsupported=0, warnings=2, custom-macros=46, sidecars=1, bookmarks=25, hyperlinks=35, omml-equations=4, omml-equation-fallbacks=0
+paper3 dual engines: rust-rule/semantic-engine generated, paragraphs=653, tables=12, drawings=20 on both paths; comparison report, compatibility counts, sidecar count, reference graph counts, bookmark/hyperlink counts, OMML counts and text diff generated
 paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node generated
 ```
 
@@ -888,15 +920,15 @@ paper3 semantic backend compare: auto/rule-based/xelatex-hook/luatex-node genera
 
 ## 7. 下一步执行项
 
-下一步建议进入 T10：
+下一步建议进入 T11：
 
 ```text
-T10 Semantic Collector trait
+T11 XDV parser 原型
 ```
 
 具体先做：
 
-1. 梳理当前 `SemanticBackend` 与 collector 责任边界。
-2. 设计 `CollectedDocument` / `SemanticCollector` 的最小 trait。
-3. 优先在 `doc-compiler-engine` 内把规则降级、XeLaTeX hook、LuaTeX node 的公共输出结构收敛，再评估是否拆出 `crates/semantic-collector`。
-4. 继续保持旧 `doc-core` 路径不依赖新语义引擎。
+1. 新增 `crates/xdv-parser` 最小 crate。
+2. 先解析 XDV/DVI 指令头和最小 opcode 子集。
+3. 定义 FontDef、Glyph、SetChar、Push、Pop、Rule、Special 的数据结构。
+4. 用 fixture 单测锁定 parser 行为，暂不接入 DOCX 输出。
