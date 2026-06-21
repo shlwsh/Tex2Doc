@@ -20,6 +20,7 @@ doc-docx-writer = { path = "../docx-writer" }
 doc-latex-reader = { path = "../latex-reader" }
 doc-semantic-ast = { path = "../semantic-ast" }
 doc-utils       = { path = "../utils" }
+doc-compiler-engine = { path = "../compiler-engine" }
 
 clap     = { workspace = true }
 tokio    = { workspace = true, features = ["macros", "rt-multi-thread", "fs", "process", "sync"] }

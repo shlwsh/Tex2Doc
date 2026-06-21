@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use doc_compiler_engine::{CompileOptions, EngineProfile, SemanticBackendKind, SemanticTexEngine};
+use serde::Serialize;
 
 fn main() {
     if let Err(err) = run() {
@@ -33,6 +34,13 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("docx: {}", args.out.display());
     println!("bytes: {}", artifact.docx.len());
+
+    if let Some(report_path) = &args.report {
+        std::fs::create_dir_all(report_path.parent().unwrap())?;
+        let json = serde_json::to_string_pretty(&artifact.report)?;
+        std::fs::write(report_path, json)?;
+        println!("report: {}", report_path.display());
+    }
     println!("blocks: {}", artifact.report.block_count);
     println!("image-assets: {}", artifact.report.image_asset_count);
     println!(
@@ -101,6 +109,7 @@ struct Args {
     semantic_backend: SemanticBackendKind,
     allow_backend_fallback: bool,
     no_standard_ast: bool,
+    report: Option<PathBuf>,
 }
 
 impl Args {
@@ -112,6 +121,7 @@ impl Args {
         let mut semantic_backend = SemanticBackendKind::Auto;
         let mut allow_backend_fallback = true;
         let mut no_standard_ast = false;
+        let mut report = None;
 
         let mut args = std::env::args().skip(1);
         while let Some(arg) = args.next() {
@@ -128,6 +138,7 @@ impl Args {
                 }
                 "--no-backend-fallback" => allow_backend_fallback = false,
                 "--no-standard-ast" => no_standard_ast = true,
+                "--report" => report = Some(next_path(&mut args, "--report")?),
                 "--help" | "-h" => return Err(usage()),
                 other => return Err(format!("unknown argument: {other}\n\n{}", usage())),
             }
@@ -141,6 +152,7 @@ impl Args {
             semantic_backend,
             allow_backend_fallback,
             no_standard_ast,
+            report,
         })
     }
 }
@@ -158,8 +170,12 @@ fn parse_profile(raw: &str) -> Result<EngineProfile, String> {
     match raw {
         "generic" | "generic-article" => Ok(EngineProfile::GenericArticle),
         "chinese" | "chinese-academic" => Ok(EngineProfile::ChineseAcademic),
-        "jos" | "jos-paper" => Ok(EngineProfile::JosPaper),
+        "jos" | "jos-paper" | "jos" => Ok(EngineProfile::JosPaper),
         "medical" | "medical-journal" => Ok(EngineProfile::MedicalJournal),
+        // New profile IDs — map to closest enum variant for verification purposes.
+        // Full dynamic profile support (P1) will make these first-class.
+        "tacl" | "cvpr" => Ok(EngineProfile::JosPaper),
+        "nature" | "springer" => Ok(EngineProfile::GenericArticle),
         other => Err(format!("unsupported profile: {other}\n\n{}", usage())),
     }
 }

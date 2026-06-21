@@ -1,0 +1,13 @@
+[package]
+name = "doc-desktop-slint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slint = "1"
+doc-core = { path = "../core" }
+doc-compiler-engine = { path = "../compiler-engine" }
+
+[build-dependencies]
+slint-build = "1"

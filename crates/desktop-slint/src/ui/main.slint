@@ -1,0 +1,43 @@
+import { Button, VerticalBox, LineEdit, TextEdit, GridBox } from "std-widgets.slint";
+
+export component MainWindow inherits Window {
+    in-out property <string> project-path;
+    in-out property <string> status;
+    
+    GridBox {
+        padding: 24px;
+        spacing: 12px;
+        
+        Text {
+            text: "Tex2Doc Desktop";
+            font-size: 24px;
+            font-weight: 700;
+            row: 0;
+            colspan: 2;
+        }
+        
+        LineEdit {
+            placeholder-text: "TeX project path...";
+            text <=> project-path;
+            row: 1;
+            colspan: 2;
+        }
+        
+        Button {
+            text: "Detect Profile";
+            clicked => { 
+                status = "Detecting...";
+            }
+            row: 2;
+            colspan: 2;
+        }
+        
+        TextEdit {
+            text <=> status;
+            read-only: true;
+            min-height: 200px;
+            row: 3;
+            colspan: 2;
+        }
+    }
+}

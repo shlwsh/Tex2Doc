@@ -110,6 +110,7 @@ impl EngineProfile {
                     bibliography_style: "plain",
                     reference_section_title: "References",
                 },
+                style_map: Some(doc_docx_writer::ProfileStyleMap::generic()),
             },
             Self::ChineseAcademic => ProfileSpec {
                 profile: self,
@@ -134,6 +135,7 @@ impl EngineProfile {
                     bibliography_style: "gbt7714-like",
                     reference_section_title: "参考文献",
                 },
+                style_map: None,
             },
             Self::JosPaper => ProfileSpec {
                 profile: self,
@@ -158,6 +160,7 @@ impl EngineProfile {
                     bibliography_style: "unsrt",
                     reference_section_title: "References",
                 },
+                style_map: Some(doc_docx_writer::ProfileStyleMap::jos()),
             },
             Self::MedicalJournal => ProfileSpec {
                 profile: self,
@@ -182,12 +185,13 @@ impl EngineProfile {
                     bibliography_style: "vancouver-like",
                     reference_section_title: "References",
                 },
+                style_map: None,
             },
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileSpec {
     pub profile: EngineProfile,
     pub id: &'static str,
@@ -197,6 +201,8 @@ pub struct ProfileSpec {
     pub font_policy: FontPolicySpec,
     pub caption_policy: CaptionPolicySpec,
     pub citation_policy: CitationPolicySpec,
+    /// Profile-specific DOCX style mappings (e.g. JOS vs generic).
+    pub style_map: Option<doc_docx_writer::ProfileStyleMap>,
 }
 
 impl ProfileSpec {
@@ -329,6 +335,8 @@ pub struct CompileOptions {
     pub page_setup: Option<doc_docx_writer::PageSetup>,
     pub collect_standard_ast: bool,
     pub enable_bibliography: bool,
+    /// Optional profile-specific style map. If None, uses the profile's default.
+    pub style_map: Option<doc_docx_writer::ProfileStyleMap>,
 }
 
 impl Default for CompileOptions {
@@ -344,6 +352,7 @@ impl Default for CompileOptions {
             page_setup: None,
             collect_standard_ast: true,
             enable_bibliography: true,
+            style_map: None,
         }
     }
 }
@@ -353,6 +362,14 @@ impl CompileOptions {
         self.page_setup
             .clone()
             .or_else(|| self.profile.spec().default_page_setup())
+    }
+
+    /// Returns the effective style map: explicit override takes precedence,
+    /// then falls back to the profile's built-in default.
+    pub fn effective_style_map(&self) -> Option<doc_docx_writer::ProfileStyleMap> {
+        self.style_map
+            .clone()
+            .or_else(|| self.profile.spec().style_map.clone())
     }
 }
 
@@ -459,11 +476,13 @@ impl SemanticTexEngine {
             ),
         );
 
+        let style_map = options.effective_style_map();
         let mut docx = doc_docx_writer::pack_with_page_setup(
             &graph.document,
             options.template_bytes.as_deref(),
             Some(&graph.image_assets),
             page_setup.as_ref(),
+            style_map.as_ref(),
         )
         .map_err(|e| EngineError::Serialize(e.to_string()))?;
         if options.enable_omml_equations {
@@ -479,6 +498,9 @@ impl SemanticTexEngine {
             docx = linked.docx;
         }
         graph.report.docx_bytes = docx.len();
+
+        // Run quality gate (min score 70)
+        graph.report.run_quality_gate(70);
 
         Ok(CompileArtifact {
             docx,
@@ -609,6 +631,30 @@ pub struct CompileArtifact {
     pub report: CompileReport,
 }
 
+/// Result of a quality gate check applied after DOCX generation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityGateResult {
+    pub passed: bool,
+    pub total_checks: usize,
+    pub passed_checks: usize,
+    pub failed_checks: Vec<QualityCheck>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityCheck {
+    pub name: String,
+    pub passed: bool,
+    pub severity: QualitySeverity,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualitySeverity {
+    Error,
+    Warning,
+    Info,
+}
+
 /// Unified document graph used between semantic collection and renderers.
 #[derive(Debug, Clone)]
 pub struct DocumentGraph {
@@ -644,6 +690,7 @@ pub struct CompileReport {
     pub omml_equation_count: usize,
     pub omml_equation_fallback_count: usize,
     pub docx_bytes: usize,
+    pub quality_gate: Option<QualityGateResult>,
 }
 
 impl CompileReport {
@@ -670,6 +717,7 @@ impl CompileReport {
             omml_equation_count: 0,
             omml_equation_fallback_count: 0,
             docx_bytes: 0,
+            quality_gate: None,
         }
     }
 
@@ -678,6 +726,105 @@ impl CompileReport {
             stage,
             status,
             message: message.into(),
+        });
+    }
+
+    /// Run quality gate checks against the current compile report state.
+    ///
+    /// Checks:
+    /// - Compatibility score >= `min_score`
+    /// - unresolved_reference_count == 0 (no broken links)
+    /// - Not 100% OMML fallback (omml_equation_fallback_count < omml_equation_count)
+    /// - docx_bytes > 0 (non-empty output)
+    pub fn run_quality_gate(&mut self, min_score: u8) {
+        let mut checks = Vec::new();
+
+        // Compatibility score check
+        let score = self.compatibility.score;
+        let score_passed = score >= min_score;
+        checks.push(QualityCheck {
+            name: "compatibility_score".to_string(),
+            passed: score_passed,
+            severity: if score_passed {
+                QualitySeverity::Info
+            } else {
+                QualitySeverity::Error
+            },
+            message: format!(
+                "compatibility score {} (min={min_score}): {}",
+                score,
+                if score_passed { "pass" } else { "FAIL" }
+            ),
+        });
+
+        // Unresolved references check
+        let unresolved = self.unresolved_reference_count;
+        let unresolved_passed = unresolved == 0;
+        checks.push(QualityCheck {
+            name: "unresolved_references".to_string(),
+            passed: unresolved_passed,
+            severity: if unresolved_passed {
+                QualitySeverity::Info
+            } else {
+                QualitySeverity::Warning
+            },
+            message: format!(
+                "{} unresolved reference(s): {}",
+                unresolved,
+                if unresolved_passed { "pass" } else { "WARN" }
+            ),
+        });
+
+        // OMML fallback check
+        let omml_total = self.omml_equation_count;
+        let omml_fallback = self.omml_equation_fallback_count;
+        let omml_passed = omml_total == 0 || omml_fallback < omml_total;
+        checks.push(QualityCheck {
+            name: "omml_equation_fallback".to_string(),
+            passed: omml_passed,
+            severity: if omml_passed {
+                QualitySeverity::Info
+            } else {
+                QualitySeverity::Warning
+            },
+            message: format!(
+                "{}/{} equations used OMML (fallback check): {}",
+                omml_total - omml_fallback,
+                omml_total,
+                if omml_passed { "pass" } else { "WARN" }
+            ),
+        });
+
+        // DOCX non-empty check
+        let bytes = self.docx_bytes;
+        let bytes_passed = bytes > 0;
+        checks.push(QualityCheck {
+            name: "docx_non_empty".to_string(),
+            passed: bytes_passed,
+            severity: if bytes_passed {
+                QualitySeverity::Info
+            } else {
+                QualitySeverity::Error
+            },
+            message: format!(
+                "DOCX size {} bytes: {}",
+                bytes,
+                if bytes_passed { "pass" } else { "FAIL" }
+            ),
+        });
+
+        let passed_checks = checks.iter().filter(|c| c.passed).count();
+        let failed_checks = checks
+            .iter()
+            .filter(|c| !c.passed)
+            .cloned()
+            .collect::<Vec<_>>();
+
+        self.quality_gate = Some(QualityGateResult {
+            passed: failed_checks.is_empty(),
+            total_checks: checks.len(),
+            passed_checks,
+            failed_checks,
         });
     }
 }

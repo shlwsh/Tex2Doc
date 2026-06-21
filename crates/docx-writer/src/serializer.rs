@@ -15,6 +15,7 @@ use quick_xml::Writer;
 
 use crate::model::{merge_adjacent_runs, Paragraph, Run};
 use crate::page_setup::PageSetup;
+use crate::profile::ProfileStyleMap;
 use crate::styles::{
     STYLE_ABSTRACT_EN, STYLE_ABSTRACT_ZH, STYLE_AUTHOR_ZH, STYLE_BODY, STYLE_BODY_NO_INDENT,
     STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_COMMENT, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
@@ -57,6 +58,171 @@ fn from_text_run(r: &TextRun) -> Run {
     }
 }
 
+/// Look up a style ID for a given role, falling back to a default when not mapped.
+fn style_for_role(
+    style_map: Option<&ProfileStyleMap>,
+    role: &str,
+    default: &'static str,
+) -> String {
+    style_map
+        .and_then(|m| m.get(role))
+        .unwrap_or(default)
+        .to_string()
+}
+
+/// Write the front matter with optional style mapping.
+fn write_front_matter_with_style(
+    w: &mut Writer<Vec<u8>>,
+    meta: &doc_semantic_ast::MetaData,
+    style_map: Option<&ProfileStyleMap>,
+) {
+    use doc_semantic_ast::MetaData;
+
+    // ── 中文标题 ──
+    if let Some(title) = &meta.title {
+        let p = Paragraph {
+            style_id: Some(style_for_role(style_map, "title_zh", STYLE_TITLE_ZH)),
+            runs: vec![Run::plain(title.clone())],
+            jc: Some("left".to_string()),
+            keep_next: false,
+            keep_lines: true,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文作者（整段单 run，对齐 sh populate）──
+    if !meta.authors.is_empty() {
+        let authors = meta.authors.join("");
+        let p = Paragraph {
+            style_id: Some(style_for_role(style_map, "author_zh", STYLE_AUTHOR_ZH)),
+            runs: vec![Run::plain(authors)],
+            jc: Some("left".to_string()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 中文单位（每行一段）──
+    for line in &meta.institute_lines {
+        let p = Paragraph {
+            style_id: Some(style_for_role(style_map, "institute_zh", STYLE_INSTITUTE_ZH)),
+            runs: vec![Run::plain(normalize_institute_line(line))],
+            jc: Some("left".to_string()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    if !meta.institute_lines.is_empty() {
+        write_spacer(w, 300);
+    }
+
+    // ── 中文摘要（标签 + 正文，单 run）──
+    if let Some(abstract_zh) = &meta.abstract_text {
+        if !abstract_zh.is_empty() {
+            let p = Paragraph {
+                style_id: Some(style_for_role(style_map, "abstract_zh", STYLE_ABSTRACT_ZH)),
+                runs: vec![Run::plain(format!("摘   要: {abstract_zh}"))],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 中文关键词（标签 + 关键词列表）──
+    if !meta.keywords.is_empty() {
+        let keywords_text = meta.keywords.join("；");
+        let p = Paragraph {
+            style_id: Some(style_for_role(style_map, "keywords", STYLE_KEYWORDS)),
+            runs: vec![Run::plain(format!("关键词: {keywords_text}"))],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    if !meta.abstract_text.as_ref().is_some_and(|a| !a.is_empty())
+        || !meta.keywords.is_empty()
+    {
+        write_spacer(w, 200);
+    }
+
+    // ── 英文标题（当与中文标题不同时写）──
+    if let Some(en_title) = &meta.title_en {
+        if !en_title.is_empty() && en_title != meta.title.as_deref().unwrap_or("") {
+            let p = Paragraph {
+                style_id: Some(style_for_role(style_map, "english_title", STYLE_ENGLISH_TITLE)),
+                runs: vec![Run::plain(en_title.clone())],
+                jc: Some("left".to_string()),
+                keep_next: false,
+                keep_lines: true,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 英文作者──
+    if !meta.authors_en.is_empty() {
+        let authors_en = meta.authors_en.join("; ");
+        let p = Paragraph {
+            style_id: None,
+            runs: vec![Run::plain(authors_en)],
+            jc: Some("left".to_string()),
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 英文摘要──
+    if let Some(abstract_en) = &meta.abstract_en {
+        if !abstract_en.is_empty() {
+            let p = Paragraph {
+                style_id: Some(style_for_role(style_map, "abstract_en", STYLE_ABSTRACT_EN)),
+                runs: vec![Run::plain(format!("Abstract: {abstract_en}"))],
+                jc: None,
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    // ── 英文关键词──
+    if !meta.keywords_en.is_empty() {
+        let keywords_text = meta.keywords_en.join("; ");
+        let p = Paragraph {
+            style_id: None,
+            runs: vec![Run::plain(format!("Keywords: {keywords_text}"))],
+            jc: None,
+            keep_next: false,
+            keep_lines: false,
+        };
+        write_paragraph(w, &p);
+    }
+
+    // ── 引用格式（DOI）──
+    if let Some(citation_en) = &meta.citation_en {
+        if !citation_en.is_empty() {
+            let p = Paragraph {
+                style_id: None,
+                runs: vec![Run::plain(citation_en.clone())],
+                jc: Some("left".to_string()),
+                keep_next: false,
+                keep_lines: false,
+            };
+            write_paragraph(w, &p);
+        }
+    }
+
+    write_spacer(w, 300);
+}
+
 /// 写出 `document.xml` 字节流。
 ///
 /// `image_assets` 提供图片字节（来自 VFS）；若 `Block::Figure` 的路径命中，
@@ -67,6 +233,7 @@ pub fn serialize_document(
     doc: &Document,
     image_assets: Option<&ImageAssets>,
     page_setup: Option<&PageSetup>,
+    style_map: Option<&ProfileStyleMap>,
     embedded_images: &mut Vec<EmbeddedImage>,
 ) -> Vec<u8> {
     let mut w = Writer::new(Vec::new());
@@ -114,7 +281,7 @@ pub fn serialize_document(
     let mut equation_counter: u32 = 0;
 
     // V2：先写 front matter（中文标题 / 作者 / 单位 / 摘要 / 关键词 / 引用 / 英文标题块）
-    write_front_matter(&mut w, &doc.metadata);
+    write_front_matter_with_style(&mut w, &doc.metadata, style_map);
 
     let body_blocks = coalesce_theorem_like_blocks(&doc.blocks);
     for block in &body_blocks {
@@ -2884,7 +3051,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
 
         assert!(xml.contains(r#"<w:pStyle w:val="JOSBody"/>"#));
@@ -2905,7 +3072,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
 
         assert!(xml.contains("p&lt;0.001 &amp; x&gt;0"), "got: {xml}");
@@ -2924,7 +3091,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         assert!(xml.contains(r#"<w:pStyle w:val="JOSCode"/>"#));
         assert!(xml.contains("Score(u,t)"));
@@ -2962,7 +3129,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
 
         assert!(xml.contains("w:tbl"), "algorithm should use table");
@@ -3056,7 +3223,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         assert!(xml.contains(r#"<w:jc w:val="center"/>"#));
         assert!(xml.contains("<w:tcW"));
@@ -3111,7 +3278,7 @@ mod tests {
         };
         let text_width = ps.text_width_twips();
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, Some(&ps), &mut embedded);
+        let xml = serialize_document(&doc, None, Some(&ps), None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         // 1) tblW 必须是 pct=5000
         assert!(
@@ -3185,7 +3352,7 @@ mod tests {
             first_footer_indent_twips: None,
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, Some(&ps), &mut embedded);
+        let xml = serialize_document(&doc, None, Some(&ps), None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         let col_w = ps.text_width_twips() / 3;
 
@@ -3232,7 +3399,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         // 找 JOSCaption 段 (caption 在表之前)
         let caps: Vec<&str> = {
@@ -3280,7 +3447,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, None, None, &mut embedded);
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         let tr_prs: Vec<&str> = xml.split("<w:trPr>")
             .skip(1)
@@ -3318,7 +3485,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let _xml = serialize_document(&doc, Some(&assets), None, &mut embedded);
+        let _xml = serialize_document(&doc, Some(&assets), None, None, &mut embedded);
         assert_eq!(embedded.len(), 1, "expected exactly 1 embedded image");
         assert_eq!(embedded[0].ext, "png", "must keep PNG extension");
         assert_eq!(
@@ -3361,7 +3528,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, Some(&assets), Some(&ps), &mut embedded);
+        let xml = serialize_document(&doc, Some(&assets), Some(&ps), None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         let expected = ps.text_width_twips() as u64 * 635 / 2;
 
@@ -3396,7 +3563,7 @@ mod tests {
             }],
         };
         let mut embedded = Vec::new();
-        let xml = serialize_document(&doc, Some(&assets), None, &mut embedded);
+        let xml = serialize_document(&doc, Some(&assets), None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
         // 1) JOSImage 段必须 keepNext + keepLines（图段 → caption 不分页）
         // 找 pPr 起止：从 <w:p> 之后到 <w:pStyle ... JOSImage/> 之后

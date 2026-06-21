@@ -20,6 +20,8 @@ members = [
     "crates/semantic-collector", # T4 semantic collector trait + types (split from compiler-engine),
     "crates/compatibility-analyzer", # T5 compatibility analysis crate,
     "crates/rule-engine",         # T6 AI fallback / rule engine,
+    "crates/desktop-slint",       # P1: Slint desktop app skeleton,
+    "crates/commercial-api-client", # P1: Commercial API client skeleton,
 ]
 
 [workspace.package]
@@ -37,6 +39,8 @@ doc-utils        = { path = "crates/utils" }
 doc-semantic-ast = { path = "crates/semantic-ast" }
 doc-latex-reader = { path = "crates/latex-reader" }
 doc-docx-writer  = { path = "crates/docx-writer" }
+doc-desktop-slint = { path = "crates/desktop-slint" }
+doc-commercial-api-client = { path = "crates/commercial-api-client" }
 doc-bib          = { path = "crates/bib" }
 doc-mathml       = { path = "crates/mathml" }
 doc-compiler-engine = { path = "crates/compiler-engine" }

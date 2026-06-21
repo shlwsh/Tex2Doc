@@ -117,6 +117,7 @@ pub fn convert_sync(
         options.template_bytes.as_deref(),
         None,
         options.page_setup.as_ref(),
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -216,6 +217,7 @@ pub fn convert_dir(
         options.template_bytes.as_deref(),
         Some(&image_assets),
         ps_ref,
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -379,6 +381,7 @@ pub fn convert_zip(
         options.template_bytes.as_deref(),
         Some(&image_assets),
         ps_ref,
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
