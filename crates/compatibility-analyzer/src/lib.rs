@@ -170,13 +170,23 @@ fn analyze_compatibility_impl(
         report.custom_macro_count += count_custom_macro_definitions(&source);
 
         if contains_tex_environment(&source, "tikzpicture") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut warning_seen,
-                "unsupported_environment",
-                "tikzpicture",
-                "TikZ graphics need rasterization or a semantic drawing plugin before high-fidelity DOCX output",
-            );
+            if rules.tikz_warning_only {
+                add_compatibility_issue(
+                    &mut report.warnings,
+                    &mut warning_seen,
+                    "limited_environment",
+                    "tikzpicture",
+                    "TikZ graphics are partially supported via rasterization fallback",
+                );
+            } else {
+                add_compatibility_issue(
+                    &mut report.unsupported,
+                    &mut warning_seen,
+                    "unsupported_environment",
+                    "tikzpicture",
+                    "TikZ graphics need rasterization or a semantic drawing plugin before high-fidelity DOCX output",
+                );
+            }
         }
         if contains_tex_environment(&source, "minted") {
             add_compatibility_issue(

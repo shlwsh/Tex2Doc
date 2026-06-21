@@ -672,38 +672,77 @@ fn split_inline_math(text: &str) -> Vec<RunPart<'_>> {
     let len = bytes.len();
     let mut i = 0;
     while i < len {
+        // ── $ delimiter ────────────────────────────────────────────────
         if bytes[i] == b'$' {
-            // Check it's $...$ (not $$ which is block)
+            // Check for $$...$$ block math
             if i + 1 < len && bytes[i + 1] == b'$' {
-                // Double $$ = block math delimiter - treat as literal text
-                let mut j = i + 1;
-                while j < len && bytes[j] == b'$' {
+                // Greedy: find the matching $$
+                let mut j = i + 2;
+                while j + 1 < len && !(bytes[j] == b'$' && bytes[j + 1] == b'$') {
                     j += 1;
                 }
-                parts.push(RunPart::Text(&text[i..j]));
-                i = j;
+                if j + 1 < len && bytes[j] == b'$' && bytes[j + 1] == b'$' {
+                    // Found closing $$ → push whole block as text (block math)
+                    parts.push(RunPart::Text(&text[i..j + 2]));
+                    i = j + 2;
+                } else {
+                    // No closing $$ → treat opening $$ as plain text
+                    parts.push(RunPart::Text("$$"));
+                    i += 2;
+                }
                 continue;
             }
-            // Single $ - find closing $
+            // Single $ → inline math
             let mut j = i + 1;
             while j < len && bytes[j] != b'$' {
                 j += 1;
             }
-            let math = &text[i + 1..j];
-            if !math.is_empty() {
-                parts.push(RunPart::InlineMath(math));
+            if j < len {
+                let math = &text[i + 1..j];
+                if !math.is_empty() {
+                    parts.push(RunPart::InlineMath(math));
+                }
+                i = j + 1;
+            } else {
+                parts.push(RunPart::Text(&text[i..]));
+                break;
             }
-            i = j + 1;
-        } else {
-            let mut j = i + 1;
-            while j < len && bytes[j] != b'$' {
-                j += 1;
-            }
-            if j > i {
-                parts.push(RunPart::Text(&text[i..j]));
-            }
-            i = j;
+            continue;
         }
+        // ── \( inline math ─────────────────────────────────────────────
+        if bytes[i] == b'\\' && i + 1 < len && bytes[i + 1] == b'(' {
+            let remaining = &text[i + 2..];
+            if let Some(end) = remaining.find(r"\)") {
+                let math = &remaining[..end];
+                if !math.is_empty() {
+                    parts.push(RunPart::InlineMath(math));
+                }
+                i = i + 2 + end + r"\)".len();
+            } else {
+                // No closing \) → treat as plain text
+                let mut j = i + 1;
+                while j < len && bytes[j] != b'$' {
+                    j += 1;
+                }
+                if j > i {
+                    parts.push(RunPart::Text(&text[i..j]));
+                }
+                i = j;
+            }
+            continue;
+        }
+        // ── Plain text ───────────────────────────────────────────────
+        let mut j = i + 1;
+        while j < len
+            && bytes[j] != b'$'
+            && !(bytes[j] == b'\\' && j + 1 < len && bytes[j + 1] == b'(')
+        {
+            j += 1;
+        }
+        if j > i {
+            parts.push(RunPart::Text(&text[i..j]));
+        }
+        i = j; // let the $ handler take the $
     }
     parts
 }
@@ -899,26 +938,44 @@ fn flush_paragraph(
     }
     let body = buffer.trim().to_string();
     let s = *start;
+    let span_len = buffer.len() as u32;
 
-    // V2 接入：把 LaTeX 段落走过 `latex_to_text` normalizer，
-    // 输出多 run（plain / italic / bold / sup / sub）。
-    // 注意：inline math ($...$) 不再单独提取为 Block::Equation，
-    // 直接作为 TextStyle::MathInline 留在段落中（适合中文学术文档）。
-    let cite_map: HashMap<String, usize> = HashMap::new();
-    let normalized = crate::normalize::latex_to_text(&body, &cite_map, &label_map);
-    let runs: Vec<TextRun> = normalized
-        .runs
-        .into_iter()
-        .map(|r| TextRun {
-            text: r.text,
-            style: r.style,
-            span: Span::new(s, s + buffer.len() as u32, span.source),
-        })
-        .collect();
+    // M3-1: Detect $...$ and \(...\) inline math BEFORE latex_to_text normalizer.
+    // Math parts get TextStyle::MathInline (OMML in Word); plain text continues through normalizer.
+    let parts = split_inline_math(&body);
+    let mut runs: Vec<TextRun> = Vec::new();
+
+    for part in parts {
+        match part {
+            RunPart::InlineMath(math_content) => {
+                // Preserve raw LaTeX — do NOT normalize math content to Unicode.
+                // The serializer will emit OMML <m:oMath> around this text.
+                runs.push(TextRun {
+                    text: math_content.to_string(),
+                    style: TextStyle::MathInline,
+                    span: Span::new(s, s + span_len, span.source),
+                });
+            }
+            RunPart::Text(text_content) => {
+                // Normalize remaining text through latex_to_text (handles \textit, \ref, etc.)
+                let cite_map: HashMap<String, usize> = HashMap::new();
+                let normalized =
+                    crate::normalize::latex_to_text(&text_content, &cite_map, label_map);
+                for r in normalized.runs {
+                    runs.push(TextRun {
+                        text: r.text,
+                        style: r.style,
+                        span: Span::new(s, s + span_len, span.source),
+                    });
+                }
+            }
+        }
+    }
+
     if !runs.is_empty() {
         doc.push(Block::Paragraph {
             runs,
-            span: Span::new(s, s + buffer.len() as u32, span.source),
+            span: Span::new(s, s + span_len, span.source),
         });
     }
     buffer.clear();
@@ -2977,6 +3034,19 @@ fn strip_inline(
                 }
                 out.push('\n');
                 i = j + 1;
+                continue;
+            }
+            // \(...\) inline math: skip the whole segment so it passes through
+            // to flush_paragraph → split_inline_math for OMML rendering.
+            if j < bytes.len() && bytes[j] == b'(' {
+                i += 2; // skip \(
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b')' {
+                        i += 2; // skip \)
+                        break;
+                    }
+                    i += 1;
+                }
                 continue;
             }
             // 命令名：alpha / @ / 单字符转义（\% \$ \& \# \_ \{ \} \,）

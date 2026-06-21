@@ -23,11 +23,16 @@
 mod audit;
 mod builtin_rules;
 mod registry;
-mod rule_output;
 mod rule_engine;
+mod rule_output;
+mod rule_output_routing;
+
+#[cfg(feature = "ai-fallback")]
+mod ai_inference;
 
 pub use audit::{AuditCache, AuditRecord, DecisionSource};
 pub use registry::{MacroRule, RuleRegistry};
 pub use rule_engine::RuleEngine;
 pub use rule_engine::RuleEngineConfig;
 pub use rule_output::RuleOutput;
+pub use rule_output_routing::{extract_arg_text, route_rule_output, RoutingConfig};

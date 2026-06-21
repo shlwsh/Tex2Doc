@@ -32,6 +32,8 @@ pub struct AuditRecord {
     pub source: DecisionSource,
     /// SHA-256 hash of the AI prompt (if applicable).
     pub prompt_hash: Option<String>,
+    /// AI model name that produced this inference (e.g. "gpt-4o-mini").
+    pub ai_model: Option<String>,
     /// Whether this decision was accepted by the user.
     pub accepted: Option<bool>,
     /// Source file where the macro was encountered.
@@ -58,6 +60,7 @@ impl AuditRecord {
             confidence,
             source,
             prompt_hash: None,
+            ai_model: None,
             accepted: None,
             source_file: None,
             source_line: None,
@@ -76,6 +79,18 @@ impl AuditRecord {
     pub fn with_location(mut self, file: String, line: u32) -> Self {
         self.source_file = Some(file);
         self.source_line = Some(line);
+        self
+    }
+
+    /// Attach the SHA-256 hash of the AI prompt (for AI-sourced records).
+    pub fn with_prompt_hash(mut self, hash: String) -> Self {
+        self.prompt_hash = Some(hash);
+        self
+    }
+
+    /// Attach the AI model name that produced this inference.
+    pub fn with_ai_model(mut self, model: &str) -> Self {
+        self.ai_model = Some(model.to_string());
         self
     }
 }

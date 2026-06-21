@@ -43,6 +43,7 @@ doc-compiler-engine = { path = "crates/compiler-engine" }
 doc-xdv-parser          = { path = "crates/xdv-parser" }
 doc-semantic-collector   = { path = "crates/semantic-collector" }
 doc-compatibility-analyzer = { path = "crates/compatibility-analyzer" }
+doc-tex-facade           = { path = "crates/tex-facade" }
 doc-rule-engine          = { path = "crates/rule-engine" }
 
 # 错误 / 序列化

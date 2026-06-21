@@ -22,8 +22,10 @@ use doc_latex_reader::{
 use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
-use doc_rule_engine::{RuleEngine, RuleEngineConfig, RuleOutput};
-use doc_xdv_parser::{xdv_to_layout_nodes, to_collector_layout_graph};
+use doc_rule_engine::{
+    route_rule_output, RuleEngine, RuleEngineConfig, RoutingConfig, RuleOutput,
+};
+use doc_xdv_parser::to_collector_layout_graph;
 use doc_utils::{ImageAssets, VirtualFs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -888,6 +890,13 @@ impl SemanticBackend for XeLaTeXHookBackend {
         let event_count = result.events.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
         artifact.events = result.events;
+        // M2-1: Parse XDV output from XeLaTeX for LayoutGraph
+        let layout = if let Some(xdv_path) = result.xdv_path {
+            parse_layout_from_xdv(&xdv_path)
+        } else {
+            None
+        };
+        artifact.layout = layout.or_else(|| Some(LayoutGraph::default()));
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
@@ -927,11 +936,191 @@ impl SemanticBackend for LuaTeXNodeBackend {
     ) -> Result<SemanticBackendArtifact, EngineError> {
         let result = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
         let event_count = result.events.len();
+        let node_tree_count = result.node_tree.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
         artifact.events = result.events;
 
-        // P2-2: Parse the XDV output from LuaLaTeX and populate LayoutGraph.
-        let layout = if let Some(xdv_path) = result.xdv_path {
+        // M4-2: Build LayoutGraph from node tree entries (detailed layout info)
+        // Falls back to XDV-based layout if node tree is empty
+        let layout = if !result.node_tree.is_empty() {
+            // Use detailed node tree entries to build LayoutGraph
+            let nodes: Vec<LayoutNode> = result
+                .node_tree
+                .iter()
+                .filter_map(|entry| {
+                    // Convert each node entry to a LayoutNode
+                    let (id, kind, x, y, width, height, depth, font_id, font_name, char) =
+                        match entry {
+                            NodeEntry::Glyph {
+                                x,
+                                y,
+                                char,
+                                font_id,
+                                font_name,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("glyph_{}_{}", x, y),
+                                "glyph".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                Some(*font_id),
+                                font_name.clone(),
+                                Some(*char),
+                            ),
+                            NodeEntry::Hlist {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("hlist_{}_{}", x, y),
+                                "hlist".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Vlist {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("vlist_{}_{}", x, y),
+                                "vlist".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Glue {
+                                x,
+                                y,
+                                width,
+                                stretch: _,
+                                shrink: _,
+                                stretch_order: _,
+                                shrink_order: _,
+                                ..
+                            } => (
+                                format!("glue_{}_{}", x, y),
+                                "glue".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Rule {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("rule_{}_{}", x, y),
+                                "rule".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Kern { x, y, kern, .. } => (
+                                format!("kern_{}_{}", x, y),
+                                "kern".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*kern),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Penalty { x, y, .. } => (
+                                format!("penalty_{}_{}", x, y),
+                                "penalty".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::LocalPar { x, y, .. } => (
+                                format!("local_par_{}_{}", x, y),
+                                "local_par".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Dir { x, y, dir, .. } => (
+                                format!("dir_{}_{}", x, y),
+                                "dir".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                dir.clone(),
+                                None,
+                            ),
+                            // Skip summary entries - they don't produce layout nodes
+                            NodeEntry::NodeTree { .. } => return None,
+                        };
+
+                    Some(LayoutNode {
+                        id,
+                        kind,
+                        page: None,
+                        x,
+                        y,
+                        font_id,
+                        font_name,
+                        char,
+                        width,
+                        height,
+                        depth,
+                    })
+                })
+                .collect();
+            Some(LayoutGraph { nodes })
+        } else if let Some(xdv_path) = result.xdv_path {
+            // Fallback to XDV-based layout if no node tree entries
             parse_layout_from_xdv(&xdv_path)
         } else {
             None
@@ -943,10 +1132,23 @@ impl SemanticBackend for LuaTeXNodeBackend {
             Some(SEMANTIC_SIDECAR),
             "semantic events collected from the LuaTeX node sidecar",
         ));
+        if node_tree_count > 0 {
+            artifact.sidecars.push(BuildSidecar::new(
+                "node-tree-jsonl",
+                Some(NODE_TREE_SIDECAR),
+                format!("{} node tree entries collected from the LuaTeX hook", node_tree_count),
+            ));
+        }
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
             format!("LuaTeXNodeBackend collected {event_count} semantic events"),
         ));
+        if node_tree_count > 0 {
+            artifact.diagnostics.push(EngineDiagnostic::info(
+                "node_tree_entries",
+                format!("LuaTeXNodeBackend collected {node_tree_count} node tree entries"),
+            ));
+        }
         Ok(artifact)
     }
 }
@@ -1429,6 +1631,7 @@ impl RuntimeEngine {
 }
 
 const SEMANTIC_SIDECAR: &str = "__docx_semantic_events.jsonl";
+const NODE_TREE_SIDECAR: &str = "__docx_node_tree.jsonl";
 
 /// XeLaTeX semantic hook (v2 schema).
 /// Emits JSONL with schema header, source location (path + line), and macro name.
@@ -1520,10 +1723,22 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
 const LUALATEX_SEMANTIC_HOOK: &str = r#"
 \directlua{
 docxsem_file = io.open("__docx_semantic_events.jsonl", "w")
+docxsem_node_tree_file = io.open("__docx_node_tree.jsonl", "w")
 local glyph_id = node.id("glyph")
 local glue_id = node.id("glue")
+local hlist_id = node.id("hlist")
+local vlist_id = node.id("vlist")
+local rule_id = node.id("rule")
+local kern_id = node.id("kern")
+local penalty_id = node.id("penalty")
+local local_par_id = node.id("local_par")
+local dir_id = node.id("dir")
 local bs = string.char(92)
 local lua_space = string.char(37) .. "s"
+
+-- Current page info for position tracking
+local current_page = 1
+local current_vpos = 0
 
 function docxsem_json(value)
   value = tostring(value or "")
@@ -1538,6 +1753,239 @@ function docxsem_write(raw)
   if docxsem_file then
     docxsem_file:write(raw, string.char(10))
   end
+end
+
+function docxsem_node_tree_write(raw)
+  if docxsem_node_tree_file then
+    docxsem_node_tree_file:write(raw, string.char(10))
+  end
+end
+
+-- M4-2: Emit detailed node entries for each node type
+-- This replaces the simple counting with per-node emission
+function docxsem_emit_node(type_name, props)
+  local parts = {'"type":"' .. type_name .. '"'}
+  for k, v in pairs(props) do
+    table.insert(parts, '"' .. k .. '":' .. tostring(v))
+  end
+  local json = '{' .. table.concat(parts, ',') .. '}'
+  docxsem_node_tree_write(json)
+end
+
+-- Helper to get font info from a node
+local function docxsem_get_font_info(n)
+  if n.font then
+    local font_info = font.getfont(n.font)
+    if font_info then
+      return {
+        font_id = n.font,
+        font_name = font_info.name or "unknown",
+        font_size = font_info.size or 0
+      }
+    end
+  end
+  return {font_id = 0, font_name = "unknown", font_size = 0}
+end
+
+-- M4-2: Detailed node traversal with position tracking
+function docxsem_node_tree(head)
+  if type(head) ~= "userdata" then return end
+  
+  -- Reset counters
+  local hlist_count = 0
+  local vlist_count = 0
+  local glyph_count = 0
+  local glue_count = 0
+  local rule_count = 0
+  
+  -- Track position state
+  local cur_x = 0
+  local cur_y = 0
+  local hpos = 0
+  local vpos = 0
+  
+  -- Recursive node traversal with position tracking
+  local function traverse_node(n, depth, is_vlist)
+    if not n or type(n) ~= "userdata" then return end
+    
+    local id = n.id
+    local subtype = n.subtype or 0
+    
+    if id == hlist_id then
+      hlist_count = hlist_count + 1
+      -- Emit hlist node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0,
+        head_id = hlist_count
+      }
+      docxsem_emit_node("hlist", props)
+      -- Traverse into hlist content
+      if n.list and type(n.list) == "userdata" then
+        local saved_x = hpos
+        local saved_y = vpos
+        for child in node.traverse(n.list) do
+          traverse_node(child, depth + 1, false)
+        end
+        hpos = saved_x
+        vpos = saved_y
+      end
+    elseif id == vlist_id then
+      vlist_count = vlist_count + 1
+      -- Emit vlist node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0,
+        head_id = vlist_count
+      }
+      docxsem_emit_node("vlist", props)
+      -- Traverse into vlist content
+      if n.list and type(n.list) == "userdata" then
+        local saved_x = hpos
+        local saved_y = vpos
+        for child in node.traverse(n.list) do
+          traverse_node(child, depth + 1, true)
+        end
+        hpos = saved_x
+        vpos = saved_y
+      end
+    elseif id == glyph_id then
+      glyph_count = glyph_count + 1
+      -- Get character info
+      local char_code = n.char or 0
+      local ok, char_str = pcall(utf8.char, char_code)
+      if not ok then char_str = string.format("U+%04X", char_code) end
+      
+      -- Get font info
+      local font_info = docxsem_get_font_info(n)
+      
+      -- Emit glyph node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        char = char_code,
+        char_str = docxsem_json(char_str),
+        font_id = font_info.font_id,
+        font_name = docxsem_json(font_info.font_name),
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0
+      }
+      docxsem_emit_node("glyph", props)
+      
+      -- Advance horizontal position for non-vlist context
+      if not is_vlist then
+        hpos = hpos + (n.width or 0)
+      end
+    elseif id == glue_id then
+      glue_count = glue_count + 1
+      -- Get glue spec info
+      local width = n.width or 0
+      local stretch = n.stretch or 0
+      local shrink = n.shrink or 0
+      local stretch_order = n.stretch_order or 0
+      local shrink_order = n.shrink_order or 0
+      
+      -- Emit glue node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = width,
+        stretch = stretch,
+        shrink = shrink,
+        stretch_order = stretch_order,
+        shrink_order = shrink_order
+      }
+      docxsem_emit_node("glue", props)
+      
+      -- Advance horizontal position for non-vlist context
+      if not is_vlist then
+        hpos = hpos + width
+      end
+    elseif id == rule_id then
+      rule_count = rule_count + 1
+      -- Emit rule node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0
+      }
+      docxsem_emit_node("rule", props)
+      
+      -- Advance position
+      if not is_vlist then
+        hpos = hpos + (n.width or 0)
+      end
+    elseif id == kern_id then
+      -- Kern nodes affect spacing
+      local kern_width = n.kern or 0
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        kern = kern_width
+      }
+      docxsem_emit_node("kern", props)
+      if not is_vlist then
+        hpos = hpos + kern_width
+      end
+    elseif id == penalty_id then
+      -- Penalty nodes (line breaks etc)
+      local penalty_value = n.penalty or 0
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        penalty = penalty_value
+      }
+      docxsem_emit_node("penalty", props)
+    elseif id == local_par_id then
+      -- Local par node (paragraph start)
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos
+      }
+      docxsem_emit_node("local_par", props)
+    elseif id == dir_id then
+      -- Direction node
+      local dir_str = n.dir or ""
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        dir = docxsem_json(dir_str)
+      }
+      docxsem_emit_node("dir", props)
+    end
+  end
+  
+  -- Traverse all nodes in the head
+  for n in node.traverse(head) do
+    traverse_node(n, 0, false)
+  end
+  
+  -- Emit summary entry with totals
+  local summary = '{"type":"node_tree","hlist":' .. hlist_count 
+    .. ',"vlist":' .. vlist_count 
+    .. ',"glyph":' .. glyph_count 
+    .. ',"glue":' .. glue_count 
+    .. ',"rule":' .. rule_count 
+    .. ',"page":' .. current_page .. '}'
+  docxsem_node_tree_write(summary)
 end
 
 function docxsem_heading(level, text)
@@ -1600,6 +2048,7 @@ local function docxsem_post_linebreak(head)
   if not ok then
     docxsem_write('# luatex-node-error: ' .. tostring(err))
   end
+  docxsem_node_tree(head)
   return head
 end
 
@@ -1662,13 +2111,148 @@ end
   \let\docxsemoldendequation\endequation
   \renewenvironment{equation}{\directlua{docxsem_equation()}\docxsemoldequation}{\docxsemoldendequation}
 \fi
-\AtEndDocument{\directlua{if docxsem_file then docxsem_file:close() end}}
+\AtEndDocument{\directlua{if docxsem_file then docxsem_file:close() end}\directlua{if docxsem_node_tree_file then docxsem_node_tree_file:close() end}}
 \makeatother
 "#;
+
+// M4-2: Detailed node entries emitted by the LuaLaTeX hook.
+// Each node type has its own JSON structure with type-specific properties.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeEntry {
+    /// Glyph node (character)
+    Glyph {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        char: u32,
+        #[serde(default)]
+        char_str: Option<String>,
+        font_id: u32,
+        #[serde(default)]
+        font_name: Option<String>,
+        width: i64,
+        height: i64,
+        depth: i64,
+    },
+    /// Horizontal list node (line of text)
+    Hlist {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+        #[serde(default)]
+        head_id: Option<u32>,
+    },
+    /// Vertical list node (paragraph/box)
+    Vlist {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+        #[serde(default)]
+        head_id: Option<u32>,
+    },
+    /// Glue node (spacing)
+    Glue {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        #[serde(default)]
+        stretch: Option<i64>,
+        #[serde(default)]
+        shrink: Option<i64>,
+        #[serde(default)]
+        stretch_order: Option<u32>,
+        #[serde(default)]
+        shrink_order: Option<u32>,
+    },
+    /// Rule node (rectangular box)
+    Rule {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+    },
+    /// Kern node (explicit spacing)
+    Kern {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        kern: i64,
+    },
+    /// Penalty node (line break penalties)
+    Penalty {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        penalty: i64,
+    },
+    /// Local par node (paragraph start)
+    LocalPar {
+        subtype: u32,
+        x: i64,
+        y: i64,
+    },
+    /// Direction node
+    Dir {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        #[serde(default)]
+        dir: Option<String>,
+    },
+    /// Summary entry with page-level counts (legacy format for compatibility)
+    #[serde(rename = "node_tree")]
+    NodeTree {
+        hlist: u32,
+        vlist: u32,
+        glyph: u32,
+        glue: u32,
+        rule: u32,
+        #[serde(default)]
+        page: Option<u32>,
+    },
+}
+
+impl NodeEntry {
+    /// Returns true if this is a summary entry
+    pub fn is_summary(&self) -> bool {
+        matches!(self, NodeEntry::NodeTree { .. })
+    }
+
+    /// Returns the position if available
+    pub fn position(&self) -> Option<(i64, i64)> {
+        match self {
+            NodeEntry::Glyph { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Hlist { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Vlist { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Glue { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Rule { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Kern { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Penalty { x, y, .. } => Some((*x, *y)),
+            NodeEntry::LocalPar { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Dir { x, y, .. } => Some((*x, *y)),
+            NodeEntry::NodeTree { .. } => None,
+        }
+    }
+}
+
+/// An entry from the node tree JSONL sidecar emitted by the LuaLaTeX hook.
+/// M4-2: Now uses the detailed `NodeEntry` enum that handles all node types.
+pub type NodeTreeEntry = NodeEntry;
 
 struct RuntimeCollectResult {
     events: Vec<SemanticEvent>,
     xdv_path: Option<PathBuf>,
+    node_tree: Vec<NodeTreeEntry>,
 }
 
 fn collect_runtime_events(
@@ -1726,8 +2310,9 @@ fn collect_runtime_events(
     let events = parse_semantic_events_jsonl(&sidecar)?;
 
     // P2-2: Capture XDV path for LayoutGraph conversion.
+    // XeLaTeX and LuaLaTeX both produce XDV output.
     let xdv_path = match engine {
-        RuntimeEngine::LuaLaTeX => {
+        RuntimeEngine::LuaLaTeX | RuntimeEngine::XeLaTeX => {
             let xdv = PathBuf::from(main_tex).with_extension("xdv");
             let candidate = workdir.path().join(&xdv);
             if candidate.exists() {
@@ -1739,7 +2324,29 @@ fn collect_runtime_events(
         _ => None,
     };
 
-    Ok(RuntimeCollectResult { events, xdv_path })
+    // M4-2: Read node tree JSONL sidecar emitted by the LuaLaTeX hook.
+    let node_tree_path = workdir.path().join(NODE_TREE_SIDECAR);
+    let node_tree: Vec<NodeTreeEntry> = if node_tree_path.exists() {
+        let content = match fs::read_to_string(&node_tree_path) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(EngineError::Io(format!(
+                    "failed to read node tree sidecar {}: {}",
+                    node_tree_path.display(),
+                    e
+                )));
+            }
+        };
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(RuntimeCollectResult { events, xdv_path, node_tree })
 }
 
 fn materialize_vfs(vfs: &VirtualFs, root: &Path) -> Result<(), EngineError> {
@@ -1802,8 +2409,12 @@ fn run_latex_runtime(
     command
         .arg("-interaction=nonstopmode")
         .arg("-halt-on-error")
-        .arg("-file-line-error")
-        .arg(main_tex)
+        .arg("-file-line-error");
+    // M2-1: XeLaTeX requires explicit -output-format=xdv to produce .xdv output
+    if matches!(engine, RuntimeEngine::XeLaTeX) {
+        command.arg("-output-format=xdv");
+    }
+    command.arg(main_tex)
         .env("TEXMFVAR", &tex_cache)
         .env("TEXMFCACHE", &tex_cache)
         .current_dir(workdir);
@@ -2716,7 +3327,11 @@ fn apply_rule_engine_to_document(mut document: Document) -> Document {
 /// The RuleEngine processes inline macro patterns (e.g., `\unknownmacro{arg}`) found in
 /// the fallback text. Environment-level fallbacks (e.g., `\begin{unknown}{...}`) are
 /// preserved as-is for later inspection.
-fn resolve_raw_fallback(text: &str, span: &Span, engine: &mut RuleEngine) -> Block {
+fn resolve_raw_fallback(
+    text: &str,
+    span: &Span,
+    engine: &mut RuleEngine,
+) -> Block {
     // Try to detect an environment-level pattern \begin{name}...\end{name}
     if let Some(name) = detect_environment_name(text) {
         // Record in audit trail but preserve as RawFallback for now
@@ -2729,10 +3344,14 @@ fn resolve_raw_fallback(text: &str, span: &Span, engine: &mut RuleEngine) -> Blo
 
     // Try to detect an inline macro pattern (e.g., \unknownmacro{...})
     if let Some((macro_name, arity)) = detect_inline_macro(text) {
-        let output = engine.process_unknown(&macro_name, arity);
-        // For now, preserve the original fallback text to avoid changing existing behavior.
-        // Future work: route RuleOutput -> structured blocks based on output variant.
-        let _ = output;
+        // M2-3: Route RuleOutput → Block conversion
+        let args = extract_macro_args(text, arity);
+        let config = RoutingConfig::default();
+        if let Some(output) = engine.process_unknown(&macro_name, arity) {
+            if let Some(block) = route_rule_output(&output, &args, &config) {
+                return block;
+            }
+        }
     }
 
     Block::RawFallback {
@@ -2769,6 +3388,53 @@ fn detect_inline_macro(text: &str) -> Option<(String, usize)> {
         return None;
     }
     Some((name, arity))
+}
+
+/// Extract macro arguments from inline fallback text like `\macro{arg1}{arg2}`.
+///
+/// Returns a Vec of argument strings with outer braces stripped.
+/// Returns empty Vec if the text doesn't start with a known macro pattern.
+fn extract_macro_args(text: &str, arity: usize) -> Vec<String> {
+    let text = text.trim();
+    let mut args = Vec::with_capacity(arity);
+    let rest = match text.strip_prefix('\\') {
+        Some(r) => r,
+        None => return args,
+    };
+    // Skip macro name
+    let name_end = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    let after_name = &rest[name_end..];
+    let mut chars = after_name.chars().peekable();
+    for _ in 0..arity {
+        // Skip optional whitespace
+        while chars.peek() == Some(&' ') {
+            chars.next();
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next(); // skip opening brace
+            let mut depth = 1;
+            let mut arg_chars = Vec::new();
+            while let Some(c) = chars.next() {
+                if c == '{' {
+                    depth += 1;
+                } else if c == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                arg_chars.push(c);
+            }
+            let arg_text: String = arg_chars.into_iter().collect::<String>().trim().to_string();
+            args.push(arg_text);
+        } else {
+            break;
+        }
+    }
+    args
 }
 
 fn collect_image_assets_from_vfs(vfs: &VirtualFs) -> ImageAssets {
@@ -3593,5 +4259,168 @@ a+b=c
     fn parse_layout_from_xdv_returns_none_for_missing_file() {
         let result = parse_layout_from_xdv(std::path::Path::new("/nonexistent/file.xdv"));
         assert!(result.is_none());
+    }
+
+    #[test]
+    fn lua_hook_contains_docxsem_node_tree() {
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("docxsem_node_tree"),
+            "Lua hook should define docxsem_node_tree function"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("hlist_count"),
+            "Lua hook should count hlist nodes"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("glyph_count"),
+            "Lua hook should count glyph nodes"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("__docx_node_tree.jsonl"),
+            "Lua hook should open node tree sidecar file"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("docxsem_node_tree_write"),
+            "Lua hook should have docxsem_node_tree_write function"
+        );
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_summary() {
+        // Test the summary entry format
+        let json = r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::NodeTree {
+                hlist,
+                vlist,
+                glyph,
+                glue,
+                rule,
+                page,
+            } => {
+                assert_eq!(hlist, 2);
+                assert_eq!(vlist, 1);
+                assert_eq!(glyph, 42);
+                assert_eq!(glue, 15);
+                assert_eq!(rule, 3);
+                assert_eq!(page, Some(1));
+            }
+            _ => panic!("expected NodeTree variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_glyph() {
+        let json = r#"{"type":"glyph","subtype":0,"x":100,"y":200,"char":65,"font_id":1,"width":10,"height":8,"depth":2}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Glyph {
+                x,
+                y,
+                char,
+                font_id,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 100);
+                assert_eq!(y, 200);
+                assert_eq!(char, 65);
+                assert_eq!(font_id, 1);
+                assert_eq!(width, 10);
+                assert_eq!(height, 8);
+                assert_eq!(depth, 2);
+            }
+            _ => panic!("expected Glyph variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_hlist() {
+        let json = r#"{"type":"hlist","subtype":0,"x":0,"y":0,"width":500,"height":12,"depth":3}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Hlist {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 0);
+                assert_eq!(y, 0);
+                assert_eq!(width, 500);
+                assert_eq!(height, 12);
+                assert_eq!(depth, 3);
+            }
+            _ => panic!("expected Hlist variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_glue() {
+        let json = r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Glue {
+                x,
+                y,
+                width,
+                stretch,
+                shrink,
+                ..
+            } => {
+                assert_eq!(x, 100);
+                assert_eq!(y, 0);
+                assert_eq!(width, 200);
+                assert_eq!(stretch, Some(100));
+                assert_eq!(shrink, Some(50));
+            }
+            _ => panic!("expected Glue variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_rule() {
+        let json = r#"{"type":"rule","subtype":0,"x":0,"y":0,"width":500,"height":1,"depth":0}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Rule {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 0);
+                assert_eq!(y, 0);
+                assert_eq!(width, 500);
+                assert_eq!(height, 1);
+                assert_eq!(depth, 0);
+            }
+            _ => panic!("expected Rule variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_is_summary() {
+        let json = r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.is_summary());
+    }
+
+    #[test]
+    fn node_tree_entry_position() {
+        let glyph_json = r#"{"type":"glyph","subtype":0,"x":100,"y":200,"char":65,"font_id":1,"width":10,"height":8,"depth":2}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(glyph_json).unwrap();
+        assert_eq!(entry.position(), Some((100, 200)));
+
+        let summary_json = r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
+        let summary: NodeTreeEntry = serde_json::from_str(summary_json).unwrap();
+        assert_eq!(summary.position(), None);
     }
 }

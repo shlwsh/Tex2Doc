@@ -1,0 +1,28 @@
+id = "jos-paper-toml"
+display_name = "IEEE/JOS Paper"
+
+document_classes = ["IEEEtran"]
+
+[page_setup]
+kind = "a4"
+width_mm = 210.0
+height_mm = 297.0
+margin_top_mm = 19.1
+margin_bottom_mm = 19.1
+margin_left_mm = 17.78
+margin_right_mm = 17.78
+
+[font_policy]
+latin_main = "Times New Roman"
+notes = "10pt"
+
+[caption_policy]
+figure_prefix = "Fig."
+table_prefix = "Table"
+equation_prefix = ""
+numbering = "arabic"
+
+[citation_policy]
+style = "ieee"
+bibliography_style = "ieee"
+reference_section_title = "References"

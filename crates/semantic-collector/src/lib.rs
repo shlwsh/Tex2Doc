@@ -127,16 +127,88 @@ pub struct SourceSpan {
 // Layout types
 // ---------------------------------------------------------------------------
 
-/// A layout node from XDV/DVI bytecode analysis.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+// M4-2: Detailed layout types for node-based layout information
+// These are stored in LayoutGraph.nodes as detailed node entries
+
+/// A layout node representing a physical element in the rendered document.
+/// M4-2: Extended with node-based layout information from LuaTeX node traversal.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LayoutNode {
     pub id: String,
     pub kind: String,
     pub page: Option<u32>,
+    /// M4-2: Position information from node tree
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub x: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub y: Option<i64>,
+    /// M4-2: Font information for glyph nodes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub font_name: Option<String>,
+    /// M4-2: Character information for glyph nodes
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub char: Option<u32>,
+    /// M4-2: Dimensions
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub width: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub height: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<i64>,
+}
+
+impl LayoutNode {
+    /// Create a basic layout node
+    pub fn new(id: impl Into<String>, kind: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            kind: kind.into(),
+            page: None,
+            x: None,
+            y: None,
+            font_id: None,
+            font_name: None,
+            char: None,
+            width: None,
+            height: None,
+            depth: None,
+        }
+    }
+
+    /// Set position
+    pub fn with_position(mut self, x: i64, y: i64) -> Self {
+        self.x = Some(x);
+        self.y = Some(y);
+        self
+    }
+
+    /// Set font info
+    pub fn with_font(mut self, font_id: u32, font_name: impl Into<String>) -> Self {
+        self.font_id = Some(font_id);
+        self.font_name = Some(font_name.into());
+        self
+    }
+
+    /// Set character
+    pub fn with_char(mut self, char: u32) -> Self {
+        self.char = Some(char);
+        self
+    }
+
+    /// Set dimensions
+    pub fn with_dimensions(mut self, width: i64, height: i64, depth: i64) -> Self {
+        self.width = Some(width);
+        self.height = Some(height);
+        self.depth = Some(depth);
+        self
+    }
 }
 
 /// A layout graph mapping semantic events to physical pages.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+/// M4-2: Extended to include detailed node-based layout information.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct LayoutGraph {
     pub nodes: Vec<LayoutNode>,
 }

@@ -427,6 +427,7 @@ impl XdvParser {
             253 => {
                 // XeTeXFntDefExt
                 let ext = self.read_font_def_ext(r)?;
+                self.doc.ext_fonts.push(ext.clone());
                 self.push_cmd(XdvCommand::FontDefExt(ext));
             }
 

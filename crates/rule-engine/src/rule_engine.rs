@@ -151,6 +151,106 @@ impl RuleEngine {
     pub fn has_unknown(&self) -> bool {
         !self.audit.is_empty()
     }
+
+    /// Process a macro with optional AI fallback (requires `ai-fallback` feature).
+    ///
+    /// First checks the rule registry. If the macro is unknown and AI is enabled
+    /// and `api_url` is provided, sends the macro to the configured AI API for
+    /// semantic classification. Falls back to conservative `InlineText` if AI
+    /// is unavailable or confidence is below threshold.
+    ///
+    /// Returns the `RuleOutput` for the macro.
+    #[cfg(feature = "ai-fallback")]
+    pub fn process_with_ai(
+        &mut self,
+        macro_name: &str,
+        arity: usize,
+        context: &str,
+        api_url: &str,
+        api_key: Option<&str>,
+    ) -> Option<RuleOutput> {
+        // 1. Check registry first
+        if let Some(rule) = self.registry.lookup(macro_name) {
+            let record = AuditRecord::new(
+                macro_name.to_string(),
+                arity,
+                rule.output.as_str(),
+                1.0,
+                DecisionSource::Loaded,
+            );
+            self.audit.record(record);
+            return Some(rule.output.clone());
+        }
+
+        // 2. Try AI inference when enabled
+        if self.config.enable_ai {
+            let prompt = crate::ai_inference::build_prompt(macro_name, arity, context);
+            let prompt_hash = crate::ai_inference::compute_prompt_hash(&prompt);
+
+            match crate::ai_inference::infer_macro(macro_name, arity, context, api_url, api_key) {
+                Ok(inference) => {
+                    if inference.confidence >= self.config.ai_min_confidence {
+                        let record = AuditRecord::new(
+                            macro_name.to_string(),
+                            arity,
+                            inference.output.as_str(),
+                            inference.confidence,
+                            DecisionSource::AI,
+                        )
+                        .with_prompt_hash(prompt_hash)
+                        .with_ai_model(&inference.model);
+                        self.audit.record(record);
+                        return Some(inference.output);
+                    }
+                }
+                Err(e) => {
+                    eprintln!(
+                        "[rule-engine] AI inference failed for \\{}: {e}",
+                        macro_name
+                    );
+                }
+            }
+        }
+
+        // 3. Fallback: conservative text
+        let record = AuditRecord::new(
+            macro_name.to_string(),
+            arity,
+            "verbatim",
+            1.0,
+            DecisionSource::Fallback,
+        );
+        self.audit.record(record);
+
+        if self.config.warn_on_unknown {
+            eprintln!(
+                "[rule-engine] unknown macro: \\{} (arity={}) — using verbatim fallback",
+                macro_name, arity
+            );
+        }
+
+        Some(RuleOutput::InlineText { content_arg: 0 })
+    }
+
+    /// Stub for `process_with_ai` when `ai-fallback` is not enabled.
+    /// Logs a warning that AI is not available and falls back to `process_unknown`.
+    #[cfg(not(feature = "ai-fallback"))]
+    pub fn process_with_ai(
+        &mut self,
+        macro_name: &str,
+        arity: usize,
+        _context: &str,
+        _api_url: &str,
+        _api_key: Option<&str>,
+    ) -> Option<RuleOutput> {
+        if self.config.enable_ai {
+            eprintln!(
+                "[rule-engine] AI fallback requested but `ai-fallback` feature is not enabled; \
+                 falling back to builtin behavior"
+            );
+        }
+        self.process_unknown(macro_name, arity)
+    }
 }
 
 impl Default for RuleEngine {
@@ -225,5 +325,83 @@ mod tests {
         // Should not panic even with stderr
         engine.process_unknown("silent", 1);
         assert_eq!(engine.audit_count(), 1);
+    }
+
+    #[cfg(feature = "ai-fallback")]
+    #[test]
+    fn ai_fallback_stub_builds_prompt() {
+        let prompt = crate::ai_inference::build_prompt("mycompanytable", 2, "some context");
+        assert!(prompt.contains("mycompanytable"));
+        assert!(prompt.contains("2"));
+        assert!(prompt.contains("some context"));
+    }
+
+    #[cfg(feature = "ai-fallback")]
+    #[test]
+    fn ai_fallback_stub_infer_fails() {
+        let result = crate::ai_inference::infer_macro(
+            "foo", 1, "ctx", "http://localhost:9999", None,
+        );
+        // Should fail gracefully (no server running)
+        assert!(result.is_err());
+    }
+
+    #[cfg(feature = "ai-fallback")]
+    #[test]
+    fn process_with_ai_registry_hit() {
+        let mut engine = RuleEngine::new();
+        engine.set_config(RuleEngineConfig {
+            enable_ai: true,
+            ai_min_confidence: 0.5,
+            ..Default::default()
+        });
+        // textbf is a builtin rule — should be found in registry, no AI call
+        let result = engine.process_with_ai("textbf", 1, "", "http://localhost:9999", None);
+        assert!(result.is_some());
+        let records = engine.audit_cache().records();
+        assert_eq!(records[records.len() - 1].source, DecisionSource::Loaded);
+    }
+
+    #[cfg(feature = "ai-fallback")]
+    #[test]
+    fn process_with_ai_unknown_falls_through() {
+        let mut engine = RuleEngine::new();
+        engine.set_config(RuleEngineConfig {
+            enable_ai: true,
+            ai_min_confidence: 0.5,
+            ..Default::default()
+        });
+        // No real API server — should fall through to fallback
+        let result = engine.process_with_ai(
+            "definitelyunknown", 1, "", "http://localhost:9999", None,
+        );
+        assert!(result.is_some());
+        let records = engine.audit_cache().records();
+        assert_eq!(records[records.len() - 1].source, DecisionSource::Fallback);
+    }
+
+    #[cfg(not(feature = "ai-fallback"))]
+    #[test]
+    fn process_with_ai_disabled_warns_and_falls_back() {
+        let mut engine = RuleEngine::new();
+        engine.set_config(RuleEngineConfig {
+            enable_ai: true,
+            ..Default::default()
+        });
+        // Should fall back to builtin process_unknown
+        let result = engine.process_with_ai("anymacro", 1, "", "", None);
+        assert!(result.is_some());
+        assert_eq!(engine.audit_count(), 1);
+    }
+
+    #[cfg(feature = "ai-fallback")]
+    #[test]
+    fn compute_prompt_hash_is_deterministic() {
+        let h1 = crate::ai_inference::compute_prompt_hash("hello");
+        let h2 = crate::ai_inference::compute_prompt_hash("hello");
+        let h3 = crate::ai_inference::compute_prompt_hash("world");
+        assert_eq!(h1, h2);
+        assert_ne!(h1, h3);
+        assert_eq!(h1.len(), 64); // SHA-256 hex length
     }
 }

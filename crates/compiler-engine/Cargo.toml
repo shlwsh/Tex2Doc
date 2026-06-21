@@ -21,6 +21,7 @@ doc-xdv-parser         = { workspace = true }
 thiserror = { workspace = true }
 serde     = { workspace = true }
 serde_json = { workspace = true }
+toml = "0.8"
 tempfile  = "3"
 zip       = { workspace = true }
 image     = { workspace = true }
