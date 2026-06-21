@@ -3,16 +3,17 @@
 //! Manages the lifecycle of conversion jobs (pending → running → done).
 
 use crate::app_state::{AppState, JobEntry, JobStatus, JobUpdate};
+use crate::commands::{self, CommandResult, LocalConvertResult};
 use std::path::Path;
 use std::sync::Arc;
 use std::thread;
-use crate::commands::{self, CommandResult, LocalConvertResult};
 
 /// P5: A background conversion job.
 pub struct ConvertJob {
     pub id: String,
     pub project_path: String,
     pub output_path: String,
+    pub profile: String,
     pub quality: String,
 }
 
@@ -28,6 +29,7 @@ impl ConvertJob {
 
         let project_path = self.project_path.clone();
         let output_path = self.output_path.clone();
+        let profile = self.profile.clone();
         let quality = self.quality.clone();
         let app = Arc::clone(&app_state);
 
@@ -35,12 +37,19 @@ impl ConvertJob {
             let result = commands::run_local_convert(
                 Path::new(&project_path),
                 Path::new(&output_path),
+                &profile,
                 &quality,
                 &app,
             );
 
             match &result {
-                Ok(r) => app.update_job(&id, JobUpdate::Succeeded(r.docx_path.display().to_string())),
+                Ok(r) => app.update_job(
+                    &id,
+                    JobUpdate::Succeeded {
+                        output_path: r.docx_path.display().to_string(),
+                        report_path: Some(r.report_path.display().to_string()),
+                    },
+                ),
                 Err(e) => app.update_job(&id, JobUpdate::Failed(e.to_string())),
             }
 
@@ -53,6 +62,7 @@ impl ConvertJob {
 pub fn start_job(
     project_path: String,
     output_path: String,
+    profile: String,
     quality: String,
     app_state: Arc<AppState>,
     on_done: impl FnOnce(CommandResult<LocalConvertResult>) + Send + 'static,
@@ -63,22 +73,45 @@ pub fn start_job(
     let entry = JobEntry {
         id: id.clone(),
         project_path: project_path.clone(),
-        profile: "auto".to_string(),
+        profile: profile.clone(),
         status: JobStatus::Pending,
         output_path: None,
+        report_path: None,
         error: None,
         created_at: chrono_now_simple(),
     };
     app_state.add_job(entry);
 
     let job = ConvertJob {
-        id,
+        id: id.clone(),
         project_path,
         output_path,
+        profile,
         quality,
     };
     job.spawn(Arc::clone(&app_state), on_done);
 
+    id
+}
+
+/// P5: Register a job whose execution is managed outside this module.
+pub fn register_external_job(
+    project_path: String,
+    profile: String,
+    app_state: &AppState,
+) -> String {
+    let id = commands::generate_job_id();
+    let entry = JobEntry {
+        id: id.clone(),
+        project_path,
+        profile,
+        status: JobStatus::Pending,
+        output_path: None,
+        report_path: None,
+        error: None,
+        created_at: chrono_now_simple(),
+    };
+    app_state.add_job(entry);
     id
 }
 

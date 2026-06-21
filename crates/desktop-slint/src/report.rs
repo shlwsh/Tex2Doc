@@ -3,7 +3,7 @@
 //! Formats `CompileReport` and `QualityGateResult` into human-readable strings
 //! for display in the UI status panel.
 
-use doc_compiler_engine::{CompileReport, QualityGateResult};
+use doc_compiler_engine::CompileReport;
 
 /// P5: Formatted summary of a conversion report for UI display.
 #[derive(Debug, Clone)]
@@ -34,18 +34,29 @@ impl ReportSummary {
         let checks_passed = qg.map(|q| q.passed_checks).unwrap_or(0);
         let checks_total = qg.map(|q| q.total_checks).unwrap_or(0);
         let warnings: Vec<String> = qg
-            .map(|q| q.warnings.iter().map(|c| format!("{}: {}", c.name, c.message)).collect())
+            .map(|q| {
+                q.warnings
+                    .iter()
+                    .map(|c| format!("{}: {}", c.name, c.message))
+                    .collect()
+            })
             .unwrap_or_default();
 
         Self {
-            profile: ap.map(|p| p.id.clone()).unwrap_or_else(|| report.profile.id().to_string()),
+            profile: ap
+                .map(|p| p.id.clone())
+                .unwrap_or_else(|| report.profile.id().to_string()),
             display_name: ap.map(|p| p.display_name.clone()).unwrap_or_default(),
             source: ap.map(|p| p.source.clone()).unwrap_or_default(),
             confidence: ap.and_then(|p| p.confidence),
             compatibility_score: report.compatibility.score,
             backend: report.backend.selected.id().to_string(),
-            quality_status: qg.map(|q| q.status.as_str().to_string()).unwrap_or_else(|| "Unknown".to_string()),
-            quality_score: qg.map(|q| q.score.to_string()).unwrap_or_else(|| "N/A".to_string()),
+            quality_status: qg
+                .map(|q| q.status.as_str().to_string())
+                .unwrap_or_else(|| "Unknown".to_string()),
+            quality_score: qg
+                .map(|q| q.score.to_string())
+                .unwrap_or_else(|| "N/A".to_string()),
             checks_passed,
             checks_total,
             warnings,
@@ -69,8 +80,14 @@ impl ReportSummary {
         lines.push(format!("Compatibility: {}%", self.compatibility_score));
         lines.push(format!("Backend: {}", self.backend));
         lines.push(String::new());
-        lines.push(format!("Quality Gate: {} (score={})", self.quality_status, self.quality_score));
-        lines.push(format!("Checks: {}/{} passed", self.checks_passed, self.checks_total));
+        lines.push(format!(
+            "Quality Gate: {} (score={})",
+            self.quality_status, self.quality_score
+        ));
+        lines.push(format!(
+            "Checks: {}/{} passed",
+            self.checks_passed, self.checks_total
+        ));
         for warn in &self.warnings {
             lines.push(format!("  WARN: {}", warn));
         }

@@ -2,10 +2,21 @@ import { Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, Progr
 
 export component MainWindow inherits Window {
     title: "Tex2Doc Desktop";
+    preferred-width: 920px;
+    preferred-height: 720px;
 
-    // ── State properties ──────────────────────────────────────────────────────
     in-out property <string> project-path;
+    in-out property <string> api-base-url;
+    in-out property <string> login-email;
+    in-out property <string> login-password;
+    in-out property <string> account-status: "Not signed in.";
+    in-out property <string> usage-status: "--";
+    in-out property <string> billing-plan-id: "pro";
+    in-out property <string> billing-status: "--";
+    in-out property <string> update-channel: "stable";
+    in-out property <string> update-status: "--";
     in-out property <string> detected-profile: "auto";
+    in-out property <string> main-tex;
     in-out property <string> quality-level: "standard";
     in-out property <string> output-path;
     in-out property <string> status-text: "Ready. Enter a project path and click Convert.";
@@ -18,43 +29,220 @@ export component MainWindow inherits Window {
 
     // ── Callbacks (implemented in Rust) ─────────────────────────────────────
     callback convert-clicked(string, string, string, string);
+    callback cloud-convert-clicked(string, string, string, string, string, string);
     callback detect-profile-clicked(string);
+    callback login-clicked(string, string, string);
+    callback register-clicked(string, string, string);
+    callback refresh-login-clicked(string);
+    callback logout-clicked();
+    callback refresh-usage-clicked(string);
+    callback show-plans-clicked(string);
+    callback checkout-clicked(string, string);
+    callback billing-portal-clicked(string);
+    callback check-update-clicked(string, string);
+    callback choose-project-folder-clicked(string, string);
+    callback choose-project-zip-clicked(string, string);
+    callback choose-output-clicked(string);
     callback open-output-clicked(string);
+    callback open-report-clicked(string);
+    callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
 
-    // ── Layout ───────────────────────────────────────────────────────────────
-    GridBox {
+    VerticalBox {
         padding: 24px;
         spacing: 12px;
 
-        // Header
         Text {
             text: "Tex2Doc Desktop";
             font-size: 22px;
             font-weight: 700;
             color: #1a73e8;
-            row: 0;
-            colspan: 2;
         }
 
-        // Project path input
         GroupBox {
-            title: "Project";
-            row: 1;
-            colspan: 2;
+            title: "Account";
 
             VerticalBox {
+                spacing: 8px;
+
                 LineEdit {
-                    placeholder-text: "TeX project path (e.g. /home/user/paper)...";
-                    text <=> project-path;
+                    placeholder-text: "API base URL";
+                    text <=> api-base-url;
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Email";
+                        text <=> login-email;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Password";
+                        text <=> login-password;
+                    }
+
+                    Button {
+                        text: "Login";
+                        enabled: api-base-url != "" && login-email != "";
+                        clicked => {
+                            root.account-status = "Signing in...";
+                            root.login-clicked(api-base-url, login-email, login-password);
+                        }
+                    }
+
+                    Button {
+                        text: "Register";
+                        enabled: api-base-url != "" && login-email != "";
+                        clicked => {
+                            root.account-status = "Registering...";
+                            root.register-clicked(api-base-url, login-email, login-password);
+                        }
+                    }
+
+                    Button {
+                        text: "Refresh";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.account-status = "Refreshing login...";
+                            root.refresh-login-clicked(api-base-url);
+                        }
+                    }
+
+                    Button {
+                        text: "Logout";
+                        clicked => {
+                            root.logout-clicked();
+                        }
+                    }
+
+                    Button {
+                        text: "Usage";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.usage-status = "Refreshing usage...";
+                            root.refresh-usage-clicked(api-base-url);
+                        }
+                    }
+                }
+
+                Text { text: account-status; font-size: 12px; }
+                Text { text: usage-status; font-size: 12px; }
+            }
+        }
+
+        GroupBox {
+            title: "Billing";
+
+            VerticalBox {
+                spacing: 8px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Plan ID";
+                        text <=> billing-plan-id;
+                    }
+
+                    Button {
+                        text: "Plans";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.billing-status = "Loading plans...";
+                            root.show-plans-clicked(api-base-url);
+                        }
+                    }
+
+                    Button {
+                        text: "Checkout";
+                        enabled: api-base-url != "" && billing-plan-id != "";
+                        clicked => {
+                            root.billing-status = "Creating checkout session...";
+                            root.checkout-clicked(api-base-url, billing-plan-id);
+                        }
+                    }
+
+                    Button {
+                        text: "Portal";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.billing-status = "Opening billing portal...";
+                            root.billing-portal-clicked(api-base-url);
+                        }
+                    }
+                }
+
+                Text { text: billing-status; font-size: 12px; }
+            }
+        }
+
+        GroupBox {
+            title: "Updates";
+
+            VerticalBox {
+                spacing: 8px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Release channel";
+                        text <=> update-channel;
+                    }
+
+                    Button {
+                        text: "Check";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.update-status = "Checking for updates...";
+                            root.check-update-clicked(api-base-url, update-channel);
+                        }
+                    }
+                }
+
+                Text { text: update-status; font-size: 12px; }
+            }
+        }
+
+        GroupBox {
+            title: "Project";
+
+            VerticalBox {
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "TeX project path or project zip...";
+                        text <=> project-path;
+                    }
+
+                    Button {
+                        text: "Folder";
+                        enabled: !is-converting;
+                        clicked => {
+                            root.choose-project-folder-clicked(project-path, output-path);
+                        }
+                    }
+
+                    Button {
+                        text: "Zip";
+                        enabled: !is-converting;
+                        clicked => {
+                            root.choose-project-zip-clicked(project-path, output-path);
+                        }
+                    }
+                }
+
+                LineEdit {
+                    placeholder-text: "Main TeX for cloud conversion (optional, e.g. main-jos.tex)...";
+                    text <=> main-tex;
                 }
             }
         }
 
-        // Options row
         GroupBox {
             title: "Options";
-            row: 2;
-            colspan: 2;
 
             HorizontalBox {
                 spacing: 16px;
@@ -77,18 +265,27 @@ export component MainWindow inherits Window {
 
                 VerticalBox {
                     Text { text: "Output"; font-size: 12px; }
-                    LineEdit {
-                        placeholder-text: "Output DOCX path...";
-                        text <=> output-path;
+                    HorizontalBox {
+                        spacing: 8px;
+
+                        LineEdit {
+                            placeholder-text: "Output DOCX path...";
+                            text <=> output-path;
+                        }
+
+                        Button {
+                            text: "Save As";
+                            enabled: !is-converting;
+                            clicked => {
+                                root.choose-output-clicked(output-path);
+                            }
+                        }
                     }
                 }
             }
         }
 
-        // Action buttons
         HorizontalBox {
-            row: 3;
-            colspan: 2;
             spacing: 8px;
 
             Button {
@@ -112,27 +309,48 @@ export component MainWindow inherits Window {
             }
 
             Button {
+                text: "Cloud Convert";
+                enabled: api-base-url != "" && project-path != "" && output-path != "" && !is-converting;
+                clicked => {
+                    root.is-converting = true;
+                    root.status-text = "[cloud] Uploading TeX project...";
+                    root.conversion-progress = 0.1;
+                    root.cloud-convert-clicked(api-base-url, project-path, main-tex, detected-profile, quality-level, output-path);
+                }
+            }
+
+            Button {
                 text: "Open Output";
                 enabled: !is-converting && output-path != "";
                 clicked => {
                     root.open-output-clicked(output-path);
                 }
             }
+
+            Button {
+                text: "Open Report";
+                enabled: !is-converting && output-path != "";
+                clicked => {
+                    root.open-report-clicked(output-path);
+                }
+            }
+
+            Button {
+                text: "Diagnostics";
+                enabled: !is-converting;
+                clicked => {
+                    root.export-diagnostics-clicked(project-path, output-path, api-base-url, detected-profile, quality-level, status-text, recent-jobs, update-status);
+                }
+            }
         }
 
-        // Progress indicator
         ProgressIndicator {
-            row: 4;
-            colspan: 2;
             progress: conversion-progress;
             visible: is-converting;
         }
 
-        // Report summary
         GroupBox {
             title: "Report";
-            row: 5;
-            colspan: 2;
 
             HorizontalBox {
                 spacing: 16px;
@@ -159,11 +377,8 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Status panel
         GroupBox {
             title: "Status";
-            row: 6;
-            colspan: 2;
 
             TextEdit {
                 text <=> status-text;
@@ -173,11 +388,8 @@ export component MainWindow inherits Window {
             }
         }
 
-        // Recent jobs
         GroupBox {
             title: "Recent Jobs";
-            row: 7;
-            colspan: 2;
 
             TextEdit {
                 text <=> recent-jobs;

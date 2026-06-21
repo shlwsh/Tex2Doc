@@ -262,14 +262,6 @@ pub fn serialize_document(
         "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
     ));
     root.push_attribute((
-        "xmlns:wp",
-        "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing",
-    ));
-    root.push_attribute((
-        "xmlns:a",
-        "http://schemas.openxmlformats.org/drawingml/2006/main",
-    ));
-    root.push_attribute((
         "xmlns:pic",
         "http://schemas.openxmlformats.org/drawingml/2006/picture",
     ));
@@ -3056,6 +3048,31 @@ mod tests {
 
         assert!(xml.contains(r#"<w:pStyle w:val="JOSBody"/>"#));
         assert!(!xml.contains(r#"<w:pStyle w:val="JOSReference"/>"#));
+    }
+
+    #[test]
+    fn document_root_namespaces_are_unique() {
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Paragraph {
+                runs: vec![TextRun {
+                    text: "Namespace smoke test".to_string(),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+
+        assert_eq!(xml.matches(r#"xmlns:w=""#).count(), 1);
+        assert_eq!(xml.matches(r#"xmlns:r=""#).count(), 1);
+        assert_eq!(xml.matches(r#"xmlns:m=""#).count(), 1);
+        assert_eq!(xml.matches(r#"xmlns:a=""#).count(), 1);
+        assert_eq!(xml.matches(r#"xmlns:wp=""#).count(), 1);
+        assert_eq!(xml.matches(r#"xmlns:pic=""#).count(), 1);
     }
 
     #[test]

@@ -1,0 +1,23 @@
+\documentclass{book}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\begin{document}
+\title{Generic Book-Style Conversion Fixture}
+\author{Example Author}
+\maketitle
+\chapter{Problem Statement}
+Book-like projects are useful fallback fixtures because they contain chapter-level structure and longer running text.
+\section{Document Flow}
+The conversion pipeline should maintain paragraphs and basic inline emphasis such as \textbf{bold text} and \textit{italic text}.
+\section{Notation}
+\begin{equation}
+  \Delta = \sum_{i=1}^{n} |x_i-y_i| \label{eq:delta}
+\end{equation}
+\chapter{Results}
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=.45\textwidth]{book-result.png}
+  \caption{Book-style result overview.}
+\end{figure}
+The fixture intentionally uses only common LaTeX constructs so it can serve as an arXiv-style fallback case.
+\end{document}

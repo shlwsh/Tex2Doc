@@ -17,6 +17,8 @@ use tracing_subscriber::EnvFilter;
 mod error;
 mod limits;
 mod routes;
+mod state;
+mod worker_service;
 
 use limits::MAX_BODY;
 

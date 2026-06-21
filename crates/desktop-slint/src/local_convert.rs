@@ -4,7 +4,8 @@
 //! that does not consume cloud quotas.
 
 use doc_compiler_engine::{
-    CompileOptions, CompileArtifact, EngineError, ProfileRef, SemanticBackendKind, SemanticTexEngine,
+    CompileArtifact, CompileOptions, EngineError, ProfileRef, SemanticBackendKind,
+    SemanticTexEngine,
 };
 use std::path::Path;
 use thiserror::Error;
@@ -34,7 +35,9 @@ pub fn convert(
     quality: &str,
 ) -> Result<CompileArtifact> {
     if !project_root.is_dir() {
-        return Err(LocalConvertError::ProjectNotFound(project_root.display().to_string()));
+        return Err(LocalConvertError::ProjectNotFound(
+            project_root.display().to_string(),
+        ));
     }
 
     let min_score = match quality {

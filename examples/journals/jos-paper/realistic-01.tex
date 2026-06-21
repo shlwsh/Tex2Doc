@@ -1,0 +1,30 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\begin{document}
+\title{A Realistic IEEE JOS Profile Fixture}
+\author{\IEEEauthorblockN{First Author}\IEEEauthorblockA{Example University}}
+\maketitle
+\begin{abstract}
+This fixture resembles a journal manuscript with motivation, method, evaluation, and references.
+\end{abstract}
+\begin{IEEEkeywords}
+semantic TeX; DOCX; journal profile
+\end{IEEEkeywords}
+\section{Introduction}
+The JOS profile should preserve IEEE-style front matter and structured sections.
+\section{Model}
+\begin{equation}
+  Q = \sum_{i=1}^{n} w_i q_i \label{eq:jos-q}
+\end{equation}
+\section{Evaluation}
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=.45\textwidth]{jos-overview.png}
+  \caption{JOS fixture overview.}
+\end{figure}
+\section{Conclusion}
+This realistic fixture expands beyond the minimal smoke case.
+\bibliographystyle{ieeetran}
+\bibliography{refs}
+\end{document}

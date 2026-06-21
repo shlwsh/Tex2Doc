@@ -11,12 +11,19 @@ use std::path::PathBuf;
 /// P5: User settings for the desktop client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
+    /// Commercial API base URL.
+    pub api_base_url: String,
     /// Default output directory for conversions.
     pub output_dir: PathBuf,
     /// Default quality level (preview|standard|strict).
     pub quality: String,
     /// Default profile (auto or a specific ID).
     pub default_profile: String,
+    /// Release channel for update checks.
+    #[serde(default = "default_release_channel")]
+    pub release_channel: String,
+    /// Last used login email. Passwords and tokens are intentionally not stored here.
+    pub last_login_email: Option<String>,
     /// Last used project path.
     pub last_project_path: Option<String>,
 }
@@ -24,9 +31,12 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            api_base_url: "https://api.tex2doc.cn/v1/".to_string(),
             output_dir: dirs_default_output(),
             quality: "standard".to_string(),
             default_profile: "auto".to_string(),
+            release_channel: default_release_channel(),
+            last_login_email: None,
             last_project_path: None,
         }
     }
@@ -47,7 +57,7 @@ impl Settings {
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent)?;
             }
-            let json = serde_json::to_string_pretty(self)?;
+            let json = serde_json::to_string_pretty(self).map_err(std::io::Error::other)?;
             fs::write(path, json)?;
         }
         Ok(())
@@ -69,6 +79,30 @@ fn config_path() -> Option<PathBuf> {
 /// Returns the default output directory.
 fn dirs_default_output() -> PathBuf {
     ProjectDirs::from("com", "tex2doc", "Tex2Doc")
-        .map(|dirs| dirs.document_dir().join("Tex2Doc").join("output"))
+        .map(|dirs| dirs.data_dir().join("output"))
         .unwrap_or_else(|| PathBuf::from("./output"))
+}
+
+fn default_release_channel() -> String {
+    "stable".to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn missing_release_channel_defaults_to_stable() {
+        let json = r#"{
+            "api_base_url": "https://api.tex2doc.cn/v1/",
+            "output_dir": "/tmp/tex2doc",
+            "quality": "standard",
+            "default_profile": "auto",
+            "last_login_email": null,
+            "last_project_path": null
+        }"#;
+
+        let settings: Settings = serde_json::from_str(json).unwrap();
+        assert_eq!(settings.release_channel, "stable");
+    }
 }

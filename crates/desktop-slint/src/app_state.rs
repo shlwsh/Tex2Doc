@@ -7,14 +7,16 @@ use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
 /// P5: Application-wide state shared by all UI components.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug)]
 pub struct AppState {
     /// Current authentication token (None = not logged in).
-    pub auth_token: Option<String>,
+    pub auth_token: RwLock<Option<String>>,
+    /// Current refresh token (None = not logged in).
+    pub refresh_token: RwLock<Option<String>>,
     /// Display name of the logged-in user.
-    pub user_name: Option<String>,
+    pub user_name: RwLock<Option<String>>,
     /// Conversion quota (None = unlimited / local mode).
-    pub quota_remaining: Option<usize>,
+    pub quota_remaining: RwLock<Option<usize>>,
     /// Current conversion jobs.
     pub jobs: RwLock<Vec<JobEntry>>,
 }
@@ -27,6 +29,8 @@ pub struct JobEntry {
     pub profile: String,
     pub status: JobStatus,
     pub output_path: Option<String>,
+    #[serde(default)]
+    pub report_path: Option<String>,
     pub error: Option<String>,
     pub created_at: String,
 }
@@ -53,15 +57,69 @@ impl std::fmt::Display for JobStatus {
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            auth_token: None,
-            user_name: None,
-            quota_remaining: None,
+            auth_token: RwLock::new(None),
+            refresh_token: RwLock::new(None),
+            user_name: RwLock::new(None),
+            quota_remaining: RwLock::new(None),
             jobs: RwLock::new(Vec::new()),
         }
     }
 }
 
 impl AppState {
+    pub fn set_account_session(
+        &self,
+        access_token: String,
+        refresh_token: String,
+        user_name: Option<String>,
+        quota_remaining: Option<usize>,
+    ) {
+        if let Ok(mut token) = self.auth_token.write() {
+            *token = Some(access_token);
+        }
+        if let Ok(mut token) = self.refresh_token.write() {
+            *token = Some(refresh_token);
+        }
+        if let Ok(mut user) = self.user_name.write() {
+            *user = user_name;
+        }
+        if let Ok(mut quota) = self.quota_remaining.write() {
+            *quota = quota_remaining;
+        }
+    }
+
+    pub fn auth_token(&self) -> Option<String> {
+        self.auth_token.read().ok().and_then(|token| token.clone())
+    }
+
+    pub fn refresh_token(&self) -> Option<String> {
+        self.refresh_token
+            .read()
+            .ok()
+            .and_then(|token| token.clone())
+    }
+
+    pub fn set_refresh_token(&self, refresh_token: String) {
+        if let Ok(mut token) = self.refresh_token.write() {
+            *token = Some(refresh_token);
+        }
+    }
+
+    pub fn clear_account_session(&self) {
+        if let Ok(mut token) = self.auth_token.write() {
+            *token = None;
+        }
+        if let Ok(mut token) = self.refresh_token.write() {
+            *token = None;
+        }
+        if let Ok(mut user) = self.user_name.write() {
+            *user = None;
+        }
+        if let Ok(mut quota) = self.quota_remaining.write() {
+            *quota = None;
+        }
+    }
+
     pub fn add_job(&self, entry: JobEntry) {
         if let Ok(mut jobs) = self.jobs.write() {
             jobs.insert(0, entry);
@@ -77,9 +135,13 @@ impl AppState {
             if let Some(job) = jobs.iter_mut().find(|j| j.id == id) {
                 match update {
                     JobUpdate::Running => job.status = JobStatus::Running,
-                    JobUpdate::Succeeded(path) => {
+                    JobUpdate::Succeeded {
+                        output_path,
+                        report_path,
+                    } => {
                         job.status = JobStatus::Succeeded;
-                        job.output_path = Some(path);
+                        job.output_path = Some(output_path);
+                        job.report_path = report_path;
                     }
                     JobUpdate::Failed(err) => {
                         job.status = JobStatus::Failed;
@@ -91,7 +153,9 @@ impl AppState {
     }
 
     pub fn recent_jobs(&self) -> Vec<JobEntry> {
-        self.jobs.read().ok()
+        self.jobs
+            .read()
+            .ok()
             .map(|j| j.iter().take(10).cloned().collect())
             .unwrap_or_default()
     }
@@ -100,6 +164,9 @@ impl AppState {
 #[derive(Debug, Clone)]
 pub enum JobUpdate {
     Running,
-    Succeeded(String),
+    Succeeded {
+        output_path: String,
+        report_path: Option<String>,
+    },
     Failed(String),
 }

@@ -1,0 +1,19 @@
+\documentclass[aclang]{acl}
+\usepackage{natbib}
+\begin{document}
+\title{Robust Citation Handling in TACL Fixtures}
+\author{Third Author\affiliation{Example Lab}}
+\aclfinalcopy
+\section{Introduction}
+Citation commands such as \citep{a2024} and \citet{b2024} should be recognized by the rule engine.
+\section{Analysis}
+\begin{itemize}
+\item profile detection should select TACL;
+\item citation-like macros should not become raw text failures;
+\item report generation should remain stable.
+\end{itemize}
+\section{Conclusion}
+This fixture prioritizes citation-heavy prose.
+\bibliographystyle{acl_natbib}
+\bibliography{refs}
+\end{document}

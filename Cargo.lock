@@ -1532,16 +1532,20 @@ name = "doc-desktop-slint"
 version = "0.1.0"
 dependencies = [
  "directories",
+ "doc-commercial-api-client",
  "doc-compiler-engine",
  "doc-core",
  "env_logger",
  "log",
  "serde",
  "serde_json",
+ "sha2",
  "slint",
  "slint-build",
  "thiserror 2.0.18",
  "tokio",
+ "url",
+ "zip",
 ]
 
 [[package]]
@@ -1705,6 +1709,7 @@ dependencies = [
  "async-trait",
  "axum",
  "bytes",
+ "doc-compiler-engine",
  "doc-core",
  "http",
  "memchr",

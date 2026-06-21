@@ -5,7 +5,6 @@ use std::time::Duration;
 use reqwest::Client;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use thiserror::Error;
 
 use crate::models::*;
 use crate::ApiError;
@@ -20,7 +19,7 @@ pub struct ClientConfig {
 impl Default for ClientConfig {
     fn default() -> Self {
         Self {
-            base_url: url::Url::parse("https://api.tex2doc.cn/v1").unwrap(),
+            base_url: url::Url::parse("https://api.tex2doc.cn/v1/").unwrap(),
             api_key: String::new(),
             timeout: Duration::from_secs(30),
         }
@@ -49,8 +48,18 @@ impl ApiClient {
         })
     }
 
-    async fn get<R: DeserializeOwned>(&self, path: &str) -> Result<R, ApiError> {
-        let url = self.config.base_url.join(path).map_err(ApiError::Url)?;
+    pub(crate) fn endpoint(&self, path: &str) -> Result<url::Url, ApiError> {
+        let mut base = self.config.base_url.clone();
+        if !base.path().ends_with('/') {
+            let path = format!("{}/", base.path().trim_end_matches('/'));
+            base.set_path(&path);
+        }
+        base.join(path.trim_start_matches('/'))
+            .map_err(ApiError::Url)
+    }
+
+    pub(crate) async fn get<R: DeserializeOwned>(&self, path: &str) -> Result<R, ApiError> {
+        let url = self.endpoint(path)?;
         let resp = self
             .http
             .get(url)
@@ -68,12 +77,32 @@ impl ApiClient {
             .map_err(|e| ApiError::Decode(e.to_string()))
     }
 
-    async fn post<R: Serialize + ?Sized, B: DeserializeOwned>(
+    pub(crate) async fn get_bytes(&self, path: &str) -> Result<Vec<u8>, ApiError> {
+        let url = self.endpoint(path)?;
+        let resp = self
+            .http
+            .get(url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .send()
+            .await
+            .map_err(|e| ApiError::Transport(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ApiError::Http { status, body });
+        }
+        resp.bytes()
+            .await
+            .map(|b| b.to_vec())
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
+    pub(crate) async fn post<R: Serialize + ?Sized, B: DeserializeOwned>(
         &self,
         path: &str,
         body: &R,
     ) -> Result<B, ApiError> {
-        let url = self.config.base_url.join(path).map_err(ApiError::Url)?;
+        let url = self.endpoint(path)?;
         let resp = self
             .http
             .post(url)
@@ -92,14 +121,34 @@ impl ApiClient {
             .map_err(|e| ApiError::Decode(e.to_string()))
     }
 
+    pub(crate) async fn post_multipart<B: DeserializeOwned>(
+        &self,
+        path: &str,
+        form: reqwest::multipart::Form,
+    ) -> Result<B, ApiError> {
+        let url = self.endpoint(path)?;
+        let resp = self
+            .http
+            .post(url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| ApiError::Transport(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ApiError::Http { status, body });
+        }
+        resp.json()
+            .await
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
     /// Submit a DOCX for quality analysis.
     pub async fn submit_analysis(&self, docx: &[u8]) -> Result<AnalysisJob, ApiError> {
         let form = docx_to_form(docx)?;
-        let url = self
-            .config
-            .base_url
-            .join("/analysis/submit")
-            .map_err(ApiError::Url)?;
+        let url = self.endpoint("analysis/submit")?;
         let resp = self
             .http
             .post(url)
@@ -120,16 +169,14 @@ impl ApiClient {
 
     /// Poll for analysis result.
     pub async fn get_analysis_result(&self, job_id: &str) -> Result<AnalysisResult, ApiError> {
-        self.get(&format!("/analysis/{}", job_id)).await
+        self.get(&format!("analysis/{}", job_id)).await
     }
 }
 
 fn docx_to_form(docx: &[u8]) -> Result<reqwest::multipart::Form, ApiError> {
     let part = reqwest::multipart::Part::bytes(docx.to_vec())
         .file_name("document.docx")
-        .mime_str(
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+        .mime_str("application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         .map_err(|e| ApiError::Transport(e.to_string()))?;
     Ok(reqwest::multipart::Form::new().part("file", part))
 }

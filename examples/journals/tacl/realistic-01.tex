@@ -1,0 +1,26 @@
+\documentclass[aclang]{acl}
+\usepackage{natbib}
+\usepackage{amsmath}
+\begin{document}
+\title{A Realistic TACL Fixture for Semantic Parsing}
+\author{First Author\affiliation{University of Example}}
+\aclfinalcopy
+\section{Introduction}
+ACL and TACL papers heavily use natbib citations such as \citep{author2024example}.
+\section{Method}
+\begin{equation}
+  p(y|x)=\prod_{t=1}^{T}p(y_t|y_{<t},x)
+\end{equation}
+\section{Experiments}
+\begin{table}[ht]
+\centering
+\begin{tabular}{lrr}
+Model & Dev & Test\\
+base & 81.2 & 80.5\\
+ours & 86.0 & 85.4\\
+\end{tabular}
+\caption{TACL fixture results.}
+\end{table}
+\bibliographystyle{acl_natbib}
+\bibliography{refs}
+\end{document}

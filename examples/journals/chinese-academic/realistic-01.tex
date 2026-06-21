@@ -1,0 +1,30 @@
+\documentclass{ctexart}
+\usepackage{ctex}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\begin{document}
+\title{中文学术论文语义转换真实样本一}
+\author{李明}
+\keywords{中文论文；语义转换；文档工程}
+\begin{abstract}
+本文构造一个包含摘要、关键词、公式、表格与图片的中文学术论文样本，用于检验中文 profile 的泛化能力。
+\endabstract}
+\section{引言}
+中文学术论文通常包含中文标点、中文关键词和多级标题。本文在式~\ref{eq:cn-score} 中给出一个简单评分模型。
+\section{方法}
+\begin{equation}
+  S = \lambda A + (1-\lambda)B \label{eq:cn-score}
+\end{equation}
+\section{实验}
+\begin{table}[ht]
+\centering
+\begin{tabular}{lrr}
+方法 & 准确率 & 时间\\
+基线 & 78.1 & 4.2\\
+本文 & 86.3 & 3.1\\
+\end{tabular}
+\caption{中文样本实验结果}
+\end{table}
+\section{结论}
+该样本用于 nightly 回归中的中文学术场景。
+\end{document}
