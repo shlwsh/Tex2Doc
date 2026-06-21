@@ -1,21 +1,18 @@
-id = "jos-paper-toml"
-display_name = "IEEE/JOS Paper"
-aliases = ["jos-paper"]
+id = "cvpr"
+display_name = "CVPR/ICCV Paper"
 
 document_classes = ["IEEEtran"]
+aliases = ["cvpr-paper", "iccv"]
 
 [page_setup]
-kind = "a4"
-width_mm = 210.0
-height_mm = 297.0
-margin_top_mm = 19.1
-margin_bottom_mm = 19.1
-margin_left_mm = 17.78
-margin_right_mm = 17.78
+kind = "letter"
+columns = 1
 
 [font_policy]
 latin_main = "Times New Roman"
-notes = "10pt"
+cjk_main = ""
+math = "Cambria Math"
+notes = "IEEE CVPR conference paper format"
 
 [caption_policy]
 figure_prefix = "Fig."
@@ -24,7 +21,7 @@ equation_prefix = ""
 numbering = "arabic"
 
 [citation_policy]
-style = "ieee"
+style = "numeric-compressed"
 bibliography_style = "ieee"
 reference_section_title = "References"
 
@@ -39,17 +36,22 @@ weight = 0.70
 
 [[detection.signals]]
 kind = "documentclass_option"
-value = "journal"
+value = "conference"
 weight = 0.20
 
 [[detection.signals]]
 kind = "macro"
-value = "IEEEauthorblockN"
+value = "cvprfinalcopy"
 weight = 0.10
 
 [[detection.signals]]
 kind = "macro"
-value = "IEEEkeywords"
+value = "iccvfinalcopy"
+weight = 0.10
+
+[[detection.signals]]
+kind = "macro"
+value = "cvprPaperID"
 weight = 0.05
 
 [backend]
@@ -64,48 +66,48 @@ preserve_raw_fallback = true
 collect_runtime_events = true
 collect_layout_graph = true
 
-# IEEE/JOS-specific macro rules
+# CVPR/ICCV-specific macro rules
 [[macro_rules]]
-name = "IEEEauthorblockN"
-semantic = "author"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "IEEEauthorblockA"
-semantic = "affiliation"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "IEEEkeywords"
-semantic = "keyword"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "markboth"
-semantic = "metadata"
-args = 2
-style = ""
-
-[[macro_rules]]
-name = "IEEEpeerreviewmaketitle"
+name = "cvprfinalcopy"
 semantic = "metadata"
 args = 0
 style = ""
 
 [[macro_rules]]
-name = "citet"
-semantic = "citation"
-args = 1
-style = "textual"
+name = "iccvfinalcopy"
+semantic = "metadata"
+args = 0
+style = ""
 
 [[macro_rules]]
-name = "citep"
-semantic = "citation"
+name = "cvprPaperID"
+semantic = "metadata"
 args = 1
-style = "parenthetical"
+style = ""
+
+[[macro_rules]]
+name = "confName"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "confYear"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "author"
+semantic = "author"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "affiliation"
+semantic = "affiliation"
+args = 1
+style = ""
 
 [[style_map]]
 semantic = "heading.level1"

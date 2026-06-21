@@ -31,6 +31,7 @@ mod rule_output_routing;
 mod ai_inference;
 
 pub use audit::{AuditCache, AuditRecord, DecisionSource};
+pub use builtin_rules::{builtin_rules, journal_rules};
 pub use registry::{MacroRule, RuleRegistry};
 pub use rule_engine::RuleEngine;
 pub use rule_engine::RuleEngineConfig;

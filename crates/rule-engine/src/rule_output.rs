@@ -35,6 +35,38 @@ pub enum RuleOutput {
     },
     /// The macro should be kept as-is (verbatim).
     Verbatim,
+    // === Journal-specific output variants ===
+    /// A citation macro (e.g., `\citet`, `\citep`, `\citealp`).
+    Citation {
+        /// Which argument (0-indexed) contains the citation keys.
+        keys_arg: usize,
+        /// Citation style hint: "textual", "parenthetical", etc.
+        style: String,
+    },
+    /// A metadata field macro (e.g., `\IEEEkeywords`, `\shorttitle`, `\confName`).
+    MetadataField {
+        /// The field name (e.g., "keywords", "title", "confName").
+        key: String,
+        /// Which argument (0-indexed) contains the value.
+        content_arg: usize,
+    },
+    /// An author list macro (e.g., `\IEEEauthorblockN`, `\author`).
+    AuthorList {
+        /// Which argument (0-indexed) contains the author block.
+        content_arg: usize,
+    },
+    /// An affiliation/address macro (e.g., `\IEEEauthorblockA`, `\affiliation`, `\institute`).
+    Affiliation {
+        /// Which argument (0-indexed) contains the affiliation.
+        content_arg: usize,
+    },
+    /// A keyword list macro (e.g., `\IEEEkeywords`, `\keywords`).
+    KeywordList {
+        /// Which argument (0-indexed) contains the keyword text.
+        content_arg: usize,
+        /// Separator between keywords (default: comma).
+        separator: String,
+    },
 }
 
 impl RuleOutput {
@@ -48,6 +80,11 @@ impl RuleOutput {
             Self::Table { .. } => "table",
             Self::Figure { .. } => "figure",
             Self::Verbatim => "verbatim",
+            Self::Citation { .. } => "citation",
+            Self::MetadataField { .. } => "metadata_field",
+            Self::AuthorList { .. } => "author_list",
+            Self::Affiliation { .. } => "affiliation",
+            Self::KeywordList { .. } => "keyword_list",
         }
     }
 }

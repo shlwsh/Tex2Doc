@@ -1,0 +1,149 @@
+id = "chinese-academic"
+display_name = "Chinese Academic Paper"
+aliases = ["chinese-academic-toml"]
+
+document_classes = ["ctexart", "ctexrep", "ctexbook", "article"]
+
+[page_setup]
+kind = "a4"
+width_mm = 210.0
+height_mm = 297.0
+margin_top_mm = 25.0
+margin_bottom_mm = 25.0
+margin_left_mm = 30.0
+margin_right_mm = 30.0
+
+[font_policy]
+latin_main = "Times New Roman"
+cjk_main = "宋体"
+math = "Cambria Math"
+notes = "CTeX-oriented Chinese academic font policy"
+
+[caption_policy]
+figure_prefix = "图"
+table_prefix = "表"
+equation_prefix = "式"
+numbering = "chapter-or-section"
+
+[citation_policy]
+style = "numeric-compressed"
+bibliography_style = "gbt7714"
+reference_section_title = "参考文献"
+
+[detection]
+min_confidence = 0.75
+fallback_profile = "generic"
+
+[[detection.signals]]
+kind = "documentclass"
+value = "ctexart"
+weight = 0.70
+
+[[detection.signals]]
+kind = "package"
+value = "ctex"
+weight = 0.10
+
+[[detection.signals]]
+kind = "package"
+value = "xeCJK"
+weight = 0.05
+
+[[detection.signals]]
+kind = "macro"
+value = "setCJKmainfont"
+weight = 0.05
+
+[backend]
+preferred = "xelatex-hook"
+fallback = ["luatex-node", "rule-based"]
+requires_xetex = true
+prefers_luatex = false
+
+[semantic_policy]
+unknown_macro = "rule-engine"
+preserve_raw_fallback = true
+collect_runtime_events = true
+collect_layout_graph = true
+
+# Chinese academic-specific macro rules
+[[macro_rules]]
+name = "zihao"
+semantic = "ignore"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "songti"
+semantic = "ignore"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "heiti"
+semantic = "ignore"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "kaishu"
+semantic = "ignore"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "fangsong"
+semantic = "ignore"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "CTEXsetup"
+semantic = "ignore"
+args = 2
+style = ""
+
+[[macro_rules]]
+name = "ctexset"
+semantic = "ignore"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "keywords"
+semantic = "keyword"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "zhabstract"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "enabstract"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[style_map]]
+semantic = "heading.level1"
+docx_style = "Heading1"
+
+[[style_map]]
+semantic = "heading.level2"
+docx_style = "Heading2"
+
+[[style_map]]
+semantic = "paragraph.body"
+docx_style = "BodyText"
+
+[[style_map]]
+semantic = "caption.figure"
+docx_style = "Caption"
+
+[quality]
+min_compatibility_score = 70
+max_raw_fallback_blocks = 10
+require_reference_graph = true

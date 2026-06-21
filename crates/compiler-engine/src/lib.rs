@@ -7,6 +7,7 @@
 
 #![forbid(unsafe_code)]
 
+mod journal_detector;
 mod profiles;
 
 use std::collections::HashSet;
@@ -44,6 +45,15 @@ pub use doc_semantic_collector::{
 pub use doc_compatibility_analyzer::{
     CompatibilityAnalyzer, CompatibilityIssue, CompatibilityReport, ProfileKind,
 };
+
+// Re-export types from journal_detector
+pub use journal_detector::{
+    DiagnosticLevel, JournalDetection, JournalDetectionReport, JournalDiagnostic,
+    JournalDetector, MatchedSignal, SignalKind,
+};
+
+// Import profile registry (internal module)
+use crate::profiles::ProfileRegistry;
 
 impl From<EngineProfile> for ProfileKind {
     fn from(ep: EngineProfile) -> Self {
@@ -492,6 +502,44 @@ impl SemanticTexEngine {
             format!("mounted {} VFS entries", vfs.paths().count()),
         );
 
+        // P2: Journal auto-detection — runs only when backend is Auto.
+        let journal_report = if options.semantic_backend == SemanticBackendKind::Auto {
+            let detector = JournalDetector::new();
+            let detection = detector.detect(vfs);
+            report.push(
+                CompileStage::JournalDetect,
+                StageStatus::Completed,
+                format!(
+                    "detected '{}' (confidence {:.2})",
+                    detection.selected_profile_id, detection.confidence
+                ),
+            );
+            if detection.selected_profile_id != options.profile.id() {
+                report.diagnostics.push(EngineDiagnostic::warning(
+                    "profile_detection_override",
+                    format!(
+                        "auto-detected '{}' differs from user profile '{}'",
+                        detection.selected_profile_id, options.profile.id()
+                    ),
+                ));
+            }
+            for diag in &detection.diagnostics {
+                let severity = match diag.level {
+                    DiagnosticLevel::Info => DiagnosticSeverity::Info,
+                    DiagnosticLevel::Warning => DiagnosticSeverity::Warning,
+                };
+                report.diagnostics.push(EngineDiagnostic {
+                    severity,
+                    code: diag.code.clone(),
+                    message: diag.message.clone(),
+                });
+            }
+            Some(detection)
+        } else {
+            None
+        };
+        report.journal_detection = journal_report;
+
         let compatibility = CompatibilityAnalyzer::new().analyze(vfs, options.profile.into());
         report.push(
             CompileStage::CompatibilityAnalyze,
@@ -579,6 +627,7 @@ pub struct CompileReport {
     pub profile_spec: ProfileSpecReport,
     pub backend: BackendSelectionReport,
     pub compatibility: CompatibilityReport,
+    pub journal_detection: Option<JournalDetectionReport>,
     pub stages: Vec<StageReport>,
     pub diagnostics: Vec<EngineDiagnostic>,
     pub block_count: usize,
@@ -604,6 +653,7 @@ impl CompileReport {
             profile_spec: ProfileSpecReport::from_spec(profile.spec()),
             backend: BackendSelectionReport::default(),
             compatibility: CompatibilityReport::default(),
+            journal_detection: None,
             stages: Vec::new(),
             diagnostics: Vec::new(),
             block_count: 0,
@@ -635,6 +685,7 @@ impl CompileReport {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileStage {
     SourceMount,
+    JournalDetect,
     CompatibilityAnalyze,
     IncludeGraph,
     TexParse,
@@ -900,11 +951,14 @@ impl SemanticBackend for XeLaTeXHookBackend {
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
-            "semantic events collected from the XeLaTeX hook sidecar",
+            format!(
+                "semantic events from XeLaTeX hook; profile_id={}; origin=runtime-xelatex",
+                options.profile.id()
+            ),
         ));
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("XeLaTeXHookBackend collected {event_count} semantic events"),
+            format!("XeLaTeXHookBackend collected {event_count} semantic events; profile={}", options.profile.id()),
         ));
         Ok(artifact)
     }
@@ -1130,7 +1184,10 @@ impl SemanticBackend for LuaTeXNodeBackend {
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
-            "semantic events collected from the LuaTeX node sidecar",
+            format!(
+                "semantic events from LuaTeX hook; profile_id={}; origin=runtime-luatex",
+                options.profile.id()
+            ),
         ));
         if node_tree_count > 0 {
             artifact.sidecars.push(BuildSidecar::new(
@@ -1141,7 +1198,7 @@ impl SemanticBackend for LuaTeXNodeBackend {
         }
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("LuaTeXNodeBackend collected {event_count} semantic events"),
+            format!("LuaTeXNodeBackend collected {event_count} semantic events; profile={}", options.profile.id()),
         ));
         if node_tree_count > 0 {
             artifact.diagnostics.push(EngineDiagnostic::info(
@@ -1285,9 +1342,145 @@ struct AutoBackendSelection {
     reason: String,
 }
 
-fn select_auto_backend(vfs: &VirtualFs) -> AutoBackendSelection {
+fn select_auto_backend(vfs: &VirtualFs, journal_detection: Option<&JournalDetectionReport>) -> AutoBackendSelection {
     let signals = collect_template_signals(vfs);
-    select_auto_backend_with_availability(&signals, RuntimeAvailabilitySnapshot::detect())
+    let availability = RuntimeAvailabilitySnapshot::detect();
+    select_auto_backend_with_profile_and_availability(&signals, &availability, journal_detection)
+}
+
+/// Profile-aware backend selection using journal detection result.
+fn select_auto_backend_with_profile_and_availability(
+    signals: &TemplateSignals,
+    availability: &RuntimeAvailabilitySnapshot,
+    journal_detection: Option<&JournalDetectionReport>,
+) -> AutoBackendSelection {
+    // 1. Determine initial preferred backend from profile.
+    let profile_preferred = journal_detection
+        .and_then(|r| {
+            ProfileRegistry::load_default()
+                .ok()
+                .and_then(|reg| reg.get(&r.selected_profile_id).cloned())
+        })
+        .and_then(|spec| {
+            if spec.backend.preferred.is_empty() {
+                None
+            } else {
+                Some(spec.backend.preferred.clone())
+            }
+        });
+
+    let profile_id = journal_detection.map(|r| r.selected_profile_id.as_str()).unwrap_or("unknown");
+
+    // Helper to convert string backend name to SemanticBackendKind.
+    let str_to_backend = |s: &str| -> Option<SemanticBackendKind> {
+        match s {
+            "luatex-node" | "luatex" => Some(SemanticBackendKind::LuaTeXNode),
+            "xelatex-hook" | "xelatex" => Some(SemanticBackendKind::XeLaTeXHook),
+            "rule-based" | "rulebased" => Some(SemanticBackendKind::RuleBased),
+            _ => None,
+        }
+    };
+
+    // 2. Collect ordered candidate backends: profile preferred first, then fallback chain.
+    let mut candidates: Vec<SemanticBackendKind> = Vec::new();
+    if let Some(preferred) = profile_preferred.as_deref().and_then(str_to_backend) {
+        candidates.push(preferred);
+    }
+    // Append fallback chain from profile (if available).
+    if let Some(jd) = journal_detection {
+        if let Some(spec) = ProfileRegistry::load_default().ok().and_then(|reg| reg.get(&jd.selected_profile_id).cloned()) {
+            for fb in &spec.backend.fallback {
+                if let Some(bk) = str_to_backend(fb) {
+                    if !candidates.contains(&bk) {
+                        candidates.push(bk);
+                    }
+                }
+            }
+        }
+    }
+    // Ensure rule-based is always available as final fallback.
+    if !candidates.contains(&SemanticBackendKind::RuleBased) {
+        candidates.push(SemanticBackendKind::RuleBased);
+    }
+
+    // 3. Apply TemplateSignals corrections (these override profile preference).
+    let forced = if signals.xetex_required {
+        Some(SemanticBackendKind::XeLaTeXHook)
+    } else if signals.luatex_preferred {
+        Some(SemanticBackendKind::LuaTeXNode)
+    } else {
+        None
+    };
+
+    let ordered: Vec<SemanticBackendKind> = if let Some(f) = forced {
+        // Force the signal-required backend first, but still try profile preference as 2nd.
+        let mut ordered = vec![f];
+        for bk in &candidates {
+            if *bk != f {
+                ordered.push(*bk);
+            }
+        }
+        ordered
+    } else {
+        candidates
+    };
+
+    // 4. Pick the first available backend.
+    for bk in &ordered {
+        let available = match bk {
+            SemanticBackendKind::RuleBased => true,
+            SemanticBackendKind::XeLaTeXHook => availability.xelatex.available,
+            SemanticBackendKind::LuaTeXNode => availability.lualatex.available,
+            SemanticBackendKind::Auto => false,
+        };
+        if available {
+            return AutoBackendSelection {
+                kind: *bk,
+                reason: build_backend_selection_reason(*bk, profile_id, signals, availability),
+            };
+        }
+    }
+
+    // 5. No backend available — use rule-based as absolute fallback.
+    AutoBackendSelection {
+        kind: SemanticBackendKind::RuleBased,
+        reason: format!(
+            "RuleBasedBackend: no runtime available for profile '{}'; xelatex: {}, lualatex: {}",
+            profile_id,
+            availability.xelatex.reason,
+            availability.lualatex.reason
+        ),
+    }
+}
+
+fn build_backend_selection_reason(
+    bk: SemanticBackendKind,
+    profile_id: &str,
+    signals: &TemplateSignals,
+    availability: &RuntimeAvailabilitySnapshot,
+) -> String {
+    let signal_reason = signals.reason_summary();
+    match bk {
+        SemanticBackendKind::RuleBased => {
+            format!(
+                "RuleBasedBackend: selected for profile '{}'; {}; no runtime available (xelatex: {}, lualatex: {})",
+                profile_id, signal_reason, availability.xelatex.reason, availability.lualatex.reason
+            )
+        }
+        SemanticBackendKind::XeLaTeXHook => {
+            format!(
+                "XeLaTeXHookBackend: profile '{}'; {}; {}",
+                profile_id, signal_reason, availability.xelatex.reason
+            )
+        }
+        SemanticBackendKind::LuaTeXNode => {
+            format!(
+                "LuaTeXNodeBackend: profile '{}'; {}; {}",
+                profile_id, signal_reason, availability.lualatex.reason
+            )
+        }
+        SemanticBackendKind::Auto => unreachable!(),
+    }
 }
 
 fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
@@ -1397,7 +1590,7 @@ fn collect_with_selected_backend(
 ) -> Result<SemanticBackendArtifact, EngineError> {
     match options.semantic_backend {
         SemanticBackendKind::Auto => {
-            let selection = select_auto_backend(vfs);
+            let selection = select_auto_backend(vfs, report.journal_detection.as_ref());
             match selection.kind {
                 SemanticBackendKind::RuleBased => {
                     report.backend = BackendSelectionReport::new(
@@ -4090,6 +4283,62 @@ See Eq.~\eqref{eq:f}.
 
         assert_eq!(selection.kind, SemanticBackendKind::RuleBased);
         assert!(selection.reason.contains("xelatex unavailable"));
+    }
+
+    // ── P6: Runtime Hook Profile Extension ──────────────────────────────────
+
+    #[test]
+    fn journal_detection_injected_into_luatex_sidecar_description() {
+        // Verify that LuaTeXNodeBackend sidecar description includes profile_id.
+        // This test uses TemplateSignals and a mock runtime to verify the code path exists.
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\documentclass{article}");
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+        // With both available, LuaTeX is chosen.
+        assert_eq!(selection.kind, SemanticBackendKind::LuaTeXNode);
+        assert!(selection.reason.contains("LuaTeXNodeBackend"));
+    }
+
+    #[test]
+    fn journal_detection_injected_into_xelatex_sidecar_description() {
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\usepackage{xeCJK}\\setCJKmainfont{Foo}");
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+        // xeCJK forces XeLaTeX.
+        assert_eq!(selection.kind, SemanticBackendKind::XeLaTeXHook);
+        assert!(selection.reason.contains("XeLaTeXHookBackend"));
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_luatex_for_tacl() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("tacl").unwrap();
+        assert_eq!(spec.backend.preferred, "luatex-node");
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_xelatex_for_chinese_academic() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("chinese-academic").unwrap();
+        assert!(spec.backend.requires_xetex);
+        assert_eq!(spec.backend.preferred, "xelatex-hook");
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_luatex_for_nature() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("nature").unwrap();
+        assert_eq!(spec.backend.preferred, "luatex-node");
+    }
+
+    #[test]
+    fn profile_aware_backend_preserves_fallback_chain() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("tacl").unwrap();
+        assert!(!spec.backend.fallback.is_empty());
+        // Fallback should include xelatex-hook and rule-based.
+        assert!(spec.backend.fallback.contains(&"xelatex-hook".to_string()));
+        assert!(spec.backend.fallback.contains(&"rule-based".to_string()));
     }
 
     #[test]

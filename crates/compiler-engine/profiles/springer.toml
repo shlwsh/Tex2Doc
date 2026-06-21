@@ -1,21 +1,21 @@
-id = "jos-paper-toml"
-display_name = "IEEE/JOS Paper"
-aliases = ["jos-paper"]
+id = "springer"
+display_name = "Springer Journal Article"
 
-document_classes = ["IEEEtran"]
+document_classes = ["springer"]
+aliases = ["svjour3", "llncs", "sn-jnl", "springer-journal"]
 
 [page_setup]
 kind = "a4"
-width_mm = 210.0
-height_mm = 297.0
-margin_top_mm = 19.1
-margin_bottom_mm = 19.1
-margin_left_mm = 17.78
-margin_right_mm = 17.78
+margin_top_mm = 25.0
+margin_bottom_mm = 25.0
+margin_left_mm = 22.0
+margin_right_mm = 22.0
 
 [font_policy]
 latin_main = "Times New Roman"
-notes = "10pt"
+cjk_main = ""
+math = "Times New Roman"
+notes = "Springer LNCS/SVJour journal format"
 
 [caption_policy]
 figure_prefix = "Fig."
@@ -24,8 +24,8 @@ equation_prefix = ""
 numbering = "arabic"
 
 [citation_policy]
-style = "ieee"
-bibliography_style = "ieee"
+style = "numeric"
+bibliography_style = "springer-spcjour"
 reference_section_title = "References"
 
 [detection]
@@ -34,23 +34,34 @@ fallback_profile = "generic"
 
 [[detection.signals]]
 kind = "documentclass"
-value = "IEEEtran"
+value = "springer"
 weight = 0.70
 
 [[detection.signals]]
-kind = "documentclass_option"
-value = "journal"
-weight = 0.20
-
-[[detection.signals]]
 kind = "macro"
-value = "IEEEauthorblockN"
+value = "institute"
 weight = 0.10
 
 [[detection.signals]]
 kind = "macro"
-value = "IEEEkeywords"
+value = "titlerunning"
 weight = 0.05
+
+[[detection.signals]]
+kind = "macro"
+value = "authorrunning"
+weight = 0.05
+
+# Also support svjour3 and llncs classes for future expansion
+[[detection.signals]]
+kind = "documentclass"
+value = "svjour3"
+weight = 0.70
+
+[[detection.signals]]
+kind = "documentclass"
+value = "llncs"
+weight = 0.70
 
 [backend]
 preferred = "luatex-node"
@@ -64,48 +75,42 @@ preserve_raw_fallback = true
 collect_runtime_events = true
 collect_layout_graph = true
 
-# IEEE/JOS-specific macro rules
+# Springer-specific macro rules
 [[macro_rules]]
-name = "IEEEauthorblockN"
-semantic = "author"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "IEEEauthorblockA"
+name = "institute"
 semantic = "affiliation"
 args = 1
 style = ""
 
 [[macro_rules]]
-name = "IEEEkeywords"
+name = "titlerunning"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "authorrunning"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "email"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "orcidID"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "keywords"
 semantic = "keyword"
 args = 1
 style = ""
-
-[[macro_rules]]
-name = "markboth"
-semantic = "metadata"
-args = 2
-style = ""
-
-[[macro_rules]]
-name = "IEEEpeerreviewmaketitle"
-semantic = "metadata"
-args = 0
-style = ""
-
-[[macro_rules]]
-name = "citet"
-semantic = "citation"
-args = 1
-style = "textual"
-
-[[macro_rules]]
-name = "citep"
-semantic = "citation"
-args = 1
-style = "parenthetical"
 
 [[style_map]]
 semantic = "heading.level1"
@@ -124,6 +129,6 @@ semantic = "caption.figure"
 docx_style = "Caption"
 
 [quality]
-min_compatibility_score = 75
+min_compatibility_score = 70
 max_raw_fallback_blocks = 10
 require_reference_graph = true

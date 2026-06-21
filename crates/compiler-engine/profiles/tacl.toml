@@ -1,32 +1,31 @@
-id = "jos-paper-toml"
-display_name = "IEEE/JOS Paper"
-aliases = ["jos-paper"]
+id = "tacl"
+display_name = "ACL/TACL Paper"
 
-document_classes = ["IEEEtran"]
+document_classes = ["acl"]
+aliases = ["acl-paper", "tacl"]
 
 [page_setup]
-kind = "a4"
-width_mm = 210.0
-height_mm = 297.0
-margin_top_mm = 19.1
-margin_bottom_mm = 19.1
-margin_left_mm = 17.78
-margin_right_mm = 17.78
+kind = "letter"
+columns = 2
 
 [font_policy]
 latin_main = "Times New Roman"
-notes = "10pt"
+cjk_main = ""
+math = "Cambria Math"
+notes = "ACL/TACL Word-compatible fallback"
 
 [caption_policy]
-figure_prefix = "Fig."
+figure_prefix = "Figure"
 table_prefix = "Table"
 equation_prefix = ""
 numbering = "arabic"
 
 [citation_policy]
-style = "ieee"
-bibliography_style = "ieee"
+style = "author-year"
+bibliography_style = "acl_natbib"
 reference_section_title = "References"
+supports_natbib = true
+supports_biblatex = false
 
 [detection]
 min_confidence = 0.75
@@ -34,22 +33,22 @@ fallback_profile = "generic"
 
 [[detection.signals]]
 kind = "documentclass"
-value = "IEEEtran"
+value = "acl"
 weight = 0.70
 
 [[detection.signals]]
 kind = "documentclass_option"
-value = "journal"
+value = "aclang"
 weight = 0.20
 
 [[detection.signals]]
 kind = "macro"
-value = "IEEEauthorblockN"
+value = "aclfinalcopy"
 weight = 0.10
 
 [[detection.signals]]
-kind = "macro"
-value = "IEEEkeywords"
+kind = "package"
+value = "natbib"
 weight = 0.05
 
 [backend]
@@ -64,37 +63,7 @@ preserve_raw_fallback = true
 collect_runtime_events = true
 collect_layout_graph = true
 
-# IEEE/JOS-specific macro rules
-[[macro_rules]]
-name = "IEEEauthorblockN"
-semantic = "author"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "IEEEauthorblockA"
-semantic = "affiliation"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "IEEEkeywords"
-semantic = "keyword"
-args = 1
-style = ""
-
-[[macro_rules]]
-name = "markboth"
-semantic = "metadata"
-args = 2
-style = ""
-
-[[macro_rules]]
-name = "IEEEpeerreviewmaketitle"
-semantic = "metadata"
-args = 0
-style = ""
-
+# ACL/TACL-specific macro rules
 [[macro_rules]]
 name = "citet"
 semantic = "citation"
@@ -106,6 +75,42 @@ name = "citep"
 semantic = "citation"
 args = 1
 style = "parenthetical"
+
+[[macro_rules]]
+name = "citealp"
+semantic = "citation"
+args = 1
+style = "textual-no-parens"
+
+[[macro_rules]]
+name = "aclfinalcopy"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "aclpaperid"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "shorttitle"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "name"
+semantic = "author"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "address"
+semantic = "affiliation"
+args = 1
+style = ""
 
 [[style_map]]
 semantic = "heading.level1"
@@ -122,6 +127,10 @@ docx_style = "BodyText"
 [[style_map]]
 semantic = "caption.figure"
 docx_style = "Caption"
+
+[[style_map]]
+semantic = "bibliography.item"
+docx_style = "Bibliography"
 
 [quality]
 min_compatibility_score = 75

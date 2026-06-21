@@ -1,0 +1,48 @@
+id = "generic-article"
+display_name = "Generic Article"
+aliases = ["generic", "generic-article-toml"]
+
+document_classes = ["article", "report", "book"]
+
+[page_setup]
+kind = "default"
+
+[font_policy]
+latin_main = "Times New Roman"
+cjk_main = ""
+math = "Cambria Math"
+notes = "Default Word-compatible article font policy"
+
+[caption_policy]
+figure_prefix = "Figure"
+table_prefix = "Table"
+equation_prefix = "Equation"
+numbering = "arabic"
+
+[citation_policy]
+style = "numeric"
+bibliography_style = "plain"
+reference_section_title = "References"
+
+[detection]
+min_confidence = 0.75
+fallback_profile = "generic"
+
+# No strong signals: generic matches everything and falls back to itself.
+
+[backend]
+preferred = "luatex-node"
+fallback = ["rule-based"]
+requires_xetex = false
+prefers_luatex = true
+
+[semantic_policy]
+unknown_macro = "rule-engine"
+preserve_raw_fallback = true
+collect_runtime_events = true
+collect_layout_graph = true
+
+[quality]
+min_compatibility_score = 75
+max_raw_fallback_blocks = 10
+require_reference_graph = true

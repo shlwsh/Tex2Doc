@@ -100,27 +100,203 @@ impl CompatibilityAnalyzer {
 /// Profile classification used during compatibility analysis.
 #[derive(Debug, Clone, Copy, Default)]
 pub enum ProfileKind {
+    /// Generic / arXiv-like document.
     #[default]
+    Generic,
+    /// Chinese academic papers (CTeX-based templates).
     GenericArticle,
+    /// Chinese academic papers (CTeX-based templates). Alias for GenericArticle.
     ChineseAcademic,
+    /// Journal of Software / 软件学报 oriented profile.
     JosPaper,
+    /// ACL/TACL conference paper.
+    Tacl,
+    /// CVPR/ICCV conference paper.
+    Cvpr,
+    /// Nature research article.
+    Nature,
+    /// Springer journal article.
+    Springer,
+    /// Medical journal manuscripts.
     MedicalJournal,
 }
 
 impl ProfileKind {
+    /// Returns true if the given document class is supported by this profile.
     pub fn supports_document_class(&self, class: &str) -> bool {
         match self {
-            Self::GenericArticle => true,
+            Self::Generic | Self::GenericArticle => true,
             Self::ChineseAcademic => {
                 ["article", "report", "book", "ctexart", "ctexbook", "ctexrep"]
                     .iter()
                     .any(|s| s.eq_ignore_ascii_case(class))
             }
             Self::JosPaper => {
-                ["article"].iter().any(|s| s.eq_ignore_ascii_case(class))
+                ["article", "rjthesis"].iter().any(|s| s.eq_ignore_ascii_case(class))
+            }
+            Self::Tacl => ["acl"].iter().any(|s| s.eq_ignore_ascii_case(class)),
+            Self::Cvpr => ["IEEEtran"].iter().any(|s| s.eq_ignore_ascii_case(class)),
+            Self::Nature => ["nature"].iter().any(|s| s.eq_ignore_ascii_case(class)),
+            Self::Springer => {
+                ["springer", "svjour3", "llncs", "sn-jnl"]
+                    .iter()
+                    .any(|s| s.eq_ignore_ascii_case(class))
             }
             Self::MedicalJournal => {
-                ["article"].iter().any(|s| s.eq_ignore_ascii_case(class))
+                ["article", "elsarticle", "wlscirep"]
+                    .iter()
+                    .any(|s| s.eq_ignore_ascii_case(class))
+            }
+        }
+    }
+
+    /// Returns the canonical name of this profile for display/reporting.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Self::Generic => "generic",
+            Self::GenericArticle => "generic-article",
+            Self::ChineseAcademic => "chinese-academic",
+            Self::JosPaper => "jos-paper",
+            Self::Tacl => "tacl",
+            Self::Cvpr => "cvpr",
+            Self::Nature => "nature",
+            Self::Springer => "springer",
+            Self::MedicalJournal => "medical-journal",
+        }
+    }
+
+    /// Try to resolve a string profile ID to a ProfileKind variant.
+    pub fn from_id(id: &str) -> Option<Self> {
+        match id {
+            "generic" => Some(Self::Generic),
+            "generic-article" => Some(Self::GenericArticle),
+            "chinese-academic" => Some(Self::ChineseAcademic),
+            "jos-paper" | "jos-paper-toml" => Some(Self::JosPaper),
+            "tacl" | "acl" | "acl-paper" => Some(Self::Tacl),
+            "cvpr" | "iccv" | "cvpr-paper" => Some(Self::Cvpr),
+            "nature" | "nature-research" => Some(Self::Nature),
+            "springer" | "svjour3" | "llncs" | "sn-jnl" => Some(Self::Springer),
+            "medical-journal" => Some(Self::MedicalJournal),
+            _ => None,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Profile-aware package compatibility
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PackageCompat {
+    Supported,
+    Warning,
+    Unsupported,
+}
+
+fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(PackageCompat, &'static str)> {
+    use PackageCompat::*;
+
+    let compat = match profile {
+        // Generic / arXiv: no specific package warnings.
+        ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => return None,
+
+        ProfileKind::JosPaper => {
+            return Some(match package {
+                "IEEEtran" => (Supported, "IEEEtran is the primary class for JOS papers"),
+                "amsmath" => (Supported, "amsmath is fully supported for JOS papers"),
+                "graphicx" => (Supported, "graphicx is fully supported"),
+                "algorithm2e" => (Warning, "algorithm2e may lose fine styling in IEEE JOS format"),
+                "tabularx" => (Warning, "tabularx advanced layout may be simplified"),
+                _ => return None,
+            });
+        }
+
+        ProfileKind::Tacl => {
+            return Some(match package {
+                "acl" => (Supported, "acl class is the primary class for TACL papers"),
+                "natbib" => (Supported, "natbib is fully supported for ACL/TACL"),
+                "biblatex" => (Warning, "biblatex is not recommended for TACL; use natbib instead"),
+                "tikz" => (Warning, "TikZ may need rasterization fallback in TACL papers"),
+                _ => return None,
+            });
+        }
+
+        ProfileKind::Cvpr => {
+            return Some(match package {
+                "IEEEtran" => (Supported, "IEEEtran[conference] is the primary class for CVPR"),
+                "amsmath" => (Supported, "amsmath is fully supported for CVPR papers"),
+                "algorithmicx" => (Warning, "algorithmicx may lose styling in CVPR format"),
+                "subcaption" => (Warning, "subcaption support is limited in CVPR papers"),
+                _ => return None,
+            });
+        }
+
+        ProfileKind::Nature => {
+            return Some(match package {
+                "nature" => (Supported, "nature class is fully supported"),
+                "natbib" => (Supported, "natbib is fully supported for Nature articles"),
+                "biblatex" => (Warning, "biblatex is not recommended for Nature; use natbib"),
+                "pstricks" => (Unsupported, "PSTricks is not supported for Nature articles"),
+                _ => return None,
+            });
+        }
+
+        ProfileKind::Springer => {
+            return Some(match package {
+                "springer" => (Supported, "springer class is fully supported"),
+                "svjour3" => (Supported, "svjour3 class is fully supported for Springer"),
+                "llncs" => (Supported, "LLNCS class is supported for Springer"),
+                "algorithm2e" => (Warning, "algorithm2e may conflict with Springer style"),
+                "longtable" => (Warning, "longtable is not recommended in Springer articles"),
+                "beamer" => (Unsupported, "beamer is not supported in Springer journal articles"),
+                _ => return None,
+            });
+        }
+
+        ProfileKind::ChineseAcademic => {
+            return Some(match package {
+                "ctex" => (Supported, "CTeX suite is fully supported for Chinese academic"),
+                "xeCJK" => (Supported, "xeCJK is fully supported"),
+                "fontspec" => (Supported, "fontspec is fully supported"),
+                "gbt7714" => (Warning, "gbt7714 has partial compatibility; verify bibliography format"),
+                "biblatex" => (Warning, "biblatex has limited support for Chinese academic papers"),
+                "minted" => (Unsupported, "minted is not supported for Chinese academic papers"),
+                _ => return None,
+            });
+        }
+    };
+}
+
+fn apply_profile_package_checks(
+    profile: ProfileKind,
+    packages: Vec<String>,
+    report: &mut CompatibilityReport,
+    warning_seen: &mut HashSet<String>,
+) {
+    use PackageCompat::*;
+    for pkg in packages {
+        let Some((compat, msg)) = profile_package_compat(profile, &pkg) else {
+            continue;
+        };
+        match compat {
+            Supported => { /* no issue */ }
+            Warning => {
+                add_compatibility_issue(
+                    &mut report.warnings,
+                    warning_seen,
+                    "profile_limited_package",
+                    &pkg,
+                    msg,
+                );
+            }
+            Unsupported => {
+                add_compatibility_issue(
+                    &mut report.unsupported,
+                    warning_seen,
+                    "profile_unsupported_package",
+                    &pkg,
+                    msg,
+                );
             }
         }
     }
@@ -209,30 +385,33 @@ fn analyze_compatibility_impl(
     }
 
     report.document_classes = sorted_strings(document_classes);
-    report.packages = sorted_strings(packages);
+    let sorted_packages = sorted_strings(packages);
+    report.packages = sorted_packages.clone();
 
-    for class in report.document_classes.clone() {
-        let class_str = class.as_str();
-        if matches!(class_str, "beamer" | "standalone") {
+    // Check document classes.
+    let classes_to_check: Vec<String> = report.document_classes.iter().cloned().collect();
+    for class_str in classes_to_check {
+        if matches!(class_str.as_str(), "beamer" | "standalone") {
             add_compatibility_issue(
                 &mut report.unsupported,
                 &mut warning_seen,
                 "unsupported_document_class",
-                class_str,
+                &class_str,
                 "presentation or standalone drawing classes are outside the paper-oriented semantic profile",
             );
-        } else if !profile.supports_document_class(class_str) {
+        } else if !profile.supports_document_class(&class_str) {
             add_compatibility_issue(
                 &mut report.warnings,
                 &mut warning_seen,
                 "profile_document_class_mismatch",
-                class_str,
+                &class_str,
                 "document class is outside the active profile and may need profile-specific lowering rules",
             );
         }
     }
 
-    for package in report.packages.clone() {
+    // Check packages (generic compatibility).
+    for package in sorted_packages.clone() {
         match package.as_str() {
             "tikz" | "pgf" | "pgfplots" | "circuitikz" => {
                 if rules.tikz_warning_only {
@@ -310,6 +489,9 @@ fn analyze_compatibility_impl(
             _ => {}
         }
     }
+
+    // Profile-aware package checks.
+    apply_profile_package_checks(profile, sorted_packages, &mut report, &mut warning_seen);
 
     if report.custom_macro_count > 0 {
         add_compatibility_issue(

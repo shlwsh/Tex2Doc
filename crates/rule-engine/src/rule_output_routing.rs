@@ -79,6 +79,64 @@ pub fn route_rule_output(
                 span: Span::default(),
             })
         }
+        // Journal-specific variants: route to Paragraph-like blocks for now.
+        // The actual semantic interpretation (citation/reference/metadata) is handled
+        // downstream in the docx renderer.
+        RuleOutput::Citation { keys_arg, style } => {
+            let keys = args.get(*keys_arg).cloned().unwrap_or_default();
+            Some(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("[citation:{}:{}]", style, keys),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            })
+        }
+        RuleOutput::MetadataField { key, content_arg } => {
+            let value = args.get(*content_arg).cloned().unwrap_or_default();
+            Some(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("[metadata:{}={}]", key, value),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            })
+        }
+        RuleOutput::AuthorList { content_arg } => {
+            let value = args.get(*content_arg).cloned().unwrap_or_default();
+            Some(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("[author:{}]", value),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            })
+        }
+        RuleOutput::Affiliation { content_arg } => {
+            let value = args.get(*content_arg).cloned().unwrap_or_default();
+            Some(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("[affiliation:{}]", value),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            })
+        }
+        RuleOutput::KeywordList { content_arg, separator } => {
+            let value = args.get(*content_arg).cloned().unwrap_or_default();
+            Some(Block::Paragraph {
+                runs: vec![TextRun {
+                    text: format!("[keywords{}:{}]", separator, value),
+                    style: TextStyle::Plain,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            })
+        }
     }
 }
 
