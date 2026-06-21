@@ -8,6 +8,13 @@ publish = false
 slint = "1"
 doc-core = { path = "../core" }
 doc-compiler-engine = { path = "../compiler-engine" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "5"
+tokio = { version = "1", features = ["rt", "sync"] }
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2"
 
 [build-dependencies]
 slint-build = "1"

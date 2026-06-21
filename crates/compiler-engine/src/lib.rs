@@ -24,7 +24,8 @@ use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
 use doc_rule_engine::{
-    route_rule_output, RuleEngine, RuleEngineConfig, RoutingConfig, RuleOutput,
+    journal_rules, route_rule_output, AuditCache, DecisionSource, MacroRule, RuleEngine,
+    RuleEngineConfig, RoutingConfig, RuleOutput,
 };
 use doc_xdv_parser::to_collector_layout_graph;
 use doc_utils::{ImageAssets, VirtualFs};
@@ -53,7 +54,7 @@ pub use journal_detector::{
 };
 
 // Import profile registry (internal module)
-use crate::profiles::ProfileRegistry;
+use crate::profiles::{MacroRuleToml, ProfileRegistry};
 
 impl From<EngineProfile> for ProfileKind {
     fn from(ep: EngineProfile) -> Self {
@@ -78,6 +79,182 @@ pub enum EngineProfile {
     JosPaper,
     /// Medical journal manuscripts with strict title/abstract/table needs.
     MedicalJournal,
+}
+
+/// How the user or the pipeline specified a profile.
+#[derive(Debug, Clone)]
+pub enum ProfileRef {
+    /// Automatically detected by `JournalDetector`.
+    Auto,
+    /// Specified by canonical profile ID (e.g. "tacl", "cvpr", "nature").
+    Id(String),
+    /// Specified by explicit file path to a TOML/JSON profile.
+    Path(PathBuf),
+    /// Legacy `EngineProfile` variant (backwards compatibility).
+    Legacy(EngineProfile),
+}
+
+/// The active profile driving the current compile session.
+///
+/// This is the P1 cornerstone: it replaces the bare `EngineProfile` enum as the
+/// compilation context, carrying the resolved TOML spec, the source of the
+/// selection, and optionally the auto-detection report.
+#[derive(Debug, Clone)]
+pub struct ActiveProfile {
+    /// Canonical profile ID (e.g. "tacl", "generic-article").
+    pub id: String,
+    /// Fully resolved profile specification (may be from TOML or built-in).
+    pub spec: profiles::ProfileSpecFile,
+    /// How this profile was selected.
+    pub source: ProfileSource,
+    /// Auto-detection report (present when `source == AutoDetected`).
+    pub detection: Option<journal_detector::JournalDetectionReport>,
+}
+
+/// A serializable summary of the active profile for `CompileReport`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveProfileReport {
+    pub id: String,
+    pub display_name: String,
+    pub source: String,
+    pub confidence: Option<f32>,
+    pub document_classes: Vec<String>,
+    pub backend_preferred: String,
+    /// P3: Quality thresholds for this profile.
+    pub quality: profiles::QualitySpec,
+    /// P3: Style map entries for this profile.
+    pub style_map: Vec<profiles::StyleMapSpec>,
+}
+
+impl ActiveProfileReport {
+    fn from_active(active: &ActiveProfile) -> Self {
+        Self {
+            id: active.id.clone(),
+            display_name: active.spec.display_name.clone(),
+            source: active.source.to_string(),
+            confidence: active.detection.as_ref().map(|d| d.confidence),
+            document_classes: active.spec.document_classes.clone(),
+            backend_preferred: active.spec.backend.preferred.clone(),
+            quality: active.spec.quality.clone(),
+            style_map: active.spec.style_map.clone(),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileSource {
+    /// User passed `--profile <id>` on the CLI.
+    ExplicitId,
+    /// User passed `--profile-path <path>` on the CLI.
+    ExplicitPath,
+    /// Automatically detected by `JournalDetector`.
+    AutoDetected,
+    /// Fell back to generic because no other profile matched.
+    Fallback,
+}
+
+impl std::fmt::Display for ProfileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileSource::ExplicitId => write!(f, "explicit_id"),
+            ProfileSource::ExplicitPath => write!(f, "explicit_path"),
+            ProfileSource::AutoDetected => write!(f, "auto_detected"),
+            ProfileSource::Fallback => write!(f, "fallback"),
+        }
+    }
+}
+
+impl ActiveProfile {
+    /// Resolve a `ProfileRef` into an `ActiveProfile`.
+    ///
+    /// This is the P1 "resolve active profile" step — it replaces the old
+    /// `parse_engine_profile()` logic with full TOML profile loading.
+    pub fn resolve(
+        profile_ref: &ProfileRef,
+        vfs: &doc_utils::VirtualFs,
+    ) -> Result<Self, EngineError> {
+        match profile_ref {
+            ProfileRef::Auto => Self::resolve_auto(vfs),
+            ProfileRef::Id(id) => Self::resolve_by_id(id),
+            ProfileRef::Path(path) => Self::resolve_by_path(path),
+            ProfileRef::Legacy(legacy) => Self::resolve_legacy(*legacy),
+        }
+    }
+
+    fn resolve_auto(vfs: &doc_utils::VirtualFs) -> Result<Self, EngineError> {
+        let detector = journal_detector::JournalDetector::new();
+        let detection = detector.detect(vfs);
+        let id = &detection.selected_profile_id;
+        let spec = Self::load_spec_by_id(id)
+            .ok_or_else(|| EngineError::Profile(format!("auto-detected profile '{id}' not found")))?;
+        Ok(Self {
+            id: id.clone(),
+            spec,
+            source: ProfileSource::AutoDetected,
+            detection: Some(detection),
+        })
+    }
+
+    fn resolve_by_id(id: &str) -> Result<Self, EngineError> {
+        let spec = Self::load_spec_by_id(id)
+            .ok_or_else(|| EngineError::Profile(format!("profile '{id}' not found")))?;
+        Ok(Self {
+            id: id.to_string(),
+            spec,
+            source: ProfileSource::ExplicitId,
+            detection: None,
+        })
+    }
+
+    fn resolve_by_path(path: &Path) -> Result<Self, EngineError> {
+        let spec = profiles::load_from_file(path).map_err(|e| {
+            EngineError::Profile(format!("failed to load profile from {:?}: {}", path, e))
+        })?;
+        Ok(Self {
+            id: spec.id.clone(),
+            spec,
+            source: ProfileSource::ExplicitPath,
+            detection: None,
+        })
+    }
+
+    fn resolve_legacy(legacy: EngineProfile) -> Result<Self, EngineError> {
+        let id = legacy.id();
+        let spec = Self::load_spec_by_id(id)
+            .ok_or_else(|| EngineError::Profile(format!("legacy profile '{id}' not found")))?;
+        Ok(Self {
+            id: id.to_string(),
+            spec,
+            source: ProfileSource::ExplicitId,
+            detection: None,
+        })
+    }
+
+    /// Load a profile spec by ID from the registry.
+    fn load_spec_by_id(id: &str) -> Option<profiles::ProfileSpecFile> {
+        let registry = profiles::ProfileRegistry::load_default().ok()?;
+        registry.get(id).cloned()
+    }
+
+    /// Convenience: convert to `ProfileKind` for `CompatibilityAnalyzer`.
+    pub fn to_profile_kind(&self) -> doc_compatibility_analyzer::ProfileKind {
+        match self.id.as_str() {
+            "generic" | "generic-article" | "generic-article-toml" => {
+                doc_compatibility_analyzer::ProfileKind::Generic
+            }
+            "chinese-academic" | "chinese-academic-toml" => {
+                doc_compatibility_analyzer::ProfileKind::ChineseAcademic
+            }
+            "jos-paper" | "jos-paper-toml" => doc_compatibility_analyzer::ProfileKind::JosPaper,
+            "medical-journal" => doc_compatibility_analyzer::ProfileKind::MedicalJournal,
+            "tacl" | "acl-paper" | "acl" => doc_compatibility_analyzer::ProfileKind::Tacl,
+            "cvpr" | "iccv" | "cvpr-paper" => doc_compatibility_analyzer::ProfileKind::Cvpr,
+            "nature" | "nature-research" => doc_compatibility_analyzer::ProfileKind::Nature,
+            "springer" | "svjour3" | "llncs" | "springer-journal" => {
+                doc_compatibility_analyzer::ProfileKind::Springer
+            }
+            _ => doc_compatibility_analyzer::ProfileKind::Generic,
+        }
+    }
 }
 
 impl EngineProfile {
@@ -325,7 +502,11 @@ impl ProfileSpecReport {
 /// Options controlling semantic collection and DOCX rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileOptions {
+    /// Legacy profile field (used when `profile_ref` is None).
     pub profile: EngineProfile,
+    /// P1: How the profile was specified. When Some, takes precedence over `profile`.
+    #[serde(skip)]
+    pub profile_ref: Option<ProfileRef>,
     pub semantic_backend: SemanticBackendKind,
     pub allow_backend_fallback: bool,
     pub enable_reference_links: bool,
@@ -336,13 +517,25 @@ pub struct CompileOptions {
     pub collect_standard_ast: bool,
     pub enable_bibliography: bool,
     /// Optional profile-specific style map. If None, uses the profile's default.
+    #[serde(skip)]
     pub style_map: Option<doc_docx_writer::ProfileStyleMap>,
+    /// Internal: resolved active profile (set by `resolve_active_profile`, used by
+    /// `apply_rule_engine_to_document`).
+    #[serde(skip)]
+    pub active_profile: Option<ActiveProfile>,
+    /// Internal: rule engine report populated after semantic collection.
+    #[serde(skip)]
+    pub rule_engine: Option<RuleEngineReport>,
+    /// P4.3: Override the minimum compatibility score from the CLI --quality flag.
+    #[serde(skip)]
+    pub min_compatibility_score_override: Option<u8>,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
         Self {
             profile: EngineProfile::ChineseAcademic,
+            profile_ref: None,
             semantic_backend: SemanticBackendKind::Auto,
             allow_backend_fallback: true,
             enable_reference_links: true,
@@ -353,11 +546,26 @@ impl Default for CompileOptions {
             collect_standard_ast: true,
             enable_bibliography: true,
             style_map: None,
+            active_profile: None,
+            rule_engine: None,
+            min_compatibility_score_override: None,
         }
     }
 }
 
 impl CompileOptions {
+    /// Internal: set the resolved active profile. Called by `compile_vfs_to_graph`.
+    pub fn set_active_profile(&mut self, profile: ActiveProfile) -> &mut Self {
+        self.active_profile = Some(profile);
+        self
+    }
+
+    /// Internal: set the rule engine report after semantic collection.
+    pub fn set_rule_engine_report(&mut self, report: RuleEngineReport) -> &mut Self {
+        self.rule_engine = Some(report);
+        self
+    }
+
     pub fn effective_page_setup(&self) -> Option<doc_docx_writer::PageSetup> {
         self.page_setup
             .clone()
@@ -370,6 +578,27 @@ impl CompileOptions {
         self.style_map
             .clone()
             .or_else(|| self.profile.spec().style_map.clone())
+    }
+
+    /// P1: Resolve the active profile from the `profile_ref` or fall back to legacy.
+    /// Sets `self.active_profile` and returns the resolved value.
+    pub fn resolve_active_profile(
+        &mut self,
+        vfs: &doc_utils::VirtualFs,
+    ) -> Result<ActiveProfile, EngineError> {
+        let active = if let Some(ref pref) = self.profile_ref {
+            ActiveProfile::resolve(pref, vfs)?
+        } else {
+            // Legacy path: use EngineProfile
+            ActiveProfile::resolve(&ProfileRef::Legacy(self.profile), vfs)?
+        };
+        self.active_profile = Some(active.clone());
+        Ok(active)
+    }
+
+    /// P1: Convenience — resolve profile without mutating self (for one-shot calls).
+    pub fn resolve_profile(vfs: &doc_utils::VirtualFs) -> Result<ActiveProfile, EngineError> {
+        ActiveProfile::resolve(&ProfileRef::Auto, vfs)
     }
 }
 
@@ -499,8 +728,18 @@ impl SemanticTexEngine {
         }
         graph.report.docx_bytes = docx.len();
 
-        // Run quality gate (min score 70)
-        graph.report.run_quality_gate(70);
+        // P3: Run quality gate with profile-specific thresholds (CLI --quality can override)
+        let quality_spec = graph.report.active_profile.as_ref()
+            .map(|ap| ap.quality.clone())
+            .unwrap_or_else(profiles::QualitySpec::default);
+        let quality_spec = if let Some(override_score) = options.min_compatibility_score_override {
+            let mut spec = quality_spec;
+            spec.min_compatibility_score = override_score;
+            spec
+        } else {
+            quality_spec
+        };
+        graph.report.run_quality_gate(&quality_spec);
 
         Ok(CompileArtifact {
             docx,
@@ -517,35 +756,34 @@ impl SemanticTexEngine {
         vfs: &mut VirtualFs,
         options: &CompileOptions,
     ) -> Result<DocumentGraph, EngineError> {
+        // P1: Resolve the active profile
+        let active = ActiveProfile::resolve(
+            options.profile_ref.as_ref().unwrap_or(&ProfileRef::Legacy(options.profile)),
+            vfs,
+        )?;
+
         let mut report = CompileReport::new(options.profile);
+        report.set_active_profile(&active);
         report.push(
             CompileStage::SourceMount,
             StageStatus::Completed,
             format!("mounted {} VFS entries", vfs.paths().count()),
         );
 
-        // P2: Journal auto-detection — runs only when backend is Auto.
-        let journal_report = if options.semantic_backend == SemanticBackendKind::Auto {
-            let detector = JournalDetector::new();
-            let detection = detector.detect(vfs);
+        // P2: Journal auto-detection — runs only when source is AutoDetected.
+        // When source is ExplicitId/Path/Legacy, skip redundant detection.
+        let journal_report = if active.source == ProfileSource::AutoDetected {
+            let detection = active.detection.clone();
             report.push(
                 CompileStage::JournalDetect,
                 StageStatus::Completed,
                 format!(
                     "detected '{}' (confidence {:.2})",
-                    detection.selected_profile_id, detection.confidence
+                    active.id,
+                    detection.as_ref().map(|d| d.confidence).unwrap_or(0.0)
                 ),
             );
-            if detection.selected_profile_id != options.profile.id() {
-                report.diagnostics.push(EngineDiagnostic::warning(
-                    "profile_detection_override",
-                    format!(
-                        "auto-detected '{}' differs from user profile '{}'",
-                        detection.selected_profile_id, options.profile.id()
-                    ),
-                ));
-            }
-            for diag in &detection.diagnostics {
+            for diag in detection.as_ref().into_iter().flat_map(|d| &d.diagnostics) {
                 let severity = match diag.level {
                     DiagnosticLevel::Info => DiagnosticSeverity::Info,
                     DiagnosticLevel::Warning => DiagnosticSeverity::Warning,
@@ -556,13 +794,21 @@ impl SemanticTexEngine {
                     message: diag.message.clone(),
                 });
             }
-            Some(detection)
+            detection
         } else {
+            report.push(
+                CompileStage::JournalDetect,
+                StageStatus::Completed,
+                format!(
+                    "profile '{}' explicitly set (source: {})",
+                    active.id, active.source
+                ),
+            );
             None
         };
         report.journal_detection = journal_report;
 
-        let compatibility = CompatibilityAnalyzer::new().analyze(vfs, options.profile.into());
+        let compatibility = CompatibilityAnalyzer::new().analyze(vfs, active.to_profile_kind());
         report.push(
             CompileStage::CompatibilityAnalyze,
             StageStatus::Completed,
@@ -587,7 +833,10 @@ impl SemanticTexEngine {
         }
         report.compatibility = compatibility;
 
-        let mut artifact = collect_with_selected_backend(main_tex, vfs, options, &mut report)?;
+        let mut opts = options.clone();
+        opts.set_active_profile(active.clone());
+
+        let mut artifact = collect_with_selected_backend(main_tex, vfs, &mut opts, &mut report)?;
         let reference_graph = build_reference_graph(vfs, &artifact.events);
         report.semantic_event_count = artifact.events.len();
         report.layout_node_count = artifact
@@ -610,6 +859,11 @@ impl SemanticTexEngine {
         }
         report.diagnostics.append(&mut artifact.diagnostics);
 
+        // P2: Transfer rule engine report from options into the final report.
+        if let Some(re) = opts.rule_engine.take() {
+            report.rule_engine = Some(re);
+        }
+
         Ok(DocumentGraph {
             document: artifact.document,
             standard_document: artifact.standard_document,
@@ -631,13 +885,33 @@ pub struct CompileArtifact {
     pub report: CompileReport,
 }
 
-/// Result of a quality gate check applied after DOCX generation.
+/// P3: Result of a quality gate check applied after DOCX generation.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct QualityGateResult {
-    pub passed: bool,
+    pub status: QualityStatus,
+    pub score: u8,
     pub total_checks: usize,
     pub passed_checks: usize,
     pub failed_checks: Vec<QualityCheck>,
+    pub warnings: Vec<QualityCheck>,
+}
+
+/// P3: Overall quality gate status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualityStatus {
+    Passed,
+    PassedWithWarnings,
+    Failed,
+}
+
+impl QualityStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passed => "Passed",
+            Self::PassedWithWarnings => "PassedWithWarnings",
+            Self::Failed => "Failed",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -653,6 +927,31 @@ pub enum QualitySeverity {
     Error,
     Warning,
     Info,
+}
+
+impl QualitySeverity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+        }
+    }
+}
+
+/// P2: Report summarizing RuleEngine activity during compilation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleEngineReport {
+    /// Number of builtin rules loaded.
+    pub builtin_rules: usize,
+    /// Number of journal-specific rules loaded.
+    pub journal_rules: usize,
+    /// Number of profile-specific rules loaded from TOML.
+    pub profile_rules: usize,
+    /// Number of distinct unknown macros encountered.
+    pub unknown_macro_count: usize,
+    /// List of unknown macro names encountered.
+    pub unknown_macros: Vec<String>,
 }
 
 /// Unified document graph used between semantic collection and renderers.
@@ -671,6 +970,7 @@ pub struct DocumentGraph {
 pub struct CompileReport {
     pub profile: EngineProfile,
     pub profile_spec: ProfileSpecReport,
+    pub active_profile: Option<ActiveProfileReport>,
     pub backend: BackendSelectionReport,
     pub compatibility: CompatibilityReport,
     pub journal_detection: Option<JournalDetectionReport>,
@@ -691,6 +991,8 @@ pub struct CompileReport {
     pub omml_equation_fallback_count: usize,
     pub docx_bytes: usize,
     pub quality_gate: Option<QualityGateResult>,
+    /// P2: RuleEngine activity report (populated after semantic collection).
+    pub rule_engine: Option<RuleEngineReport>,
 }
 
 impl CompileReport {
@@ -698,6 +1000,7 @@ impl CompileReport {
         Self {
             profile,
             profile_spec: ProfileSpecReport::from_spec(profile.spec()),
+            active_profile: None,
             backend: BackendSelectionReport::default(),
             compatibility: CompatibilityReport::default(),
             journal_detection: None,
@@ -718,6 +1021,7 @@ impl CompileReport {
             omml_equation_fallback_count: 0,
             docx_bytes: 0,
             quality_gate: None,
+            rule_engine: None,
         }
     }
 
@@ -729,102 +1033,205 @@ impl CompileReport {
         });
     }
 
-    /// Run quality gate checks against the current compile report state.
+    /// Attach the resolved active profile to this report.
+    pub fn set_active_profile(&mut self, active: &ActiveProfile) {
+        self.active_profile = Some(ActiveProfileReport::from_active(active));
+    }
+
+    /// P3: Run quality gate checks using profile-specific thresholds from `spec`.
     ///
-    /// Checks:
-    /// - Compatibility score >= `min_score`
-    /// - unresolved_reference_count == 0 (no broken links)
-    /// - Not 100% OMML fallback (omml_equation_fallback_count < omml_equation_count)
-    /// - docx_bytes > 0 (non-empty output)
-    pub fn run_quality_gate(&mut self, min_score: u8) {
-        let mut checks = Vec::new();
+    /// Checks (up to 10):
+    /// 1. compatibility score >= min_compatibility_score (Error)
+    /// 2. unresolved references == 0 (Error/Warning)
+    /// 3. raw fallback blocks <= max_raw_fallback_blocks (Error)
+    /// 4. docx_bytes > 0 (Error)
+    /// 5. style coverage (Info)
+    /// 6. profile confidence < 0.80 (Warning)
+    /// 7. runtime fallback (Warning)
+    /// 8. backend runtime fallback (Warning)
+    /// 9. OMML equation fallback (Warning)
+    /// 10. journal profile detection (Info)
+    pub fn run_quality_gate(&mut self, spec: &profiles::QualitySpec) {
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        let mut infos = Vec::new();
 
-        // Compatibility score check
+        // 1. Compatibility score
         let score = self.compatibility.score;
-        let score_passed = score >= min_score;
-        checks.push(QualityCheck {
-            name: "compatibility_score".to_string(),
-            passed: score_passed,
-            severity: if score_passed {
-                QualitySeverity::Info
-            } else {
-                QualitySeverity::Error
-            },
-            message: format!(
-                "compatibility score {} (min={min_score}): {}",
-                score,
-                if score_passed { "pass" } else { "FAIL" }
-            ),
-        });
+        if score >= spec.min_compatibility_score {
+            infos.push(QualityCheck {
+                name: "compatibility_score".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("compatibility score {} >= {}: pass", score, spec.min_compatibility_score),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "compatibility_score".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: format!("compatibility score {} < {}: FAIL", score, spec.min_compatibility_score),
+            });
+        }
 
-        // Unresolved references check
+        // 2. Unresolved references
         let unresolved = self.unresolved_reference_count;
-        let unresolved_passed = unresolved == 0;
-        checks.push(QualityCheck {
-            name: "unresolved_references".to_string(),
-            passed: unresolved_passed,
-            severity: if unresolved_passed {
-                QualitySeverity::Info
-            } else {
-                QualitySeverity::Warning
-            },
-            message: format!(
-                "{} unresolved reference(s): {}",
-                unresolved,
-                if unresolved_passed { "pass" } else { "WARN" }
-            ),
-        });
+        if unresolved == 0 {
+            infos.push(QualityCheck {
+                name: "unresolved_references".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: "no unresolved references: pass".to_string(),
+            });
+        } else {
+            warnings.push(QualityCheck {
+                name: "unresolved_references".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!("{} unresolved reference(s): WARN", unresolved),
+            });
+        }
 
-        // OMML fallback check
+        // 3. Raw fallback blocks (from rule_engine report)
+        let raw_count = self.rule_engine.as_ref().map(|r| r.unknown_macro_count).unwrap_or(0);
+        if raw_count <= spec.max_raw_fallback_blocks {
+            infos.push(QualityCheck {
+                name: "raw_fallback_blocks".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("{} unknown macro(s) <= {}: pass", raw_count, spec.max_raw_fallback_blocks),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "raw_fallback_blocks".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: format!("{} unknown macro(s) > {} max: FAIL", raw_count, spec.max_raw_fallback_blocks),
+            });
+        }
+
+        // 4. DOCX non-empty
+        let bytes = self.docx_bytes;
+        if bytes > 0 {
+            infos.push(QualityCheck {
+                name: "docx_non_empty".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("DOCX size {} bytes: pass", bytes),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "docx_non_empty".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: "DOCX is empty: FAIL".to_string(),
+            });
+        }
+
+        // 5. Style coverage (Info)
+        let style_map_entries = self.active_profile.as_ref()
+            .map(|ap| ap.style_map.len())
+            .unwrap_or(0);
+        if style_map_entries > 0 {
+            infos.push(QualityCheck {
+                name: "style_coverage".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("{} style map entries defined for profile", style_map_entries),
+            });
+        }
+
+        // 6. Profile confidence
+        if let Some(ref det) = self.journal_detection {
+            if det.confidence < 0.80 {
+                warnings.push(QualityCheck {
+                    name: "profile_confidence".to_string(),
+                    passed: false,
+                    severity: QualitySeverity::Warning,
+                    message: format!("profile detection confidence {:.0}% < 80%: low confidence", det.confidence * 100.0),
+                });
+            } else {
+                infos.push(QualityCheck {
+                    name: "profile_confidence".to_string(),
+                    passed: true,
+                    severity: QualitySeverity::Info,
+                    message: format!("profile detection confidence {:.0}%: pass", det.confidence * 100.0),
+                });
+            }
+        }
+
+        // 7. Runtime fallback from rule engine
+        if let Some(ref re) = self.rule_engine {
+            if re.unknown_macro_count > 0 {
+                warnings.push(QualityCheck {
+                    name: "runtime_fallback".to_string(),
+                    passed: false,
+                    severity: QualitySeverity::Warning,
+                    message: format!("{} unknown macro(s) fell back to text", re.unknown_macro_count),
+                });
+            }
+        }
+
+        // 8. Backend runtime fallback
+        if self.backend.selected != self.backend.requested {
+            warnings.push(QualityCheck {
+                name: "backend_fallback".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!("backend fell back from {:?} to {:?}", self.backend.requested, self.backend.selected),
+            });
+        } else {
+            infos.push(QualityCheck {
+                name: "backend_fallback".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: "requested backend selected: pass".to_string(),
+            });
+        }
+
+        // 9. OMML equation fallback
         let omml_total = self.omml_equation_count;
         let omml_fallback = self.omml_equation_fallback_count;
-        let omml_passed = omml_total == 0 || omml_fallback < omml_total;
-        checks.push(QualityCheck {
-            name: "omml_equation_fallback".to_string(),
-            passed: omml_passed,
-            severity: if omml_passed {
-                QualitySeverity::Info
-            } else {
-                QualitySeverity::Warning
-            },
-            message: format!(
-                "{}/{} equations used OMML (fallback check): {}",
-                omml_total - omml_fallback,
-                omml_total,
-                if omml_passed { "pass" } else { "WARN" }
-            ),
-        });
+        if omml_total == 0 || omml_fallback < omml_total {
+            infos.push(QualityCheck {
+                name: "omml_equation_fallback".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("{}/{} equations used OMML: pass", omml_total.saturating_sub(omml_fallback), omml_total),
+            });
+        } else {
+            warnings.push(QualityCheck {
+                name: "omml_equation_fallback".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!("all {} equations fell back to text: WARN", omml_total),
+            });
+        }
 
-        // DOCX non-empty check
-        let bytes = self.docx_bytes;
-        let bytes_passed = bytes > 0;
-        checks.push(QualityCheck {
-            name: "docx_non_empty".to_string(),
-            passed: bytes_passed,
-            severity: if bytes_passed {
-                QualitySeverity::Info
-            } else {
-                QualitySeverity::Error
-            },
-            message: format!(
-                "DOCX size {} bytes: {}",
-                bytes,
-                if bytes_passed { "pass" } else { "FAIL" }
-            ),
-        });
+        // 10. Journal profile detection (Info)
+        if let Some(ref det) = self.journal_detection {
+            infos.push(QualityCheck {
+                name: "journal_detection".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("detected '{}' (confidence {:.0}%)", det.selected_profile_id, det.confidence * 100.0),
+            });
+        }
 
-        let passed_checks = checks.iter().filter(|c| c.passed).count();
-        let failed_checks = checks
-            .iter()
-            .filter(|c| !c.passed)
-            .cloned()
-            .collect::<Vec<_>>();
-
+        let total = errors.len() + warnings.len() + infos.len();
         self.quality_gate = Some(QualityGateResult {
-            passed: failed_checks.is_empty(),
-            total_checks: checks.len(),
-            passed_checks,
-            failed_checks,
+            status: if !errors.is_empty() {
+                QualityStatus::Failed
+            } else if !warnings.is_empty() {
+                QualityStatus::PassedWithWarnings
+            } else {
+                QualityStatus::Passed
+            },
+            score,
+            total_checks: total,
+            passed_checks: infos.len() + warnings.len(),
+            failed_checks: errors,
+            warnings,
         });
     }
 }
@@ -930,7 +1337,8 @@ pub type SemanticBackendArtifact = CollectedDocument;
 pub struct SemanticCollectorInput<'a> {
     pub main_tex: &'a str,
     pub vfs: &'a mut VirtualFs,
-    pub options: &'a CompileOptions,
+    /// P2: Mutable so `RuleBasedCollector` can set `rule_engine` report after collection.
+    pub options: &'a mut CompileOptions,
 }
 
 pub trait SemanticCollector {
@@ -952,7 +1360,7 @@ pub trait SemanticBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError>;
 }
@@ -989,7 +1397,23 @@ impl SemanticCollector for RuleBasedCollector {
             lower_semantic_document(input.main_tex, input.vfs, &parse, &joined, input.options)?;
 
         // P1-2: Apply RuleEngine to transform RawFallback blocks into structured blocks.
-        let document = apply_rule_engine_to_document(document);
+        // P2: Profile-aware: use the active_profile stored on CompileOptions.
+        // Graceful degradation: if no active_profile, use a default engine.
+        let (document, engine) = if let Some(active) = input.options.active_profile.as_ref() {
+            apply_rule_engine_to_document(document, active)
+        } else {
+            apply_rule_engine_to_document(
+                document,
+                &ActiveProfile {
+                    id: "builtin".to_string(),
+                    spec: Default::default(),
+                    source: ProfileSource::Fallback,
+                    detection: None,
+                },
+            )
+        };
+        let re_report = build_rule_engine_report(&engine);
+        input.options.set_rule_engine_report(re_report);
 
         report.block_count = document.blocks.len();
         report.push(
@@ -1053,7 +1477,7 @@ impl SemanticBackend for RuleBasedBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
         let mut input = SemanticCollectorInput {
@@ -1081,7 +1505,7 @@ impl SemanticBackend for XeLaTeXHookBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
         let result = collect_runtime_events(RuntimeEngine::XeLaTeX, main_tex, vfs)?;
@@ -1132,7 +1556,7 @@ impl SemanticBackend for LuaTeXNodeBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
         let result = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
@@ -1369,6 +1793,8 @@ pub enum EngineError {
     Zip(String),
     #[error("不支持的操作：{0}")]
     Unsupported(String),
+    #[error("Profile 错误：{0}")]
+    Profile(String),
 }
 
 impl From<doc_utils::DocError> for EngineError {
@@ -1388,6 +1814,12 @@ impl From<doc_utils::DocError> for EngineError {
 impl From<std::io::Error> for EngineError {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err.to_string())
+    }
+}
+
+impl From<profiles::ProfileLoadError> for EngineError {
+    fn from(err: profiles::ProfileLoadError) -> Self {
+        Self::Profile(err.to_string())
     }
 }
 
@@ -1732,7 +2164,7 @@ fn select_auto_backend_with_availability(
 fn collect_with_selected_backend(
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     match options.semantic_backend {
@@ -1800,7 +2232,7 @@ fn collect_runtime_or_fallback<B: SemanticBackend>(
     reason: impl Into<String>,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     collect_runtime_or_fallback_requested(
@@ -1820,7 +2252,7 @@ fn collect_runtime_or_fallback_requested<B: SemanticBackend>(
     reason: impl Into<String>,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     let reason = reason.into();
@@ -1889,7 +2321,7 @@ fn collect_rule_based_fallback(
     reason: String,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     report.backend = BackendSelectionReport::fallback(
@@ -3642,13 +4074,123 @@ fn append_bibliography_paragraphs(
     }
 }
 
-/// Apply RuleEngine to transform `RawFallback` blocks in the document.
-///
-/// For each `RawFallback` block, the RuleEngine processes any detected inline macro pattern.
-/// This integrates the rule-engine audit trail (for auditability) and allows future
-/// expansion where inline macro fallbacks can be resolved into structured inline runs.
-fn apply_rule_engine_to_document(mut document: Document) -> Document {
+/// P2: Build a RuleEngine populated with builtin rules, journal-specific rules,
+/// and profile-specific rules from the TOML spec.
+fn build_rule_engine(active_profile: &ActiveProfile) -> RuleEngine {
     let mut engine = RuleEngine::new();
+
+    // P2.1: Load journal-specific rules
+    let journal_rules: Vec<MacroRule> =
+        doc_rule_engine::journal_rules(&active_profile.id);
+    for rule in journal_rules {
+        engine.registry_mut().register(rule);
+    }
+
+    // P2.1: Load profile TOML macro_rules
+    for rule_toml in &active_profile.spec.macro_rules {
+        let rule = macro_rule_toml_to_macro_rule(rule_toml);
+        engine.registry_mut().register(rule);
+    }
+
+    engine
+}
+
+/// P2: Convert a `MacroRuleToml` (profile spec) into a `MacroRule` (rule engine).
+fn macro_rule_toml_to_macro_rule(toml: &MacroRuleToml) -> MacroRule {
+    let output = match toml.semantic.as_str() {
+        "citation" => RuleOutput::Citation {
+            keys_arg: toml.args.saturating_sub(1),
+            style: toml.style.clone(),
+        },
+        "metadata" => RuleOutput::MetadataField {
+            key: toml.name.clone(),
+            content_arg: 0,
+        },
+        "author" => RuleOutput::AuthorList {
+            content_arg: 0,
+        },
+        "affiliation" => RuleOutput::Affiliation {
+            content_arg: 0,
+        },
+        "keyword" => RuleOutput::KeywordList {
+            content_arg: 0,
+            separator: "; ".to_string(),
+        },
+        "heading" => RuleOutput::Heading {
+            level: 1,
+            text_arg: 0,
+        },
+        "paragraph" => RuleOutput::Paragraph {
+            body_arg: 0,
+        },
+        "inline-text" => RuleOutput::InlineText {
+            content_arg: 0,
+        },
+        "ignore" => RuleOutput::Ignore,
+        "verbatim" => RuleOutput::Verbatim,
+        _ => RuleOutput::InlineText {
+            content_arg: 0,
+        },
+    };
+    MacroRule {
+        id: format!("profile:{}/{}", toml.name, toml.semantic),
+        name: toml.name.clone(),
+        arity: toml.args,
+        output,
+        description: Some(format!("profile macro rule: {}", toml.semantic)),
+    }
+}
+
+/// P2: Build a `RuleEngineReport` from the engine's audit cache.
+fn build_rule_engine_report(engine: &RuleEngine) -> RuleEngineReport {
+    // RuleEngine::new() loads builtin rules; journal rules are added by profile.
+    let builtin_count = doc_rule_engine::builtin_rules().len();
+
+    let journal_names: std::collections::HashSet<&str> = [
+        "citet", "citep", "citealp", "IEEEkeywords", "IEEEauthorblockN", "IEEEauthorblockA",
+        "shorttitle", "name", "address", "cvprfinalcopy", "confName", "confYear", "author",
+        "affiliation", "corres", "equalcont", "affil", "maketitle", "institute",
+        "titlerunning", "authorrunning", "email", "orcidID", "zihao", "songti", "heiti",
+        "ctexset", "zhabstract", "enabstract",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut journal_count = 0usize;
+    let mut profile_count = 0usize;
+    for rule in engine.registry().iter() {
+        if rule.name.starts_with("profile:") {
+            profile_count += 1;
+        } else if journal_names.contains(rule.name.as_str()) {
+            journal_count += 1;
+        }
+    }
+
+    let unknown_names: Vec<String> = engine
+        .audit_cache()
+        .records()
+        .iter()
+        .filter(|r| r.source == DecisionSource::Fallback)
+        .map(|r| r.macro_name.clone())
+        .collect();
+    let unknown_set: std::collections::HashSet<_> = unknown_names.iter().cloned().collect();
+    RuleEngineReport {
+        builtin_rules: builtin_count,
+        journal_rules: journal_count,
+        profile_rules: profile_count,
+        unknown_macro_count: unknown_set.len(),
+        unknown_macros: unknown_names,
+    }
+}
+
+/// P2: Apply RuleEngine to transform `RawFallback` blocks in the document.
+///
+/// P2: Loads profile-specific and journal-specific rules from `ActiveProfile`.
+fn apply_rule_engine_to_document(
+    mut document: Document,
+    active_profile: &ActiveProfile,
+) -> (Document, RuleEngine) {
+    let mut engine = build_rule_engine(active_profile);
     let blocks = std::mem::take(&mut document.blocks);
     for block in blocks {
         match block {
@@ -3659,7 +4201,7 @@ fn apply_rule_engine_to_document(mut document: Document) -> Document {
             other => document.blocks.push(other),
         }
     }
-    document
+    (document, engine)
 }
 
 /// Attempt to convert a `RawFallback` text to a structured `Block` using the RuleEngine.
@@ -3935,15 +4477,22 @@ E = mc^2
     #[test]
     fn profile_spec_exposes_jos_rules() {
         let spec = EngineProfile::JosPaper.spec();
+        // Capture all needed fields before consuming spec via default_page_setup()
+        let spec_id = spec.id;
+        let spec_page_setup = spec.page_setup;
+        let spec_doc_classes = spec.document_classes;
+        let spec_caption_fig_prefix = spec.caption_policy.figure_prefix;
+        let spec_cite_bib_style = spec.citation_policy.bibliography_style;
+
         let page_setup = spec
             .default_page_setup()
             .expect("JOS profile should provide page setup");
 
-        assert_eq!(spec.id, "jos-paper");
-        assert_eq!(spec.page_setup, PageSetupProfile::JosPaper3);
-        assert!(spec.document_classes.contains(&"rjthesis"));
-        assert_eq!(spec.caption_policy.figure_prefix, "图");
-        assert_eq!(spec.citation_policy.bibliography_style, "unsrt");
+        assert_eq!(spec_id, "jos-paper");
+        assert_eq!(spec_page_setup, PageSetupProfile::JosPaper3);
+        assert!(spec_doc_classes.contains(&"rjthesis"));
+        assert_eq!(spec_caption_fig_prefix, "图");
+        assert_eq!(spec_cite_bib_style, "unsrt");
         assert_eq!(page_setup.width_twips, 10433);
         assert_eq!(page_setup.height_twips, 14742);
     }
@@ -3978,17 +4527,17 @@ E = mc^2
     fn explicit_runtime_backend_falls_back_to_rule_based() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::XeLaTeXHook,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(options.profile.clone());
         let artifact = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
             "main.tex",
             &mut vfs,
-            &options,
+            &mut options,
             &mut report,
         )
         .expect("fallback to rule-based backend");
@@ -4009,18 +4558,18 @@ E = mc^2
     fn runtime_backend_without_fallback_returns_error() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::XeLaTeXHook,
             allow_backend_fallback: false,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(options.profile.clone());
         let err = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
             "main.tex",
             &mut vfs,
-            &options,
+            &mut options,
             &mut report,
         )
         .expect_err("strict missing runtime should error");
@@ -4197,18 +4746,19 @@ Body text.
 
     #[test]
     fn rule_based_collector_outputs_collected_document() {
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::RuleBased,
             ..CompileOptions::default()
         };
+        let profile = options.profile.clone();
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
         let mut input = SemanticCollectorInput {
             main_tex: "main.tex",
             vfs: &mut vfs,
-            options: &options,
+            options: &mut options,
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(profile);
 
         let collected = RuleBasedCollector
             .collect(&mut input, &mut report)
@@ -4569,7 +5119,7 @@ a+b=c
             &self,
             _main_tex: &str,
             _vfs: &mut VirtualFs,
-            _options: &CompileOptions,
+            _options: &mut CompileOptions,
             _report: &mut CompileReport,
         ) -> Result<SemanticBackendArtifact, EngineError> {
             unreachable!("missing backend should not be collected")

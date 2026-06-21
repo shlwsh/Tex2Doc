@@ -1,43 +1,190 @@
-import { Button, VerticalBox, LineEdit, TextEdit, GridBox } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
+    title: "Tex2Doc Desktop";
+
+    // ── State properties ──────────────────────────────────────────────────────
     in-out property <string> project-path;
-    in-out property <string> status;
-    
+    in-out property <string> detected-profile: "auto";
+    in-out property <string> quality-level: "standard";
+    in-out property <string> output-path;
+    in-out property <string> status-text: "Ready. Enter a project path and click Convert.";
+    in-out property <bool> is-converting: false;
+    in-out property <float> conversion-progress: 0.0;
+    in-out property <string> compatibility-score: "--";
+    in-out property <string> quality-status: "--";
+    in-out property <string> profile-confidence: "--";
+    in-out property <string> recent-jobs: "No recent jobs.";
+
+    // ── Callbacks (implemented in Rust) ─────────────────────────────────────
+    callback convert-clicked(string, string, string, string);
+    callback detect-profile-clicked(string);
+    callback open-output-clicked(string);
+
+    // ── Layout ───────────────────────────────────────────────────────────────
     GridBox {
         padding: 24px;
         spacing: 12px;
-        
+
+        // Header
         Text {
             text: "Tex2Doc Desktop";
-            font-size: 24px;
+            font-size: 22px;
             font-weight: 700;
+            color: #1a73e8;
             row: 0;
             colspan: 2;
         }
-        
-        LineEdit {
-            placeholder-text: "TeX project path...";
-            text <=> project-path;
+
+        // Project path input
+        GroupBox {
+            title: "Project";
             row: 1;
             colspan: 2;
-        }
-        
-        Button {
-            text: "Detect Profile";
-            clicked => { 
-                status = "Detecting...";
+
+            VerticalBox {
+                LineEdit {
+                    placeholder-text: "TeX project path (e.g. /home/user/paper)...";
+                    text <=> project-path;
+                }
             }
+        }
+
+        // Options row
+        GroupBox {
+            title: "Options";
             row: 2;
             colspan: 2;
+
+            HorizontalBox {
+                spacing: 16px;
+
+                VerticalBox {
+                    Text { text: "Profile"; font-size: 12px; }
+                    ComboBox {
+                        current-value: detected-profile;
+                        model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                    }
+                }
+
+                VerticalBox {
+                    Text { text: "Quality"; font-size: 12px; }
+                    ComboBox {
+                        current-value: quality-level;
+                        model: ["preview", "standard", "strict"];
+                    }
+                }
+
+                VerticalBox {
+                    Text { text: "Output"; font-size: 12px; }
+                    LineEdit {
+                        placeholder-text: "Output DOCX path...";
+                        text <=> output-path;
+                    }
+                }
+            }
         }
-        
-        TextEdit {
-            text <=> status;
-            read-only: true;
-            min-height: 200px;
+
+        // Action buttons
+        HorizontalBox {
             row: 3;
             colspan: 2;
+            spacing: 8px;
+
+            Button {
+                text: "Detect Profile";
+                enabled: project-path != "" && !is-converting;
+                clicked => {
+                    root.status-text = "[...] Detecting profile for: " + project-path + "...";
+                    root.detect-profile-clicked(project-path);
+                }
+            }
+
+            Button {
+                text: "Convert";
+                enabled: project-path != "" && output-path != "" && !is-converting;
+                clicked => {
+                    root.is-converting = true;
+                    root.status-text = "[1/3] Reading TeX source...";
+                    root.conversion-progress = 0.1;
+                    root.convert-clicked(project-path, detected-profile, quality-level, output-path);
+                }
+            }
+
+            Button {
+                text: "Open Output";
+                enabled: !is-converting && output-path != "";
+                clicked => {
+                    root.open-output-clicked(output-path);
+                }
+            }
+        }
+
+        // Progress indicator
+        ProgressIndicator {
+            row: 4;
+            colspan: 2;
+            progress: conversion-progress;
+            visible: is-converting;
+        }
+
+        // Report summary
+        GroupBox {
+            title: "Report";
+            row: 5;
+            colspan: 2;
+
+            HorizontalBox {
+                spacing: 16px;
+
+                VerticalBox {
+                    Text { text: "Profile"; font-size: 11px; color: #666; }
+                    Text { text: detected-profile; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Compatibility"; font-size: 11px; color: #666; }
+                    Text { text: compatibility-score + "%"; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Quality"; font-size: 11px; color: #666; }
+                    Text { text: quality-status; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Confidence"; font-size: 11px; color: #666; }
+                    Text { text: profile-confidence; font-size: 14px; font-weight: 600; }
+                }
+            }
+        }
+
+        // Status panel
+        GroupBox {
+            title: "Status";
+            row: 6;
+            colspan: 2;
+
+            TextEdit {
+                text <=> status-text;
+                read-only: true;
+                min-height: 120px;
+                font-size: 12px;
+            }
+        }
+
+        // Recent jobs
+        GroupBox {
+            title: "Recent Jobs";
+            row: 7;
+            colspan: 2;
+
+            TextEdit {
+                text <=> recent-jobs;
+                read-only: true;
+                min-height: 60px;
+                font-size: 11px;
+            }
         }
     }
 }

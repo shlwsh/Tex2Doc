@@ -203,10 +203,10 @@ FAIL=0
 for profile in "${PROFILES[@]}"; do
     if run_test "$profile"; then
         PROFILE_RESULTS["$profile"]="passed"
-        ((PASS++))
+        PASS=$((PASS + 1))
     else
         PROFILE_RESULTS["$profile"]="failed"
-        ((FAIL++))
+        FAIL=$((FAIL + 1))
     fi
 done
 
