@@ -587,9 +587,11 @@ dependencies = [
  "doc-docx-writer",
  "doc-latex-reader",
  "doc-mathml",
+ "doc-rule-engine",
  "doc-semantic-ast",
  "doc-semantic-collector",
  "doc-utils",
+ "doc-xdv-parser",
  "image",
  "pdfium-render",
  "serde",
@@ -837,6 +839,7 @@ dependencies = [
 name = "doc-xdv-parser"
 version = "0.1.0"
 dependencies = [
+ "doc-semantic-collector",
  "serde",
  "thiserror 1.0.69",
 ]

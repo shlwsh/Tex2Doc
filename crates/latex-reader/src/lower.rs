@@ -274,6 +274,21 @@ fn lower_with_macros_numbering_and_cites(
         }
 
         // 环境优先
+        // 代码类环境（minted / lstlisting / listings）优先检测，提取语言信息后走专用路径
+        if let Some((env_name, language, body, end)) = scan_code_environment(&text, pos) {
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+                &label_map,
+            );
+            let blk = lower_code_environment(env_name, language.as_deref(), body, default_span, macros);
+            doc.push(blk);
+            pos = end;
+            continue;
+        }
         if let Some((name, body, end)) = scan_environment(&text, pos) {
             let body_resolved = replace_refs_in_latex(body, &label_map);
             let body_for_lower = body_resolved.as_str();
@@ -1144,6 +1159,151 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
     Some((name, body, after_end))
 }
 
+/// 专门解析代码类环境（minted / lstlisting / listings / minted* / lstlisting*），
+/// 从 `\begin{name}[options]{lang}` 或 `\begin{name}[lang]` 中提取语言和正文内容。
+///
+/// 对于 `minted`：跳过 `[options]`，再从第二个 `{...}` 取语言，第三个 `{...}` 开始是 body。
+/// 对于 `lstlisting`/`listings`：第一个 `[lang]` 或 `{lang}` 是语言，其余是 body。
+/// 对于 `minted*`：同 minted，但 body 保留逃逸。
+///
+/// 返回 `(Name, language, body, after_end)`；解析失败返回 None。
+fn scan_code_environment(text: &str, pos: usize) -> Option<(&str, Option<String>, &str, usize)> {
+    let bytes = text.as_bytes();
+    if pos >= bytes.len() || bytes[pos] != b'\\' {
+        return None;
+    }
+    if !text[pos..].starts_with("\\begin{") {
+        return None;
+    }
+    let after_begin = pos + "\\begin{".len();
+    let name_end = text[after_begin..].find('}')? + after_begin;
+    let name = &text[after_begin..name_end];
+
+    let code_envs = ["minted", "minted*", "lstlisting", "listings"];
+    if !code_envs.contains(&name) {
+        return None;
+    }
+
+    let mut p = name_end + 1;
+
+    // 提取语言标识符（从 [...] 或 {...}）
+    let language = extract_language_from_env(text, &mut p)?;
+
+    // 从当前位置开始找 \end{name}
+    let end_pat = format!("\\end{{{name}}}");
+    let body_end = text[p..].find(&end_pat).map(|off| p + off).unwrap_or(text.len());
+    let body = &text[p..body_end];
+    let after_end = (body_end + end_pat.len()).min(text.len());
+
+    Some((name, language, body, after_end))
+}
+
+/// 从 `\begin{...}[...]{...}` 的位置 `p` 开始提取语言标识符。
+/// 支持两种形式：
+///   - `minted` / `minted*`：`[options]` 然后 `{lang}` → 语言 = 第二个 {..} 内容
+///   - `lstlisting` / `listings`：`[lang]` 或 `{lang}` → 语言 = 第一个参数内容
+///
+/// 成功时推进 `p` 到 body 起始位置，返回语言字符串（可能为空串）。
+fn extract_language_from_env(text: &str, p: &mut usize) -> Option<Option<String>> {
+    let bytes = text.as_bytes();
+    let mut depth = 0;
+    let mut brace_start = 0;
+    let mut brace_count = 0;
+
+    // 跳过开头的空白
+    while *p < bytes.len() && (bytes[*p] == b' ' || bytes[*p] == b'\t') {
+        *p += 1;
+    }
+    if *p >= bytes.len() {
+        return Some(None);
+    }
+
+    // 检测是 minted 风格（必有 {lang}）还是 lstlisting 风格（可选 [lang]）
+    let is_minted_style = text[*p..].starts_with('[') || text[*p..].starts_with('{');
+
+    if !is_minted_style {
+        return Some(None);
+    }
+
+    // 策略：收集所有 {...} 的内容，语言 = 第二个 {..} 的内容
+    // （minted: [options] {lang} {...body...}，第二个 {..} 是语言）
+    // 扫描到第二个闭合 } 为止
+    let start = *p;
+    while *p < bytes.len() {
+        match bytes[*p] {
+            b'{' => {
+                if depth == 0 {
+                    brace_start = *p;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    brace_count += 1;
+                    if brace_count == 2 {
+                        // 第二个 {..} 的内容 = 语言
+                        let lang = text[brace_start + 1..*p].trim();
+                        // body 从 } 后开始
+                        *p += 1;
+                        return Some(Some(lang.to_string()));
+                    }
+                }
+            }
+            b'[' => {
+                // [options] — 跳过整个 [...] 块（支持嵌套）
+                let mut i = *p + 1;
+                let mut d = 1;
+                while i < bytes.len() && d > 0 {
+                    match bytes[i] {
+                        b'[' => d += 1,
+                        b']' => d -= 1,
+                        b'{' => { let _ = find_matching_brace(text, i); }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                *p = i;
+            }
+            _ => {}
+        }
+        *p += 1;
+    }
+
+    // 兜底：没有找到足够的 {...}，尝试把第一个 {..} 内容当作语言（lstlisting 的 {lang} 形式）
+    // 回溯重扫
+    *p = start;
+    let mut first_brace_lang: Option<String> = None;
+    depth = 0;
+    for i in (*p)..bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                if depth == 0 {
+                    brace_start = i;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    brace_count += 1;
+                    let lang = text[brace_start + 1..i].trim();
+                    if first_brace_lang.is_none() && !lang.is_empty() {
+                        first_brace_lang = Some(lang.to_string());
+                    }
+                    if brace_count == 2 {
+                        *p = i + 1;
+                        return Some(first_brace_lang);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some(None)
+}
+
 /// 检测当前行是否是 paper3 模板里的"附中文参考文献"或"作者简介"section 标签。
 ///
 /// 形式为 `\noindent{\xiaowuhao\hei 附中文参考文献:}` 或带 `\textbf`。
@@ -1253,6 +1413,37 @@ fn lower_environment(
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
         },
+    }
+}
+
+fn clean_code_body(body: &str) -> String {
+    let trimmed = body.trim();
+    // 移除 minted 逃逸前缀 `+` 和每行首的 `  ` 双空格
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .map(|l| {
+            let s = l.strip_prefix(' ').unwrap_or(l);
+            let s = s.strip_prefix(' ').unwrap_or(s);
+            let s = s.strip_prefix('+').unwrap_or(s);
+            s
+        })
+        .collect::<Vec<_>>();
+    lines.join("\n")
+}
+
+fn lower_code_environment(
+    name: &str,
+    language: Option<&str>,
+    body: &str,
+    span: Span,
+    macros: &mut MacroMap,
+) -> Block {
+    let lang = language.filter(|l| !l.is_empty()).map(|s| s.to_string());
+    let cleaned = clean_code_body(body);
+    Block::CodeBlock {
+        language: lang,
+        code: cleaned,
+        span,
     }
 }
 

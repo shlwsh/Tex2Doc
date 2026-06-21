@@ -22,6 +22,8 @@ use doc_latex_reader::{
 use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
+use doc_rule_engine::{RuleEngine, RuleEngineConfig, RuleOutput};
+use doc_xdv_parser::{xdv_to_layout_nodes, to_collector_layout_graph};
 use doc_utils::{ImageAssets, VirtualFs};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -309,6 +311,7 @@ pub struct CompileOptions {
     pub semantic_backend: SemanticBackendKind,
     pub allow_backend_fallback: bool,
     pub enable_reference_links: bool,
+    pub enable_ref_fields: bool,
     pub enable_omml_equations: bool,
     pub template_bytes: Option<Vec<u8>>,
     pub page_setup: Option<doc_docx_writer::PageSetup>,
@@ -323,6 +326,7 @@ impl Default for CompileOptions {
             semantic_backend: SemanticBackendKind::Auto,
             allow_backend_fallback: true,
             enable_reference_links: true,
+            enable_ref_fields: false,
             enable_omml_equations: true,
             template_bytes: None,
             page_setup: None,
@@ -457,7 +461,7 @@ impl SemanticTexEngine {
             docx = omml.docx;
         }
         if options.enable_reference_links {
-            let linked = apply_reference_links_to_docx(docx, &graph.reference_graph)?;
+            let linked = apply_reference_links_to_docx(docx, &graph.reference_graph, options.enable_ref_fields)?;
             graph.report.bookmark_count = linked.bookmarks;
             graph.report.hyperlink_count = linked.hyperlinks;
             docx = linked.docx;
@@ -783,6 +787,10 @@ impl SemanticCollector for RuleBasedCollector {
 
         let document =
             lower_semantic_document(input.main_tex, input.vfs, &parse, &joined, input.options)?;
+
+        // P1-2: Apply RuleEngine to transform RawFallback blocks into structured blocks.
+        let document = apply_rule_engine_to_document(document);
+
         report.block_count = document.blocks.len();
         report.push(
             CompileStage::SemanticCollect,
@@ -876,10 +884,10 @@ impl SemanticBackend for XeLaTeXHookBackend {
         options: &CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
-        let events = collect_runtime_events(RuntimeEngine::XeLaTeX, main_tex, vfs)?;
-        let event_count = events.len();
+        let result = collect_runtime_events(RuntimeEngine::XeLaTeX, main_tex, vfs)?;
+        let event_count = result.events.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
-        artifact.events = events;
+        artifact.events = result.events;
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
@@ -917,11 +925,19 @@ impl SemanticBackend for LuaTeXNodeBackend {
         options: &CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
-        let events = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
-        let event_count = events.len();
+        let result = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
+        let event_count = result.events.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
-        artifact.events = events;
-        artifact.layout = Some(LayoutGraph::default());
+        artifact.events = result.events;
+
+        // P2-2: Parse the XDV output from LuaLaTeX and populate LayoutGraph.
+        let layout = if let Some(xdv_path) = result.xdv_path {
+            parse_layout_from_xdv(&xdv_path)
+        } else {
+            None
+        };
+        artifact.layout = layout.or_else(|| Some(LayoutGraph::default()));
+
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
@@ -1650,11 +1666,16 @@ end
 \makeatother
 "#;
 
+struct RuntimeCollectResult {
+    events: Vec<SemanticEvent>,
+    xdv_path: Option<PathBuf>,
+}
+
 fn collect_runtime_events(
     engine: RuntimeEngine,
     main_tex: &str,
     vfs: &VirtualFs,
-) -> Result<Vec<SemanticEvent>, EngineError> {
+) -> Result<RuntimeCollectResult, EngineError> {
     let workdir = tempfile::tempdir().map_err(|e| EngineError::Io(e.to_string()))?;
     materialize_vfs(vfs, workdir.path())?;
 
@@ -1702,7 +1723,23 @@ fn collect_runtime_events(
             e
         ))
     })?;
-    Ok(parse_semantic_events_jsonl(&sidecar)?)
+    let events = parse_semantic_events_jsonl(&sidecar)?;
+
+    // P2-2: Capture XDV path for LayoutGraph conversion.
+    let xdv_path = match engine {
+        RuntimeEngine::LuaLaTeX => {
+            let xdv = PathBuf::from(main_tex).with_extension("xdv");
+            let candidate = workdir.path().join(&xdv);
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
+        }
+        _ => None,
+    };
+
+    Ok(RuntimeCollectResult { events, xdv_path })
 }
 
 fn materialize_vfs(vfs: &VirtualFs, root: &Path) -> Result<(), EngineError> {
@@ -1795,6 +1832,18 @@ fn tail_for_diagnostic(input: &str) -> String {
     let mut chars = input.chars().rev().take(MAX).collect::<Vec<_>>();
     chars.reverse();
     chars.into_iter().collect::<String>()
+}
+
+/// Parse an XDV file and convert it to a `LayoutGraph`.
+///
+/// Returns `None` if parsing fails (e.g., file not found, corrupt XDV, etc.).
+/// This is intentionally lenient: a failed layout parse does NOT fail the compile.
+fn parse_layout_from_xdv(xdv_path: &Path) -> Option<LayoutGraph> {
+    let bytes = fs::read(xdv_path).ok()?;
+    let mut parser = doc_xdv_parser::XdvParser::default();
+    let xdv = parser.parse_bytes(&bytes).ok()?;
+    let nodes = doc_xdv_parser::xdv_to_layout_nodes(&xdv);
+    Some(to_collector_layout_graph(nodes))
 }
 
 #[derive(Debug, Clone)]
@@ -2051,6 +2100,7 @@ struct ReferenceLinkedDocx {
 fn apply_reference_links_to_docx(
     docx: Vec<u8>,
     reference_graph: &ReferenceGraph,
+    enable_ref_fields: bool,
 ) -> Result<ReferenceLinkedDocx, EngineError> {
     if reference_graph.labels.is_empty() || reference_graph.references.is_empty() {
         return Ok(ReferenceLinkedDocx {
@@ -2094,7 +2144,7 @@ fn apply_reference_links_to_docx(
         });
     };
 
-    let (linked_xml, bookmarks, hyperlinks) = link_document_xml(&document_xml, reference_graph);
+    let (linked_xml, bookmarks, hyperlinks) = link_document_xml(&document_xml, reference_graph, enable_ref_fields);
 
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -2132,6 +2182,7 @@ fn apply_reference_links_to_docx(
 fn link_document_xml(
     document_xml: &str,
     reference_graph: &ReferenceGraph,
+    enable_ref_fields: bool,
 ) -> (String, usize, usize) {
     let bookmark_plan = build_bookmark_plan(reference_graph);
     if bookmark_plan.is_empty() {
@@ -2209,7 +2260,7 @@ fn link_document_xml(
                 continue;
             }
             if let Some(updated) =
-                hyperlink_paragraph(&paragraph_xml, &plan.name, &reference_needles(reference))
+                hyperlink_paragraph(&paragraph_xml, &plan.name, &reference_needles(reference), enable_ref_fields)
             {
                 paragraph_xml = updated;
                 reference_hits.insert(reference_idx);
@@ -2402,7 +2453,7 @@ fn insert_bookmark_in_paragraph(paragraph: &str, id: usize, name: &str) -> Strin
     )
 }
 
-fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String]) -> Option<String> {
+fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String], enable_ref_fields: bool) -> Option<String> {
     if paragraph.contains("<w:hyperlink") || paragraph.contains("<w:bookmarkStart") {
         return None;
     }
@@ -2410,14 +2461,14 @@ fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String]) -> Opt
         if needle.is_empty() {
             continue;
         }
-        if let Some(updated) = hyperlink_first_text_run(paragraph, anchor, needle) {
+        if let Some(updated) = hyperlink_first_text_run(paragraph, anchor, needle, enable_ref_fields) {
             return Some(updated);
         }
     }
     None
 }
 
-fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str) -> Option<String> {
+fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str, enable_ref_fields: bool) -> Option<String> {
     let escaped_needle = escape_xml_text(needle);
     let mut search_from = 0usize;
     while let Some(rel) = paragraph[search_from..].find("<w:t") {
@@ -2437,11 +2488,23 @@ fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str) -> Opti
             if !before.is_empty() {
                 replacement.push_str(&text_run_xml(before));
             }
-            replacement.push_str(&format!(
-                "<w:hyperlink w:anchor=\"{}\" w:history=\"1\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r></w:hyperlink>",
-                escape_xml_attr(anchor),
-                text_xml(&escaped_needle)
-            ));
+            if enable_ref_fields {
+                replacement.push_str(&format!(
+                    "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>\
+                     <w:r><w:instrText xml:space=\"preserve\"> REF {} \\h </w:instrText></w:r>\
+                     <w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>\
+                     <w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r>\
+                     <w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
+                    escape_xml_attr(anchor),
+                    text_xml(&escaped_needle)
+                ));
+            } else {
+                replacement.push_str(&format!(
+                    "<w:hyperlink w:anchor=\"{}\" w:history=\"1\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r></w:hyperlink>",
+                    escape_xml_attr(anchor),
+                    text_xml(&escaped_needle)
+                ));
+            }
             if !after.is_empty() {
                 replacement.push_str(&text_run_xml(after));
             }
@@ -2626,6 +2689,86 @@ fn append_bibliography_paragraphs(
     for (offset, block) in blocks.into_iter().enumerate() {
         doc.blocks.insert(insert_at + offset, block);
     }
+}
+
+/// Apply RuleEngine to transform `RawFallback` blocks in the document.
+///
+/// For each `RawFallback` block, the RuleEngine processes any detected inline macro pattern.
+/// This integrates the rule-engine audit trail (for auditability) and allows future
+/// expansion where inline macro fallbacks can be resolved into structured inline runs.
+fn apply_rule_engine_to_document(mut document: Document) -> Document {
+    let mut engine = RuleEngine::new();
+    let blocks = std::mem::take(&mut document.blocks);
+    for block in blocks {
+        match block {
+            Block::RawFallback { text, span } => {
+                let resolved = resolve_raw_fallback(&text, &span, &mut engine);
+                document.blocks.push(resolved);
+            }
+            other => document.blocks.push(other),
+        }
+    }
+    document
+}
+
+/// Attempt to convert a `RawFallback` text to a structured `Block` using the RuleEngine.
+///
+/// The RuleEngine processes inline macro patterns (e.g., `\unknownmacro{arg}`) found in
+/// the fallback text. Environment-level fallbacks (e.g., `\begin{unknown}{...}`) are
+/// preserved as-is for later inspection.
+fn resolve_raw_fallback(text: &str, span: &Span, engine: &mut RuleEngine) -> Block {
+    // Try to detect an environment-level pattern \begin{name}...\end{name}
+    if let Some(name) = detect_environment_name(text) {
+        // Record in audit trail but preserve as RawFallback for now
+        let _ = engine.process_unknown(&format!("begin{{{name}}}"), 0);
+        return Block::RawFallback {
+            text: text.to_string(),
+            span: *span,
+        };
+    }
+
+    // Try to detect an inline macro pattern (e.g., \unknownmacro{...})
+    if let Some((macro_name, arity)) = detect_inline_macro(text) {
+        let output = engine.process_unknown(&macro_name, arity);
+        // For now, preserve the original fallback text to avoid changing existing behavior.
+        // Future work: route RuleOutput -> structured blocks based on output variant.
+        let _ = output;
+    }
+
+    Block::RawFallback {
+        text: text.to_string(),
+        span: *span,
+    }
+}
+
+/// Detect `\begin{name}` pattern in raw fallback text and return the environment name.
+fn detect_environment_name(text: &str) -> Option<String> {
+    let text = text.trim();
+    let rest = text.strip_prefix("\\begin{")?;
+    let end = rest.find('}')?;
+    Some(rest[..end].to_string())
+}
+
+/// Detect an inline macro pattern `\name{arg}` and return (macro_name, arity).
+fn detect_inline_macro(text: &str) -> Option<(String, usize)> {
+    let text = text.trim();
+    // Match \name followed by optional [...] then required {...}
+    let rest = text.strip_prefix('\\')?;
+    let name_end = rest
+        .chars()
+        .take_while(|c| c.is_ascii_alphabetic())
+        .count();
+    if name_end == 0 {
+        return None;
+    }
+    let name = rest[..name_end].to_string();
+    // Count mandatory braces after the name
+    let after_name = &rest[name_end..];
+    let arity = after_name.chars().filter(|&c| c == '{').count();
+    if arity == 0 {
+        return None;
+    }
+    Some((name, arity))
 }
 
 fn collect_image_assets_from_vfs(vfs: &VirtualFs) -> ImageAssets {
@@ -3179,13 +3322,26 @@ See Figure~\ref{fig:a}.
     #[test]
     fn docx_reference_links_hyperlink_plain_text_run() {
         let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
-        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")])
+        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], false)
             .expect("hyperlink text run");
 
         assert!(updated.contains(r#"<w:hyperlink w:anchor="ref_fig_a""#));
         assert!(updated.contains(r#"<w:t xml:space="preserve">See </w:t>"#));
         assert!(updated.contains("<w:t>Figure 1</w:t>"));
         assert!(updated.contains("<w:t>.</w:t>"));
+    }
+
+    #[test]
+    fn docx_reference_links_ref_field_mode() {
+        let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
+        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], true)
+            .expect("ref field text run");
+
+        assert!(updated.contains("<w:fldChar"));
+        assert!(updated.contains("REF"));
+        assert!(updated.contains("ref_fig_a"));
+        assert!(updated.contains(r#"w:fldCharType="begin""#));
+        assert!(updated.contains(r#"w:fldCharType="end""#));
     }
 
     #[test]
@@ -3431,5 +3587,11 @@ a+b=c
 "#;
         let events = parse_semantic_events_jsonl(jsonl).unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn parse_layout_from_xdv_returns_none_for_missing_file() {
+        let result = parse_layout_from_xdv(std::path::Path::new("/nonexistent/file.xdv"));
+        assert!(result.is_none());
     }
 }
