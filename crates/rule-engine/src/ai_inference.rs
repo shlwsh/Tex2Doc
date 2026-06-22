@@ -4,7 +4,7 @@
 //! semantic classification. All AI interactions are recorded in the audit
 //! trail with confidence scores and prompt hashes.
 
-use crate::audit::{AuditRecord, AuditCache, DecisionSource};
+use crate::audit::{AuditCache, AuditRecord, DecisionSource};
 use crate::rule_output::RuleOutput;
 
 /// Build a classification prompt for the AI model.
@@ -62,7 +62,9 @@ pub fn infer_macro(
     use reqwest::blocking::Client;
 
     let client = Client::new();
-    let mut req = client.post(api_url).header("Content-Type", "application/json");
+    let mut req = client
+        .post(api_url)
+        .header("Content-Type", "application/json");
 
     if let Some(key) = api_key {
         req = req.header("Authorization", format!("Bearer {key}"));
@@ -103,16 +105,10 @@ pub fn infer_macro(
     let output = match type_str {
         "inline_text" => RuleOutput::InlineText { content_arg: 0 },
         "paragraph" => RuleOutput::Paragraph {
-            body_arg: result
-                .get("body_arg")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(0) as usize,
+            body_arg: result.get("body_arg").and_then(|v| v.as_u64()).unwrap_or(0) as usize,
         },
         "heading" => RuleOutput::Heading {
-            level: result
-                .get("level")
-                .and_then(|v| v.as_u64())
-                .unwrap_or(1) as u8,
+            level: result.get("level").and_then(|v| v.as_u64()).unwrap_or(1) as u8,
             text_arg: 0,
         },
         "figure" => RuleOutput::Figure { body_arg: 0 },
@@ -132,7 +128,7 @@ pub fn infer_macro(
 /// Compute a SHA-256 hash of a prompt for audit-trail deduplication.
 #[cfg(feature = "ai-fallback")]
 pub fn compute_prompt_hash(prompt: &str) -> String {
-    use sha2::{Sha256, Digest};
+    use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     hasher.update(prompt.as_bytes());
     format!("{:x}", hasher.finalize())

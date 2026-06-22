@@ -249,8 +249,8 @@ fn lower_with_macros_numbering_and_cites(
     let default_span = Span::default();
     let mut pos: usize = 0;
     let bytes = text.as_bytes();
-    let len = bytes.len();    // Citation number tracking across the document. When `.bbl` is available,
-    // seed this map with BibTeX order; otherwise fallback remains first-use order.
+    let len = bytes.len(); // Citation number tracking across the document. When `.bbl` is available,
+                           // seed this map with BibTeX order; otherwise fallback remains first-use order.
     let mut cite_numbers: HashMap<String, usize> =
         initial_cite_numbers.cloned().unwrap_or_default();
 
@@ -284,7 +284,8 @@ fn lower_with_macros_numbering_and_cites(
                 macros,
                 &label_map,
             );
-            let blk = lower_code_environment(env_name, language.as_deref(), body, default_span, macros);
+            let blk =
+                lower_code_environment(env_name, language.as_deref(), body, default_span, macros);
             doc.push(blk);
             pos = end;
             continue;
@@ -1248,7 +1249,10 @@ fn scan_code_environment(text: &str, pos: usize) -> Option<(&str, Option<String>
 
     // 从当前位置开始找 \end{name}
     let end_pat = format!("\\end{{{name}}}");
-    let body_end = text[p..].find(&end_pat).map(|off| p + off).unwrap_or(text.len());
+    let body_end = text[p..]
+        .find(&end_pat)
+        .map(|off| p + off)
+        .unwrap_or(text.len());
     let body = &text[p..body_end];
     let after_end = (body_end + end_pat.len()).min(text.len());
 
@@ -1315,7 +1319,9 @@ fn extract_language_from_env(text: &str, p: &mut usize) -> Option<Option<String>
                     match bytes[i] {
                         b'[' => d += 1,
                         b']' => d -= 1,
-                        b'{' => { let _ = find_matching_brace(text, i); }
+                        b'{' => {
+                            let _ = find_matching_brace(text, i);
+                        }
                         _ => {}
                     }
                     i += 1;
@@ -1459,14 +1465,9 @@ fn lower_environment(
             span,
         },
         // v12 规则回迁：algorithm2e 走算法路径
-        "algorithm2e" => lower_algorithm_env_inline(
-            name,
-            body,
-            span,
-            numbering,
-            cite_numbers,
-            label_map,
-        ),
+        "algorithm2e" => {
+            lower_algorithm_env_inline(name, body, span, numbering, cite_numbers, label_map)
+        }
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
@@ -1637,7 +1638,12 @@ fn lower_list(
                 // v13.2.2 R2.1: 空行 = 段落边界
                 if let Some(buf) = current.take() {
                     items.push(lower_item_body(
-                        buf, span, macros, numbering, cite_numbers, label_map,
+                        buf,
+                        span,
+                        macros,
+                        numbering,
+                        cite_numbers,
+                        label_map,
                     ));
                 }
                 continue;
@@ -1906,12 +1912,12 @@ fn lower_description_with_label(
                     //   v13.2 F15b: 用 sentinel `\u{0002}/\u{0003}` 包裹 label_clean，
                     //   防止后续 `flush_paragraph` 调 latex_to_text 的 `split_runs_with_sup_sub`
                     //   把 `[N]` 误判为 citation 上标（JOS 段是编号标签，**不是**上标）。
-                    let label_wrapped = if label_clean.starts_with('[') && label_clean.ends_with(']')
-                    {
-                        format!("\u{0002}{label_clean}\u{0003}")
-                    } else {
-                        label_clean.clone()
-                    };
+                    let label_wrapped =
+                        if label_clean.starts_with('[') && label_clean.ends_with(']') {
+                            format!("\u{0002}{label_clean}\u{0003}")
+                        } else {
+                            label_clean.clone()
+                        };
                     let item_text = if label_clean.is_empty() {
                         rest.to_string()
                     } else if rest.is_empty() {
@@ -2234,11 +2240,7 @@ fn lower_item_body(
         // v13.2 F12: fallback 路径走 latex_to_text 二次切分，
         //   让 inline math 内的 _t 切成 sub run（之前是单 Plain TextRun，
         //   sub/sup 信息丢失导致 docx 渲染为 "Freq t" 而非下标）。
-        let normalized = crate::normalize::latex_to_text(
-            stripped.trim(),
-            cite_numbers,
-            label_map,
-        );
+        let normalized = crate::normalize::latex_to_text(stripped.trim(), cite_numbers, label_map);
         let runs: Vec<TextRun> = normalized
             .runs
             .into_iter()
@@ -2248,10 +2250,7 @@ fn lower_item_body(
                 span,
             })
             .collect();
-        out.push(Block::Paragraph {
-            runs,
-            span,
-        });
+        out.push(Block::Paragraph { runs, span });
     }
     out
 }
@@ -2756,14 +2755,7 @@ fn lower_captioned_env(
 
     // v12 规则回迁：algorithm2e 兼容
     if name == "algorithm2e" {
-        return lower_algorithm_env_inline(
-            name,
-            body,
-            span,
-            numbering,
-            cite_numbers,
-            label_map,
-        );
+        return lower_algorithm_env_inline(name, body, span, numbering, cite_numbers, label_map);
     }
 
     let (img, caption) = extract_includegraphics_and_caption(body);
@@ -2866,7 +2858,9 @@ struct IncludeGraphicsInfo {
     sizing: Option<FigureSizing>,
 }
 
-fn extract_includegraphics_and_caption(body: &str) -> (Option<IncludeGraphicsInfo>, Option<String>) {
+fn extract_includegraphics_and_caption(
+    body: &str,
+) -> (Option<IncludeGraphicsInfo>, Option<String>) {
     let img = find_includegraphics(body);
     let caption: Option<String> =
         find_command_with_brace(body, "caption").map(|args| args.to_string());
@@ -2899,7 +2893,11 @@ fn find_includegraphics(body: &str) -> Option<IncludeGraphicsInfo> {
     let start = i + 1;
     let off = find_matching_brace(body, i)?;
     let path = body[start..start + off].trim().to_string();
-    let source_options = if options.is_empty() { None } else { Some(options.join(",")) };
+    let source_options = if options.is_empty() {
+        None
+    } else {
+        Some(options.join(","))
+    };
     Some(IncludeGraphicsInfo {
         path,
         sizing: FigureSizing::from_options(source_options),
@@ -3750,7 +3748,13 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
-            Block::Figure { path, caption, scale, sizing, .. } => {
+            Block::Figure {
+                path,
+                caption,
+                scale,
+                sizing,
+                ..
+            } => {
                 assert_eq!(path, "a.png");
                 assert_eq!(caption.as_deref(), Some("Demo"));
                 assert_eq!(*scale, 0.7);
@@ -4329,7 +4333,10 @@ mod tests {
         let abstract_text = doc.metadata.abstract_text.unwrap_or_default();
         assert!(abstract_text.contains("±"), "got: {abstract_text}");
         // v13.2 F12: \gamma / \delta 在 clean_math 后保留 Roman
-        assert!(abstract_text.contains("gamma+delta"), "got: {abstract_text}");
+        assert!(
+            abstract_text.contains("gamma+delta"),
+            "got: {abstract_text}"
+        );
         assert!(!abstract_text.contains("\\pm"), "got: {abstract_text}");
         assert!(!abstract_text.contains("\\gamma"), "got: {abstract_text}");
     }
@@ -4734,8 +4741,16 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         // 期望：2 个 Heading + 2 个 Paragraph
-        let headings = doc.blocks.iter().filter(|b| matches!(b, Block::Heading { .. })).count();
-        let paragraphs = doc.blocks.iter().filter(|b| matches!(b, Block::Paragraph { .. })).count();
+        let headings = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Heading { .. }))
+            .count();
+        let paragraphs = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Paragraph { .. }))
+            .count();
         assert_eq!(headings, 2, "应当有 2 个 Heading");
         // v11 行为：每个空行触发一次 flush_paragraph；v12 折叠后行为更稳
         // 此测试重点验证 lowering 仍能跑通，段数因 flush 触发次数而异
@@ -4758,12 +4773,16 @@ mod tests {
         let src = "\\begin{algorithm2e}[H]\n\\KwIn{logs}\n\\KwOut{filt}\n\\For{$l \\in L$}{\\If{$l.status = 5xx$}{keep($l$)\\;}}\n\\Return{filt}\n\\caption{filter}\\label{alg:filt}\n\\end{algorithm2e}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
-        assert!(matches!(doc.blocks[0], Block::Algorithm { .. }), "期望 Algorithm 块");
+        assert!(
+            matches!(doc.blocks[0], Block::Algorithm { .. }),
+            "期望 Algorithm 块"
+        );
     }
 
     #[test]
     fn algorithm2e_extracts_io() {
-        let src = "\\begin{algorithm2e}\n\\KwIn{logs}\n\\KwOut{filt}\n\\Return{filt}\n\\end{algorithm2e}";
+        let src =
+            "\\begin{algorithm2e}\n\\KwIn{logs}\n\\KwOut{filt}\n\\Return{filt}\n\\end{algorithm2e}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         if let Block::Algorithm { io, lines, .. } = &doc.blocks[0] {

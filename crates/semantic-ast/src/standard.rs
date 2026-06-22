@@ -532,7 +532,11 @@ impl BlockNode {
                 metadata: NodeMetadata::from_rule("algorithm2e.algorithm"),
                 children: vec![],
             },
-            Block::CodeBlock { language, code, span } => Self {
+            Block::CodeBlock {
+                language,
+                code,
+                span,
+            } => Self {
                 id,
                 kind: BlockKind::CodeBlock(CodeBlockNode {
                     language: language.clone(),
@@ -899,16 +903,16 @@ fn write_block_markdown(out: &mut String, block: &BlockNode) {
                 escape_md(raw)
             ));
         }
-            BlockKind::CodeBlock(node) => {
-                let lang = node.language.as_deref().unwrap_or("text");
-                out.push_str(&format!("**Code block** — `{lang}`\n\n"));
-                out.push_str("```");
-                out.push_str(lang);
-                out.push('\n');
-                out.push_str(&escape_md(&node.code));
-                out.push_str("\n```\n");
-            }
-            BlockKind::FrontMatter(_) | BlockKind::AuthorBio(_) => {}
+        BlockKind::CodeBlock(node) => {
+            let lang = node.language.as_deref().unwrap_or("text");
+            out.push_str(&format!("**Code block** — `{lang}`\n\n"));
+            out.push_str("```");
+            out.push_str(lang);
+            out.push('\n');
+            out.push_str(&escape_md(&node.code));
+            out.push_str("\n```\n");
+        }
+        BlockKind::FrontMatter(_) | BlockKind::AuthorBio(_) => {}
     }
     out.push('\n');
 }

@@ -272,7 +272,10 @@ impl<'a> Parser<'a> {
         }
 
         // v13.2.6 R8: 字体命令 → 只取内容，不加 \? 前缀
-        if matches!(cmd, "mathrm" | "mathbf" | "mathsf" | "mathtt" | "mathcal" | "mathit") {
+        if matches!(
+            cmd,
+            "mathrm" | "mathbf" | "mathsf" | "mathtt" | "mathcal" | "mathit"
+        ) {
             return Some(self.parse_group_or_single());
         }
 

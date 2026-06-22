@@ -15,14 +15,18 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use clap::Parser;
 use doc_compiler_engine::{
-    CompatibilityAnalyzer, CompileOptions,
-    JournalDetector, ProfileKind, ProfileRef, SemanticBackendKind, SemanticTexEngine,
+    CompatibilityAnalyzer, CompileOptions, JournalDetector, ProfileKind, ProfileRef,
+    SemanticBackendKind, SemanticTexEngine,
 };
 use doc_utils::VirtualFs;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Debug, clap::Parser)]
-#[command(name = "doc-engine", version, about = "Doc-engine CLI (V2 Tex2Doc engine)")]
+#[command(
+    name = "doc-engine",
+    version,
+    about = "Doc-engine CLI (V2 Tex2Doc engine)"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -155,7 +159,9 @@ fn run_convert(args: semantic_cmd::SemanticConvertArgs) -> Result<()> {
     let backend = parse_backend(&args.backend)?;
 
     // P4.3: Parse --quality level and compute min_score override
-    let quality_level: semantic_cmd::QualityLevel = args.quality.parse()
+    let quality_level: semantic_cmd::QualityLevel = args
+        .quality
+        .parse()
         .map_err(|e: String| anyhow::anyhow!("--quality: {}", e))?;
     let min_score_override = match quality_level {
         semantic_cmd::QualityLevel::Preview => 60,
@@ -181,17 +187,14 @@ fn run_convert(args: semantic_cmd::SemanticConvertArgs) -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("main_tex must be a valid string"))?;
 
     let engine = SemanticTexEngine::new();
-    let artifact = match engine.compile_dir_to_docx(
-        &args.project_root,
-        &PathBuf::from(main_tex),
-        &options,
-    ) {
-        Ok(a) => a,
-        Err(e) => {
-            eprintln!("Conversion failed: {}", e);
-            std::process::exit(semantic_cmd::CliExitCode::EConvertFailed.code());
-        }
-    };
+    let artifact =
+        match engine.compile_dir_to_docx(&args.project_root, &PathBuf::from(main_tex), &options) {
+            Ok(a) => a,
+            Err(e) => {
+                eprintln!("Conversion failed: {}", e);
+                std::process::exit(semantic_cmd::CliExitCode::EConvertFailed.code());
+            }
+        };
 
     std::fs::write(&args.out, &artifact.docx)
         .with_context(|| format!("failed to write DOCX: {}", args.out.display()))?;
@@ -210,9 +213,17 @@ fn run_convert(args: semantic_cmd::SemanticConvertArgs) -> Result<()> {
     if let Some(ref qg) = report.quality_gate {
         match qg.status {
             doc_compiler_engine::QualityStatus::Failed => {
-                eprintln!("Quality gate FAILED: {} check(s) failed", qg.failed_checks.len());
+                eprintln!(
+                    "Quality gate FAILED: {} check(s) failed",
+                    qg.failed_checks.len()
+                );
                 for check in &qg.failed_checks {
-                    eprintln!("  [{}] {}: {}", check.severity.as_str(), check.name, check.message);
+                    eprintln!(
+                        "  [{}] {}: {}",
+                        check.severity.as_str(),
+                        check.name,
+                        check.message
+                    );
                 }
                 std::process::exit(semantic_cmd::CliExitCode::EQualityFailed.code());
             }
@@ -253,12 +264,26 @@ fn run_convert(args: semantic_cmd::SemanticConvertArgs) -> Result<()> {
     } else {
         println!("docx: {}", args.out.display());
         println!("profile: {}", active_profile_id);
-        println!("detected_profile: {}",
-            report.journal_detection.as_ref().map(|d| d.selected_profile_id.clone()).unwrap_or_else(|| active_profile_id.clone()));
+        println!(
+            "detected_profile: {}",
+            report
+                .journal_detection
+                .as_ref()
+                .map(|d| d.selected_profile_id.clone())
+                .unwrap_or_else(|| active_profile_id.clone())
+        );
         println!("compatibility-score: {}", compatibility_score);
-        println!("backend: {} (requested: {})", backend_id, backend_requested_id);
+        println!(
+            "backend: {} (requested: {})",
+            backend_id, backend_requested_id
+        );
         if let Some(ref qg) = report.quality_gate {
-            println!("quality-gate: {} ({}/{} checks passed)", qg.status.as_str(), qg.passed_checks, qg.total_checks);
+            println!(
+                "quality-gate: {} ({}/{} checks passed)",
+                qg.status.as_str(),
+                qg.passed_checks,
+                qg.total_checks
+            );
         }
     }
 
@@ -289,9 +314,8 @@ fn run_verify(args: semantic_cmd::SemanticVerifyArgs) -> Result<()> {
     // Read ZIP contents
     let docx_bytes = std::fs::read(docx_path)?;
     let zip_bytes: &[u8] = &docx_bytes;
-    let mut zip_reader =
-        zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
-            .map_err(|e| anyhow::anyhow!("failed to open DOCX as ZIP: {}", e))?;
+    let mut zip_reader = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes))
+        .map_err(|e| anyhow::anyhow!("failed to open DOCX as ZIP: {}", e))?;
 
     // Extract document.xml
     let doc_xml = extract_docx_part(&mut zip_reader, "word/document.xml")
@@ -350,7 +374,11 @@ fn run_verify(args: semantic_cmd::SemanticVerifyArgs) -> Result<()> {
         name: "styles_present".to_string(),
         passed: has_styles,
         severity: "error".to_string(),
-        message: if has_styles { "present".to_string() } else { "missing".to_string() },
+        message: if has_styles {
+            "present".to_string()
+        } else {
+            "missing".to_string()
+        },
     });
 
     // document.xml presence
@@ -367,7 +395,11 @@ fn run_verify(args: semantic_cmd::SemanticVerifyArgs) -> Result<()> {
         name: "rels_present".to_string(),
         passed: has_rels,
         severity: "error".to_string(),
-        message: if has_rels { "present".to_string() } else { "missing".to_string() },
+        message: if has_rels {
+            "present".to_string()
+        } else {
+            "missing".to_string()
+        },
     });
 
     // Table count
@@ -402,7 +434,10 @@ fn run_verify(args: semantic_cmd::SemanticVerifyArgs) -> Result<()> {
         message: format!("{}", docx_chars),
     });
 
-    let all_passed = checks.iter().filter(|c| c.severity == "error").all(|c| c.passed);
+    let all_passed = checks
+        .iter()
+        .filter(|c| c.severity == "error")
+        .all(|c| c.passed);
     let passed_count = checks.iter().filter(|c| c.passed).count();
     let total_count = checks.len();
 
@@ -502,12 +537,13 @@ fn extract_docx_text(doc_xml: &str) -> String {
 
 fn build_vfs(project_root: &Path) -> Result<VirtualFs> {
     let mut vfs = VirtualFs::new();
-    vfs.mount_dir(project_root)
-        .map_err(|e| anyhow::anyhow!(
+    vfs.mount_dir(project_root).map_err(|e| {
+        anyhow::anyhow!(
             "failed to scan project directory {}: {}",
             project_root.display(),
             e
-        ))?;
+        )
+    })?;
     Ok(vfs)
 }
 

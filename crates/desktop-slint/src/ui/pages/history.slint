@@ -1,0 +1,111 @@
+import { Button, VerticalBox, HorizontalBox, GroupBox, TextEdit, ListView } from "std-widgets.slint";
+import { JobRow } from "../types.slint";
+
+export component HistoryTab inherits Rectangle {
+    in-out property <string> recent-jobs: "No recent jobs.";
+    in-out property <string> project-path;
+    in-out property <string> output-path;
+    in-out property <string> api-base-url;
+    in-out property <string> detected-profile: "auto";
+    in-out property <string> quality-level: "standard";
+    in-out property <string> status-text: "";
+    in-out property <string> update-status: "--";
+    in-out property <bool> is-converting: false;
+    in-out property <[JobRow]> job-history;
+    in-out property <int> selected-job-index: -1;
+
+    callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
+    callback remove-job-clicked(string);
+    callback clear-jobs-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        GroupBox {
+            title: "Job History (Phase D.5)";
+
+            VerticalBox {
+                spacing: 6px;
+
+                if job-history.length == 0: Text {
+                    text: "No recent jobs.";
+                    color: #666;
+                    font-size: 12px;
+                }
+
+                ListView {
+                    height: 200px;
+                    for row[idx] in job-history: Rectangle {
+                        background: idx == selected-job-index ? #d8e8ff : (Math.mod(idx, 2) == 0 ? #fafafa : #f3f3f3);
+                        border-radius: 3px;
+                        HorizontalBox {
+                            padding: 4px;
+                            spacing: 8px;
+                            Text { text: row.id; font-size: 11px; color: #444; width: 80px; }
+                            Text { text: row.kind; font-size: 11px; width: 60px; }
+                            Text { text: row.status; font-size: 11px; width: 80px; color: row.status == "Succeeded" ? #207020 : (row.status == "Failed" ? #a02020 : #444); }
+                            Text { text: row.input; font-size: 11px; color: #666; horizontal-stretch: 1; overflow: elide; }
+                            Text { text: row.opened-at; font-size: 10px; color: #888; width: 130px; }
+                            Button {
+                                text: "Select";
+                                clicked => {
+                                    root.selected-job-index = idx;
+                                }
+                            }
+                            Button {
+                                text: "Remove";
+                                enabled: !is-converting;
+                                clicked => {
+                                    root.remove-job-clicked(row.id);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+                    Button {
+                        text: "Clear All";
+                        enabled: job-history.length > 0 && !is-converting;
+                        clicked => { root.clear-jobs-clicked(); }
+                    }
+                    Text {
+                        text: "Selected: " + (selected-job-index >= 0 && selected-job-index < job-history.length ? job-history[selected-job-index].id : "(none)");
+                        font-size: 11px;
+                        color: #666;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Recent (text view, legacy)";
+
+            TextEdit {
+                text <=> recent-jobs;
+                read-only: true;
+                min-height: 80px;
+                font-size: 11px;
+            }
+        }
+
+        GroupBox {
+            title: "Diagnostics";
+
+            VerticalBox {
+                spacing: 6px;
+
+                Button {
+                    text: "Export Diagnostic Bundle";
+                    enabled: !is-converting;
+                    clicked => {
+                        root.export-diagnostics-clicked(project-path, output-path, api-base-url, detected-profile, quality-level, status-text, recent-jobs, update-status);
+                    }
+                }
+            }
+        }
+    }
+}

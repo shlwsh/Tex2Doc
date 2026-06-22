@@ -1,11 +1,11 @@
 //! Main rule engine: orchestrates rule lookup, AI inference, and audit recording.
 
 use super::audit::AuditCache;
+use super::audit::AuditRecord;
+use super::audit::DecisionSource;
 use super::builtin_rules::builtin_rules;
 use super::registry::RuleRegistry;
 use super::rule_output::RuleOutput;
-use super::audit::AuditRecord;
-use super::audit::DecisionSource;
 
 /// Configuration for the rule engine.
 #[derive(Debug, Clone)]
@@ -103,11 +103,7 @@ impl RuleEngine {
     /// Records the decision in the audit cache.
     ///
     /// Returns `None` if the macro is unknown and AI is disabled.
-    pub fn process_unknown(
-        &mut self,
-        macro_name: &str,
-        arity: usize,
-    ) -> Option<RuleOutput> {
+    pub fn process_unknown(&mut self, macro_name: &str, arity: usize) -> Option<RuleOutput> {
         // 1. Check registry
         if let Some(rule) = self.registry.lookup(macro_name) {
             let record = AuditRecord::new(
@@ -261,7 +257,10 @@ impl Default for RuleEngine {
 
 #[cfg(test)]
 mod tests {
-    use crate::{AuditCache, AuditRecord, DecisionSource, MacroRule, RuleRegistry, RuleEngine, RuleEngineConfig, RuleOutput};
+    use crate::{
+        AuditCache, AuditRecord, DecisionSource, MacroRule, RuleEngine, RuleEngineConfig,
+        RuleOutput, RuleRegistry,
+    };
 
     #[test]
     fn builtin_rules_loaded() {
@@ -288,10 +287,16 @@ mod tests {
         let mut engine = RuleEngine::new();
         let result = engine.process_unknown("textbf", 1);
         assert!(result.is_some());
-        assert!(matches!(result.unwrap(), RuleOutput::InlineText { content_arg: 0 }));
+        assert!(matches!(
+            result.unwrap(),
+            RuleOutput::InlineText { content_arg: 0 }
+        ));
         assert_eq!(engine.audit_count(), 1);
         // Source should be Loaded (since it came from registry)
-        assert_eq!(engine.audit_cache().records()[0].source, DecisionSource::Loaded);
+        assert_eq!(
+            engine.audit_cache().records()[0].source,
+            DecisionSource::Loaded
+        );
     }
 
     #[test]
@@ -339,9 +344,8 @@ mod tests {
     #[cfg(feature = "ai-fallback")]
     #[test]
     fn ai_fallback_stub_infer_fails() {
-        let result = crate::ai_inference::infer_macro(
-            "foo", 1, "ctx", "http://localhost:9999", None,
-        );
+        let result =
+            crate::ai_inference::infer_macro("foo", 1, "ctx", "http://localhost:9999", None);
         // Should fail gracefully (no server running)
         assert!(result.is_err());
     }
@@ -372,9 +376,8 @@ mod tests {
             ..Default::default()
         });
         // No real API server — should fall through to fallback
-        let result = engine.process_with_ai(
-            "definitelyunknown", 1, "", "http://localhost:9999", None,
-        );
+        let result =
+            engine.process_with_ai("definitelyunknown", 1, "", "http://localhost:9999", None);
         assert!(result.is_some());
         let records = engine.audit_cache().records();
         assert_eq!(records[records.len() - 1].source, DecisionSource::Fallback);

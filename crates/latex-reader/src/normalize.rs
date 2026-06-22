@@ -157,9 +157,31 @@ pub fn latex_to_text(
     //     sh 的 Python `clean_math` 末尾不调用 `re.sub(r"\\[A-Za-z]+", r"\1", ...)`，
     //     不会引发此问题；我们要在 rust 这边手动做一遍。
     for cmd in [
-        "sigma", "bigl", "bigr", "left", "right", "overline", "hat", "bar", "tilde",
-        "vec", "dot", "widehat", "widetilde", "overrightarrow", "varepsilon", "epsilon",
-        "gamma", "delta", "lambda", "sum", "int", "prod", "partial", "nabla", "forall",
+        "sigma",
+        "bigl",
+        "bigr",
+        "left",
+        "right",
+        "overline",
+        "hat",
+        "bar",
+        "tilde",
+        "vec",
+        "dot",
+        "widehat",
+        "widetilde",
+        "overrightarrow",
+        "varepsilon",
+        "epsilon",
+        "gamma",
+        "delta",
+        "lambda",
+        "sum",
+        "int",
+        "prod",
+        "partial",
+        "nabla",
+        "forall",
         "exists",
     ] {
         s = s.replace(&format!("\\{cmd}"), cmd);
@@ -179,7 +201,14 @@ pub fn latex_to_text(
     if s.contains("Freq_t") || s.contains("Freq t") {
         let r = split_runs_with_sup_sub(&s, true, true);
         eprintln!("latex_to_text STEP26 IN: {s}");
-        eprintln!("latex_to_text STEP26 OUT runs: {}", r.runs.iter().map(|r| format!("[{:?}]={}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+        eprintln!(
+            "latex_to_text STEP26 OUT runs: {}",
+            r.runs
+                .iter()
+                .map(|r| format!("[{:?}]={}", r.style, r.text))
+                .collect::<Vec<_>>()
+                .join(" | ")
+        );
         return r;
     }
     split_runs_with_sup_sub(&s, true, true)
@@ -700,10 +729,7 @@ fn strip_balanced_braces(text: &str) -> String {
     let mut i = 0;
     while i < bytes.len() {
         // v13.1 P1: 跳过 ^{...} 和 _{...} 模式, 不剥外层 {}
-        if (bytes[i] == b'^' || bytes[i] == b'_')
-            && i + 1 < bytes.len()
-            && bytes[i + 1] == b'{'
-        {
+        if (bytes[i] == b'^' || bytes[i] == b'_') && i + 1 < bytes.len() && bytes[i + 1] == b'{' {
             if let Some(end) = find_matching_brace(text, i + 1) {
                 out.push_str(&text[i..=end]);
                 i = end + 1;
@@ -1109,14 +1135,11 @@ pub fn split_runs_with_sup_sub(
                         // v13.2.7a: 中文标点（`。！？；：`等）和非 ASCII 也视为安全——
                         // 中文学术段落的 `\cite` 输出 `[N]` 后几乎总是紧跟 `。` 或汉字
                         // （如 "重要[1-6]。" 或 "研究[7]。"）。
-                        let followed_by_safe = text[end + 1..]
-                            .chars()
-                            .next()
-                            .map_or(true, |c| {
-                                c.is_whitespace()
-                                    || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}' | '(')
-                                    || !c.is_ascii()
-                            });
+                        let followed_by_safe = text[end + 1..].chars().next().map_or(true, |c| {
+                            c.is_whitespace()
+                                || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}' | '(')
+                                || !c.is_ascii()
+                        });
                         let preceded_by_safe = match prev_char {
                             None => true,
                             // v13.2.7b: 数字前跟 [N] → 危险（`abc[1]` 应保持同 run）
@@ -1137,36 +1160,42 @@ pub fn split_runs_with_sup_sub(
             }
             // ^[X] / ^{XYZ}
             if bytes[i] == b'^' && i + 1 < len {
-            if bytes[i + 1] == b'{' {
-                if let Some(end) = find_matching_brace(text, i + 1) {
-                    let inner = &text[i + 2..end];
-                    flush(&mut buf, &mut runs);
-                    // v13.2 F12: superscript run 也加 `^` 前缀
-                    runs.push(NormalizedRun {
-                        text: inner.to_string(),
-                        style: TextStyle::Superscript,
-                    });
-                    i = end + 1;
-                    continue;
+                if bytes[i + 1] == b'{' {
+                    if let Some(end) = find_matching_brace(text, i + 1) {
+                        let inner = &text[i + 2..end];
+                        flush(&mut buf, &mut runs);
+                        // v13.2 F12: superscript run 也加 `^` 前缀
+                        runs.push(NormalizedRun {
+                            text: inner.to_string(),
+                            style: TextStyle::Superscript,
+                        });
+                        i = end + 1;
+                        continue;
+                    }
+                } else {
+                    // 多字符上标 ^[A-Za-z0-9*]+（与 `^{...}` 形式不同，裸用 ^ 后跟一段）
+                    let mut end = i + 1;
+                    while end < len
+                        && (bytes[end].is_ascii_alphanumeric()
+                            || bytes[end] == b'*'
+                            || bytes[end] == b'-'
+                            || bytes[end] == b'['
+                            || bytes[end] == b']')
+                    {
+                        end += 1;
+                    }
+                    if end > i + 1 {
+                        let word = &text[i + 1..end];
+                        flush(&mut buf, &mut runs);
+                        // 上标 run 只保留内容文本，不带 `^` 字面字符。
+                        runs.push(NormalizedRun {
+                            text: word.to_string(),
+                            style: TextStyle::Superscript,
+                        });
+                        i = end;
+                        continue;
+                    }
                 }
-            } else {
-                // 多字符上标 ^[A-Za-z0-9*]+（与 `^{...}` 形式不同，裸用 ^ 后跟一段）
-                let mut end = i + 1;
-                while end < len && (bytes[end].is_ascii_alphanumeric() || bytes[end] == b'*' || bytes[end] == b'-' || bytes[end] == b'[' || bytes[end] == b']') {
-                    end += 1;
-                }
-                if end > i + 1 {
-                    let word = &text[i + 1..end];
-                    flush(&mut buf, &mut runs);
-                    // 上标 run 只保留内容文本，不带 `^` 字面字符。
-                    runs.push(NormalizedRun {
-                        text: word.to_string(),
-                        style: TextStyle::Superscript,
-                    });
-                    i = end;
-                    continue;
-                }
-            }
             }
         }
         if enable_subscript && bytes[i] == b'_' && i + 1 < len {
@@ -1381,7 +1410,10 @@ mod tests {
         let input = r"\sigma\bigl((F_t-F_{t-1})/max(F_{t-1},\varepsilon)\bigr)";
         let out = clean_math(input);
         assert!(out.contains("F_t"), "F_t should survive: got {out}");
-        assert!(out.contains("F_{t-1}"), "F_{{t-1}} should survive: got {out}");
+        assert!(
+            out.contains("F_{t-1}"),
+            "F_{{t-1}} should survive: got {out}"
+        );
         assert!(out.contains("sigma"), "sigma should be Roman: got {out}");
         assert!(out.contains("bigl"), "bigl should be Roman: got {out}");
         assert!(out.contains("bigr"), "bigr should be Roman: got {out}");
@@ -1396,7 +1428,10 @@ mod tests {
         eprintln!("DEBUG F_t OUT: {out}");
         // sh oracle: "sigma bigl((F_t-F_{t-1})/max(F_{t-1},varepsilon)bigr)"
         assert!(out.contains("F_t"), "F_t should survive: got {out}");
-        assert!(out.contains("F_{t-1}"), "F_{{t-1}} should survive: got {out}");
+        assert!(
+            out.contains("F_{t-1}"),
+            "F_{{t-1}} should survive: got {out}"
+        );
     }
 
     #[test]
@@ -1576,7 +1611,11 @@ mod tests {
             .map(|r| r.text.as_str())
             .collect();
         // v13.2.7a: 不带 `^` 前缀
-        assert_eq!(sup_runs, vec!["**"], "** must stay as one sup run, not split");
+        assert_eq!(
+            sup_runs,
+            vec!["**"],
+            "** must stay as one sup run, not split"
+        );
     }
 
     // v13.2.7a: subscript run 的 text **不带** `_` 字面前缀。

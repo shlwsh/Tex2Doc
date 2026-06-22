@@ -20,25 +20,25 @@ use doc_latex_reader::{
     lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_bib, parse_tex,
     IncludeGraph, JoinedStream, Parse,
 };
+use doc_rule_engine::{
+    route_rule_output, DecisionSource, MacroRule, RoutingConfig, RuleEngine, RuleOutput,
+};
 use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
-use doc_rule_engine::{
-    DecisionSource, MacroRule, RuleEngine, RuleOutput, route_rule_output, RoutingConfig,
-};
-use doc_xdv_parser::to_collector_layout_graph;
 use doc_utils::{ImageAssets, VirtualFs};
+use doc_xdv_parser::to_collector_layout_graph;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 // Re-export types and functions from doc_semantic_collector
 pub use doc_semantic_collector::{
-    BackendAvailability, BackendSelectionReport, BuildSidecar, build_reference_graph,
-    CitationReference, CollectedDocument as SemanticCollectorDocument, CrossReference, EventSource,
-    is_tex_like_path, LayoutGraph, LayoutNode, parse_semantic_events_jsonl, path_to_posix,
-    ReferenceGraph, ReferenceLabel, ReferenceOrigin, ReferenceSource, ReferenceTargetKind,
-    scan_tex_commands, SemanticBackendKind, SemanticEvent, SemanticEventV2, SourceSpan,
-    strip_tex_comments, UnresolvedReference,
+    build_reference_graph, is_tex_like_path, parse_semantic_events_jsonl, path_to_posix,
+    scan_tex_commands, strip_tex_comments, BackendAvailability, BackendSelectionReport,
+    BuildSidecar, CitationReference, CollectedDocument as SemanticCollectorDocument,
+    CrossReference, EventSource, LayoutGraph, LayoutNode, ReferenceGraph, ReferenceLabel,
+    ReferenceOrigin, ReferenceSource, ReferenceTargetKind, SemanticBackendKind, SemanticEvent,
+    SemanticEventV2, SourceSpan, UnresolvedReference,
 };
 
 // Re-export types from doc_compatibility_analyzer
@@ -48,8 +48,8 @@ pub use doc_compatibility_analyzer::{
 
 // Re-export types from journal_detector
 pub use journal_detector::{
-    DiagnosticLevel, JournalDetection, JournalDetectionReport, JournalDiagnostic,
-    JournalDetector, MatchedSignal, SignalKind,
+    DiagnosticLevel, JournalDetection, JournalDetectionReport, JournalDetector, JournalDiagnostic,
+    MatchedSignal, SignalKind,
 };
 
 // Import profile registry (internal module)
@@ -183,8 +183,9 @@ impl ActiveProfile {
         let detector = journal_detector::JournalDetector::new();
         let detection = detector.detect(vfs);
         let id = &detection.selected_profile_id;
-        let spec = Self::load_spec_by_id(id)
-            .ok_or_else(|| EngineError::Profile(format!("auto-detected profile '{id}' not found")))?;
+        let spec = Self::load_spec_by_id(id).ok_or_else(|| {
+            EngineError::Profile(format!("auto-detected profile '{id}' not found"))
+        })?;
         Ok(Self {
             id: id.clone(),
             spec,
@@ -720,7 +721,11 @@ impl SemanticTexEngine {
             docx = omml.docx;
         }
         if options.enable_reference_links {
-            let linked = apply_reference_links_to_docx(docx, &graph.reference_graph, options.enable_ref_fields)?;
+            let linked = apply_reference_links_to_docx(
+                docx,
+                &graph.reference_graph,
+                options.enable_ref_fields,
+            )?;
             graph.report.bookmark_count = linked.bookmarks;
             graph.report.hyperlink_count = linked.hyperlinks;
             docx = linked.docx;
@@ -728,7 +733,10 @@ impl SemanticTexEngine {
         graph.report.docx_bytes = docx.len();
 
         // P3: Run quality gate with profile-specific thresholds (CLI --quality can override)
-        let quality_spec = graph.report.active_profile.as_ref()
+        let quality_spec = graph
+            .report
+            .active_profile
+            .as_ref()
             .map(|ap| ap.quality.clone())
             .unwrap_or_else(profiles::QualitySpec::default);
         let quality_spec = if let Some(override_score) = options.min_compatibility_score_override {
@@ -757,7 +765,10 @@ impl SemanticTexEngine {
     ) -> Result<DocumentGraph, EngineError> {
         // P1: Resolve the active profile
         let active = ActiveProfile::resolve(
-            options.profile_ref.as_ref().unwrap_or(&ProfileRef::Legacy(options.profile)),
+            options
+                .profile_ref
+                .as_ref()
+                .unwrap_or(&ProfileRef::Legacy(options.profile)),
             vfs,
         )?;
 
@@ -1062,14 +1073,20 @@ impl CompileReport {
                 name: "compatibility_score".to_string(),
                 passed: true,
                 severity: QualitySeverity::Info,
-                message: format!("compatibility score {} >= {}: pass", score, spec.min_compatibility_score),
+                message: format!(
+                    "compatibility score {} >= {}: pass",
+                    score, spec.min_compatibility_score
+                ),
             });
         } else {
             errors.push(QualityCheck {
                 name: "compatibility_score".to_string(),
                 passed: false,
                 severity: QualitySeverity::Error,
-                message: format!("compatibility score {} < {}: FAIL", score, spec.min_compatibility_score),
+                message: format!(
+                    "compatibility score {} < {}: FAIL",
+                    score, spec.min_compatibility_score
+                ),
             });
         }
 
@@ -1092,20 +1109,30 @@ impl CompileReport {
         }
 
         // 3. Raw fallback blocks (from rule_engine report)
-        let raw_count = self.rule_engine.as_ref().map(|r| r.unknown_macro_count).unwrap_or(0);
+        let raw_count = self
+            .rule_engine
+            .as_ref()
+            .map(|r| r.unknown_macro_count)
+            .unwrap_or(0);
         if raw_count <= spec.max_raw_fallback_blocks {
             infos.push(QualityCheck {
                 name: "raw_fallback_blocks".to_string(),
                 passed: true,
                 severity: QualitySeverity::Info,
-                message: format!("{} unknown macro(s) <= {}: pass", raw_count, spec.max_raw_fallback_blocks),
+                message: format!(
+                    "{} unknown macro(s) <= {}: pass",
+                    raw_count, spec.max_raw_fallback_blocks
+                ),
             });
         } else {
             errors.push(QualityCheck {
                 name: "raw_fallback_blocks".to_string(),
                 passed: false,
                 severity: QualitySeverity::Error,
-                message: format!("{} unknown macro(s) > {} max: FAIL", raw_count, spec.max_raw_fallback_blocks),
+                message: format!(
+                    "{} unknown macro(s) > {} max: FAIL",
+                    raw_count, spec.max_raw_fallback_blocks
+                ),
             });
         }
 
@@ -1128,7 +1155,9 @@ impl CompileReport {
         }
 
         // 5. Style coverage (Info)
-        let style_map_entries = self.active_profile.as_ref()
+        let style_map_entries = self
+            .active_profile
+            .as_ref()
             .map(|ap| ap.style_map.len())
             .unwrap_or(0);
         if style_map_entries > 0 {
@@ -1136,7 +1165,10 @@ impl CompileReport {
                 name: "style_coverage".to_string(),
                 passed: true,
                 severity: QualitySeverity::Info,
-                message: format!("{} style map entries defined for profile", style_map_entries),
+                message: format!(
+                    "{} style map entries defined for profile",
+                    style_map_entries
+                ),
             });
         }
 
@@ -1147,14 +1179,20 @@ impl CompileReport {
                     name: "profile_confidence".to_string(),
                     passed: false,
                     severity: QualitySeverity::Warning,
-                    message: format!("profile detection confidence {:.0}% < 80%: low confidence", det.confidence * 100.0),
+                    message: format!(
+                        "profile detection confidence {:.0}% < 80%: low confidence",
+                        det.confidence * 100.0
+                    ),
                 });
             } else {
                 infos.push(QualityCheck {
                     name: "profile_confidence".to_string(),
                     passed: true,
                     severity: QualitySeverity::Info,
-                    message: format!("profile detection confidence {:.0}%: pass", det.confidence * 100.0),
+                    message: format!(
+                        "profile detection confidence {:.0}%: pass",
+                        det.confidence * 100.0
+                    ),
                 });
             }
         }
@@ -1166,7 +1204,10 @@ impl CompileReport {
                     name: "runtime_fallback".to_string(),
                     passed: false,
                     severity: QualitySeverity::Warning,
-                    message: format!("{} unknown macro(s) fell back to text", re.unknown_macro_count),
+                    message: format!(
+                        "{} unknown macro(s) fell back to text",
+                        re.unknown_macro_count
+                    ),
                 });
             }
         }
@@ -1177,7 +1218,10 @@ impl CompileReport {
                 name: "backend_fallback".to_string(),
                 passed: false,
                 severity: QualitySeverity::Warning,
-                message: format!("backend fell back from {:?} to {:?}", self.backend.requested, self.backend.selected),
+                message: format!(
+                    "backend fell back from {:?} to {:?}",
+                    self.backend.requested, self.backend.selected
+                ),
             });
         } else {
             infos.push(QualityCheck {
@@ -1196,7 +1240,11 @@ impl CompileReport {
                 name: "omml_equation_fallback".to_string(),
                 passed: true,
                 severity: QualitySeverity::Info,
-                message: format!("{}/{} equations used OMML: pass", omml_total.saturating_sub(omml_fallback), omml_total),
+                message: format!(
+                    "{}/{} equations used OMML: pass",
+                    omml_total.saturating_sub(omml_fallback),
+                    omml_total
+                ),
             });
         } else {
             warnings.push(QualityCheck {
@@ -1213,7 +1261,11 @@ impl CompileReport {
                 name: "journal_detection".to_string(),
                 passed: true,
                 severity: QualitySeverity::Info,
-                message: format!("detected '{}' (confidence {:.0}%)", det.selected_profile_id, det.confidence * 100.0),
+                message: format!(
+                    "detected '{}' (confidence {:.0}%)",
+                    det.selected_profile_id,
+                    det.confidence * 100.0
+                ),
             });
         }
 
@@ -1528,7 +1580,10 @@ impl SemanticBackend for XeLaTeXHookBackend {
         ));
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("XeLaTeXHookBackend collected {event_count} semantic events; profile={}", options.profile.id()),
+            format!(
+                "XeLaTeXHookBackend collected {event_count} semantic events; profile={}",
+                options.profile.id()
+            ),
         ));
         Ok(artifact)
     }
@@ -1763,12 +1818,18 @@ impl SemanticBackend for LuaTeXNodeBackend {
             artifact.sidecars.push(BuildSidecar::new(
                 "node-tree-jsonl",
                 Some(NODE_TREE_SIDECAR),
-                format!("{} node tree entries collected from the LuaTeX hook", node_tree_count),
+                format!(
+                    "{} node tree entries collected from the LuaTeX hook",
+                    node_tree_count
+                ),
             ));
         }
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("LuaTeXNodeBackend collected {event_count} semantic events; profile={}", options.profile.id()),
+            format!(
+                "LuaTeXNodeBackend collected {event_count} semantic events; profile={}",
+                options.profile.id()
+            ),
         ));
         if node_tree_count > 0 {
             artifact.diagnostics.push(EngineDiagnostic::info(
@@ -1920,7 +1981,10 @@ struct AutoBackendSelection {
     reason: String,
 }
 
-fn select_auto_backend(vfs: &VirtualFs, journal_detection: Option<&JournalDetectionReport>) -> AutoBackendSelection {
+fn select_auto_backend(
+    vfs: &VirtualFs,
+    journal_detection: Option<&JournalDetectionReport>,
+) -> AutoBackendSelection {
     let signals = collect_template_signals(vfs);
     let availability = RuntimeAvailabilitySnapshot::detect();
     select_auto_backend_with_profile_and_availability(&signals, &availability, journal_detection)
@@ -1947,7 +2011,9 @@ fn select_auto_backend_with_profile_and_availability(
             }
         });
 
-    let profile_id = journal_detection.map(|r| r.selected_profile_id.as_str()).unwrap_or("unknown");
+    let profile_id = journal_detection
+        .map(|r| r.selected_profile_id.as_str())
+        .unwrap_or("unknown");
 
     // Helper to convert string backend name to SemanticBackendKind.
     let str_to_backend = |s: &str| -> Option<SemanticBackendKind> {
@@ -1966,7 +2032,10 @@ fn select_auto_backend_with_profile_and_availability(
     }
     // Append fallback chain from profile (if available).
     if let Some(jd) = journal_detection {
-        if let Some(spec) = ProfileRegistry::load_default().ok().and_then(|reg| reg.get(&jd.selected_profile_id).cloned()) {
+        if let Some(spec) = ProfileRegistry::load_default()
+            .ok()
+            .and_then(|reg| reg.get(&jd.selected_profile_id).cloned())
+        {
             for fb in &spec.backend.fallback {
                 if let Some(bk) = str_to_backend(fb) {
                     if !candidates.contains(&bk) {
@@ -2024,9 +2093,7 @@ fn select_auto_backend_with_profile_and_availability(
         kind: SemanticBackendKind::RuleBased,
         reason: format!(
             "RuleBasedBackend: no runtime available for profile '{}'; xelatex: {}, lualatex: {}",
-            profile_id,
-            availability.xelatex.reason,
-            availability.lualatex.reason
+            profile_id, availability.xelatex.reason, availability.lualatex.reason
         ),
     }
 }
@@ -2968,11 +3035,7 @@ pub enum NodeEntry {
         penalty: i64,
     },
     /// Local par node (paragraph start)
-    LocalPar {
-        subtype: u32,
-        x: i64,
-        y: i64,
-    },
+    LocalPar { subtype: u32, x: i64, y: i64 },
     /// Direction node
     Dir {
         subtype: u32,
@@ -3117,7 +3180,11 @@ fn collect_runtime_events(
         Vec::new()
     };
 
-    Ok(RuntimeCollectResult { events, xdv_path, node_tree })
+    Ok(RuntimeCollectResult {
+        events,
+        xdv_path,
+        node_tree,
+    })
 }
 
 fn materialize_vfs(vfs: &VirtualFs, root: &Path) -> Result<(), EngineError> {
@@ -3185,7 +3252,8 @@ fn run_latex_runtime(
     if matches!(engine, RuntimeEngine::XeLaTeX) {
         command.arg("-output-format=xdv");
     }
-    command.arg(main_tex)
+    command
+        .arg(main_tex)
         .env("TEXMFVAR", &tex_cache)
         .env("TEXMFCACHE", &tex_cache)
         .current_dir(workdir);
@@ -3526,7 +3594,8 @@ fn apply_reference_links_to_docx(
         });
     };
 
-    let (linked_xml, bookmarks, hyperlinks) = link_document_xml(&document_xml, reference_graph, enable_ref_fields);
+    let (linked_xml, bookmarks, hyperlinks) =
+        link_document_xml(&document_xml, reference_graph, enable_ref_fields);
 
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -3641,9 +3710,12 @@ fn link_document_xml(
             if !bookmark_hits.contains(&plan.key) {
                 continue;
             }
-            if let Some(updated) =
-                hyperlink_paragraph(&paragraph_xml, &plan.name, &reference_needles(reference), enable_ref_fields)
-            {
+            if let Some(updated) = hyperlink_paragraph(
+                &paragraph_xml,
+                &plan.name,
+                &reference_needles(reference),
+                enable_ref_fields,
+            ) {
                 paragraph_xml = updated;
                 reference_hits.insert(reference_idx);
                 hyperlink_hits += 1;
@@ -3835,7 +3907,12 @@ fn insert_bookmark_in_paragraph(paragraph: &str, id: usize, name: &str) -> Strin
     )
 }
 
-fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String], enable_ref_fields: bool) -> Option<String> {
+fn hyperlink_paragraph(
+    paragraph: &str,
+    anchor: &str,
+    needles: &[String],
+    enable_ref_fields: bool,
+) -> Option<String> {
     if paragraph.contains("<w:hyperlink") || paragraph.contains("<w:bookmarkStart") {
         return None;
     }
@@ -3843,14 +3920,21 @@ fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String], enable
         if needle.is_empty() {
             continue;
         }
-        if let Some(updated) = hyperlink_first_text_run(paragraph, anchor, needle, enable_ref_fields) {
+        if let Some(updated) =
+            hyperlink_first_text_run(paragraph, anchor, needle, enable_ref_fields)
+        {
             return Some(updated);
         }
     }
     None
 }
 
-fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str, enable_ref_fields: bool) -> Option<String> {
+fn hyperlink_first_text_run(
+    paragraph: &str,
+    anchor: &str,
+    needle: &str,
+    enable_ref_fields: bool,
+) -> Option<String> {
     let escaped_needle = escape_xml_text(needle);
     let mut search_from = 0usize;
     while let Some(rel) = paragraph[search_from..].find("<w:t") {
@@ -4079,8 +4163,7 @@ fn build_rule_engine(active_profile: &ActiveProfile) -> RuleEngine {
     let mut engine = RuleEngine::new();
 
     // P2.1: Load journal-specific rules
-    let journal_rules: Vec<MacroRule> =
-        doc_rule_engine::journal_rules(&active_profile.id);
+    let journal_rules: Vec<MacroRule> = doc_rule_engine::journal_rules(&active_profile.id);
     for rule in journal_rules {
         engine.registry_mut().register(rule);
     }
@@ -4105,12 +4188,8 @@ fn macro_rule_toml_to_macro_rule(toml: &MacroRuleToml) -> MacroRule {
             key: toml.name.clone(),
             content_arg: 0,
         },
-        "author" => RuleOutput::AuthorList {
-            content_arg: 0,
-        },
-        "affiliation" => RuleOutput::Affiliation {
-            content_arg: 0,
-        },
+        "author" => RuleOutput::AuthorList { content_arg: 0 },
+        "affiliation" => RuleOutput::Affiliation { content_arg: 0 },
         "keyword" => RuleOutput::KeywordList {
             content_arg: 0,
             separator: "; ".to_string(),
@@ -4119,17 +4198,11 @@ fn macro_rule_toml_to_macro_rule(toml: &MacroRuleToml) -> MacroRule {
             level: 1,
             text_arg: 0,
         },
-        "paragraph" => RuleOutput::Paragraph {
-            body_arg: 0,
-        },
-        "inline-text" => RuleOutput::InlineText {
-            content_arg: 0,
-        },
+        "paragraph" => RuleOutput::Paragraph { body_arg: 0 },
+        "inline-text" => RuleOutput::InlineText { content_arg: 0 },
         "ignore" => RuleOutput::Ignore,
         "verbatim" => RuleOutput::Verbatim,
-        _ => RuleOutput::InlineText {
-            content_arg: 0,
-        },
+        _ => RuleOutput::InlineText { content_arg: 0 },
     };
     MacroRule {
         id: format!("profile:{}/{}", toml.name, toml.semantic),
@@ -4146,11 +4219,35 @@ fn build_rule_engine_report(engine: &RuleEngine) -> RuleEngineReport {
     let builtin_count = doc_rule_engine::builtin_rules().len();
 
     let journal_names: std::collections::HashSet<&str> = [
-        "citet", "citep", "citealp", "IEEEkeywords", "IEEEauthorblockN", "IEEEauthorblockA",
-        "shorttitle", "name", "address", "cvprfinalcopy", "confName", "confYear", "author",
-        "affiliation", "corres", "equalcont", "affil", "maketitle", "institute",
-        "titlerunning", "authorrunning", "email", "orcidID", "zihao", "songti", "heiti",
-        "ctexset", "zhabstract", "enabstract",
+        "citet",
+        "citep",
+        "citealp",
+        "IEEEkeywords",
+        "IEEEauthorblockN",
+        "IEEEauthorblockA",
+        "shorttitle",
+        "name",
+        "address",
+        "cvprfinalcopy",
+        "confName",
+        "confYear",
+        "author",
+        "affiliation",
+        "corres",
+        "equalcont",
+        "affil",
+        "maketitle",
+        "institute",
+        "titlerunning",
+        "authorrunning",
+        "email",
+        "orcidID",
+        "zihao",
+        "songti",
+        "heiti",
+        "ctexset",
+        "zhabstract",
+        "enabstract",
     ]
     .into_iter()
     .collect();
@@ -4208,11 +4305,7 @@ fn apply_rule_engine_to_document(
 /// The RuleEngine processes inline macro patterns (e.g., `\unknownmacro{arg}`) found in
 /// the fallback text. Environment-level fallbacks (e.g., `\begin{unknown}{...}`) are
 /// preserved as-is for later inspection.
-fn resolve_raw_fallback(
-    text: &str,
-    span: &Span,
-    engine: &mut RuleEngine,
-) -> Block {
+fn resolve_raw_fallback(text: &str, span: &Span, engine: &mut RuleEngine) -> Block {
     // Try to detect an environment-level pattern \begin{name}...\end{name}
     if let Some(name) = detect_environment_name(text) {
         // Record in audit trail but preserve as RawFallback for now
@@ -4254,10 +4347,7 @@ fn detect_inline_macro(text: &str) -> Option<(String, usize)> {
     let text = text.trim();
     // Match \name followed by optional [...] then required {...}
     let rest = text.strip_prefix('\\')?;
-    let name_end = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .count();
+    let name_end = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
     if name_end == 0 {
         return None;
     }
@@ -4283,10 +4373,7 @@ fn extract_macro_args(text: &str, arity: usize) -> Vec<String> {
         None => return args,
     };
     // Skip macro name
-    let name_end = rest
-        .chars()
-        .take_while(|c| c.is_ascii_alphabetic())
-        .count();
+    let name_end = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
     let after_name = &rest[name_end..];
     let mut chars = after_name.chars().peekable();
     for _ in 0..arity {
@@ -4877,8 +4964,9 @@ See Figure~\ref{fig:a}.
     #[test]
     fn docx_reference_links_hyperlink_plain_text_run() {
         let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
-        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], false)
-            .expect("hyperlink text run");
+        let updated =
+            hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], false)
+                .expect("hyperlink text run");
 
         assert!(updated.contains(r#"<w:hyperlink w:anchor="ref_fig_a""#));
         assert!(updated.contains(r#"<w:t xml:space="preserve">See </w:t>"#));
@@ -4889,8 +4977,9 @@ See Figure~\ref{fig:a}.
     #[test]
     fn docx_reference_links_ref_field_mode() {
         let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
-        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], true)
-            .expect("ref field text run");
+        let updated =
+            hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], true)
+                .expect("ref field text run");
 
         assert!(updated.contains("<w:fldChar"));
         assert!(updated.contains("REF"));
@@ -5178,7 +5267,9 @@ a+b=c
         let events = parse_semantic_events_jsonl(jsonl).unwrap();
         assert_eq!(events.len(), 2);
         match &events[0] {
-            SemanticEvent::Heading { level, text, label, .. } => {
+            SemanticEvent::Heading {
+                level, text, label, ..
+            } => {
                 assert_eq!(*level, 2);
                 assert_eq!(text, "Background");
                 assert_eq!(label.as_deref(), Some("sec:bg"));
@@ -5233,7 +5324,8 @@ a+b=c
     #[test]
     fn node_tree_entry_deserializes_summary() {
         // Test the summary entry format
-        let json = r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
+        let json =
+            r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
         let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
         match entry {
             NodeEntry::NodeTree {
@@ -5307,7 +5399,8 @@ a+b=c
 
     #[test]
     fn node_tree_entry_deserializes_glue() {
-        let json = r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
+        let json =
+            r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
         let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
         match entry {
             NodeEntry::Glue {
@@ -5364,7 +5457,8 @@ a+b=c
         let entry: NodeTreeEntry = serde_json::from_str(glyph_json).unwrap();
         assert_eq!(entry.position(), Some((100, 200)));
 
-        let summary_json = r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
+        let summary_json =
+            r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
         let summary: NodeTreeEntry = serde_json::from_str(summary_json).unwrap();
         assert_eq!(summary.position(), None);
     }

@@ -8,46 +8,32 @@ use std::fmt;
 #[derive(Debug)]
 pub enum XdvError {
     /// Unexpected end of input.
-    UnexpectedEof {
-        offset: usize,
-        needed: usize,
-    },
+    UnexpectedEof { offset: usize, needed: usize },
 
     /// Unknown or invalid opcode.
-    InvalidOpcode {
-        offset: usize,
-        opcode: u8,
-    },
+    InvalidOpcode { offset: usize, opcode: u8 },
 
     /// Invalid UTF-8 sequence.
-    InvalidUtf8 {
-        offset: usize,
-    },
+    InvalidUtf8 { offset: usize },
 
     /// Malformed data that doesn't conform to the DVI/XDV format.
-    InvalidFormat {
-        offset: usize,
-        message: String,
-    },
+    InvalidFormat { offset: usize, message: String },
 
     /// IO error reading the input.
-    Io {
-        offset: usize,
-        message: String,
-    },
+    Io { offset: usize, message: String },
 
     /// Preamble validation failed (wrong magic, bad units, etc.).
-    BadPreamble {
-        offset: usize,
-        message: String,
-    },
+    BadPreamble { offset: usize, message: String },
 }
 
 impl fmt::Display for XdvError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnexpectedEof { offset, needed } => {
-                write!(f, "unexpected EOF at byte {offset}, needed {needed} more bytes")
+                write!(
+                    f,
+                    "unexpected EOF at byte {offset}, needed {needed} more bytes"
+                )
             }
             Self::InvalidOpcode { offset, opcode } => {
                 write!(f, "invalid opcode 0x{opcode:02X} at byte {offset}")

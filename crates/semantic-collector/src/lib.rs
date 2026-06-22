@@ -461,7 +461,10 @@ mod tests {
         assert!(matches!(info.severity, CollectorDiagnosticSeverity::Info));
 
         let warn = CollectorDiagnostic::warning("code", "warning");
-        assert!(matches!(warn.severity, CollectorDiagnosticSeverity::Warning));
+        assert!(matches!(
+            warn.severity,
+            CollectorDiagnosticSeverity::Warning
+        ));
     }
 
     #[test]

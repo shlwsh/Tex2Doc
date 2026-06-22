@@ -42,7 +42,10 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
     let text_width = ps.text_width_twips();
     let jos_mode = ps.even_header_text.is_some()
         || ps.first_footer_indent_twips.is_some()
-        || ps.header_text.as_ref().is_some_and(|t| !t.trim().is_empty());
+        || ps
+            .header_text
+            .as_ref()
+            .is_some_and(|t| !t.trim().is_empty());
 
     if !jos_mode {
         return HeaderFooterParts {
@@ -94,9 +97,8 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
 }
 
 fn legacy_footer_body(template: &str) -> String {
-    let mut para = String::from(
-        r#"<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>"#,
-    );
+    let mut para =
+        String::from(r#"<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>"#);
     for (i, seg) in template.split('\n').enumerate() {
         if i > 0 {
             para.push_str(
@@ -147,10 +149,7 @@ fn masthead_body(text_width: u32) -> String {
             "Journal of Software, [doi: 10.13328/j.cnki.jos.000000]",
             "http://www.jos.org.cn",
         ),
-        (
-            "© 中国科学院软件研究所版权所有.",
-            "Tel: +86-10-62562563",
-        ),
+        ("© 中国科学院软件研究所版权所有.", "Tel: +86-10-62562563"),
     ];
     let mut out = String::new();
     for (left, right) in rows {
@@ -336,7 +335,15 @@ pub fn pack_with_page_setup(
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     // [Content_Types].xml：动态追加 header/footer Override
-    let content_types = build_content_types(has_mh, has_h, has_eh, has_ff, has_f, has_ef, has_any_hdr_ftr);
+    let content_types = build_content_types(
+        has_mh,
+        has_h,
+        has_eh,
+        has_ff,
+        has_f,
+        has_ef,
+        has_any_hdr_ftr,
+    );
     write_zip(
         &mut zip,
         "[Content_Types].xml",
@@ -345,7 +352,16 @@ pub fn pack_with_page_setup(
     )?;
     write_zip(&mut zip, "_rels/.rels", ROOT_RELS, opts)?;
     // document.xml.rels：动态追加 header/footer + 图片 relationship
-    let doc_rels = build_doc_rels(has_mh, has_h, has_eh, has_ff, has_f, has_ef, has_any_hdr_ftr, &embedded_images);
+    let doc_rels = build_doc_rels(
+        has_mh,
+        has_h,
+        has_eh,
+        has_ff,
+        has_f,
+        has_ef,
+        has_any_hdr_ftr,
+        &embedded_images,
+    );
     write_zip(
         &mut zip,
         "word/_rels/document.xml.rels",
@@ -744,11 +760,8 @@ mod tests {
         let bytes = pack_with_page_setup(&doc, None, None, Some(&ps), None).unwrap();
         let mut r = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
         let mut doc_xml = String::new();
-        std::io::Read::read_to_string(
-            &mut r.by_name("word/document.xml").unwrap(),
-            &mut doc_xml,
-        )
-        .unwrap();
+        std::io::Read::read_to_string(&mut r.by_name("word/document.xml").unwrap(), &mut doc_xml)
+            .unwrap();
         // 必须 6 个 headerReference / footerReference + titlePg
         for typ in ["first", "default", "even"] {
             assert!(
@@ -760,7 +773,10 @@ mod tests {
                 "missing footerReference {typ} in sectPr: {doc_xml}"
             );
         }
-        assert!(doc_xml.contains("<w:titlePg/>"), "missing titlePg: {doc_xml}");
+        assert!(
+            doc_xml.contains("<w:titlePg/>"),
+            "missing titlePg: {doc_xml}"
+        );
         // rIdH0 / rIdH1 / rIdH2 必须是 first / default / even
         assert!(
             doc_xml.contains(r#"<w:headerReference w:type="first" r:id="rIdH0"/>"#),

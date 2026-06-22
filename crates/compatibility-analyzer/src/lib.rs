@@ -7,7 +7,7 @@
 
 use doc_utils::VirtualFs;
 use serde::{Deserialize, Serialize};
-use std::collections::{HashSet};
+use std::collections::HashSet;
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -126,27 +126,23 @@ impl ProfileKind {
     pub fn supports_document_class(&self, class: &str) -> bool {
         match self {
             Self::Generic | Self::GenericArticle => true,
-            Self::ChineseAcademic => {
-                ["article", "report", "book", "ctexart", "ctexbook", "ctexrep"]
-                    .iter()
-                    .any(|s| s.eq_ignore_ascii_case(class))
-            }
-            Self::JosPaper => {
-                ["article", "rjthesis"].iter().any(|s| s.eq_ignore_ascii_case(class))
-            }
+            Self::ChineseAcademic => [
+                "article", "report", "book", "ctexart", "ctexbook", "ctexrep",
+            ]
+            .iter()
+            .any(|s| s.eq_ignore_ascii_case(class)),
+            Self::JosPaper => ["article", "rjthesis"]
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(class)),
             Self::Tacl => ["acl"].iter().any(|s| s.eq_ignore_ascii_case(class)),
             Self::Cvpr => ["IEEEtran"].iter().any(|s| s.eq_ignore_ascii_case(class)),
             Self::Nature => ["nature"].iter().any(|s| s.eq_ignore_ascii_case(class)),
-            Self::Springer => {
-                ["springer", "svjour3", "llncs", "sn-jnl"]
-                    .iter()
-                    .any(|s| s.eq_ignore_ascii_case(class))
-            }
-            Self::MedicalJournal => {
-                ["article", "elsarticle", "wlscirep"]
-                    .iter()
-                    .any(|s| s.eq_ignore_ascii_case(class))
-            }
+            Self::Springer => ["springer", "svjour3", "llncs", "sn-jnl"]
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(class)),
+            Self::MedicalJournal => ["article", "elsarticle", "wlscirep"]
+                .iter()
+                .any(|s| s.eq_ignore_ascii_case(class)),
         }
     }
 
@@ -193,19 +189,27 @@ enum PackageCompat {
     Unsupported,
 }
 
-fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(PackageCompat, &'static str)> {
+fn profile_package_compat(
+    profile: ProfileKind,
+    package: &str,
+) -> Option<(PackageCompat, &'static str)> {
     use PackageCompat::*;
 
     match profile {
         // Generic / arXiv: no specific package warnings.
-        ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => return None,
+        ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => {
+            return None
+        }
 
         ProfileKind::JosPaper => {
             return Some(match package {
                 "IEEEtran" => (Supported, "IEEEtran is the primary class for JOS papers"),
                 "amsmath" => (Supported, "amsmath is fully supported for JOS papers"),
                 "graphicx" => (Supported, "graphicx is fully supported"),
-                "algorithm2e" => (Warning, "algorithm2e may lose fine styling in IEEE JOS format"),
+                "algorithm2e" => (
+                    Warning,
+                    "algorithm2e may lose fine styling in IEEE JOS format",
+                ),
                 "tabularx" => (Warning, "tabularx advanced layout may be simplified"),
                 _ => return None,
             });
@@ -215,15 +219,24 @@ fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(Packag
             return Some(match package {
                 "acl" => (Supported, "acl class is the primary class for TACL papers"),
                 "natbib" => (Supported, "natbib is fully supported for ACL/TACL"),
-                "biblatex" => (Warning, "biblatex is not recommended for TACL; use natbib instead"),
-                "tikz" => (Warning, "TikZ may need rasterization fallback in TACL papers"),
+                "biblatex" => (
+                    Warning,
+                    "biblatex is not recommended for TACL; use natbib instead",
+                ),
+                "tikz" => (
+                    Warning,
+                    "TikZ may need rasterization fallback in TACL papers",
+                ),
                 _ => return None,
             });
         }
 
         ProfileKind::Cvpr => {
             return Some(match package {
-                "IEEEtran" => (Supported, "IEEEtran[conference] is the primary class for CVPR"),
+                "IEEEtran" => (
+                    Supported,
+                    "IEEEtran[conference] is the primary class for CVPR",
+                ),
                 "amsmath" => (Supported, "amsmath is fully supported for CVPR papers"),
                 "algorithmicx" => (Warning, "algorithmicx may lose styling in CVPR format"),
                 "subcaption" => (Warning, "subcaption support is limited in CVPR papers"),
@@ -235,7 +248,10 @@ fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(Packag
             return Some(match package {
                 "nature" => (Supported, "nature class is fully supported"),
                 "natbib" => (Supported, "natbib is fully supported for Nature articles"),
-                "biblatex" => (Warning, "biblatex is not recommended for Nature; use natbib"),
+                "biblatex" => (
+                    Warning,
+                    "biblatex is not recommended for Nature; use natbib",
+                ),
                 "pstricks" => (Unsupported, "PSTricks is not supported for Nature articles"),
                 _ => return None,
             });
@@ -248,19 +264,34 @@ fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(Packag
                 "llncs" => (Supported, "LLNCS class is supported for Springer"),
                 "algorithm2e" => (Warning, "algorithm2e may conflict with Springer style"),
                 "longtable" => (Warning, "longtable is not recommended in Springer articles"),
-                "beamer" => (Unsupported, "beamer is not supported in Springer journal articles"),
+                "beamer" => (
+                    Unsupported,
+                    "beamer is not supported in Springer journal articles",
+                ),
                 _ => return None,
             });
         }
 
         ProfileKind::ChineseAcademic => {
             return Some(match package {
-                "ctex" => (Supported, "CTeX suite is fully supported for Chinese academic"),
+                "ctex" => (
+                    Supported,
+                    "CTeX suite is fully supported for Chinese academic",
+                ),
                 "xeCJK" => (Supported, "xeCJK is fully supported"),
                 "fontspec" => (Supported, "fontspec is fully supported"),
-                "gbt7714" => (Warning, "gbt7714 has partial compatibility; verify bibliography format"),
-                "biblatex" => (Warning, "biblatex has limited support for Chinese academic papers"),
-                "minted" => (Unsupported, "minted is not supported for Chinese academic papers"),
+                "gbt7714" => (
+                    Warning,
+                    "gbt7714 has partial compatibility; verify bibliography format",
+                ),
+                "biblatex" => (
+                    Warning,
+                    "biblatex has limited support for Chinese academic papers",
+                ),
+                "minted" => (
+                    Unsupported,
+                    "minted is not supported for Chinese academic papers",
+                ),
                 _ => return None,
             });
         }
@@ -556,22 +587,51 @@ fn count_custom_macro_definitions(source: &str) -> usize {
     let mut i = 0usize;
 
     while i < bytes.len().saturating_sub(3) {
-        if bytes[i] == b'\\' && bytes[i + 1] == b'd' && bytes[i + 2] == b'e' && bytes[i + 3] == b'f' {
-            if !bytes[i + 4..].first().is_some_and(|b| b.is_ascii_alphabetic()) {
+        if bytes[i] == b'\\' && bytes[i + 1] == b'd' && bytes[i + 2] == b'e' && bytes[i + 3] == b'f'
+        {
+            if !bytes[i + 4..]
+                .first()
+                .is_some_and(|b| b.is_ascii_alphabetic())
+            {
                 count += 1;
                 i += 4;
                 continue;
             }
         }
-        if bytes[i] == b'\\' && bytes[i + 1] == b'c' && bytes[i + 2] == b'o' && bytes[i + 3] == b'm' && bytes[i + 4] == b'm' && bytes[i + 5] == b'a' && bytes[i + 6] == b'n' && bytes[i + 7] == b'd' {
-            if !bytes[i + 8..].first().is_some_and(|b| b.is_ascii_alphabetic()) {
+        if bytes[i] == b'\\'
+            && bytes[i + 1] == b'c'
+            && bytes[i + 2] == b'o'
+            && bytes[i + 3] == b'm'
+            && bytes[i + 4] == b'm'
+            && bytes[i + 5] == b'a'
+            && bytes[i + 6] == b'n'
+            && bytes[i + 7] == b'd'
+        {
+            if !bytes[i + 8..]
+                .first()
+                .is_some_and(|b| b.is_ascii_alphabetic())
+            {
                 count += 1;
                 i += 8;
                 continue;
             }
         }
-        if bytes[i] == b'\\' && bytes[i + 1] == b'n' && bytes[i + 2] == b'e' && bytes[i + 3] == b'w' && bytes[i + 4] == b'c' && bytes[i + 5] == b'o' && bytes[i + 6] == b'm' && bytes[i + 7] == b'm' && bytes[i + 8] == b'a' && bytes[i + 9] == b'n' && bytes[i + 10] == b'd' {
-            if !bytes[i + 11..].first().is_some_and(|b| b.is_ascii_alphabetic()) {
+        if bytes[i] == b'\\'
+            && bytes[i + 1] == b'n'
+            && bytes[i + 2] == b'e'
+            && bytes[i + 3] == b'w'
+            && bytes[i + 4] == b'c'
+            && bytes[i + 5] == b'o'
+            && bytes[i + 6] == b'm'
+            && bytes[i + 7] == b'm'
+            && bytes[i + 8] == b'a'
+            && bytes[i + 9] == b'n'
+            && bytes[i + 10] == b'd'
+        {
+            if !bytes[i + 11..]
+                .first()
+                .is_some_and(|b| b.is_ascii_alphabetic())
+            {
                 count += 1;
                 i += 11;
                 continue;

@@ -37,6 +37,8 @@ pub mod parser;
 pub mod reader;
 
 pub use error::XdvError;
-pub use layout_graph::{xdv_to_layout_nodes, to_collector_layout_graph, XdvLayoutNode, XdvPageKind};
+pub use layout_graph::{
+    to_collector_layout_graph, xdv_to_layout_nodes, XdvLayoutNode, XdvPageKind,
+};
 pub use model::{FontDef, XdvCommand, XdvDocument, XdvPage, XdvPreamble};
 pub use parser::XdvParser;

@@ -103,7 +103,9 @@ pub struct AuditCache {
 
 impl AuditCache {
     pub fn new() -> Self {
-        Self { records: Vec::new() }
+        Self {
+            records: Vec::new(),
+        }
     }
 
     /// Record a decision.

@@ -6,9 +6,7 @@
 use std::io::Cursor;
 
 use crate::error::XdvError;
-use crate::model::{
-    FontDef, FontDefExt, XdvCommand, XdvDocument, XdvPage, XdvPreamble,
-};
+use crate::model::{FontDef, FontDefExt, XdvCommand, XdvDocument, XdvPage, XdvPreamble};
 use crate::reader::ByteReader;
 
 /// XDV/DVI parser.
@@ -58,7 +56,10 @@ impl XdvParser {
         self.opcode_count = 0;
     }
 
-    fn parse_stream<R: std::io::Read>(&mut self, r: &mut ByteReader<R>) -> Result<XdvDocument, XdvError> {
+    fn parse_stream<R: std::io::Read>(
+        &mut self,
+        r: &mut ByteReader<R>,
+    ) -> Result<XdvDocument, XdvError> {
         loop {
             match r.read_u8() {
                 Ok(opcode) => {
@@ -143,8 +144,8 @@ impl XdvParser {
             }
 
             // ─── Stack ─────────────────────────────────────────────────────────
-            138 => self.push_cmd(XdvCommand::Push),   // push
-            139 => self.push_cmd(XdvCommand::Pop),    // pop
+            138 => self.push_cmd(XdvCommand::Push), // push
+            139 => self.push_cmd(XdvCommand::Pop),  // pop
 
             // ─── Horizontal movement ───────────────────────────────────────────
             140 => {
@@ -260,7 +261,9 @@ impl XdvParser {
 
             // ─── Set character (short form: 0–127) ───────────────────────────
             0..=127 => {
-                self.push_cmd(XdvCommand::SetChar { code: opcode as u32 });
+                self.push_cmd(XdvCommand::SetChar {
+                    code: opcode as u32,
+                });
             }
 
             // ─── Variable-width set_char ─────────────────────────────────────
@@ -490,7 +493,10 @@ impl XdvParser {
         })
     }
 
-    fn read_font_def_ext<R: std::io::Read>(&self, r: &mut ByteReader<R>) -> Result<FontDefExt, XdvError> {
+    fn read_font_def_ext<R: std::io::Read>(
+        &self,
+        r: &mut ByteReader<R>,
+    ) -> Result<FontDefExt, XdvError> {
         let id = r.read_u4()?;
         let checksum = r.read_u4()?;
         let scale = r.read_i4()?;
@@ -588,7 +594,7 @@ mod tests {
         // bop to create a page
         data.push(136); // bop
         data.extend_from_slice(&[0u8; 40]);
-        data.push(65);  // set_char_65 ('A')
+        data.push(65); // set_char_65 ('A')
         data.push(137); // eop
 
         let doc = XdvParser::new().parse_bytes(&data).unwrap();
@@ -616,13 +622,13 @@ mod tests {
         data.extend_from_slice(&0u32.to_be_bytes());
         data.extend_from_slice(&1048576i32.to_be_bytes());
         data.extend_from_slice(&1048576i32.to_be_bytes());
-        data.push(0);   // area len
-        data.push(5);  // name len
+        data.push(0); // area len
+        data.push(5); // name len
         data.extend_from_slice(b"CMR10");
 
         // select font 0
         data.push(172); // fnt_num_0
-        // push
+                        // push
         data.push(138);
         // right1
         data.push(140);
@@ -660,7 +666,7 @@ mod tests {
         data.push(136);
         data.extend_from_slice(&[0u8; 40]);
         data.push(244); // xxx1
-        data.push(5);   // length
+        data.push(5); // length
         data.extend_from_slice(b"hello");
         data.push(137); // eop
 

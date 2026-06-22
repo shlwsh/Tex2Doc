@@ -1,0 +1,25 @@
+// Phase D: shared structured types used by pages and main window.
+
+export struct PlanEntry {
+    id: string,
+    name: string,
+    price: string,
+    quota: int,
+    features: string,
+}
+
+export struct JobRow {
+    id: string,
+    kind: string,
+    input: string,
+    output: string,
+    status: string,
+    opened-at: string,
+    error: string,
+    html-report: string,
+}
+
+export enum ConversionMode {
+    local,
+    cloud,
+}

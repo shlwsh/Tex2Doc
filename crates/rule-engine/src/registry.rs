@@ -101,7 +101,11 @@ mod tests {
     #[test]
     fn registry_insert_lookup() {
         let mut reg = RuleRegistry::new();
-        reg.register(make_rule("textbf", 1, RuleOutput::InlineText { content_arg: 0 }));
+        reg.register(make_rule(
+            "textbf",
+            1,
+            RuleOutput::InlineText { content_arg: 0 },
+        ));
         assert!(reg.has_rule("textbf"));
         assert!(reg.lookup("textbf").is_some());
         assert_eq!(reg.lookup("textbf").unwrap().arity, 1);

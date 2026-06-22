@@ -31,10 +31,7 @@ pub fn route_rule_output(
     config: &RoutingConfig,
 ) -> Option<Block> {
     match output {
-        RuleOutput::Heading {
-            level,
-            text_arg,
-        } => {
+        RuleOutput::Heading { level, text_arg } => {
             let level = if *level == 0 {
                 config.default_heading_level
             } else {
@@ -126,7 +123,10 @@ pub fn route_rule_output(
                 span: Span::default(),
             })
         }
-        RuleOutput::KeywordList { content_arg, separator } => {
+        RuleOutput::KeywordList {
+            content_arg,
+            separator,
+        } => {
             let value = args.get(*content_arg).cloned().unwrap_or_default();
             Some(Block::Paragraph {
                 runs: vec![TextRun {
@@ -163,9 +163,7 @@ mod routing_tests {
         let args = vec!["Introduction".to_string()];
         let block = route_rule_output(&output, &args, &RoutingConfig::default());
         match block {
-            Some(Block::Heading {
-                level, text, ..
-            }) => {
+            Some(Block::Heading { level, text, .. }) => {
                 assert_eq!(level, 2);
                 assert_eq!(text, "Introduction");
             }

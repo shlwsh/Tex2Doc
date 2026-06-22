@@ -13,9 +13,9 @@ mod error;
 mod extract;
 mod facade;
 pub mod latexmk;
+pub mod rasterize;
 pub mod tectonic;
 pub mod xelatex;
-pub mod rasterize;
 
 pub use backend::{EngineKind, TexBackend, TexProject, TexRun};
 pub use cache::{compute_key, referenced_tex_files, Cache, CacheKey};

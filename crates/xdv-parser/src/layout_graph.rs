@@ -69,7 +69,11 @@ impl NativeNodeInfo {
             5 => "pos",
             _ => "unknown",
         };
-        Self { node_type: t, width: 0, kind }
+        Self {
+            node_type: t,
+            width: 0,
+            kind,
+        }
     }
 }
 
@@ -137,12 +141,18 @@ pub fn xdv_to_layout_full(xdv: &XdvDocument) -> XdvLayoutResult {
                 XdvCommand::FontDefExt(ext) => {
                     font_map.entry(ext.id).or_insert_with(|| ext.clone());
                 }
-                XdvCommand::NativeGlyph { font_id, glyph_id, width, special: _ } => {
+                XdvCommand::NativeGlyph {
+                    font_id,
+                    glyph_id,
+                    width,
+                    special: _,
+                } => {
                     let font_name = font_map
                         .get(font_id)
                         .map(|f| f.name.clone())
                         .unwrap_or_else(|| format!("font{}", font_id));
-                    let unicode_cp = resolve_native_glyph_to_unicode(*font_id, *glyph_id, &font_map);
+                    let unicode_cp =
+                        resolve_native_glyph_to_unicode(*font_id, *glyph_id, &font_map);
                     native_glyphs.push(NativeGlyphInfo {
                         font_id: *font_id,
                         font_name,
@@ -151,7 +161,11 @@ pub fn xdv_to_layout_full(xdv: &XdvDocument) -> XdvLayoutResult {
                         width: *width,
                     });
                 }
-                XdvCommand::NativeNode { node_type, width, special: _ } => {
+                XdvCommand::NativeNode {
+                    node_type,
+                    width,
+                    special: _,
+                } => {
                     let mut info = NativeNodeInfo::from_type(*node_type);
                     info.width = *width;
                     native_nodes.push(info);
@@ -162,7 +176,12 @@ pub fn xdv_to_layout_full(xdv: &XdvDocument) -> XdvLayoutResult {
     }
 
     let nodes = xdv_to_layout_nodes(xdv);
-    XdvLayoutResult { nodes, font_map, native_glyphs, native_nodes }
+    XdvLayoutResult {
+        nodes,
+        font_map,
+        native_glyphs,
+        native_nodes,
+    }
 }
 
 /// Try to resolve a native glyph to a Unicode code point.
@@ -265,7 +284,10 @@ mod tests {
     use crate::model::XdvPage;
 
     fn make_page(commands: Vec<XdvCommand>) -> XdvPage {
-        XdvPage { number: 0, commands }
+        XdvPage {
+            number: 0,
+            commands,
+        }
     }
 
     #[test]
@@ -293,15 +315,22 @@ mod tests {
     #[test]
     fn mixed_page() {
         let page = make_page(vec![
-            XdvCommand::Special { data: b"pdf:figure".to_vec() },
-            XdvCommand::Special { data: b"pdf:table".to_vec() },
+            XdvCommand::Special {
+                data: b"pdf:figure".to_vec(),
+            },
+            XdvCommand::Special {
+                data: b"pdf:table".to_vec(),
+            },
         ]);
         assert_eq!(detect_page_kind(&page), XdvPageKind::Mixed);
     }
 
     #[test]
     fn set_rule_short_thick_is_table() {
-        let page = make_page(vec![XdvCommand::SetRule { height: 100, width: 10 }]);
+        let page = make_page(vec![XdvCommand::SetRule {
+            height: 100,
+            width: 10,
+        }]);
         assert_eq!(detect_page_kind(&page), XdvPageKind::Table);
     }
 
@@ -347,9 +376,7 @@ mod tests {
         doc.ext_fonts.push(ext.clone());
         doc.pages.push(XdvPage {
             number: 0,
-            commands: vec![
-                XdvCommand::FontDefExt(ext),
-            ],
+            commands: vec![XdvCommand::FontDefExt(ext)],
         });
         let result = xdv_to_layout_full(&doc);
         assert_eq!(result.font_map.len(), 1);
@@ -387,14 +414,12 @@ mod tests {
             ext_fonts: vec![ext],
             pages: vec![XdvPage {
                 number: 0,
-                commands: vec![
-                    XdvCommand::NativeGlyph {
-                        font_id: 1,
-                        glyph_id: 65, // 'A'
-                        width: 10,
-                        special: vec![],
-                    },
-                ],
+                commands: vec![XdvCommand::NativeGlyph {
+                    font_id: 1,
+                    glyph_id: 65, // 'A'
+                    width: 10,
+                    special: vec![],
+                }],
             }],
             ..Default::default()
         };
@@ -411,14 +436,12 @@ mod tests {
             ext_fonts: vec![ext],
             pages: vec![XdvPage {
                 number: 0,
-                commands: vec![
-                    XdvCommand::NativeGlyph {
-                        font_id: 2,
-                        glyph_id: 0x4E2D, // U+4E2D '中'
-                        width: 20,
-                        special: vec![],
-                    },
-                ],
+                commands: vec![XdvCommand::NativeGlyph {
+                    font_id: 2,
+                    glyph_id: 0x4E2D, // U+4E2D '中'
+                    width: 20,
+                    special: vec![],
+                }],
             }],
             ..Default::default()
         };
@@ -434,14 +457,12 @@ mod tests {
             ext_fonts: vec![ext],
             pages: vec![XdvPage {
                 number: 0,
-                commands: vec![
-                    XdvCommand::NativeGlyph {
-                        font_id: 3,
-                        glyph_id: 0xC000, // high glyph ID, no direct mapping
-                        width: 15,
-                        special: vec![],
-                    },
-                ],
+                commands: vec![XdvCommand::NativeGlyph {
+                    font_id: 3,
+                    glyph_id: 0xC000, // high glyph ID, no direct mapping
+                    width: 15,
+                    special: vec![],
+                }],
             }],
             ..Default::default()
         };
@@ -456,10 +477,26 @@ mod tests {
             pages: vec![XdvPage {
                 number: 0,
                 commands: vec![
-                    XdvCommand::NativeNode { node_type: 0, width: 0, special: vec![] },
-                    XdvCommand::NativeNode { node_type: 1, width: 0, special: vec![] },
-                    XdvCommand::NativeNode { node_type: 2, width: 0, special: vec![] },
-                    XdvCommand::NativeNode { node_type: 99, width: 0, special: vec![] },
+                    XdvCommand::NativeNode {
+                        node_type: 0,
+                        width: 0,
+                        special: vec![],
+                    },
+                    XdvCommand::NativeNode {
+                        node_type: 1,
+                        width: 0,
+                        special: vec![],
+                    },
+                    XdvCommand::NativeNode {
+                        node_type: 2,
+                        width: 0,
+                        special: vec![],
+                    },
+                    XdvCommand::NativeNode {
+                        node_type: 99,
+                        width: 0,
+                        special: vec![],
+                    },
                 ],
             }],
             ..Default::default()
@@ -477,14 +514,12 @@ mod tests {
         let doc = XdvDocument {
             pages: vec![XdvPage {
                 number: 0,
-                commands: vec![
-                    XdvCommand::NativeGlyph {
-                        font_id: 999,
-                        glyph_id: 65,
-                        width: 10,
-                        special: vec![],
-                    },
-                ],
+                commands: vec![XdvCommand::NativeGlyph {
+                    font_id: 999,
+                    glyph_id: 65,
+                    width: 10,
+                    special: vec![],
+                }],
             }],
             ..Default::default()
         };
@@ -784,11 +819,7 @@ pub fn node_entry_to_layout_node(entry: &NodeEntry) -> Option<CollectorLayoutNod
             None,
             None,
         ),
-        NodeEntry::LocalPar {
-            subtype: _,
-            x,
-            y,
-        } => (
+        NodeEntry::LocalPar { subtype: _, x, y } => (
             format!("local_par_{}_{}", x, y),
             "local_par".to_string(),
             Some(*x),
@@ -924,7 +955,12 @@ mod node_tree_tests {
         let entry: NodeEntry = serde_json::from_str(json).unwrap();
         match entry {
             NodeEntry::Hlist {
-                x, y, width, height, depth, ..
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
             } => {
                 assert_eq!(x, 0);
                 assert_eq!(y, 0);
@@ -938,11 +974,17 @@ mod node_tree_tests {
 
     #[test]
     fn node_entry_glue_deserializes() {
-        let json = r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
+        let json =
+            r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
         let entry: NodeEntry = serde_json::from_str(json).unwrap();
         match entry {
             NodeEntry::Glue {
-                x, y, width, stretch, shrink, ..
+                x,
+                y,
+                width,
+                stretch,
+                shrink,
+                ..
             } => {
                 assert_eq!(x, 100);
                 assert_eq!(y, 0);
@@ -959,7 +1001,14 @@ mod node_tree_tests {
         let json = r#"{"type":"rule","subtype":0,"x":0,"y":0,"width":500,"height":1,"depth":0}"#;
         let entry: NodeEntry = serde_json::from_str(json).unwrap();
         match entry {
-            NodeEntry::Rule { x, y, width, height, depth, .. } => {
+            NodeEntry::Rule {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
                 assert_eq!(x, 0);
                 assert_eq!(y, 0);
                 assert_eq!(width, 500);
@@ -972,7 +1021,8 @@ mod node_tree_tests {
 
     #[test]
     fn node_entry_summary_deserializes() {
-        let json = r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
+        let json =
+            r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
         let entry: NodeEntry = serde_json::from_str(json).unwrap();
         match entry {
             NodeEntry::NodeTree {
@@ -1069,7 +1119,8 @@ mod node_tree_tests {
 
     #[test]
     fn hlist_to_layout_node() {
-        let json = r#"{"type":"hlist","subtype":0,"x":0,"y":100,"width":500,"height":12,"depth":2}"#;
+        let json =
+            r#"{"type":"hlist","subtype":0,"x":0,"y":100,"width":500,"height":12,"depth":2}"#;
         let entry: NodeEntry = serde_json::from_str(json).unwrap();
         let node = node_entry_to_layout_node(&entry).unwrap();
 
@@ -1103,7 +1154,8 @@ mod node_tree_tests {
 
     #[test]
     fn parse_node_tree_jsonl_with_page_info() {
-        let jsonl = r#"{"type":"node_tree","hlist":2,"vlist":0,"glyph":5,"glue":3,"rule":1,"page":2}"#;
+        let jsonl =
+            r#"{"type":"node_tree","hlist":2,"vlist":0,"glyph":5,"glue":3,"rule":1,"page":2}"#;
         let graph = parse_node_tree_jsonl(jsonl).unwrap();
         // Summary entries are filtered out
         assert!(graph.nodes.is_empty());

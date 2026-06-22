@@ -212,10 +212,8 @@ pub fn compare_snapshots(
                 if let Some(diff) =
                     compare_paragraph_format(&left.paragraphs[li], &right.paragraphs[ri])
                 {
-                    let kind = classify_paragraph_format_diff(
-                        &left.paragraphs[li],
-                        &right.paragraphs[ri],
-                    );
+                    let kind =
+                        classify_paragraph_format_diff(&left.paragraphs[li], &right.paragraphs[ri]);
                     match kind {
                         ParagraphFormatKind::SplitOnly => format_changed_split_only += 1,
                         ParagraphFormatKind::Real => format_changed_real += 1,
@@ -937,7 +935,9 @@ fn canonicalize_ooxml(xml: &str) -> String {
 }
 
 fn is_noise_tag(name: &str) -> bool {
-    OOXML_NOISE_TAGS.iter().any(|tag| tag.eq_ignore_ascii_case(name))
+    OOXML_NOISE_TAGS
+        .iter()
+        .any(|tag| tag.eq_ignore_ascii_case(name))
 }
 
 fn push_canonical_attrs(out: &mut String, e: &BytesStart<'_>) {
@@ -1428,7 +1428,11 @@ mod tests {
         let out = canonicalize_ooxml(xml);
         // proofErr 应被整段剥离
         assert!(!out.contains("proofErr"), "proofErr 应被删除: {}", out);
-        assert!(!out.contains("spellStart"), "proofErr 内容应被删除: {}", out);
+        assert!(
+            !out.contains("spellStart"),
+            "proofErr 内容应被删除: {}",
+            out
+        );
         // 文本与必要结构应保留
         assert!(out.contains("hello"), "文本应保留: {}", out);
         assert!(out.contains("<w:p>"), "段落标签应保留: {}", out);
@@ -1439,7 +1443,11 @@ mod tests {
     fn canonicalize_ooxml_strips_comment_range() {
         let xml = r#"<w:p><w:commentRangeStart w:id="1"/><w:r><w:t>text</w:t></w:r><w:commentRangeEnd w:id="1"/><w:r><w:commentReference w:id="1"/></w:r></w:p>"#;
         let out = canonicalize_ooxml(xml);
-        assert!(!out.contains("commentRange"), "comment range 应被删除: {}", out);
+        assert!(
+            !out.contains("commentRange"),
+            "comment range 应被删除: {}",
+            out
+        );
         assert!(out.contains("text"), "文本应保留: {}", out);
     }
 

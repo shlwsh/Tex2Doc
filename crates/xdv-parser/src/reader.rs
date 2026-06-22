@@ -144,12 +144,10 @@ impl<R: Read + Seek> ByteReader<R> {
 
     /// Return the current position.
     pub fn position(&mut self) -> Result<u64, XdvError> {
-        self.inner
-            .stream_position()
-            .map_err(|e| XdvError::Io {
-                offset: self.offset,
-                message: e.to_string(),
-            })
+        self.inner.stream_position().map_err(|e| XdvError::Io {
+            offset: self.offset,
+            message: e.to_string(),
+        })
     }
 }
 

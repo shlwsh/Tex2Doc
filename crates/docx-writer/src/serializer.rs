@@ -7,7 +7,9 @@
 //! - 公式块走 `JOSCode` 居中纯文本（对齐 sh `clean_math`，非 OMML）
 //! - 21 个 JOS 样式由 `styles.rs` 单一来源生成
 
-use doc_semantic_ast::{AlgLine, Block, Document, FigureSizing, Span, TextRun, TextStyle, TheoremLikeKind};
+use doc_semantic_ast::{
+    AlgLine, Block, Document, FigureSizing, Span, TextRun, TextStyle, TheoremLikeKind,
+};
 use doc_utils::ImageAssets;
 use image::GenericImageView;
 use quick_xml::events::{BytesDecl, BytesEnd, BytesStart, Event};
@@ -18,9 +20,9 @@ use crate::page_setup::PageSetup;
 use crate::profile::ProfileStyleMap;
 use crate::styles::{
     STYLE_ABSTRACT_EN, STYLE_ABSTRACT_ZH, STYLE_AUTHOR_ZH, STYLE_BODY, STYLE_BODY_NO_INDENT,
-    STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_COMMENT, STYLE_ENGLISH_TITLE, STYLE_HEADING1, STYLE_HEADING2,
-    STYLE_HEADING3, STYLE_IMAGE, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS, STYLE_REFERENCE,
-    STYLE_REFERENCE_HEADING, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
+    STYLE_CAPTION, STYLE_CITATION, STYLE_CODE, STYLE_COMMENT, STYLE_ENGLISH_TITLE, STYLE_HEADING1,
+    STYLE_HEADING2, STYLE_HEADING3, STYLE_IMAGE, STYLE_INSTITUTE_ZH, STYLE_KEYWORDS,
+    STYLE_REFERENCE, STYLE_REFERENCE_HEADING, STYLE_TABLE_TEXT, STYLE_TITLE_ZH,
 };
 
 /// 一张已嵌入的图片：packer 阶段把它写到 `word/media/imageN.<ext>` 并生成 rel。
@@ -104,7 +106,11 @@ fn write_front_matter_with_style(
     // ── 中文单位（每行一段）──
     for line in &meta.institute_lines {
         let p = Paragraph {
-            style_id: Some(style_for_role(style_map, "institute_zh", STYLE_INSTITUTE_ZH)),
+            style_id: Some(style_for_role(
+                style_map,
+                "institute_zh",
+                STYLE_INSTITUTE_ZH,
+            )),
             runs: vec![Run::plain(normalize_institute_line(line))],
             jc: Some("left".to_string()),
             keep_next: false,
@@ -144,9 +150,7 @@ fn write_front_matter_with_style(
         write_paragraph(w, &p);
     }
 
-    if !meta.abstract_text.as_ref().is_some_and(|a| !a.is_empty())
-        || !meta.keywords.is_empty()
-    {
+    if !meta.abstract_text.as_ref().is_some_and(|a| !a.is_empty()) || !meta.keywords.is_empty() {
         write_spacer(w, 200);
     }
 
@@ -154,7 +158,11 @@ fn write_front_matter_with_style(
     if let Some(en_title) = &meta.title_en {
         if !en_title.is_empty() && en_title != meta.title.as_deref().unwrap_or("") {
             let p = Paragraph {
-                style_id: Some(style_for_role(style_map, "english_title", STYLE_ENGLISH_TITLE)),
+                style_id: Some(style_for_role(
+                    style_map,
+                    "english_title",
+                    STYLE_ENGLISH_TITLE,
+                )),
                 runs: vec![Run::plain(en_title.clone())],
                 jc: Some("left".to_string()),
                 keep_next: false,
@@ -275,16 +283,54 @@ pub fn serialize_document(
 
     let body_blocks = coalesce_theorem_like_blocks(&doc.blocks);
     for block in &body_blocks {
-        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl"))) {
-            eprintln!("BODY BLOCK Paragraph runs ({}): {}", match block { Block::Paragraph { runs, .. } => runs.len(), _ => 0 }, match block { Block::Paragraph { runs, .. } => runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "), _ => "".into() });
+        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")))
+        {
+            eprintln!(
+                "BODY BLOCK Paragraph runs ({}): {}",
+                match block {
+                    Block::Paragraph { runs, .. } => runs.len(),
+                    _ => 0,
+                },
+                match block {
+                    Block::Paragraph { runs, .. } => runs
+                        .iter()
+                        .map(|r| format!("[{:?}]={:?}", r.style, r.text))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                    _ => "".into(),
+                }
+            );
         }
-        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("indent=-2em") || r.text.contains("sep=4pt"))) {
-            eprintln!("BODY BLOCK Paragraph INDENT ({}): {}", match block { Block::Paragraph { runs, .. } => runs.len(), _ => 0 }, match block { Block::Paragraph { runs, .. } => runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "), _ => "".into() });
+        if matches!(block, Block::Paragraph { runs, .. } if runs.iter().any(|r| r.text.contains("indent=-2em") || r.text.contains("sep=4pt")))
+        {
+            eprintln!(
+                "BODY BLOCK Paragraph INDENT ({}): {}",
+                match block {
+                    Block::Paragraph { runs, .. } => runs.len(),
+                    _ => 0,
+                },
+                match block {
+                    Block::Paragraph { runs, .. } => runs
+                        .iter()
+                        .map(|r| format!("[{:?}]={:?}", r.style, r.text))
+                        .collect::<Vec<_>>()
+                        .join(" | "),
+                    _ => "".into(),
+                }
+            );
         }
-        if matches!(block, Block::TheoremLike { body, .. } if body.contains("Freq") || body.contains("minbigl")) {
-            eprintln!("BODY BLOCK TheoremLike body: {}", match block { Block::TheoremLike { body, .. } => body.clone(), _ => "".into() });
+        if matches!(block, Block::TheoremLike { body, .. } if body.contains("Freq") || body.contains("minbigl"))
+        {
+            eprintln!(
+                "BODY BLOCK TheoremLike body: {}",
+                match block {
+                    Block::TheoremLike { body, .. } => body.clone(),
+                    _ => "".into(),
+                }
+            );
         }
-        if matches!(block, Block::List { items, .. } if items.iter().any(|sub| sub.iter().any(|b| match b { Block::Paragraph { runs, .. } => runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")), _ => false }))) {
+        if matches!(block, Block::List { items, .. } if items.iter().any(|sub| sub.iter().any(|b| match b { Block::Paragraph { runs, .. } => runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")), _ => false })))
+        {
             eprintln!("BODY BLOCK List with Freq item");
         }
         match block {
@@ -316,11 +362,28 @@ pub fn serialize_document(
                 write_paragraph(&mut w, &para);
             }
             Block::Paragraph { runs, .. } => {
-                if runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")) {
-                    eprintln!("Block::Paragraph ENTER runs ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+                if runs
+                    .iter()
+                    .any(|r| r.text.contains("Freq") || r.text.contains("minbigl"))
+                {
+                    eprintln!(
+                        "Block::Paragraph ENTER runs ({}): {}",
+                        runs.len(),
+                        runs.iter()
+                            .map(|r| format!("[{:?}]={:?}", r.style, r.text))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    );
                 }
                 if runs.iter().any(|r| r.text.contains("indent=-2em")) {
-                    eprintln!("Block::Paragraph INDENT runs ({}): {}", runs.len(), runs.iter().map(|r| format!("[{:?}]={:?}", r.style, r.text)).collect::<Vec<_>>().join(" | "));
+                    eprintln!(
+                        "Block::Paragraph INDENT runs ({}): {}",
+                        runs.len(),
+                        runs.iter()
+                            .map(|r| format!("[{:?}]={:?}", r.style, r.text))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
+                    );
                 }
                 let paragraph_text = runs.iter().map(|r| r.text.as_str()).collect::<String>();
                 let paragraph_text = paragraph_text.trim();
@@ -432,7 +495,9 @@ pub fn serialize_document(
                 }
                 for (idx, sub) in items.iter().enumerate() {
                     if sub.iter().any(|b| match b {
-                        Block::Paragraph { runs, .. } => runs.iter().any(|r| r.text.contains("Freq") || r.text.contains("minbigl")),
+                        Block::Paragraph { runs, .. } => runs
+                            .iter()
+                            .any(|r| r.text.contains("Freq") || r.text.contains("minbigl")),
                         _ => false,
                     }) {
                         eprintln!("serialize List item {idx} sub.len()={}", sub.len());
@@ -451,8 +516,7 @@ pub fn serialize_document(
                     // v12 保留子结构：当 item 只有一个 Paragraph 块时直接用其 runs
                     if sub.len() == 1 {
                         if let Block::Paragraph { runs, .. } = &sub[0] {
-                            let mut docx_runs: Vec<Run> =
-                                runs.iter().map(from_text_run).collect();
+                            let mut docx_runs: Vec<Run> = runs.iter().map(from_text_run).collect();
                             // v13: 手写序号作为前缀 plain run
                             //   v13.2 F16: bio list 不加序号/bullet——独立段落输出。
                             if !is_jos_ref && !is_bio {
@@ -508,7 +572,13 @@ pub fn serialize_document(
                 ..
             } => {
                 // v13.2 F8: 传入 page_setup，让 write_table 按 text_width 算 tblW/tcW
-                write_table(&mut w, rows, caption.as_deref(), number.as_deref(), page_setup);
+                write_table(
+                    &mut w,
+                    rows,
+                    caption.as_deref(),
+                    number.as_deref(),
+                    page_setup,
+                );
             }
             Block::Figure {
                 path,
@@ -1060,15 +1130,25 @@ fn split_graphic_number_unit(value: &str) -> Option<(f32, &str)> {
 
 fn parse_graphic_number(value: &str) -> Option<f32> {
     split_graphic_number_unit(value.trim()).and_then(|(number, unit)| {
-        if unit.is_empty() { Some(number) } else { None }
+        if unit.is_empty() {
+            Some(number)
+        } else {
+            None
+        }
     })
 }
 
-fn relative_graphic_bases(axis: GraphicAxis, page_setup: Option<&PageSetup>) -> [(&'static str, u64); 4] {
+fn relative_graphic_bases(
+    axis: GraphicAxis,
+    page_setup: Option<&PageSetup>,
+) -> [(&'static str, u64); 4] {
     [
         ("\\textwidth", axis_base_emu(GraphicAxis::Width, page_setup)),
         ("\\linewidth", axis_base_emu(GraphicAxis::Width, page_setup)),
-        ("\\columnwidth", axis_base_emu(GraphicAxis::Width, page_setup)),
+        (
+            "\\columnwidth",
+            axis_base_emu(GraphicAxis::Width, page_setup),
+        ),
         ("\\textheight", axis_base_emu(axis, page_setup)),
     ]
 }
@@ -1882,7 +1962,8 @@ fn build_algorithm_caption(number: Option<&str>, caption: Option<&str>) -> Strin
 }
 
 fn begin_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
-    w.write_event(Event::Start(BytesStart::new("w:tr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tr")))
+        .unwrap();
     w.write_event(Event::Start(BytesStart::new("w:trPr")))
         .unwrap();
     w.write_event(Event::Empty(BytesStart::new("w:cantSplit")))
@@ -1906,8 +1987,10 @@ fn write_algorithm_cell(
     no_wrap: bool,
     left_margin: Option<u32>,
 ) {
-    w.write_event(Event::Start(BytesStart::new("w:tc"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("w:tcPr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tc")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:tcPr")))
+        .unwrap();
     let w_str = width.to_string();
     let mut tc_w = BytesStart::new("w:tcW");
     tc_w.push_attribute(("w:w", w_str.as_str()));
@@ -1919,7 +2002,8 @@ fn write_algorithm_cell(
         w.write_event(Event::Empty(gs)).unwrap();
     }
     if no_wrap {
-        w.write_event(Event::Empty(BytesStart::new("w:noWrap"))).unwrap();
+        w.write_event(Event::Empty(BytesStart::new("w:noWrap")))
+            .unwrap();
     }
     if borders.top || borders.bottom || borders.left {
         w.write_event(Event::Start(BytesStart::new("w:tcBorders")))
@@ -1948,7 +2032,8 @@ fn write_algorithm_cell(
             b.push_attribute(("w:color", "000000"));
             w.write_event(Event::Empty(b)).unwrap();
         }
-        w.write_event(Event::End(BytesEnd::new("w:tcBorders"))).unwrap();
+        w.write_event(Event::End(BytesEnd::new("w:tcBorders")))
+            .unwrap();
     }
     if let Some(m) = left_margin {
         w.write_event(Event::Start(BytesStart::new("w:tcMar")))
@@ -1979,10 +2064,7 @@ fn write_algorithm_cell(
 
 fn algorithm_title_runs(caption: &str) -> Vec<Run> {
     if let Some(caps) = regex_simple_algorithm_title(caption) {
-        return vec![
-            algo_run(&caps.0, true),
-            algo_run(&caps.1, false),
-        ];
+        return vec![algo_run(&caps.0, true), algo_run(&caps.1, false)];
     }
     vec![algo_run(caption, false)]
 }
@@ -2044,10 +2126,7 @@ fn algorithm_code_runs(text: &str) -> Vec<Run> {
         ];
     }
     if lower.starts_with("return") {
-        return vec![
-            algo_run("return", true),
-            algo_run(&text[6..], false),
-        ];
+        return vec![algo_run("return", true), algo_run(&text[6..], false)];
     }
     algorithm_inline_runs(text, false)
 }
@@ -2284,7 +2363,15 @@ fn table_row_logical_columns(row: &doc_semantic_ast::TableRow) -> usize {
 }
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
-    eprintln!("write_paragraph RUNS ({}): {}", p.runs.len(), p.runs.iter().map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text)).collect::<Vec<_>>().join(" || "));
+    eprintln!(
+        "write_paragraph RUNS ({}): {}",
+        p.runs.len(),
+        p.runs
+            .iter()
+            .map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text))
+            .collect::<Vec<_>>()
+            .join(" || ")
+    );
     write_paragraph_with_opts(w, p, false, 0)
 }
 
@@ -2292,16 +2379,22 @@ fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
 /// The LaTeX content is already "cleaned" (subscripts/superscripts converted to _/^).
 fn write_inline_math_run(w: &mut Writer<Vec<u8>>, latex: &str) {
     w.write_event(Event::Start(BytesStart::new("w:r"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMath"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMathPara"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMathParaPr"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:oMathParaPr"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMath")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMathPara")))
+        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMathParaPr")))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:oMathParaPr")))
+        .unwrap();
     w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
     w.write_event(Event::Start(BytesStart::new("m:t"))).unwrap();
-    w.write_event(Event::Text(quick_xml::events::BytesText::new(latex))).unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(latex)))
+        .unwrap();
     w.write_event(Event::End(BytesEnd::new("m:t"))).unwrap();
     w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:oMathPara"))).unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:oMathPara")))
+        .unwrap();
     w.write_event(Event::End(BytesEnd::new("m:oMath"))).unwrap();
     w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
 }
@@ -2339,16 +2432,19 @@ fn is_body_style_for_cjk(style_id: &Option<String>) -> bool {
 /// v13.2.1 R1: JOSBody 等正文段落内联 Bold/Italic/Code 降级为 Plain（对齐 sh oracle）。
 fn downgrade_body_inline_styles(p: Paragraph) -> Paragraph {
     if p.runs.iter().any(|r| r.text.contains("Freq")) {
-        eprintln!("downgrade RUNS: {}", p.runs.iter().map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text)).collect::<Vec<_>>().join(" || "));
+        eprintln!(
+            "downgrade RUNS: {}",
+            p.runs
+                .iter()
+                .map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text))
+                .collect::<Vec<_>>()
+                .join(" || ")
+        );
     }
     let is_body = p.style_id.as_deref().is_some_and(|s| {
         matches!(
             s,
-            "JOSBody"
-                | "JOSAbstractEn"
-                | "JOSAbstractZh"
-                | "JOSKeywords"
-                | "JOSReference"
+            "JOSBody" | "JOSAbstractEn" | "JOSAbstractZh" | "JOSKeywords" | "JOSReference"
         )
     });
     if !is_body {
@@ -2548,7 +2644,6 @@ fn write_run(
     w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
 }
 
-
 fn collapse_cjk_internal_spaces(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -2630,8 +2725,7 @@ fn is_cjk_char(ch: char) -> bool {
 /// 11. 英文摘要 (JOSAbstractEn) — 标签 "Abstract:" + 正文
 /// 12. 英文关键词 (JOSKeywords) — 标签 "Key words:" + 列表
 fn write_spacer(w: &mut Writer<Vec<u8>>, height_twips: u32) {
-    w.write_event(Event::Start(BytesStart::new("w:p")))
-        .unwrap();
+    w.write_event(Event::Start(BytesStart::new("w:p"))).unwrap();
     w.write_event(Event::Start(BytesStart::new("w:pPr")))
         .unwrap();
     let mut spacing = BytesStart::new("w:spacing");
@@ -2772,10 +2866,7 @@ fn spaced_keywords(keywords: &[String]) -> String {
 }
 
 #[allow(dead_code)]
-fn write_front_matter(
-    w: &mut Writer<Vec<u8>>,
-    meta: &doc_semantic_ast::MetaData,
-) {
+fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData) {
     use doc_semantic_ast::MetaData;
 
     // ── 中文标题 ──
@@ -3025,10 +3116,7 @@ mod tests {
             "72 vs 4388 条*"
         );
         // "0.05% CPU *" — CPU 与 * 之间的空格保留 (字母-标点 不动)
-        assert_eq!(
-            collapse_cjk_internal_spaces("0.05% CPU *"),
-            "0.05% CPU*"
-        );
+        assert_eq!(collapse_cjk_internal_spaces("0.05% CPU *"), "0.05% CPU*");
     }
 
     #[test]
@@ -3122,7 +3210,10 @@ mod tests {
         assert!(xml.contains(r#"<w:pStyle w:val="JOSCode"/>"#));
         assert!(xml.contains("Score(u,t)"));
         assert!(xml.contains("gamma"));
-        assert!(!xml.contains("m:oMath"), "block equation should not use OMML");
+        assert!(
+            !xml.contains("m:oMath"),
+            "block equation should not use OMML"
+        );
     }
 
     #[test]
@@ -3165,7 +3256,10 @@ mod tests {
         assert!(xml.contains("logs"));
         assert!(xml.contains("init H"));
         assert!(xml.contains("foreach"));
-        assert!(!xml.contains(" | "), "algorithm lines should not merge with | ");
+        assert!(
+            !xml.contains(" | "),
+            "algorithm lines should not merge with | "
+        );
     }
 
     #[test]
@@ -3314,9 +3408,7 @@ mod tests {
         // 2) tcW 必须是 text_width / 4
         let expected_cell = text_width / 4;
         assert!(
-            xml.contains(&format!(
-                r#"<w:tcW w:w="{expected_cell}" w:type="dxa"/>"#
-            )),
+            xml.contains(&format!(r#"<w:tcW w:w="{expected_cell}" w:type="dxa"/>"#)),
             "tcW must be text_width/ncols = {expected_cell}: {xml}"
         );
     }
@@ -3414,7 +3506,9 @@ mod tests {
             rowspan: 1,
             bg_color: None,
         };
-        let row = doc_semantic_ast::TableRow { cells: vec![cell.clone(), cell] };
+        let row = doc_semantic_ast::TableRow {
+            cells: vec![cell.clone(), cell],
+        };
         let doc = doc_semantic_ast::Document {
             metadata: Default::default(),
             blocks: vec![doc_semantic_ast::Block::Table {
@@ -3440,12 +3534,19 @@ mod tests {
             }
             out
         };
-        assert!(!caps.is_empty(), "must have at least 1 JOSCaption paragraph");
+        assert!(
+            !caps.is_empty(),
+            "must have at least 1 JOSCaption paragraph"
+        );
         for cap in &caps {
-            assert!(cap.contains("<w:keepNext/>"),
-                "table caption must have keepNext (caption + table on same page): {cap}");
-            assert!(cap.contains("<w:keepLines/>"),
-                "table caption must have keepLines (caption never splits): {cap}");
+            assert!(
+                cap.contains("<w:keepNext/>"),
+                "table caption must have keepNext (caption + table on same page): {cap}"
+            );
+            assert!(
+                cap.contains("<w:keepLines/>"),
+                "table caption must have keepLines (caption never splits): {cap}"
+            );
         }
     }
 
@@ -3462,7 +3563,9 @@ mod tests {
             rowspan: 1,
             bg_color: None,
         };
-        let row = doc_semantic_ast::TableRow { cells: vec![cell.clone(), cell] };
+        let row = doc_semantic_ast::TableRow {
+            cells: vec![cell.clone(), cell],
+        };
         let doc = doc_semantic_ast::Document {
             metadata: Default::default(),
             blocks: vec![doc_semantic_ast::Block::Table {
@@ -3475,14 +3578,17 @@ mod tests {
         let mut embedded = Vec::new();
         let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
-        let tr_prs: Vec<&str> = xml.split("<w:trPr>")
+        let tr_prs: Vec<&str> = xml
+            .split("<w:trPr>")
             .skip(1)
             .filter_map(|s| s.split("</w:trPr>").next())
             .collect();
         assert_eq!(tr_prs.len(), 2, "must have exactly 2 trPr (one per row)");
         for tp in &tr_prs {
-            assert!(tp.contains("<w:cantSplit/>"),
-                "every row must have cantSplit (row not split across pages): {tp}");
+            assert!(
+                tp.contains("<w:cantSplit/>"),
+                "every row must have cantSplit (row not split across pages): {tp}"
+            );
         }
     }
 
@@ -3594,29 +3700,49 @@ mod tests {
         // 1) JOSImage 段必须 keepNext + keepLines（图段 → caption 不分页）
         // 找 pPr 起止：从 <w:p> 之后到 <w:pStyle ... JOSImage/> 之后
         let img_ppr = {
-            let i = xml.find("<w:pStyle w:val=\"JOSImage\"/>").expect("JOSImage missing");
+            let i = xml
+                .find("<w:pStyle w:val=\"JOSImage\"/>")
+                .expect("JOSImage missing");
             // pPr 在 <w:p> 之后, 在 <w:pStyle> 之内(pStyle 之后) </w:pPr> 之前
             let ppr_start = xml[..i].rfind("<w:pPr>").expect("pPr before JOSImage");
             // 找 pStyle 之后第一个 </w:pPr>
             let after_pstyle = i + "<w:pStyle w:val=\"JOSImage\"/>".len();
-            let ppr_end = xml[after_pstyle..].find("</w:pPr>").expect("pPr close after JOSImage") + after_pstyle + "</w:pPr>".len();
+            let ppr_end = xml[after_pstyle..]
+                .find("</w:pPr>")
+                .expect("pPr close after JOSImage")
+                + after_pstyle
+                + "</w:pPr>".len();
             &xml[ppr_start..ppr_end]
         };
-        assert!(img_ppr.contains("<w:keepNext/>"),
-            "image drawing paragraph must have keepNext (image + caption on same page): {img_ppr}");
-        assert!(img_ppr.contains("<w:keepLines/>"),
-            "image drawing paragraph must have keepLines (image never splits): {img_ppr}");
+        assert!(
+            img_ppr.contains("<w:keepNext/>"),
+            "image drawing paragraph must have keepNext (image + caption on same page): {img_ppr}"
+        );
+        assert!(
+            img_ppr.contains("<w:keepLines/>"),
+            "image drawing paragraph must have keepLines (image never splits): {img_ppr}"
+        );
         // 2) JOSCaption 段（图片 caption）也必须 keepNext + keepLines
         let cap_ppr = {
-            let i = xml.find("<w:pStyle w:val=\"JOSCaption\"/>").expect("JOSCaption missing");
+            let i = xml
+                .find("<w:pStyle w:val=\"JOSCaption\"/>")
+                .expect("JOSCaption missing");
             let ppr_start = xml[..i].rfind("<w:pPr>").expect("pPr before JOSCaption");
             let after_pstyle = i + "<w:pStyle w:val=\"JOSCaption\"/>".len();
-            let ppr_end = xml[after_pstyle..].find("</w:pPr>").expect("pPr close after JOSCaption") + after_pstyle + "</w:pPr>".len();
+            let ppr_end = xml[after_pstyle..]
+                .find("</w:pPr>")
+                .expect("pPr close after JOSCaption")
+                + after_pstyle
+                + "</w:pPr>".len();
             &xml[ppr_start..ppr_end]
         };
-        assert!(cap_ppr.contains("<w:keepNext/>"),
-            "figure caption must have keepNext (image + caption on same page): {cap_ppr}");
-        assert!(cap_ppr.contains("<w:keepLines/>"),
-            "figure caption must have keepLines (caption never splits): {cap_ppr}");
+        assert!(
+            cap_ppr.contains("<w:keepNext/>"),
+            "figure caption must have keepNext (image + caption on same page): {cap_ppr}"
+        );
+        assert!(
+            cap_ppr.contains("<w:keepLines/>"),
+            "figure caption must have keepLines (caption never splits): {cap_ppr}"
+        );
     }
 }

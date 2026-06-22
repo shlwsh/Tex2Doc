@@ -10,7 +10,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::docx_render::{MappingRule, MappingRegistry};
+use crate::docx_render::{MappingRegistry, MappingRule};
 
 #[derive(Debug, Error)]
 pub enum MappingLoadError {
@@ -188,7 +188,10 @@ rules:
     fn loads_jos_profile_yaml() {
         let reg = MappingRegistry::from_yaml("jos-2025", JOS_RULES_YAML).expect("load ok");
         assert_eq!(reg.profile_id, "jos-2025");
-        assert!(reg.block_mappings.iter().any(|r| r.id == "map.heading.docx"));
+        assert!(reg
+            .block_mappings
+            .iter()
+            .any(|r| r.id == "map.heading.docx"));
         assert!(reg.block_mappings.iter().any(|r| r.id == "map.list.docx"));
         assert!(reg
             .inline_mappings
@@ -222,6 +225,9 @@ rules:
     #[test]
     fn for_profile_still_works_as_fallback() {
         let reg = MappingRegistry::for_profile("jos-2025");
-        assert!(reg.block_mappings.iter().any(|r| r.id == "map.heading.docx"));
+        assert!(reg
+            .block_mappings
+            .iter()
+            .any(|r| r.id == "map.heading.docx"));
     }
 }

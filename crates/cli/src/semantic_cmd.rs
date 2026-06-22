@@ -43,7 +43,10 @@ impl std::str::FromStr for QualityLevel {
             "preview" => Ok(Self::Preview),
             "strict" => Ok(Self::Strict),
             "standard" => Ok(Self::Standard),
-            _ => Err(format!("invalid quality level '{}': must be preview|standard|strict", s)),
+            _ => Err(format!(
+                "invalid quality level '{}': must be preview|standard|strict",
+                s
+            )),
         }
     }
 }

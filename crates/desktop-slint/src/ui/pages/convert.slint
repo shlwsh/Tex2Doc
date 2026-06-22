@@ -1,0 +1,229 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox, Switch } from "std-widgets.slint";
+import { ConversionMode } from "../types.slint";
+
+export component ConvertTab inherits Rectangle {
+    in-out property <string> project-path;
+    in-out property <string> api-base-url;
+    in-out property <string> main-tex;
+    in-out property <string> detected-profile: "auto";
+    in-out property <string> quality-level: "standard";
+    in-out property <string> output-path;
+    in-out property <bool> is-converting: false;
+    in-out property <float> conversion-progress: 0.0;
+    in-out property <string> compatibility-score: "--";
+    in-out property <string> quality-status: "--";
+    in-out property <string> profile-confidence: "--";
+    in-out property <string> status-text: "";
+    in-out property <ConversionMode> conversion-mode: ConversionMode.local;
+    in-out property <bool> is-signed-in: false;
+
+    callback choose-project-folder-clicked(string, string);
+    callback choose-project-zip-clicked(string, string);
+    callback choose-output-clicked(string);
+    callback detect-profile-clicked(string);
+    callback convert-clicked(string, string, string, string);
+    callback cloud-convert-clicked(string, string, string, string, string, string);
+    callback open-output-clicked(string);
+    callback open-report-clicked(string);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        GroupBox {
+            title: "Project";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "TeX project path or project zip...";
+                        text <=> project-path;
+                    }
+
+                    Button {
+                        text: "Folder";
+                        enabled: !is-converting;
+                        clicked => {
+                            root.choose-project-folder-clicked(project-path, output-path);
+                        }
+                    }
+
+                    Button {
+                        text: "Zip";
+                        enabled: !is-converting;
+                        clicked => {
+                            root.choose-project-zip-clicked(project-path, output-path);
+                        }
+                    }
+                }
+
+                LineEdit {
+                    placeholder-text: "Main TeX for cloud conversion (optional, e.g. main-jos.tex)...";
+                    text <=> main-tex;
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Options";
+
+            HorizontalBox {
+                spacing: 16px;
+
+                VerticalBox {
+                    Text { text: "Profile"; font-size: 12px; }
+                    ComboBox {
+                        current-value: detected-profile;
+                        model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                    }
+                }
+
+                VerticalBox {
+                    Text { text: "Quality"; font-size: 12px; }
+                    ComboBox {
+                        current-value: quality-level;
+                        model: ["preview", "standard", "strict"];
+                    }
+                }
+
+                VerticalBox {
+                    Text { text: "Output"; font-size: 12px; }
+                    HorizontalBox {
+                        spacing: 8px;
+
+                        LineEdit {
+                            placeholder-text: "Output DOCX path...";
+                            text <=> output-path;
+                        }
+
+                        Button {
+                            text: "Save As";
+                            enabled: !is-converting;
+                            clicked => { root.choose-output-clicked(output-path); }
+                        }
+                    }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Engine (Phase D.3)";
+
+            HorizontalBox {
+                spacing: 12px;
+                Switch {
+                    text: is-signed-in ? "Use Cloud Engine" : "Cloud engine requires sign-in";
+                    checked: conversion-mode == ConversionMode.cloud;
+                    enabled: is-signed-in;
+                    toggled => {
+                        conversion-mode = self.checked ? ConversionMode.cloud : ConversionMode.local;
+                    }
+                }
+                Text {
+                    text: conversion-mode == ConversionMode.cloud ? "Mode: Cloud" : "Mode: Local";
+                    font-size: 12px;
+                    color: #555;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        HorizontalBox {
+            spacing: 8px;
+
+            Button {
+                text: "Detect Profile";
+                enabled: project-path != "" && !is-converting;
+                clicked => {
+                    root.detect-profile-clicked(project-path);
+                }
+            }
+
+            Button {
+                primary: true;
+                text: conversion-mode == ConversionMode.cloud ? "Convert via Cloud" : "Convert";
+                enabled: project-path != "" && output-path != "" && !is-converting
+                    && conversion-mode == ConversionMode.local;
+                clicked => {
+                    root.is-converting = true;
+                    root.status-text = "[1/3] Reading TeX source...";
+                    root.conversion-progress = 0.1;
+                    root.convert-clicked(project-path, detected-profile, quality-level, output-path);
+                }
+            }
+
+            Button {
+                primary: conversion-mode == ConversionMode.cloud;
+                text: "Cloud Convert";
+                enabled: api-base-url != "" && project-path != "" && output-path != "" && !is-converting
+                    && conversion-mode == ConversionMode.cloud;
+                clicked => {
+                    root.is-converting = true;
+                    root.status-text = "[cloud] Uploading TeX project...";
+                    root.conversion-progress = 0.1;
+                    root.cloud-convert-clicked(api-base-url, project-path, main-tex, detected-profile, quality-level, output-path);
+                }
+            }
+
+            Button {
+                text: "Open Output";
+                enabled: !is-converting && output-path != "";
+                clicked => { root.open-output-clicked(output-path); }
+            }
+
+            Button {
+                text: "Open Report";
+                enabled: !is-converting && output-path != "";
+                clicked => { root.open-report-clicked(output-path); }
+            }
+        }
+
+        ProgressIndicator {
+            progress: conversion-progress;
+            visible: is-converting;
+        }
+
+        GroupBox {
+            title: "Report";
+
+            HorizontalBox {
+                spacing: 16px;
+
+                VerticalBox {
+                    Text { text: "Profile"; font-size: 11px; color: #666; }
+                    Text { text: detected-profile; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Compatibility"; font-size: 11px; color: #666; }
+                    Text { text: compatibility-score + "%"; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Quality"; font-size: 11px; color: #666; }
+                    Text { text: quality-status; font-size: 14px; font-weight: 600; }
+                }
+
+                VerticalBox {
+                    Text { text: "Confidence"; font-size: 11px; color: #666; }
+                    Text { text: profile-confidence; font-size: 14px; font-weight: 600; }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Status";
+
+            TextEdit {
+                text <=> status-text;
+                read-only: true;
+                min-height: 120px;
+                font-size: 12px;
+            }
+        }
+    }
+}

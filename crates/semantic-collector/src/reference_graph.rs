@@ -183,18 +183,42 @@ fn collect_event_references(
 
     for event in events {
         match event {
-            SemanticEvent::Heading { label: Some(label), .. } => {
-                add_event_label(graph, label_keys, label, ReferenceTargetKind::Heading, source.clone())
-            }
-            SemanticEvent::Figure { label: Some(label), .. } => {
-                add_event_label(graph, label_keys, label, ReferenceTargetKind::Figure, source.clone())
-            }
-            SemanticEvent::Table { label: Some(label), .. } => {
-                add_event_label(graph, label_keys, label, ReferenceTargetKind::Table, source.clone())
-            }
-            SemanticEvent::Equation { label: Some(label), .. } => {
-                add_event_label(graph, label_keys, label, ReferenceTargetKind::Equation, source.clone())
-            }
+            SemanticEvent::Heading {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Heading,
+                source.clone(),
+            ),
+            SemanticEvent::Figure {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Figure,
+                source.clone(),
+            ),
+            SemanticEvent::Table {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Table,
+                source.clone(),
+            ),
+            SemanticEvent::Equation {
+                label: Some(label), ..
+            } => add_event_label(
+                graph,
+                label_keys,
+                label,
+                ReferenceTargetKind::Equation,
+                source.clone(),
+            ),
             SemanticEvent::Label { key, .. } => {
                 add_event_label(
                     graph,
@@ -388,11 +412,26 @@ mod tests {
 
     #[test]
     fn reference_kind_from_key_prefixes() {
-        assert!(matches!(reference_kind_from_key("fig:1"), ReferenceTargetKind::Figure));
-        assert!(matches!(reference_kind_from_key("tab:1"), ReferenceTargetKind::Table));
-        assert!(matches!(reference_kind_from_key("eq:1"), ReferenceTargetKind::Equation));
-        assert!(matches!(reference_kind_from_key("alg:demo"), ReferenceTargetKind::Algorithm));
-        assert!(matches!(reference_kind_from_key("unknown"), ReferenceTargetKind::Unknown));
+        assert!(matches!(
+            reference_kind_from_key("fig:1"),
+            ReferenceTargetKind::Figure
+        ));
+        assert!(matches!(
+            reference_kind_from_key("tab:1"),
+            ReferenceTargetKind::Table
+        ));
+        assert!(matches!(
+            reference_kind_from_key("eq:1"),
+            ReferenceTargetKind::Equation
+        ));
+        assert!(matches!(
+            reference_kind_from_key("alg:demo"),
+            ReferenceTargetKind::Algorithm
+        ));
+        assert!(matches!(
+            reference_kind_from_key("unknown"),
+            ReferenceTargetKind::Unknown
+        ));
     }
 
     #[test]

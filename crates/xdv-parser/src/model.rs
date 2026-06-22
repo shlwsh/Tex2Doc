@@ -103,10 +103,7 @@ pub enum XdvCommand {
     },
 
     /// A rule was placed without advancing cursor.
-    PutRule {
-        height: i32,
-        width: i32,
-    },
+    PutRule { height: i32, width: i32 },
 
     /// Push current position/state onto the stack.
     Push,

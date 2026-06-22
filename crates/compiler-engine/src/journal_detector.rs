@@ -7,9 +7,7 @@
 use doc_utils::VirtualFs;
 use serde::{Deserialize, Serialize};
 
-use crate::profiles::{
-    ProfileRegistry, ProfileSpecFile,
-};
+use crate::profiles::{ProfileRegistry, ProfileSpecFile};
 
 /// Kind of detection signal extracted from TeX source.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -128,8 +126,7 @@ impl JournalDetector {
     /// Create a new detector backed by the default profile registry.
     pub fn new() -> Self {
         Self {
-            registry: ProfileRegistry::load_default()
-                .expect("profile registry should always load"),
+            registry: ProfileRegistry::load_default().expect("profile registry should always load"),
         }
     }
 
@@ -143,7 +140,11 @@ impl JournalDetector {
         let signals = self.extract_signals(vfs);
         let candidates = self.score_profiles(&signals);
         let mut sorted = candidates.clone();
-        sorted.sort_by(|a, b| b.confidence.partial_cmp(&a.confidence).unwrap_or(std::cmp::Ordering::Equal));
+        sorted.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         // Pick the best candidate that meets its min_confidence, or fall back to generic.
         let selected = self.select_best(&sorted);
@@ -202,7 +203,9 @@ impl JournalDetector {
             }
 
             let Ok(bytes) = vfs.read(path) else { continue };
-            let Ok(raw) = std::str::from_utf8(&bytes) else { continue };
+            let Ok(raw) = std::str::from_utf8(&bytes) else {
+                continue;
+            };
 
             let source = strip_comments(raw);
             let path_str = path.to_string_lossy().to_string();
@@ -217,7 +220,9 @@ impl JournalDetector {
         let mut detections = Vec::new();
 
         for id in self.registry.all_ids() {
-            let Some(spec) = self.registry.get(id) else { continue };
+            let Some(spec) = self.registry.get(id) else {
+                continue;
+            };
             let detection = score_profile(spec, signals);
             detections.push(detection);
         }
@@ -382,7 +387,9 @@ fn extract_signals_from_source(source: &str, path: &str) -> Vec<ExtractedSignal>
 
     for (macro_name, signal_value) in macro_signals {
         if source_compact.contains(&format!("\\{}", macro_name)) {
-            let line = source.lines().position(|l| l.contains(&format!("\\{}", macro_name)));
+            let line = source
+                .lines()
+                .position(|l| l.contains(&format!("\\{}", macro_name)));
             signals.push(ExtractedSignal {
                 kind: SignalKind::Macro,
                 value: signal_value.to_string(),
@@ -429,8 +436,17 @@ fn scan_command_with_optarg(source: &str, cmd: &str) -> Vec<CmdMatch> {
 
         // Skip whitespace.
         let mut pos = 0;
-        while pos < after.len() && after[pos..].chars().next().is_some_and(|c| c.is_ascii_whitespace()) {
-            pos += after[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+        while pos < after.len()
+            && after[pos..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_whitespace())
+        {
+            pos += after[pos..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
         }
 
         // Optional [options]
@@ -452,7 +468,11 @@ fn scan_command_with_optarg(source: &str, cmd: &str) -> Vec<CmdMatch> {
                 matches.push(CmdMatch {
                     start: i,
                     class_name,
-                    optarg: if opt_val.is_empty() { None } else { Some(opt_val) },
+                    optarg: if opt_val.is_empty() {
+                        None
+                    } else {
+                        Some(opt_val)
+                    },
                     args: String::new(),
                 });
                 i = i + 1 + args_start + end - args_start + 1;
@@ -500,9 +520,16 @@ fn scan_command(source: &str, commands: &[&str]) -> Vec<CmdMatch> {
         // Skip whitespace.
         let mut pos = 0;
         while pos < after.len()
-            && after[pos..].chars().next().is_some_and(|c| c.is_ascii_whitespace())
+            && after[pos..]
+                .chars()
+                .next()
+                .is_some_and(|c| c.is_ascii_whitespace())
         {
-            pos += after[pos..].chars().next().map(|c| c.len_utf8()).unwrap_or(1);
+            pos += after[pos..]
+                .chars()
+                .next()
+                .map(|c| c.len_utf8())
+                .unwrap_or(1);
         }
 
         if pos < after.len() && after[pos..].starts_with('[') {
@@ -747,7 +774,10 @@ mod tests {
         let detector = JournalDetector::new();
         let report = detector.detect(&vfs);
         // Falls back to generic-article since no strong signals match.
-        assert!(report.selected_profile_id == "generic-article" || report.selected_profile_id == "generic");
+        assert!(
+            report.selected_profile_id == "generic-article"
+                || report.selected_profile_id == "generic"
+        );
         assert!(!report.candidates.is_empty());
     }
 
@@ -756,7 +786,10 @@ mod tests {
         let vfs = vfs_with_source("readme.txt", "This is not a TeX file.");
         let detector = JournalDetector::new();
         let report = detector.detect(&vfs);
-        assert!(report.selected_profile_id == "generic-article" || report.selected_profile_id == "generic");
+        assert!(
+            report.selected_profile_id == "generic-article"
+                || report.selected_profile_id == "generic"
+        );
     }
 
     #[test]
@@ -789,7 +822,10 @@ mod tests {
         let detector = JournalDetector::new();
         let report = detector.detect(&vfs);
         // Only article class should be detected -> generic.
-        assert!(report.selected_profile_id == "generic-article" || report.selected_profile_id == "generic");
+        assert!(
+            report.selected_profile_id == "generic-article"
+                || report.selected_profile_id == "generic"
+        );
     }
 
     #[test]

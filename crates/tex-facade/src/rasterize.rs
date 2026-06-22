@@ -12,14 +12,10 @@ use crate::error::{TexError, TexResult};
 ///
 /// Wraps the TikZ source in a minimal `standalone` document, compiles it
 /// with tectonic, then converts the first PDF page to PNG.
-pub fn rasterize_tikz_to_png(
-    tikz_body: &str,
-    work_dir: &Path,
-) -> TexResult<PathBuf> {
+pub fn rasterize_tikz_to_png(tikz_body: &str, work_dir: &Path) -> TexResult<PathBuf> {
     let wrapper = build_tikz_wrapper(tikz_body);
     let tex_path = work_dir.join("__docx_tikz_temp.tex");
-    std::fs::write(&tex_path, &wrapper)
-        .map_err(|e| TexError::Io(e))?;
+    std::fs::write(&tex_path, &wrapper).map_err(|e| TexError::Io(e))?;
     let pdf_path = compile_tikz_tex(&tex_path, work_dir)?;
     let png_path = pdf_to_png(&pdf_path, work_dir)?;
     Ok(png_path)
@@ -31,9 +27,14 @@ fn compile_tikz_tex(tex_path: &Path, work_dir: &Path) -> TexResult<PathBuf> {
         Ok(p) => p,
         Err(_) => return Err(TexError::NoEngine),
     };
-    let pdf_path = work_dir.join(
-        tex_path.file_stem().and_then(|s| s.to_str()).unwrap_or("output")
-    ).with_extension("pdf");
+    let pdf_path = work_dir
+        .join(
+            tex_path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("output"),
+        )
+        .with_extension("pdf");
 
     let output = Command::new(&tectonic)
         .args([
@@ -47,9 +48,14 @@ fn compile_tikz_tex(tex_path: &Path, work_dir: &Path) -> TexResult<PathBuf> {
         .map_err(|e| TexError::Io(e))?;
 
     if !output.status.success() || !pdf_path.exists() {
-        let log_path = work_dir.join(
-            tex_path.file_stem().and_then(|s| s.to_str()).unwrap_or("main")
-        ).with_extension("log");
+        let log_path = work_dir
+            .join(
+                tex_path
+                    .file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("main"),
+            )
+            .with_extension("log");
         let log = std::fs::read_to_string(&log_path)
             .map(|l| {
                 let tail_len = l.len().min(4096);
@@ -91,9 +97,12 @@ fn pdf_to_png(pdf_path: &Path, out_dir: &Path) -> TexResult<PathBuf> {
         let output = Command::new("mutool")
             .args([
                 "convert",
-                "-o", png_path.to_str().unwrap(),
-                "-F", "png",
-                "-r", "150",
+                "-o",
+                png_path.to_str().unwrap(),
+                "-F",
+                "png",
+                "-r",
+                "150",
                 pdf_path.to_str().unwrap(),
             ])
             .output();
@@ -108,10 +117,13 @@ fn pdf_to_png(pdf_path: &Path, out_dir: &Path) -> TexResult<PathBuf> {
     if which::which("convert").is_ok() {
         let output = Command::new("convert")
             .args([
-                "-density", "150",
-                "-quality", "90",
+                "-density",
+                "150",
+                "-quality",
+                "90",
                 pdf_path.to_str().unwrap(),
-                "-resize", "800",
+                "-resize",
+                "800",
                 png_path.to_str().unwrap(),
             ])
             .output();

@@ -166,7 +166,9 @@ fn find_main_tex(project_root: &Path) -> CommandResult<PathBuf> {
             p.extension().and_then(|e| e.to_str()) == Some("tex")
                 && p.file_name()
                     .and_then(|n| n.to_str())
-                    .map(|n| !n.starts_with('.') && !n.ends_with(".sty.tex") && !n.ends_with(".def.tex"))
+                    .map(|n| {
+                        !n.starts_with('.') && !n.ends_with(".sty.tex") && !n.ends_with(".def.tex")
+                    })
                     .unwrap_or(false)
         })
         .collect();

@@ -408,10 +408,7 @@ impl ProfileRegistry {
                         match load_toml(&path) {
                             Ok(spec) => registry.register_with_aliases(&spec),
                             Err(e) => {
-                                eprintln!(
-                                    "warning: failed to load profile {:?}: {}",
-                                    path, e
-                                );
+                                eprintln!("warning: failed to load profile {:?}: {}", path, e);
                             }
                         }
                     }
@@ -533,9 +530,7 @@ pub fn load_profile(
         if let Some((path, source)) = resolve_profile_path(id) {
             let result = match source {
                 ProfileLoadSource::TomlFile => load_toml(&path).map(ProfileLoadResult::Loaded),
-                ProfileLoadSource::JsonFile => {
-                    load_from_file(&path).map(ProfileLoadResult::Loaded)
-                }
+                ProfileLoadSource::JsonFile => load_from_file(&path).map(ProfileLoadResult::Loaded),
                 ProfileLoadSource::Builtin => unreachable!(),
             };
             return match result {
@@ -571,15 +566,14 @@ pub fn load_from_file(path: impl AsRef<Path>) -> Result<ProfileSpecFile, Profile
 /// Load a profile from a TOML file.
 #[allow(dead_code)]
 pub fn load_toml(path: impl AsRef<Path>) -> Result<ProfileSpecFile, ProfileLoadError> {
-    let bytes =
-        fs::read(path.as_ref()).map_err(|e| ProfileLoadError::Io(e.to_string()))?;
+    let bytes = fs::read(path.as_ref()).map_err(|e| ProfileLoadError::Io(e.to_string()))?;
     load_toml_from_bytes(&bytes)
 }
 
 /// Parse TOML bytes into ProfileSpecFile.
 fn load_toml_from_bytes(bytes: &[u8]) -> Result<ProfileSpecFile, ProfileLoadError> {
-    let toml_str =
-        std::str::from_utf8(bytes).map_err(|e| ProfileLoadError::Parse(format!("invalid UTF-8: {}", e)))?;
+    let toml_str = std::str::from_utf8(bytes)
+        .map_err(|e| ProfileLoadError::Parse(format!("invalid UTF-8: {}", e)))?;
     let toml_spec: ProfileSpecToml =
         toml::from_str(toml_str).map_err(|e| ProfileLoadError::Parse(e.to_string()))?;
     Ok(ProfileSpecFile::from(toml_spec))
@@ -615,8 +609,7 @@ fn builtin_json(id: &str) -> Option<&'static str> {
 /// Load a built-in profile by ID.
 #[allow(dead_code)]
 pub fn load_builtin(id: &str) -> Option<ProfileSpecFile> {
-    builtin_json(id)
-        .and_then(|json| serde_json::from_str::<ProfileSpecFile>(json).ok())
+    builtin_json(id).and_then(|json| serde_json::from_str::<ProfileSpecFile>(json).ok())
 }
 
 /// List all available profile IDs (both file-based and built-in).
@@ -780,8 +773,7 @@ min_compatibility_score = 70
 max_raw_fallback_blocks = 10
 require_reference_graph = true
 "#;
-        let spec: ProfileSpecFile =
-            load_toml_from_bytes(toml_str.as_bytes()).unwrap();
+        let spec: ProfileSpecFile = load_toml_from_bytes(toml_str.as_bytes()).unwrap();
         assert_eq!(spec.id, "roundtrip-test");
         assert_eq!(spec.detection.min_confidence, 0.80);
         assert_eq!(spec.backend.preferred, "luatex-node");
@@ -803,10 +795,7 @@ require_reference_graph = true
             spec.font_policy.latin_main.as_deref(),
             Some("Times New Roman")
         );
-        assert_eq!(
-            spec.caption_policy.figure_prefix.as_deref(),
-            Some("Fig.")
-        );
+        assert_eq!(spec.caption_policy.figure_prefix.as_deref(), Some("Fig."));
         assert_eq!(spec.citation_policy.style.as_deref(), Some("ieee"));
     }
 
@@ -818,14 +807,8 @@ require_reference_graph = true
         assert_eq!(spec.id, "chinese-academic-toml");
         assert_eq!(spec.display_name, "Chinese Academic Paper");
         assert!(spec.document_classes.contains(&"ctexart".to_string()));
-        assert_eq!(
-            spec.font_policy.cjk_main.as_deref(),
-            Some("宋体")
-        );
-        assert_eq!(
-            spec.caption_policy.figure_prefix.as_deref(),
-            Some("图")
-        );
+        assert_eq!(spec.font_policy.cjk_main.as_deref(), Some("宋体"));
+        assert_eq!(spec.caption_policy.figure_prefix.as_deref(), Some("图"));
         assert_eq!(
             spec.citation_policy.reference_section_title.as_deref(),
             Some("参考文献")
