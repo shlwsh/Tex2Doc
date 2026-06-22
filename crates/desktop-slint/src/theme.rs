@@ -1,6 +1,6 @@
-pub const DEFAULT_THEME: &str = "system";
+pub const DEFAULT_THEME: &str = "default";
 
-const SUPPORTED_THEMES: [&str; 4] = ["system", "light", "dark", "high-contrast"];
+const SUPPORTED_THEMES: [&str; 6] = ["default", "blue", "green", "purple", "orange", "dark"];
 
 #[derive(Debug, Clone, Copy)]
 pub struct ThemePalette {
@@ -19,6 +19,9 @@ pub struct ThemePalette {
 
 pub fn normalize_theme(value: &str) -> String {
     let trimmed = value.trim();
+    if matches!(trimmed, "system" | "light" | "high-contrast") {
+        return DEFAULT_THEME.to_string();
+    }
     if SUPPORTED_THEMES.contains(&trimmed) {
         trimmed.to_string()
     } else {
@@ -28,6 +31,58 @@ pub fn normalize_theme(value: &str) -> String {
 
 pub fn palette(theme: &str) -> ThemePalette {
     match normalize_theme(theme).as_str() {
+        "blue" => ThemePalette {
+            window_bg: "#F6F8FB",
+            surface: "#FFFFFF",
+            surface_alt: "#EFF6FF",
+            border: "#D7DEE8",
+            text_primary: "#172033",
+            text_secondary: "#42526B",
+            text_muted: "#6B778C",
+            accent: "#1D4ED8",
+            success: "#0F8A5F",
+            warning: "#B7791F",
+            danger: "#C2413A",
+        },
+        "green" => ThemePalette {
+            window_bg: "#F6F8F7",
+            surface: "#FFFFFF",
+            surface_alt: "#ECFDF5",
+            border: "#D7E3DC",
+            text_primary: "#172033",
+            text_secondary: "#42526B",
+            text_muted: "#6B778C",
+            accent: "#047857",
+            success: "#0F8A5F",
+            warning: "#B7791F",
+            danger: "#C2413A",
+        },
+        "purple" => ThemePalette {
+            window_bg: "#F8F7FB",
+            surface: "#FFFFFF",
+            surface_alt: "#F5F3FF",
+            border: "#DDD6FE",
+            text_primary: "#172033",
+            text_secondary: "#42526B",
+            text_muted: "#6B778C",
+            accent: "#7C3AED",
+            success: "#0F8A5F",
+            warning: "#B7791F",
+            danger: "#C2413A",
+        },
+        "orange" => ThemePalette {
+            window_bg: "#FBF8F5",
+            surface: "#FFFFFF",
+            surface_alt: "#FFF7ED",
+            border: "#FED7AA",
+            text_primary: "#172033",
+            text_secondary: "#42526B",
+            text_muted: "#6B778C",
+            accent: "#EA580C",
+            success: "#0F8A5F",
+            warning: "#B7791F",
+            danger: "#C2413A",
+        },
         "dark" => ThemePalette {
             window_bg: "#111827",
             surface: "#182235",
@@ -40,19 +95,6 @@ pub fn palette(theme: &str) -> ThemePalette {
             success: "#34D399",
             warning: "#FBBF24",
             danger: "#F87171",
-        },
-        "high-contrast" => ThemePalette {
-            window_bg: "#000000",
-            surface: "#0B0B0B",
-            surface_alt: "#161616",
-            border: "#FFFFFF",
-            text_primary: "#FFFFFF",
-            text_secondary: "#E6E6E6",
-            text_muted: "#CCCCCC",
-            accent: "#00A3FF",
-            success: "#00FF88",
-            warning: "#FFE600",
-            danger: "#FF4D4D",
         },
         _ => ThemePalette {
             window_bg: "#F6F8FB",
@@ -75,8 +117,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn invalid_theme_falls_back_to_system() {
-        assert_eq!(normalize_theme("unknown"), "system");
+    fn invalid_theme_falls_back_to_default() {
+        assert_eq!(normalize_theme("unknown"), "default");
         assert_eq!(palette("unknown").window_bg, "#F6F8FB");
     }
 

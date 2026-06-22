@@ -3,7 +3,7 @@ pub const DEFAULT_LOCALE: &str = "en";
 const SUPPORTED_LOCALES: [&str; 6] = ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
 
 #[cfg(test)]
-const KEYS: [&str; 100] = [
+const KEYS: [&str; 106] = [
     "tab.convert",
     "tab.settings",
     "tab.account",
@@ -60,6 +60,12 @@ const KEYS: [&str; 100] = [
     "settings.language",
     "settings.theme",
     "settings.apply_appearance",
+    "theme.default",
+    "theme.blue",
+    "theme.green",
+    "theme.purple",
+    "theme.orange",
+    "theme.dark",
     "settings.about",
     "settings.product",
     "settings.version",
@@ -200,6 +206,12 @@ fn en(key: &str) -> Option<&'static str> {
         "settings.language" => Some("Language"),
         "settings.theme" => Some("Theme"),
         "settings.apply_appearance" => Some("Apply Appearance"),
+        "theme.default" => Some("Default"),
+        "theme.blue" => Some("Blue"),
+        "theme.green" => Some("Green"),
+        "theme.purple" => Some("Purple"),
+        "theme.orange" => Some("Orange"),
+        "theme.dark" => Some("Dark"),
         "settings.about" => Some("About"),
         "settings.product" => Some("Product"),
         "settings.version" => Some("Version"),

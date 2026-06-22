@@ -25,7 +25,7 @@ export component MainWindow inherits Window {
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
     in-out property <string> ui-locale: "en";
-    in-out property <string> ui-theme: "system";
+    in-out property <string> ui-theme: "default";
     in-out property <string> app-version: "";
     in-out property <string> detected-profile: "auto";
     in-out property <string> main-tex;
@@ -109,6 +109,12 @@ export component MainWindow inherits Window {
     in-out property <string> t-settings-language: "Language";
     in-out property <string> t-settings-theme: "Theme";
     in-out property <string> t-settings-apply-appearance: "Apply Appearance";
+    in-out property <string> t-theme-default: "Default";
+    in-out property <string> t-theme-blue: "Blue";
+    in-out property <string> t-theme-green: "Green";
+    in-out property <string> t-theme-purple: "Purple";
+    in-out property <string> t-theme-orange: "Orange";
+    in-out property <string> t-theme-dark: "Dark";
     in-out property <string> t-settings-about: "About";
     in-out property <string> t-settings-product: "Product";
     in-out property <string> t-settings-version: "Version";
@@ -441,7 +447,7 @@ export component MainWindow inherits Window {
                                 Text { text: t-settings-theme; font-size: 12px; color: color-text-secondary; }
                                 ComboBox {
                                     current-value <=> ui-theme;
-                                    model: ["system", "light", "dark", "high-contrast"];
+                                    model: ["default", "blue", "green", "purple", "orange", "dark"];
                                     selected(_) => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
                                 }
                             }

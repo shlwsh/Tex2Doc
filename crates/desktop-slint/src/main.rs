@@ -1062,6 +1062,12 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_settings_language, "settings.language");
     set_text!(set_t_settings_theme, "settings.theme");
     set_text!(set_t_settings_apply_appearance, "settings.apply_appearance");
+    set_text!(set_t_theme_default, "theme.default");
+    set_text!(set_t_theme_blue, "theme.blue");
+    set_text!(set_t_theme_green, "theme.green");
+    set_text!(set_t_theme_purple, "theme.purple");
+    set_text!(set_t_theme_orange, "theme.orange");
+    set_text!(set_t_theme_dark, "theme.dark");
     set_text!(set_t_settings_about, "settings.about");
     set_text!(set_t_settings_product, "settings.product");
     set_text!(set_t_settings_version, "settings.version");

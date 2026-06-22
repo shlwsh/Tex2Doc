@@ -10,11 +10,13 @@ import 'package:doc_engine/bridge.dart';
 import 'package:doc_engine/workspace_app.dart';
 
 void main() {
-  testWidgets('DocEngineApp boots without throwing', (WidgetTester tester) async {
+  testWidgets('DocEngineApp boots without throwing', (
+    WidgetTester tester,
+  ) async {
     await tester.pumpWidget(const DocEngineApp(isWeb: false));
     await tester.pump();
-    expect(find.text('Doc-engine · LaTeX → DOCX'), findsOneWidget);
-    expect(find.byKey(const ValueKey('status-card')), findsOneWidget);
+    expect(find.text('Tex2Doc'), findsWidgets);
+    expect(find.byKey(const ValueKey('commercial-api-card')), findsOneWidget);
     expect(find.byKey(const ValueKey('convert-card')), findsOneWidget);
   });
 

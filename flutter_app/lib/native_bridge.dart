@@ -23,27 +23,29 @@ typedef _LastErrorDart = ffi.Pointer<ffi.Uint8> Function();
 typedef _FreeNative = ffi.Void Function(ffi.Pointer<ffi.Uint8>);
 typedef _FreeDart = void Function(ffi.Pointer<ffi.Uint8>);
 
-typedef _ConvertZipNative = ffi.Int32 Function(
-  ffi.Pointer<ffi.Uint8>,
-  ffi.IntPtr,
-  ffi.Pointer<ffi.Uint8>,
-  ffi.IntPtr,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.IntPtr>,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.IntPtr>,
-);
+typedef _ConvertZipNative =
+    ffi.Int32 Function(
+      ffi.Pointer<ffi.Uint8>,
+      ffi.IntPtr,
+      ffi.Pointer<ffi.Uint8>,
+      ffi.IntPtr,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.IntPtr>,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.IntPtr>,
+    );
 
-typedef _ConvertZipDart = int Function(
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Uint8>,
-  int,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.IntPtr>,
-  ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
-  ffi.Pointer<ffi.IntPtr>,
-);
+typedef _ConvertZipDart =
+    int Function(
+      ffi.Pointer<ffi.Uint8>,
+      int,
+      ffi.Pointer<ffi.Uint8>,
+      int,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.IntPtr>,
+      ffi.Pointer<ffi.Pointer<ffi.Uint8>>,
+      ffi.Pointer<ffi.IntPtr>,
+    );
 
 class NativeBridgeException implements Exception {
   final String message;
@@ -86,12 +88,16 @@ class NativeBridge {
     } on Object catch (e) {
       throw NativeBridgeException('打开 $name 失败：$e');
     }
-    _versionFn = _lib!.lookupFunction<_VersionNative, _VersionDart>('doc_engine_version');
-    _lastErrorFn =
-        _lib!.lookupFunction<_LastErrorNative, _LastErrorDart>('doc_engine_last_error');
+    _versionFn = _lib!.lookupFunction<_VersionNative, _VersionDart>(
+      'doc_engine_version',
+    );
+    _lastErrorFn = _lib!.lookupFunction<_LastErrorNative, _LastErrorDart>(
+      'doc_engine_last_error',
+    );
     _freeFn = _lib!.lookupFunction<_FreeNative, _FreeDart>('doc_engine_free');
-    _convertFn =
-        _lib!.lookupFunction<_ConvertZipNative, _ConvertZipDart>('doc_engine_convert_zip');
+    _convertFn = _lib!.lookupFunction<_ConvertZipNative, _ConvertZipDart>(
+      'doc_engine_convert_zip',
+    );
 
     try {
       _cachedVersion = _readCString(_versionFn!());
@@ -138,7 +144,9 @@ class NativeBridge {
           );
           if (rc != 0) {
             final errPtr = _lastErrorFn!();
-            final err = errPtr == ffi.nullptr ? 'unknown' : _readCString(errPtr);
+            final err = errPtr == ffi.nullptr
+                ? 'unknown'
+                : _readCString(errPtr);
             throw NativeBridgeException('convert_zip 失败 (rc=$rc): $err');
           }
 
@@ -151,7 +159,9 @@ class NativeBridge {
             final docx = Uint8List.fromList(docxPtr.asTypedList(docxLen));
             final warnings = warnLen > 0
                 ? List<String>.from(
-                    jsonDecode(utf8.decode(warnPtr.asTypedList(warnLen))) as List)
+                    jsonDecode(utf8.decode(warnPtr.asTypedList(warnLen)))
+                        as List,
+                  )
                 : <String>[];
             return NativeConvertResult(docx: docx, warnings: warnings);
           } finally {
@@ -177,7 +187,7 @@ class NativeBridge {
     final units = p.cast<ffi.Uint8>();
     final bytes = <int>[];
     for (var i = 0; i < 1024; i++) {
-      final b = units.elementAt(i).value;
+      final b = units[i];
       if (b == 0) break;
       bytes.add(b);
     }
