@@ -22,6 +22,12 @@ pub struct Settings {
     /// Release channel for update checks.
     #[serde(default = "default_release_channel")]
     pub release_channel: String,
+    /// UI locale code.
+    #[serde(default = "default_locale")]
+    pub locale: String,
+    /// UI theme code.
+    #[serde(default = "default_theme")]
+    pub theme: String,
     /// Last used login email. Passwords and tokens are intentionally not stored here.
     pub last_login_email: Option<String>,
     /// Last used project path.
@@ -36,6 +42,8 @@ impl Default for Settings {
             quality: "standard".to_string(),
             default_profile: "auto".to_string(),
             release_channel: default_release_channel(),
+            locale: default_locale(),
+            theme: default_theme(),
             last_login_email: None,
             last_project_path: None,
         }
@@ -45,10 +53,13 @@ impl Default for Settings {
 impl Settings {
     /// Load settings from the config file.
     pub fn load() -> Self {
-        config_path()
+        let mut settings: Self = config_path()
             .and_then(|p| fs::read_to_string(&p).ok())
             .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        settings.locale = crate::i18n::normalize_locale(&settings.locale);
+        settings.theme = crate::theme::normalize_theme(&settings.theme);
+        settings
     }
 
     /// Save settings to the config file.
@@ -88,6 +99,14 @@ fn default_release_channel() -> String {
     "stable".to_string()
 }
 
+fn default_locale() -> String {
+    crate::i18n::DEFAULT_LOCALE.to_string()
+}
+
+fn default_theme() -> String {
+    crate::theme::DEFAULT_THEME.to_string()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +124,7 @@ mod tests {
 
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.release_channel, "stable");
+        assert_eq!(settings.locale, "en");
+        assert_eq!(settings.theme, "system");
     }
 }

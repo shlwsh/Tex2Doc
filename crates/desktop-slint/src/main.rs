@@ -11,22 +11,26 @@ mod credential_store;
 mod desktop_dialog;
 mod desktop_update;
 mod diagnostics;
+mod i18n;
 mod job;
 mod job_history;
 mod local_convert;
 mod report;
 mod settings;
+mod theme;
 mod ui;
 mod updater;
 
 use app_state::{AppState, JobUpdate};
 use settings::Settings;
 use slint::include_modules;
-use slint::SharedString;
+use slint::{Color, SharedString};
 use std::sync::Arc;
 
 // Re-export generated Slint components
 include_modules!();
+
+const DESKTOP_VERSION: &str = env!("TEX2DOC_DESKTOP_VERSION");
 
 fn main() {
     // Initialize logger
@@ -64,13 +68,21 @@ fn main() {
     ui.set_quality_level(default_quality.into());
     ui.set_detected_profile(settings.default_profile.clone().into());
     ui.set_api_base_url(settings.api_base_url.clone().into());
+    ui.set_app_version(DESKTOP_VERSION.into());
+    ui.set_ui_locale(settings.locale.clone().into());
+    ui.set_ui_theme(settings.theme.clone().into());
+    apply_i18n(&ui, &settings.locale);
+    apply_theme(&ui, &settings.theme);
+    ui.set_status_text(i18n::translate(&settings.locale, "convert.ready").into());
     let mut account_status_set = false;
     if let Some(email) = settings.last_login_email.clone() {
         ui.set_login_email(email.clone().into());
         match credential_store::load_refresh_token(&settings.api_base_url, &email) {
             Ok(Some(refresh_token)) => {
                 app_state.set_refresh_token(refresh_token);
-                ui.set_account_status("Stored session found. Click Refresh.".into());
+                ui.set_account_status(
+                    i18n::translate(&settings.locale, "account.stored_session_found").into(),
+                );
                 account_status_set = true;
             }
             Ok(None) => {}
@@ -87,17 +99,28 @@ fn main() {
         ui.set_project_path(path.into());
     }
     if !account_status_set {
-        ui.set_account_status("Not signed in.".into());
+        ui.set_account_status(i18n::translate(&settings.locale, "account.not_signed_in").into());
     }
+    ui.set_is_signed_in(false);
+    ui.set_is_account_busy(false);
+    ui.set_is_billing_busy(false);
+    ui.set_account_display_name("Guest".into());
+    ui.set_account_tier("free".into());
+    ui.set_quota_remaining(0);
+    ui.set_quota_total(0);
+    ui.set_use_cloud_engine(false);
     ui.set_usage_status("--".into());
     ui.set_billing_plan_id("pro".into());
-    ui.set_billing_status("--".into());
+    ui.set_billing_status(i18n::translate(&settings.locale, "billing.status_idle").into());
     ui.set_update_channel(settings.release_channel.clone().into());
     ui.set_update_status("--".into());
     ui.set_compatibility_score("--".into());
+    ui.set_compatibility_progress(0.0);
     ui.set_quality_status("--".into());
+    ui.set_quality_progress(0.0);
     ui.set_profile_confidence("--".into());
-    ui.set_recent_jobs(recent_jobs_for_ui(&app_state).into());
+    ui.set_profile_confidence_progress(0.0);
+    ui.set_recent_jobs(recent_jobs_for_ui(&app_state, &settings.locale).into());
     ui.set_main_tex("".into());
 
     // Wire up the Convert button callback
@@ -141,7 +164,7 @@ fn main() {
                     Arc::clone(&app),
                     move |result| {
                         persist_recent_jobs(&app);
-                        let recent_jobs = recent_jobs_for_ui(&app);
+                        let recent_jobs = recent_jobs_for_ui(&app, i18n::DEFAULT_LOCALE);
                         let invoke_result = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
                                 ui.set_is_converting(false);
@@ -159,6 +182,10 @@ fn main() {
                                         ui.set_compatibility_score(
                                             result.compatibility_score.to_string().into(),
                                         );
+                                        ui.set_compatibility_progress(
+                                            (result.compatibility_score as f32 / 100.0)
+                                                .clamp(0.0, 1.0),
+                                        );
                                         ui.set_quality_status(
                                             format!(
                                                 "{} ({})",
@@ -166,15 +193,31 @@ fn main() {
                                             )
                                             .into(),
                                         );
+                                        ui.set_quality_progress(
+                                            result
+                                                .quality_score
+                                                .parse::<f32>()
+                                                .map(|score| (score / 100.0).clamp(0.0, 1.0))
+                                                .unwrap_or(0.0),
+                                        );
                                         ui.set_profile_confidence(confidence_text(
                                             result.profile_confidence,
                                         ));
+                                        ui.set_profile_confidence_progress(
+                                            result
+                                                .profile_confidence
+                                                .unwrap_or(0.0)
+                                                .clamp(0.0, 1.0),
+                                        );
                                         ui.set_status_text(result.report_text.into());
                                     }
                                     Err(error) => {
                                         log::error!("Conversion failed: {}", error);
                                         ui.set_conversion_progress(0.0);
                                         ui.set_quality_status("Failed".into());
+                                        ui.set_compatibility_progress(0.0);
+                                        ui.set_quality_progress(0.0);
+                                        ui.set_profile_confidence_progress(0.0);
                                         ui.set_status_text(
                                             format!("Conversion failed:\n{}", error).into(),
                                         );
@@ -251,7 +294,7 @@ fn main() {
                     }
                 }
                 persist_recent_jobs(&app);
-                let recent_jobs = recent_jobs_for_ui(&app);
+                let recent_jobs = recent_jobs_for_ui(&app, i18n::DEFAULT_LOCALE);
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
                         ui.set_is_converting(false);
@@ -273,10 +316,16 @@ fn main() {
                                 ui.set_quality_status("Cloud completed".into());
                                 ui.set_compatibility_score("--".into());
                                 ui.set_profile_confidence("cloud report".into());
+                                ui.set_compatibility_progress(0.0);
+                                ui.set_quality_progress(1.0);
+                                ui.set_profile_confidence_progress(0.0);
                             }
                             Err(error) => {
                                 ui.set_conversion_progress(0.0);
                                 ui.set_quality_status("Cloud failed".into());
+                                ui.set_compatibility_progress(0.0);
+                                ui.set_quality_progress(0.0);
+                                ui.set_profile_confidence_progress(0.0);
                                 ui.set_status_text(
                                     format!("Cloud conversion failed:\n{}", error).into(),
                                 );
@@ -313,8 +362,12 @@ fn main() {
                 );
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_account_busy(false);
                         match result {
-                            Ok(session) => apply_account_session(&app, &ui, &base_url, session),
+                            Ok(session) => {
+                                ui.set_login_password("".into());
+                                apply_account_session(&app, &ui, &base_url, session);
+                            }
                             Err(error) => {
                                 ui.set_account_status(format!("Login failed: {}", error).into());
                                 ui.set_usage_status("--".into());
@@ -350,8 +403,12 @@ fn main() {
                 );
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_account_busy(false);
                         match result {
-                            Ok(session) => apply_account_session(&app, &ui, &base_url, session),
+                            Ok(session) => {
+                                ui.set_login_password("".into());
+                                apply_account_session(&app, &ui, &base_url, session);
+                            }
                             Err(error) => {
                                 ui.set_account_status(format!("Register failed: {}", error).into());
                                 ui.set_usage_status("--".into());
@@ -378,6 +435,7 @@ fn main() {
             let result = cloud_account::refresh_and_fetch_usage_blocking(&base_url, refresh_token);
             let invoke_result = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_account_busy(false);
                     match result {
                         Ok(session) => apply_account_session(&app, &ui, &base_url, session),
                         Err(error) => {
@@ -404,9 +462,17 @@ fn main() {
             }
             app_state_clone.clear_account_session();
             ui.set_login_password("".into());
-            ui.set_account_status("Signed out.".into());
+            ui.set_account_status(tr_ui(&ui, "account.signed_out").into());
             ui.set_usage_status("--".into());
-            ui.set_billing_status("--".into());
+            ui.set_billing_status(tr_ui(&ui, "billing.status_idle").into());
+            ui.set_is_signed_in(false);
+            ui.set_is_account_busy(false);
+            ui.set_is_billing_busy(false);
+            ui.set_account_display_name("Guest".into());
+            ui.set_account_tier("free".into());
+            ui.set_quota_remaining(0);
+            ui.set_quota_total(0);
+            ui.set_use_cloud_engine(false);
         }
     });
 
@@ -449,6 +515,7 @@ fn main() {
                 .map(|plans| cloud_account::plans_line(&plans));
             let invoke_result = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_billing_busy(false);
                     match result {
                         Ok(line) => ui.set_billing_status(line.into()),
                         Err(error) => {
@@ -476,6 +543,7 @@ fn main() {
                 let result = cloud_account::create_checkout_blocking(&base_url, token, &plan);
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_billing_busy(false);
                         match result {
                             Ok(session) => {
                                 if let Err(error) = open_external_url(&session.url) {
@@ -520,6 +588,7 @@ fn main() {
             let result = cloud_account::create_billing_portal_blocking(&base_url, token);
             let invoke_result = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_billing_busy(false);
                     match result {
                         Ok(session) => {
                             if let Err(error) = open_external_url(&session.url) {
@@ -563,7 +632,7 @@ fn main() {
                 let result = desktop_update::check_update_blocking(
                     &base_url,
                     &release_channel,
-                    env!("CARGO_PKG_VERSION"),
+                    DESKTOP_VERSION,
                 )
                 .map(|check| desktop_update::update_status_line(&check));
                 let invoke_result = slint::invoke_from_event_loop(move || {
@@ -597,7 +666,9 @@ fn main() {
                     if should_set_output {
                         ui.set_output_path(default_output.into());
                     }
-                    ui.set_status_text(format!("Selected project: {}", selected).into());
+                    ui.set_status_text(
+                        format!("{} {}", tr_ui(&ui, "project.selected"), selected).into(),
+                    );
                 }
             }
         },
@@ -617,7 +688,9 @@ fn main() {
                     if should_set_output {
                         ui.set_output_path(default_output.into());
                     }
-                    ui.set_status_text(format!("Selected project zip: {}", selected).into());
+                    ui.set_status_text(
+                        format!("{} {}", tr_ui(&ui, "project_zip.selected"), selected).into(),
+                    );
                 }
             }
         },
@@ -630,7 +703,9 @@ fn main() {
             persist_settings(None, Some(&selected), None, None, None, None);
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_output_path(selected.clone().into());
-                ui.set_status_text(format!("Selected output: {}", selected).into());
+                ui.set_status_text(
+                    format!("{} {}", tr_ui(&ui, "output.selected"), selected).into(),
+                );
             }
         }
     });
@@ -659,8 +734,12 @@ fn main() {
                                 None,
                             );
                             ui.set_detected_profile(profile.clone().into());
-                            ui.set_status_text(format!("Detected profile: {}", profile).into());
+                            ui.set_status_text(
+                                format!("{} {}", tr_ui(&ui, "convert.detected_profile"), profile)
+                                    .into(),
+                            );
                             ui.set_profile_confidence("see conversion report".into());
+                            ui.set_profile_confidence_progress(0.0);
                         }
                         Err(error) => {
                             log::error!("Profile detection failed: {}", error);
@@ -689,12 +768,14 @@ fn main() {
         let result = open_report_path(output_path.as_str());
         if let Some(ui) = ui_weak.upgrade() {
             match result {
-                Ok(path) => {
-                    ui.set_status_text(format!("Opened report:\n{}", path.display()).into())
-                }
+                Ok(path) => ui.set_status_text(
+                    format!("{}\n{}", tr_ui(&ui, "report.opened"), path.display()).into(),
+                ),
                 Err(error) => {
                     log::error!("Failed to open report path: {}", error);
-                    ui.set_status_text(format!("Open report failed:\n{}", error).into());
+                    ui.set_status_text(
+                        format!("{}\n{}", tr_ui(&ui, "report.open_failed"), error).into(),
+                    );
                 }
             }
         }
@@ -719,19 +800,35 @@ fn main() {
                 status_text: status_text.to_string(),
                 recent_jobs: recent_jobs.to_string(),
                 update_status: update_status.to_string(),
-                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                app_version: DESKTOP_VERSION.to_string(),
             };
 
             let result = diagnostics::export_diagnostic_bundle(&input);
             if let Some(ui) = ui_weak.upgrade() {
                 match result {
                     Ok(path) => ui.set_status_text(
-                        format!("Diagnostic bundle exported:\n{}", path.display()).into(),
+                        format!("{}\n{}", tr_ui(&ui, "diagnostics.exported"), path.display())
+                            .into(),
                     ),
-                    Err(error) => {
-                        ui.set_status_text(format!("Diagnostic export failed:\n{}", error).into())
-                    }
+                    Err(error) => ui.set_status_text(
+                        format!("{}\n{}", tr_ui(&ui, "diagnostics.failed"), error).into(),
+                    ),
                 }
+            }
+        },
+    );
+
+    let ui_weak = ui.as_weak();
+    ui.on_apply_appearance_clicked(
+        move |locale: slint::SharedString, theme_value: slint::SharedString| {
+            let locale = i18n::normalize_locale(locale.as_str());
+            let theme_value = theme::normalize_theme(theme_value.as_str());
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_ui_locale(locale.clone().into());
+                ui.set_ui_theme(theme_value.clone().into());
+                apply_i18n(&ui, &locale);
+                apply_theme(&ui, &theme_value);
+                persist_appearance(&locale, &theme_value);
             }
         },
     );
@@ -757,6 +854,7 @@ fn apply_account_session(
         .usage
         .cloud_conversions_limit
         .saturating_sub(session.usage.cloud_conversions_used) as usize;
+    let quota_total = session.usage.cloud_conversions_limit as usize;
     let display_name = session
         .display_name
         .clone()
@@ -786,12 +884,17 @@ fn apply_account_session(
         .into(),
     );
     ui.set_usage_status(cloud_account::usage_line(&session.usage).into());
+    ui.set_is_signed_in(true);
+    ui.set_account_display_name(display_name.into());
+    ui.set_account_tier(session.plan_id.into());
+    ui.set_quota_remaining(quota_remaining as i32);
+    ui.set_quota_total(quota_total as i32);
 }
 
-fn recent_jobs_for_ui(app_state: &AppState) -> String {
+fn recent_jobs_for_ui(app_state: &AppState, locale: &str) -> String {
     let jobs = app_state.recent_jobs();
     if jobs.is_empty() {
-        return "No recent jobs.".to_string();
+        return i18n::translate(locale, "history.no_recent_jobs");
     }
 
     jobs.into_iter()
@@ -859,6 +962,175 @@ fn persist_release_channel(channel: &str) {
     if let Err(error) = settings.save() {
         log::warn!("Failed to persist release channel: {}", error);
     }
+}
+
+fn persist_appearance(locale: &str, theme_value: &str) {
+    let mut settings = Settings::load();
+    settings.locale = i18n::normalize_locale(locale);
+    settings.theme = theme::normalize_theme(theme_value);
+    if let Err(error) = settings.save() {
+        log::warn!("Failed to persist appearance settings: {}", error);
+    }
+}
+
+fn apply_i18n(ui: &MainWindow, locale: &str) {
+    macro_rules! set_text {
+        ($setter:ident, $key:literal) => {
+            ui.$setter(i18n::translate(locale, $key).into());
+        };
+    }
+
+    set_text!(set_t_tab_convert, "tab.convert");
+    set_text!(set_t_tab_settings, "tab.settings");
+    set_text!(set_t_tab_account, "tab.account");
+    set_text!(set_t_tab_billing, "tab.billing");
+    set_text!(set_t_tab_history, "tab.history");
+    set_text!(set_t_app_title_signed_out, "app.title.signed_out");
+    set_text!(set_t_common_account, "common.account");
+    set_text!(set_t_common_quota, "common.quota");
+    set_text!(set_t_common_compatibility, "common.compatibility");
+    set_text!(set_t_common_confidence, "common.confidence");
+    set_text!(set_t_convert_engine, "convert.engine");
+    set_text!(set_t_convert_local, "convert.local");
+    set_text!(set_t_convert_cloud, "convert.cloud");
+    set_text!(
+        set_t_convert_cloud_requires_sign_in,
+        "convert.cloud_requires_sign_in"
+    );
+    set_text!(set_t_convert_project, "convert.project");
+    set_text!(
+        set_t_convert_project_placeholder,
+        "convert.project_placeholder"
+    );
+    set_text!(set_t_convert_folder, "convert.folder");
+    set_text!(set_t_convert_zip, "convert.zip");
+    set_text!(
+        set_t_convert_main_tex_placeholder,
+        "convert.main_tex_placeholder"
+    );
+    set_text!(set_t_convert_options, "convert.options");
+    set_text!(set_t_convert_profile, "convert.profile");
+    set_text!(set_t_convert_quality, "convert.quality");
+    set_text!(set_t_convert_output, "convert.output");
+    set_text!(
+        set_t_convert_output_placeholder,
+        "convert.output_placeholder"
+    );
+    set_text!(set_t_convert_save_as, "convert.save_as");
+    set_text!(set_t_convert_detect_profile, "convert.detect_profile");
+    set_text!(set_t_convert_detecting_profile, "convert.detecting_profile");
+    set_text!(set_t_convert_convert, "convert.convert");
+    set_text!(set_t_convert_cloud_convert, "convert.cloud_convert");
+    set_text!(set_t_convert_converting, "convert.converting");
+    set_text!(set_t_convert_uploading, "convert.uploading");
+    set_text!(set_t_convert_reading_source, "convert.reading_source");
+    set_text!(set_t_convert_open_output, "convert.open_output");
+    set_text!(set_t_convert_open_report, "convert.open_report");
+    set_text!(
+        set_t_convert_cloud_reason_sign_in,
+        "convert.cloud_reason_sign_in"
+    );
+    set_text!(set_t_convert_cloud_reason_api, "convert.cloud_reason_api");
+    set_text!(
+        set_t_convert_cloud_reason_fields,
+        "convert.cloud_reason_fields"
+    );
+    set_text!(set_t_convert_report, "convert.report");
+    set_text!(set_t_convert_detected, "convert.detected");
+    set_text!(set_t_convert_status, "convert.status");
+    set_text!(set_t_convert_ready, "convert.ready");
+    set_text!(set_t_settings_service, "settings.service");
+    set_text!(
+        set_t_settings_api_base_url_placeholder,
+        "settings.api_base_url_placeholder"
+    );
+    set_text!(set_t_settings_default_params, "settings.default_params");
+    set_text!(set_t_settings_default_profile, "settings.default_profile");
+    set_text!(set_t_settings_default_quality, "settings.default_quality");
+    set_text!(
+        set_t_settings_default_output_dir,
+        "settings.default_output_dir"
+    );
+    set_text!(set_t_settings_updates, "settings.updates");
+    set_text!(
+        set_t_settings_release_channel_placeholder,
+        "settings.release_channel_placeholder"
+    );
+    set_text!(set_t_settings_check_update, "settings.check_update");
+    set_text!(set_t_settings_checking_update, "settings.checking_update");
+    set_text!(set_t_settings_appearance, "settings.appearance");
+    set_text!(set_t_settings_language, "settings.language");
+    set_text!(set_t_settings_theme, "settings.theme");
+    set_text!(set_t_settings_apply_appearance, "settings.apply_appearance");
+    set_text!(set_t_settings_about, "settings.about");
+    set_text!(set_t_settings_product, "settings.product");
+    set_text!(set_t_settings_version, "settings.version");
+    set_text!(set_t_account_sign_in_register, "account.sign_in_register");
+    set_text!(set_t_account_email, "account.email");
+    set_text!(set_t_account_password, "account.password");
+    set_text!(set_t_account_login, "account.login");
+    set_text!(set_t_account_register, "account.register");
+    set_text!(set_t_account_refresh, "account.refresh");
+    set_text!(set_t_account_logout, "account.logout");
+    set_text!(set_t_account_account, "account.account");
+    set_text!(set_t_account_display_name, "account.display_name");
+    set_text!(set_t_account_plan, "account.plan");
+    set_text!(set_t_account_quota, "account.quota");
+    set_text!(set_t_account_refresh_usage, "account.refresh_usage");
+    set_text!(set_t_account_signing_in, "account.signing_in");
+    set_text!(set_t_account_registering, "account.registering");
+    set_text!(set_t_account_refreshing, "account.refreshing");
+    set_text!(set_t_account_refreshing_usage, "account.refreshing_usage");
+    set_text!(set_t_billing_subscribe_manage, "billing.subscribe_manage");
+    set_text!(set_t_billing_plan_id, "billing.plan_id");
+    set_text!(set_t_billing_plans, "billing.plans");
+    set_text!(set_t_billing_checkout, "billing.checkout");
+    set_text!(set_t_billing_portal, "billing.portal");
+    set_text!(set_t_billing_loading_plans, "billing.loading_plans");
+    set_text!(set_t_billing_creating_checkout, "billing.creating_checkout");
+    set_text!(set_t_billing_opening_portal, "billing.opening_portal");
+    set_text!(set_t_history_recent_jobs, "history.recent_jobs");
+    set_text!(set_t_history_no_recent_jobs, "history.no_recent_jobs");
+    set_text!(set_t_history_open_output, "history.open_output");
+    set_text!(set_t_history_open_report, "history.open_report");
+    set_text!(
+        set_t_history_export_diagnostics,
+        "history.export_diagnostics"
+    );
+    set_text!(
+        set_t_history_exporting_diagnostics,
+        "history.exporting_diagnostics"
+    );
+}
+
+fn tr_ui(ui: &MainWindow, key: &str) -> String {
+    i18n::translate(ui.get_ui_locale().as_str(), key)
+}
+
+fn apply_theme(ui: &MainWindow, theme_value: &str) {
+    let palette = theme::palette(theme_value);
+    ui.set_color_window_bg(parse_color(palette.window_bg));
+    ui.set_color_surface(parse_color(palette.surface));
+    ui.set_color_surface_alt(parse_color(palette.surface_alt));
+    ui.set_color_border(parse_color(palette.border));
+    ui.set_color_text_primary(parse_color(palette.text_primary));
+    ui.set_color_text_secondary(parse_color(palette.text_secondary));
+    ui.set_color_text_muted(parse_color(palette.text_muted));
+    ui.set_color_accent(parse_color(palette.accent));
+    ui.set_color_success(parse_color(palette.success));
+    ui.set_color_warning(parse_color(palette.warning));
+    ui.set_color_danger(parse_color(palette.danger));
+}
+
+fn parse_color(hex: &str) -> Color {
+    let trimmed = hex.trim_start_matches('#');
+    let value = u32::from_str_radix(trimmed, 16).unwrap_or(0);
+    Color::from_argb_u8(
+        255,
+        ((value >> 16) & 0xff) as u8,
+        ((value >> 8) & 0xff) as u8,
+        (value & 0xff) as u8,
+    )
 }
 
 fn path_for_dialog(value: &str) -> Option<std::path::PathBuf> {

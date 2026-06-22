@@ -1,9 +1,10 @@
 import { TabWidget, Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
-    title: "Tex2Doc Desktop";
+    title: is-signed-in ? t-app-title-signed-out + " " + app-version + " - " + account-display-name : t-app-title-signed-out + " " + app-version;
     preferred-width: 1080px;
     preferred-height: 760px;
+    background: color-window-bg;
 
     // ?? State properties ??????????????????????????????????????????????????????
     in-out property <string> project-path;
@@ -12,21 +13,135 @@ export component MainWindow inherits Window {
     in-out property <string> login-password;
     in-out property <string> account-status: "Not signed in.";
     in-out property <string> usage-status: "--";
+    in-out property <bool> is-signed-in: false;
+    in-out property <bool> is-account-busy: false;
+    in-out property <bool> is-billing-busy: false;
+    in-out property <string> account-display-name: "Guest";
+    in-out property <string> account-tier: "free";
+    in-out property <int> quota-remaining: 0;
+    in-out property <int> quota-total: 0;
     in-out property <string> billing-plan-id: "pro";
     in-out property <string> billing-status: "--";
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
+    in-out property <string> ui-locale: "en";
+    in-out property <string> ui-theme: "system";
+    in-out property <string> app-version: "";
     in-out property <string> detected-profile: "auto";
     in-out property <string> main-tex;
     in-out property <string> quality-level: "standard";
     in-out property <string> output-path;
-    in-out property <string> status-text: "Ready. Enter a project path and click Convert.";
+    in-out property <string> status-text: "";
     in-out property <bool> is-converting: false;
     in-out property <float> conversion-progress: 0.0;
+    in-out property <bool> use-cloud-engine: false;
     in-out property <string> compatibility-score: "--";
+    in-out property <float> compatibility-progress: 0.0;
     in-out property <string> quality-status: "--";
+    in-out property <float> quality-progress: 0.0;
     in-out property <string> profile-confidence: "--";
+    in-out property <float> profile-confidence-progress: 0.0;
     in-out property <string> recent-jobs: "No recent jobs.";
+    in-out property <color> color-window-bg: #f6f8fb;
+    in-out property <color> color-surface: #ffffff;
+    in-out property <color> color-surface-alt: #f1f5f9;
+    in-out property <color> color-border: #d7dee8;
+    in-out property <color> color-text-primary: #172033;
+    in-out property <color> color-text-secondary: #42526b;
+    in-out property <color> color-text-muted: #6b778c;
+    in-out property <color> color-accent: #2563eb;
+    in-out property <color> color-success: #0f8a5f;
+    in-out property <color> color-warning: #b7791f;
+    in-out property <color> color-danger: #c2413a;
+
+    in-out property <string> t-tab-convert: "Convert";
+    in-out property <string> t-tab-settings: "Settings";
+    in-out property <string> t-tab-account: "Account";
+    in-out property <string> t-tab-billing: "Billing";
+    in-out property <string> t-tab-history: "History";
+    in-out property <string> t-app-title-signed-out: "Tex2Doc Desktop";
+    in-out property <string> t-common-account: "Account";
+    in-out property <string> t-common-quota: "Quota";
+    in-out property <string> t-common-compatibility: "Compatibility";
+    in-out property <string> t-common-confidence: "Confidence";
+    in-out property <string> t-convert-engine: "Engine";
+    in-out property <string> t-convert-local: "Local";
+    in-out property <string> t-convert-cloud: "Cloud";
+    in-out property <string> t-convert-cloud-requires-sign-in: "Cloud engine requires sign-in.";
+    in-out property <string> t-convert-project: "Project";
+    in-out property <string> t-convert-project-placeholder: "TeX project path or project zip...";
+    in-out property <string> t-convert-folder: "Folder";
+    in-out property <string> t-convert-zip: "Zip";
+    in-out property <string> t-convert-main-tex-placeholder: "Main TeX for cloud conversion (optional, e.g. main.tex)...";
+    in-out property <string> t-convert-options: "Options";
+    in-out property <string> t-convert-profile: "Profile";
+    in-out property <string> t-convert-quality: "Quality";
+    in-out property <string> t-convert-output: "Output";
+    in-out property <string> t-convert-output-placeholder: "Output DOCX path...";
+    in-out property <string> t-convert-save-as: "Save As";
+    in-out property <string> t-convert-detect-profile: "Detect Profile";
+    in-out property <string> t-convert-detecting-profile: "[...] Detecting profile for: ";
+    in-out property <string> t-convert-convert: "Convert";
+    in-out property <string> t-convert-cloud-convert: "Cloud Convert";
+    in-out property <string> t-convert-converting: "Converting...";
+    in-out property <string> t-convert-uploading: "Uploading...";
+    in-out property <string> t-convert-reading-source: "[1/3] Reading TeX source...";
+    in-out property <string> t-convert-open-output: "Open Output";
+    in-out property <string> t-convert-open-report: "Open Report";
+    in-out property <string> t-convert-cloud-reason-sign-in: "Sign in to use cloud engine.";
+    in-out property <string> t-convert-cloud-reason-api: "Set API base URL in Settings.";
+    in-out property <string> t-convert-cloud-reason-fields: "Fill project and output paths above.";
+    in-out property <string> t-convert-report: "Report";
+    in-out property <string> t-convert-detected: "detected";
+    in-out property <string> t-convert-status: "Status";
+    in-out property <string> t-convert-ready: "Ready. Enter a project path and click Convert.";
+    in-out property <string> t-settings-service: "Service";
+    in-out property <string> t-settings-api-base-url-placeholder: "API base URL";
+    in-out property <string> t-settings-default-params: "Default Conversion Parameters";
+    in-out property <string> t-settings-default-profile: "Default Profile";
+    in-out property <string> t-settings-default-quality: "Default Quality";
+    in-out property <string> t-settings-default-output-dir: "Default Output Directory";
+    in-out property <string> t-settings-updates: "Updates";
+    in-out property <string> t-settings-release-channel-placeholder: "Release channel";
+    in-out property <string> t-settings-check-update: "Check Update";
+    in-out property <string> t-settings-checking-update: "Checking for updates...";
+    in-out property <string> t-settings-appearance: "Appearance";
+    in-out property <string> t-settings-language: "Language";
+    in-out property <string> t-settings-theme: "Theme";
+    in-out property <string> t-settings-apply-appearance: "Apply Appearance";
+    in-out property <string> t-settings-about: "About";
+    in-out property <string> t-settings-product: "Product";
+    in-out property <string> t-settings-version: "Version";
+    in-out property <string> t-account-sign-in-register: "Sign In / Register";
+    in-out property <string> t-account-email: "Email";
+    in-out property <string> t-account-password: "Password";
+    in-out property <string> t-account-login: "Login";
+    in-out property <string> t-account-register: "Register";
+    in-out property <string> t-account-refresh: "Refresh";
+    in-out property <string> t-account-logout: "Logout";
+    in-out property <string> t-account-account: "Account";
+    in-out property <string> t-account-display-name: "Display Name";
+    in-out property <string> t-account-plan: "Plan";
+    in-out property <string> t-account-quota: "Quota";
+    in-out property <string> t-account-refresh-usage: "Refresh Usage";
+    in-out property <string> t-account-signing-in: "Signing in...";
+    in-out property <string> t-account-registering: "Registering...";
+    in-out property <string> t-account-refreshing: "Refreshing...";
+    in-out property <string> t-account-refreshing-usage: "Refreshing usage...";
+    in-out property <string> t-billing-subscribe-manage: "Subscribe / Manage";
+    in-out property <string> t-billing-plan-id: "Plan ID";
+    in-out property <string> t-billing-plans: "Plans";
+    in-out property <string> t-billing-checkout: "Checkout";
+    in-out property <string> t-billing-portal: "Billing Portal";
+    in-out property <string> t-billing-loading-plans: "Loading plans...";
+    in-out property <string> t-billing-creating-checkout: "Creating checkout session...";
+    in-out property <string> t-billing-opening-portal: "Opening billing portal...";
+    in-out property <string> t-history-recent-jobs: "Recent Jobs";
+    in-out property <string> t-history-no-recent-jobs: "No recent jobs.";
+    in-out property <string> t-history-open-output: "Open Output";
+    in-out property <string> t-history-open-report: "Open Report";
+    in-out property <string> t-history-export-diagnostics: "Export Diagnostics";
+    in-out property <string> t-history-exporting-diagnostics: "Exporting diagnostics...";
 
     // ?? Callbacks (implemented in Rust) ?????????????????????????????????????
     callback convert-clicked(string, string, string, string);
@@ -41,6 +156,7 @@ export component MainWindow inherits Window {
     callback checkout-clicked(string, string);
     callback billing-portal-clicked(string);
     callback check-update-clicked(string, string);
+    callback apply-appearance-clicked(string, string);
     callback choose-project-folder-clicked(string, string);
     callback choose-project-zip-clicked(string, string);
     callback choose-output-clicked(string);
@@ -52,13 +168,44 @@ export component MainWindow inherits Window {
 
         // ?? Tab 1: Convert ???????????????????????????????????????????????
         Tab {
-            title: "Convert";
+            title: t-tab-convert;
             VerticalBox {
                 padding: 16px;
                 spacing: 10px;
 
                 GroupBox {
-                    title: "Project";
+                    title: t-convert-engine;
+
+                    HorizontalBox {
+                        spacing: 12px;
+
+                        Button {
+                            text: t-convert-local;
+                            primary: !use-cloud-engine;
+                            enabled: !is-converting;
+                            clicked => { root.use-cloud-engine = false; }
+                        }
+
+                        Button {
+                            text: t-convert-cloud;
+                            primary: use-cloud-engine;
+                            enabled: !is-converting && is-signed-in;
+                            clicked => { root.use-cloud-engine = true; }
+                        }
+
+                        Text {
+                            text: is-signed-in
+                                ? "Account: " + account-display-name + " | " + account-tier + " | Quota: " + quota-remaining + "/" + quota-total
+                                : t-convert-cloud-requires-sign-in;
+                            font-size: 12px;
+                            color: is-signed-in ? color-text-primary : color-danger;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: t-convert-project;
 
                     VerticalBox {
                         spacing: 6px;
@@ -67,12 +214,12 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             LineEdit {
-                                placeholder-text: "TeX project path or project zip...";
+                                placeholder-text: t-convert-project-placeholder;
                                 text <=> project-path;
                             }
 
                             Button {
-                                text: "Folder";
+                                text: t-convert-folder;
                                 enabled: !is-converting;
                                 clicked => {
                                     root.choose-project-folder-clicked(root.project-path, root.output-path);
@@ -80,7 +227,7 @@ export component MainWindow inherits Window {
                             }
 
                             Button {
-                                text: "Zip";
+                                text: t-convert-zip;
                                 enabled: !is-converting;
                                 clicked => {
                                     root.choose-project-zip-clicked(root.project-path, root.output-path);
@@ -89,20 +236,20 @@ export component MainWindow inherits Window {
                         }
 
                         LineEdit {
-                            placeholder-text: "Main TeX for cloud conversion (optional, e.g. main-jos.tex)...";
+                            placeholder-text: t-convert-main-tex-placeholder;
                             text <=> main-tex;
                         }
                     }
                 }
 
                 GroupBox {
-                    title: "Options";
+                    title: t-convert-options;
 
                     HorizontalBox {
                         spacing: 16px;
 
                         VerticalBox {
-                            Text { text: "Profile"; font-size: 12px; }
+                            Text { text: t-convert-profile; font-size: 12px; color: color-text-secondary; }
                             ComboBox {
                                 current-value: detected-profile;
                                 model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
@@ -110,7 +257,7 @@ export component MainWindow inherits Window {
                         }
 
                         VerticalBox {
-                            Text { text: "Quality"; font-size: 12px; }
+                            Text { text: t-convert-quality; font-size: 12px; color: color-text-secondary; }
                             ComboBox {
                                 current-value: quality-level;
                                 model: ["preview", "standard", "strict"];
@@ -118,15 +265,15 @@ export component MainWindow inherits Window {
                         }
 
                         VerticalBox {
-                            Text { text: "Output"; font-size: 12px; }
+                            Text { text: t-convert-output; font-size: 12px; color: color-text-secondary; }
                             HorizontalBox {
                                 spacing: 6px;
                                 LineEdit {
-                                    placeholder-text: "Output DOCX path...";
+                                    placeholder-text: t-convert-output-placeholder;
                                     text <=> output-path;
                                 }
                                 Button {
-                                    text: "Save As";
+                                    text: t-convert-save-as;
                                     enabled: !is-converting;
                                     clicked => { root.choose-output-clicked(root.output-path); }
                                 }
@@ -139,47 +286,52 @@ export component MainWindow inherits Window {
                     spacing: 8px;
 
                     Button {
-                        text: "Detect Profile";
+                        text: t-convert-detect-profile;
                         enabled: project-path != "" && !is-converting;
                         clicked => {
-                            root.status-text = "[...] Detecting profile for: " + project-path + "...";
+                            root.status-text = t-convert-detecting-profile + project-path + "...";
                             root.detect-profile-clicked(root.project-path);
                         }
                     }
 
                     Button {
-                        text: "Local Convert";
-                        enabled: project-path != "" && output-path != "" && !is-converting;
+                        primary: true;
+                        text: is-converting
+                            ? (use-cloud-engine ? t-convert-uploading : t-convert-converting)
+                            : (use-cloud-engine ? t-convert-cloud-convert : t-convert-convert);
+                        enabled: project-path != "" && output-path != "" && !is-converting
+                            && (!use-cloud-engine || (api-base-url != "" && is-signed-in));
                         clicked => {
                             root.is-converting = true;
-                            root.status-text = "[1/3] Reading TeX source...";
                             root.conversion-progress = 0.1;
-                            root.convert-clicked(root.project-path, root.detected-profile, root.quality-level, root.output-path);
+                            if root.use-cloud-engine {
+                                root.status-text = "[cloud] Uploading TeX project...";
+                                root.cloud-convert-clicked(root.api-base-url, root.project-path, root.main-tex, root.detected-profile, root.quality-level, root.output-path);
+                            } else {
+                                root.status-text = t-convert-reading-source;
+                                root.convert-clicked(root.project-path, root.detected-profile, root.quality-level, root.output-path);
+                            }
                         }
                     }
 
                     Button {
-                        text: "Cloud Convert";
-                        enabled: api-base-url != "" && project-path != "" && output-path != "" && !is-converting;
-                        clicked => {
-                            root.is-converting = true;
-                            root.status-text = "[cloud] Uploading TeX project...";
-                            root.conversion-progress = 0.1;
-                            root.cloud-convert-clicked(root.api-base-url, root.project-path, root.main-tex, root.detected-profile, root.quality-level, root.output-path);
-                        }
-                    }
-
-                    Button {
-                        text: "Open Output";
+                        text: t-convert-open-output;
                         enabled: !is-converting && output-path != "";
                         clicked => { root.open-output-clicked(root.output-path); }
                     }
 
                     Button {
-                        text: "Open Report";
+                        text: t-convert-open-report;
                         enabled: !is-converting && output-path != "";
                         clicked => { root.open-report-clicked(root.output-path); }
                     }
+                }
+
+                Text {
+                    visible: use-cloud-engine && (api-base-url == "" || !is-signed-in || project-path == "" || output-path == "");
+                    text: !is-signed-in ? t-convert-cloud-reason-sign-in : (api-base-url == "" ? t-convert-cloud-reason-api : t-convert-cloud-reason-fields);
+                    color: color-danger;
+                    font-size: 11px;
                 }
 
                 ProgressIndicator {
@@ -188,35 +340,67 @@ export component MainWindow inherits Window {
                 }
 
                 GroupBox {
-                    title: "Report";
+                    title: t-convert-report;
 
                     HorizontalBox {
-                        spacing: 16px;
+                        spacing: 10px;
 
-                        VerticalBox {
-                            Text { text: "Profile"; font-size: 11px; color: #666; }
-                            Text { text: detected-profile; font-size: 14px; font-weight: 600; }
+                        Rectangle {
+                            background: color-surface;
+                            border-color: color-border;
+                            border-radius: 8px;
+                            VerticalBox {
+                                padding: 8px;
+                                spacing: 4px;
+                                Text { text: t-convert-profile; font-size: 11px; color: color-text-muted; }
+                                Text { text: detected-profile; font-size: 17px; font-weight: 700; color: color-text-primary; }
+                                Text { text: t-convert-detected; font-size: 11px; color: color-text-muted; }
+                            }
                         }
 
-                        VerticalBox {
-                            Text { text: "Compatibility"; font-size: 11px; color: #666; }
-                            Text { text: compatibility-score + "%"; font-size: 14px; font-weight: 600; }
+                        Rectangle {
+                            background: color-surface;
+                            border-color: color-border;
+                            border-radius: 8px;
+                            VerticalBox {
+                                padding: 8px;
+                                spacing: 4px;
+                                Text { text: t-common-compatibility; font-size: 11px; color: color-text-muted; }
+                                Text { text: compatibility-score == "--" ? "--" : compatibility-score + "%"; font-size: 17px; font-weight: 700; color: compatibility-progress >= 0.8 ? color-success : (compatibility-progress >= 0.5 ? color-warning : color-danger); }
+                                ProgressIndicator { progress: compatibility-progress; }
+                            }
                         }
 
-                        VerticalBox {
-                            Text { text: "Quality"; font-size: 11px; color: #666; }
-                            Text { text: quality-status; font-size: 14px; font-weight: 600; }
+                        Rectangle {
+                            background: color-surface;
+                            border-color: color-border;
+                            border-radius: 8px;
+                            VerticalBox {
+                                padding: 8px;
+                                spacing: 4px;
+                                Text { text: t-convert-quality; font-size: 11px; color: color-text-muted; }
+                                Text { text: quality-status; font-size: 17px; font-weight: 700; color: color-text-primary; }
+                                ProgressIndicator { progress: quality-progress; }
+                            }
                         }
 
-                        VerticalBox {
-                            Text { text: "Confidence"; font-size: 11px; color: #666; }
-                            Text { text: profile-confidence; font-size: 14px; font-weight: 600; }
+                        Rectangle {
+                            background: color-surface;
+                            border-color: color-border;
+                            border-radius: 8px;
+                            VerticalBox {
+                                padding: 8px;
+                                spacing: 4px;
+                                Text { text: t-common-confidence; font-size: 11px; color: color-text-muted; }
+                                Text { text: profile-confidence; font-size: 17px; font-weight: 700; color: color-text-primary; }
+                                ProgressIndicator { progress: profile-confidence-progress; }
+                            }
                         }
                     }
                 }
 
                 GroupBox {
-                    title: "Status";
+                    title: t-convert-status;
 
                     TextEdit {
                         text <=> status-text;
@@ -230,26 +414,13 @@ export component MainWindow inherits Window {
 
         // ?? Tab 2: Settings ???????????????????????????????????????????????
         Tab {
-            title: "Settings";
+            title: t-tab-settings;
             VerticalBox {
                 padding: 16px;
                 spacing: 10px;
 
                 GroupBox {
-                    title: "Service";
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        LineEdit {
-                            placeholder-text: "API base URL";
-                            text <=> api-base-url;
-                        }
-                    }
-                }
-
-                GroupBox {
-                    title: "Default Conversion Parameters";
+                    title: t-settings-appearance;
 
                     VerticalBox {
                         spacing: 6px;
@@ -258,7 +429,55 @@ export component MainWindow inherits Window {
                             spacing: 16px;
 
                             VerticalBox {
-                                Text { text: "Default Profile"; font-size: 12px; }
+                                Text { text: t-settings-language; font-size: 12px; color: color-text-secondary; }
+                                ComboBox {
+                                    current-value <=> ui-locale;
+                                    model: ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
+                                    selected(_) => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
+                                }
+                            }
+
+                            VerticalBox {
+                                Text { text: t-settings-theme; font-size: 12px; color: color-text-secondary; }
+                                ComboBox {
+                                    current-value <=> ui-theme;
+                                    model: ["system", "light", "dark", "high-contrast"];
+                                    selected(_) => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
+                                }
+                            }
+
+                            Button {
+                                text: t-settings-apply-appearance;
+                                clicked => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
+                            }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: t-settings-service;
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        LineEdit {
+                            placeholder-text: t-settings-api-base-url-placeholder;
+                            text <=> api-base-url;
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: t-settings-default-params;
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        HorizontalBox {
+                            spacing: 16px;
+
+                            VerticalBox {
+                                Text { text: t-settings-default-profile; font-size: 12px; color: color-text-secondary; }
                                 ComboBox {
                                     current-value: detected-profile;
                                     model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
@@ -266,7 +485,7 @@ export component MainWindow inherits Window {
                             }
 
                             VerticalBox {
-                                Text { text: "Default Quality"; font-size: 12px; }
+                                Text { text: t-settings-default-quality; font-size: 12px; color: color-text-secondary; }
                                 ComboBox {
                                     current-value: quality-level;
                                     model: ["preview", "standard", "strict"];
@@ -277,18 +496,18 @@ export component MainWindow inherits Window {
                         HorizontalBox {
                             spacing: 8px;
                             VerticalBox {
-                                Text { text: "Default Output Directory"; font-size: 12px; }
+                                Text { text: t-settings-default-output-dir; font-size: 12px; color: color-text-secondary; }
                             }
                         }
 
                         HorizontalBox {
                             spacing: 8px;
                             LineEdit {
-                                placeholder-text: "Default output DOCX path...";
+                                placeholder-text: t-convert-output-placeholder;
                                 text <=> output-path;
                             }
                             Button {
-                                text: "Save As";
+                                text: t-convert-save-as;
                                 enabled: !is-converting;
                                 clicked => { root.choose-output-clicked(root.output-path); }
                             }
@@ -297,7 +516,7 @@ export component MainWindow inherits Window {
                 }
 
                 GroupBox {
-                    title: "Updates";
+                    title: t-settings-updates;
 
                     VerticalBox {
                         spacing: 6px;
@@ -306,15 +525,15 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             LineEdit {
-                                placeholder-text: "Release channel";
+                                placeholder-text: t-settings-release-channel-placeholder;
                                 text <=> update-channel;
                             }
 
                             Button {
-                                text: "Check Update";
+                                text: t-settings-check-update;
                                 enabled: api-base-url != "";
                                 clicked => {
-                                    root.update-status = "Checking for updates...";
+                                    root.update-status = t-settings-checking-update;
                                     root.check-update-clicked(root.api-base-url, root.update-channel);
                                 }
                             }
@@ -323,18 +542,28 @@ export component MainWindow inherits Window {
                         Text { text: update-status; font-size: 12px; }
                     }
                 }
+
+                GroupBox {
+                    title: t-settings-about;
+
+                    VerticalBox {
+                        spacing: 6px;
+                        Text { text: t-settings-product + ": Tex2Doc Desktop"; font-size: 12px; color: color-text-primary; }
+                        Text { text: t-settings-version + ": " + app-version; font-size: 12px; color: color-text-secondary; }
+                    }
+                }
             }
         }
 
         // ?? Tab 3: Account ???????????????????????????????????????????????
         Tab {
-            title: "Account";
+            title: t-tab-account;
             VerticalBox {
                 padding: 16px;
                 spacing: 10px;
 
                 GroupBox {
-                    title: "Sign In / Register";
+                    title: t-account-sign-in-register;
 
                     VerticalBox {
                         spacing: 6px;
@@ -343,12 +572,13 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             LineEdit {
-                                placeholder-text: "Email";
+                                placeholder-text: t-account-email;
                                 text <=> login-email;
                             }
 
                             LineEdit {
-                                placeholder-text: "Password";
+                                placeholder-text: t-account-password;
+                                input-type: password;
                                 text <=> login-password;
                             }
                         }
@@ -357,34 +587,37 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             Button {
-                                text: "Login";
-                                enabled: api-base-url != "" && login-email != "";
+                                text: is-account-busy ? t-account-signing-in : t-account-login;
+                                enabled: api-base-url != "" && login-email != "" && !is-account-busy;
                                 clicked => {
-                                    root.account-status = "Signing in...";
+                                    root.is-account-busy = true;
+                                    root.account-status = t-account-signing-in;
                                     root.login-clicked(root.api-base-url, root.login-email, root.login-password);
                                 }
                             }
 
                             Button {
-                                text: "Register";
-                                enabled: api-base-url != "" && login-email != "";
+                                text: is-account-busy ? t-account-registering : t-account-register;
+                                enabled: api-base-url != "" && login-email != "" && !is-account-busy;
                                 clicked => {
-                                    root.account-status = "Registering...";
+                                    root.is-account-busy = true;
+                                    root.account-status = t-account-registering;
                                     root.register-clicked(root.api-base-url, root.login-email, root.login-password);
                                 }
                             }
 
                             Button {
-                                text: "Refresh";
-                                enabled: api-base-url != "";
+                                text: is-account-busy ? t-account-refreshing : t-account-refresh;
+                                enabled: api-base-url != "" && !is-account-busy;
                                 clicked => {
-                                    root.account-status = "Refreshing login...";
+                                    root.is-account-busy = true;
+                                    root.account-status = t-account-refreshing;
                                     root.refresh-login-clicked(root.api-base-url);
                                 }
                             }
 
                             Button {
-                                text: "Logout";
+                                text: t-account-logout;
                                 clicked => { root.logout-clicked(); }
                             }
                         }
@@ -392,22 +625,41 @@ export component MainWindow inherits Window {
                 }
 
                 GroupBox {
-                    title: "Session";
+                    title: t-account-account;
 
                     VerticalBox {
                         spacing: 6px;
 
+                        HorizontalBox {
+                            spacing: 16px;
+
+                            VerticalBox {
+                                Text { text: t-account-display-name; font-size: 11px; color: color-text-muted; }
+                                Text { text: account-display-name; font-size: 14px; font-weight: 700; color: color-text-primary; }
+                            }
+
+                            VerticalBox {
+                                Text { text: t-account-plan; font-size: 11px; color: color-text-muted; }
+                                Text { text: account-tier; font-size: 14px; font-weight: 700; color: account-tier == "free" ? color-text-muted : color-accent; }
+                            }
+
+                            VerticalBox {
+                                Text { text: t-account-quota; font-size: 11px; color: color-text-muted; }
+                                Text { text: quota-remaining + " / " + quota-total; font-size: 14px; font-weight: 700; color: color-text-primary; }
+                            }
+                        }
+
                         Button {
-                            text: "Refresh Usage";
-                            enabled: api-base-url != "";
+                            text: t-account-refresh-usage;
+                            enabled: api-base-url != "" && is-signed-in;
                             clicked => {
-                                root.usage-status = "Refreshing usage...";
+                                root.usage-status = t-account-refreshing-usage;
                                 root.refresh-usage-clicked(root.api-base-url);
                             }
                         }
 
-                        Text { text: account-status; font-size: 12px; }
-                        Text { text: usage-status; font-size: 12px; }
+                        Text { text: account-status; font-size: 12px; color: color-text-secondary; }
+                        Text { text: usage-status; font-size: 12px; color: color-text-secondary; }
                     }
                 }
             }
@@ -415,13 +667,13 @@ export component MainWindow inherits Window {
 
         // ?? Tab 4: Plans ?????????????????????????????????????????????????
         Tab {
-            title: "Plans";
+            title: t-tab-billing;
             VerticalBox {
                 padding: 16px;
                 spacing: 10px;
 
                 GroupBox {
-                    title: "Subscription";
+                    title: t-billing-subscribe-manage;
 
                     VerticalBox {
                         spacing: 6px;
@@ -430,15 +682,16 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             LineEdit {
-                                placeholder-text: "Plan ID";
+                                placeholder-text: t-billing-plan-id;
                                 text <=> billing-plan-id;
                             }
 
                             Button {
-                                text: "Plans";
-                                enabled: api-base-url != "";
+                                text: t-billing-plans;
+                                enabled: api-base-url != "" && !is-billing-busy;
                                 clicked => {
-                                    root.billing-status = "Loading plans...";
+                                    root.is-billing-busy = true;
+                                    root.billing-status = t-billing-loading-plans;
                                     root.show-plans-clicked(root.api-base-url);
                                 }
                             }
@@ -448,25 +701,27 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             Button {
-                                text: "Checkout";
-                                enabled: api-base-url != "" && billing-plan-id != "";
+                                text: t-billing-checkout;
+                                enabled: api-base-url != "" && billing-plan-id != "" && !is-billing-busy;
                                 clicked => {
-                                    root.billing-status = "Creating checkout session...";
+                                    root.is-billing-busy = true;
+                                    root.billing-status = t-billing-creating-checkout;
                                     root.checkout-clicked(root.api-base-url, root.billing-plan-id);
                                 }
                             }
 
                             Button {
-                                text: "Billing Portal";
-                                enabled: api-base-url != "";
+                                text: t-billing-portal;
+                                enabled: api-base-url != "" && !is-billing-busy;
                                 clicked => {
-                                    root.billing-status = "Opening billing portal...";
+                                    root.is-billing-busy = true;
+                                    root.billing-status = t-billing-opening-portal;
                                     root.billing-portal-clicked(root.api-base-url);
                                 }
                             }
                         }
 
-                        Text { text: billing-status; font-size: 12px; }
+                        Text { text: billing-status; font-size: 12px; color: color-text-secondary; }
                     }
                 }
             }
@@ -474,13 +729,13 @@ export component MainWindow inherits Window {
 
         // ?? Tab 5: History ???????????????????????????????????????????????
         Tab {
-            title: "History";
+            title: t-tab-history;
             VerticalBox {
                 padding: 16px;
                 spacing: 10px;
 
                 GroupBox {
-                    title: "Recent Jobs";
+                    title: t-history-recent-jobs;
 
                     VerticalBox {
                         spacing: 6px;
@@ -496,21 +751,22 @@ export component MainWindow inherits Window {
                             spacing: 8px;
 
                             Button {
-                                text: "Open Output";
+                                text: t-history-open-output;
                                 enabled: output-path != "";
                                 clicked => { root.open-output-clicked(root.output-path); }
                             }
 
                             Button {
-                                text: "Open Report";
+                                text: t-history-open-report;
                                 enabled: output-path != "";
                                 clicked => { root.open-report-clicked(root.output-path); }
                             }
 
                             Button {
-                                text: "Export Diagnostics";
+                                text: t-history-export-diagnostics;
                                 enabled: !is-converting;
                                 clicked => {
+                                    root.status-text = t-history-exporting-diagnostics;
                                     root.export-diagnostics-clicked(root.project-path, root.output-path, root.api-base-url, root.detected-profile, root.quality-level, root.status-text, root.recent-jobs, root.update-status);
                                 }
                             }
