@@ -64,6 +64,7 @@ impl Settings {
     }
 
     /// Update the last project path.
+    #[allow(dead_code)]
     pub fn set_last_project(&mut self, path: String) {
         self.last_project_path = Some(path);
         let _ = self.save();

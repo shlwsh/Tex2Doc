@@ -24,8 +24,7 @@ use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
 use doc_rule_engine::{
-    journal_rules, route_rule_output, AuditCache, DecisionSource, MacroRule, RuleEngine,
-    RuleEngineConfig, RoutingConfig, RuleOutput,
+    DecisionSource, MacroRule, RuleEngine, RuleOutput, route_rule_output, RoutingConfig,
 };
 use doc_xdv_parser::to_collector_layout_graph;
 use doc_utils::{ImageAssets, VirtualFs};
@@ -2079,6 +2078,7 @@ fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
     signals
 }
 
+#[allow(dead_code)]
 fn select_auto_backend_with_availability(
     signals: &TemplateSignals,
     availability: RuntimeAvailabilitySnapshot,
@@ -3093,7 +3093,6 @@ fn collect_runtime_events(
                 None
             }
         }
-        _ => None,
     };
 
     // M4-2: Read node tree JSONL sidecar emitted by the LuaLaTeX hook.

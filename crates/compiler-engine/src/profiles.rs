@@ -386,7 +386,7 @@ impl ProfileRegistry {
             ("jos-paper", "jos-paper"),
             ("medical-journal", "medical-journal"),
         ];
-        for (id, path_key) in builtin_ids {
+        for (id, _) in builtin_ids {
             if let Some(spec) = load_builtin(id) {
                 registry.register_with_aliases(&spec);
             }
@@ -475,6 +475,7 @@ impl ProfileRegistry {
 
 /// Source of a loaded profile.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[allow(dead_code)]
 pub enum ProfileLoadSource {
     JsonFile,
     TomlFile,
@@ -483,6 +484,7 @@ pub enum ProfileLoadSource {
 
 /// Result of a profile load attempt.
 #[derive(Debug)]
+#[allow(dead_code)]
 pub enum ProfileLoadResult {
     /// Profile was loaded from a JSON or TOML file.
     Loaded(ProfileSpecFile),
@@ -493,6 +495,7 @@ pub enum ProfileLoadResult {
 }
 
 /// Loads a profile from a file path, built-in ID, or falls back to `None`.
+#[allow(dead_code)]
 pub fn load_profile(
     profile_path: Option<&Path>,
     profile_id: Option<&str>,
@@ -584,6 +587,7 @@ fn load_toml_from_bytes(bytes: &[u8]) -> Result<ProfileSpecFile, ProfileLoadErro
 
 /// Resolve a profile ID to a file path in the profiles directory.
 /// Prefers TOML over JSON if both exist.
+#[allow(dead_code)]
 pub fn resolve_profile_path(id: &str) -> Option<(PathBuf, ProfileLoadSource)> {
     let profile_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("profiles");
     let toml_path = profile_dir.join(format!("{}.toml", id));

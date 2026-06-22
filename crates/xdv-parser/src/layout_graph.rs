@@ -137,7 +137,7 @@ pub fn xdv_to_layout_full(xdv: &XdvDocument) -> XdvLayoutResult {
                 XdvCommand::FontDefExt(ext) => {
                     font_map.entry(ext.id).or_insert_with(|| ext.clone());
                 }
-                XdvCommand::NativeGlyph { font_id, glyph_id, width, special } => {
+                XdvCommand::NativeGlyph { font_id, glyph_id, width, special: _ } => {
                     let font_name = font_map
                         .get(font_id)
                         .map(|f| f.name.clone())
@@ -151,7 +151,7 @@ pub fn xdv_to_layout_full(xdv: &XdvDocument) -> XdvLayoutResult {
                         width: *width,
                     });
                 }
-                XdvCommand::NativeNode { node_type, width, special } => {
+                XdvCommand::NativeNode { node_type, width, special: _ } => {
                     let mut info = NativeNodeInfo::from_type(*node_type);
                     info.width = *width;
                     native_nodes.push(info);
@@ -648,7 +648,7 @@ pub enum NodeEntry {
 pub fn node_entry_to_layout_node(entry: &NodeEntry) -> Option<CollectorLayoutNode> {
     let (id, kind, x, y, width, height, depth, font_id, font_name, char) = match entry {
         NodeEntry::Glyph {
-            subtype,
+            subtype: _,
             x,
             y,
             char,

@@ -11,6 +11,7 @@ use thiserror::Error;
 
 /// P5: Errors that can occur during desktop commands.
 #[derive(Error, Debug)]
+#[allow(dead_code)]
 pub enum CommandError {
     #[error("project not found: {0}")]
     ProjectNotFound(String),
@@ -150,18 +151,107 @@ pub fn generate_job_id() -> String {
     uuid_simple()
 }
 
-/// Find main.tex or minimal.tex in project root.
+/// Find the main .tex file in a project root.
+///
+/// Strategy (tiered):
+/// 1. Exact-name matches for common conventions (`main.tex`, etc.)
+/// 2. Files with `\documentclass` — pick the one with the most content
+/// 3. Largest `.tex` file by line count as last resort
 fn find_main_tex(project_root: &Path) -> CommandResult<PathBuf> {
-    let candidates = ["main.tex", "minimal.tex", "paper.tex", "article.tex"];
+    let entries = walkdir(project_root)?;
+
+    let candidates: Vec<PathBuf> = entries
+        .into_iter()
+        .filter(|p| {
+            p.extension().and_then(|e| e.to_str()) == Some("tex")
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .map(|n| !n.starts_with('.') && !n.ends_with(".sty.tex") && !n.ends_with(".def.tex"))
+                    .unwrap_or(false)
+        })
+        .collect();
+
+    if candidates.is_empty() {
+        return Err(CommandError::MainTexNotFound(
+            project_root.display().to_string(),
+        ));
+    }
+
+    // Tier 1: exact-name matches (highest priority)
+    let exact_names = ["main.tex", "minimal.tex", "paper.tex", "article.tex"];
     for candidate in &candidates {
-        let path = project_root.join(candidate);
-        if path.is_file() {
-            return Ok(path);
+        let name = candidate.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if exact_names.contains(&name) {
+            return Ok(candidate.clone());
         }
     }
-    Err(CommandError::MainTexNotFound(
-        project_root.display().to_string(),
-    ))
+
+    // Tier 2: files containing \documentclass — pick the one with the most lines
+    let with_docclass: Vec<PathBuf> = candidates
+        .iter()
+        .filter(|p| has_document_class(p))
+        .cloned()
+        .collect();
+
+    if !with_docclass.is_empty() {
+        return Ok(best_candidate_by_lines(&with_docclass));
+    }
+
+    // Tier 3: fallback to largest file by line count
+    Ok(best_candidate_by_lines(&candidates))
+}
+
+/// Returns the candidate with the most lines (proxy for "most likely to be the main file").
+fn best_candidate_by_lines(candidates: &[PathBuf]) -> PathBuf {
+    candidates
+        .iter()
+        .map(|p| {
+            let lines = std::fs::read_to_string(p)
+                .map(|s| s.lines().count())
+                .unwrap_or(0);
+            (p.clone(), lines)
+        })
+        .max_by_key(|(_, lines)| *lines)
+        .map(|(p, _)| p)
+        .unwrap_or_else(|| candidates[0].clone())
+}
+
+/// Check whether a .tex file contains \documentclass (ignoring comments).
+fn has_document_class(path: &Path) -> bool {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('%') {
+            continue;
+        }
+        if trimmed.contains(r"\documentclass") || trimmed.contains("\\documentclass") {
+            return true;
+        }
+    }
+    false
+}
+
+/// Recursively walk a directory, collecting all file paths (not dirs).
+fn walkdir(root: &Path) -> CommandResult<Vec<PathBuf>> {
+    let mut results = Vec::new();
+    let mut stack = vec![root.to_path_buf()];
+
+    while let Some(current) = stack.pop() {
+        let entries = std::fs::read_dir(&current)
+            .map_err(|e| CommandError::ProjectNotFound(format!("{}: {}", current.display(), e)))?;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else {
+                results.push(path);
+            }
+        }
+    }
+
+    Ok(results)
 }
 
 fn report_path_for(output_docx: &Path) -> PathBuf {

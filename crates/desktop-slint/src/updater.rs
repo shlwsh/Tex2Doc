@@ -35,6 +35,7 @@ pub enum SignatureStatus {
 }
 
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum UpdaterError {
     #[error("release manifest decode failed: {0}")]
     Decode(#[from] serde_json::Error),
@@ -48,12 +49,14 @@ pub enum UpdaterError {
 
 pub type Result<T> = std::result::Result<T, UpdaterError>;
 
+#[allow(dead_code)]
 pub fn parse_manifest(json: &str) -> Result<ReleaseManifest> {
     let manifest: ReleaseManifest = serde_json::from_str(json)?;
     validate_manifest(&manifest)?;
     Ok(manifest)
 }
 
+#[allow(dead_code)]
 pub fn check_update_from_manifest(
     current_version: &str,
     manifest_json: &str,
@@ -97,11 +100,13 @@ pub fn is_newer_version(current: &str, latest: &str) -> bool {
     compare_versions(latest, current).is_gt()
 }
 
+#[allow(dead_code)]
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let digest = Sha256::digest(bytes);
     format!("{digest:x}")
 }
 
+#[allow(dead_code)]
 pub fn verify_sha256(bytes: &[u8], expected_sha256: &str) -> Result<()> {
     let actual = sha256_hex(bytes);
     if actual.eq_ignore_ascii_case(expected_sha256) {
@@ -122,11 +127,13 @@ pub fn verify_manifest_signature(manifest: &ReleaseManifest) -> Result<Signature
     Ok(SignatureStatus::DeferredVerification)
 }
 
+#[allow(dead_code)]
 pub fn download_and_verify_from_bytes(bytes: &[u8], expected_sha256: &str) -> Result<Vec<u8>> {
     verify_sha256(bytes, expected_sha256)?;
     Ok(bytes.to_vec())
 }
 
+#[allow(dead_code)]
 pub fn install_update_placeholder() -> Result<()> {
     Err(UpdaterError::InstallUnsupported)
 }

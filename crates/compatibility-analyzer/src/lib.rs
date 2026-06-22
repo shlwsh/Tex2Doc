@@ -196,7 +196,7 @@ enum PackageCompat {
 fn profile_package_compat(profile: ProfileKind, package: &str) -> Option<(PackageCompat, &'static str)> {
     use PackageCompat::*;
 
-    let compat = match profile {
+    match profile {
         // Generic / arXiv: no specific package warnings.
         ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => return None,
 
@@ -314,7 +314,8 @@ fn analyze_compatibility_impl(
     let mut report = CompatibilityReport::default();
     let mut document_classes = HashSet::new();
     let mut packages = HashSet::new();
-    let mut unsupported_seen: HashSet<String> = HashSet::new();
+    #[allow(dead_code)]
+    let _unsupported_seen: HashSet<String> = HashSet::new();
     let mut warning_seen: HashSet<String> = HashSet::new();
 
     for path in vfs.paths() {
@@ -718,6 +719,7 @@ fn sorted_strings(set: HashSet<String>) -> Vec<String> {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ScannedTexCommand {
     name: String,
     argument: String,

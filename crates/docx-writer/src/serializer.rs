@@ -76,8 +76,6 @@ fn write_front_matter_with_style(
     meta: &doc_semantic_ast::MetaData,
     style_map: Option<&ProfileStyleMap>,
 ) {
-    use doc_semantic_ast::MetaData;
-
     // ── 中文标题 ──
     if let Some(title) = &meta.title {
         let p = Paragraph {
@@ -1305,6 +1303,7 @@ fn equation_jos_runs(text: &str) -> Vec<Run> {
     runs
 }
 
+#[allow(dead_code)]
 fn formula_runs(latex: &str) -> Vec<Run> {
     let cleaned = clean_formula_latex(latex);
     let mut runs = Vec::new();
@@ -1385,6 +1384,7 @@ fn read_script_arg(text: &str, start: usize) -> (String, usize) {
     (text[i..end].to_string(), end.max(i + 1))
 }
 
+#[allow(dead_code)]
 fn clean_formula_latex(latex: &str) -> String {
     let mut s = latex.to_string();
     s = strip_latex_command_arg(&s, "label");
@@ -2643,6 +2643,7 @@ fn write_spacer(w: &mut Writer<Vec<u8>>, height_twips: u32) {
     w.write_event(Event::End(BytesEnd::new("w:p"))).unwrap();
 }
 
+#[allow(dead_code)]
 fn token_width_units(token: &str) -> f64 {
     let mut total = 0.0;
     for ch in token.chars() {
@@ -2663,6 +2664,7 @@ fn token_width_units(token: &str) -> f64 {
     total
 }
 
+#[allow(dead_code)]
 fn wrap_text_units(text: &str, max_units: f64) -> Vec<String> {
     let tokens = tokenize_citation_text(text);
     let mut lines: Vec<String> = Vec::new();
@@ -2689,6 +2691,7 @@ fn wrap_text_units(text: &str, max_units: f64) -> Vec<String> {
     lines.into_iter().filter(|l| !l.is_empty()).collect()
 }
 
+#[allow(dead_code)]
 fn tokenize_citation_text(text: &str) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut i = 0;
@@ -2733,6 +2736,7 @@ fn tokenize_citation_text(text: &str) -> Vec<String> {
     tokens
 }
 
+#[allow(dead_code)]
 fn split_citation_text(text: &str, max_units: f64) -> Vec<String> {
     let text = text.trim();
     if text.is_empty() {
@@ -2756,6 +2760,7 @@ fn normalize_institute_line(text: &str) -> String {
     s
 }
 
+#[allow(dead_code)]
 fn spaced_keywords(keywords: &[String]) -> String {
     keywords
         .join("; ")
@@ -2766,7 +2771,11 @@ fn spaced_keywords(keywords: &[String]) -> String {
         .join("; ")
 }
 
-fn write_front_matter(w: &mut Writer<Vec<u8>>, meta: &doc_semantic_ast::MetaData) {
+#[allow(dead_code)]
+fn write_front_matter(
+    w: &mut Writer<Vec<u8>>,
+    meta: &doc_semantic_ast::MetaData,
+) {
     use doc_semantic_ast::MetaData;
 
     // ── 中文标题 ──

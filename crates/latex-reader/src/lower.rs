@@ -18,7 +18,7 @@ use doc_semantic_ast::{
 };
 use std::collections::HashMap;
 
-use crate::expand::{expand_macros_in, expand_macros_with_input, MacroMap};
+use crate::expand::{expand_macros_in, MacroMap};
 use crate::include::JoinedStream;
 use crate::parser::Parse;
 
@@ -1365,6 +1365,7 @@ fn extract_language_from_env(text: &str, p: &mut usize) -> Option<Option<String>
 ///
 /// 形式为 `\noindent{\xiaowuhao\hei 附中文参考文献:}` 或带 `\textbf`。
 /// 返回 Some("附中文参考文献") 或 Some("作者简介") 或 None。
+#[allow(dead_code)]
 fn detect_section_label(s: &str) -> Option<&'static str> {
     const LABELS: &[&str] = &["附中文参考文献", "作者简介"];
     let line_end = s.find('\n').unwrap_or(s.len());
@@ -1489,11 +1490,11 @@ fn clean_code_body(body: &str) -> String {
 }
 
 fn lower_code_environment(
-    name: &str,
+    _name: &str,
     language: Option<&str>,
     body: &str,
     span: Span,
-    macros: &mut MacroMap,
+    _macros: &mut MacroMap,
 ) -> Block {
     let lang = language.filter(|l| !l.is_empty()).map(|s| s.to_string());
     let cleaned = clean_code_body(body);
@@ -1568,6 +1569,7 @@ fn lower_paragraph_container(
 ///   \begin{flushleft}\xiaowuhao {\hei 摘\hspace{2em}要:} \kai} <body> {\end{flushleft}\xiaowuhao}
 /// 因此 \begin{rjabstract} 内部已经包含 "摘 要" 标签 + 正文 + 后续 flushleft 收尾。
 /// 本函数只负责把 body 降级，返回第一个非空 Paragraph（与原 lower_abstract_paragraph 一致）。
+#[allow(dead_code)]
 fn lower_abstract_paragraph(
     body: &str,
     span: Span,
@@ -1673,9 +1675,8 @@ fn lower_list(
 ///   这部分参数被 main loop 当段文本推到 buffer，最终 flush_paragraph 后
 ///   输出 `indent=-2em ...` 等字面到 docx。
 /// 这里显式砍掉第一个 `\item` 之前的所有非空非注释行（保留空行因为是段落边界）。
+#[allow(dead_code)]
 fn strip_list_param_lines(body: &str) -> String {
-    let mut prefix_end = 0usize;
-    let mut found = false;
     let bytes = body.as_bytes();
     let len = bytes.len();
     let mut i = 0;
