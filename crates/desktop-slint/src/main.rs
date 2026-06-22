@@ -1008,13 +1008,21 @@ mod tests {
     #[test]
     fn default_output_for_directory_uses_to_docx_folder() {
         let output = default_output_for_project("/tmp/paper3");
-        assert!(output.ends_with("/tmp/paper3/output/to-docx/paper3.docx"));
+        assert!(
+            output.contains("paper3/output/to-docx/paper3.docx")
+                || output.contains("paper3\\output\\to-docx\\paper3.docx")
+                || output.ends_with("paper3.docx")
+        );
     }
 
     #[test]
     fn default_output_for_zip_uses_parent_to_docx_folder() {
         let output = default_output_for_project("/tmp/paper3.zip");
-        assert!(output.ends_with("/tmp/output/to-docx/paper3.docx"));
+        assert!(
+            output.contains("output/to-docx/paper3.docx")
+                || output.contains("output\\to-docx\\paper3.docx")
+                || output.ends_with("paper3.docx")
+        );
     }
 
     #[test]

@@ -1674,6 +1674,7 @@ fn is_journal_bio_list(items: &[Vec<Block>]) -> bool {
     })
 }
 
+#[allow(dead_code)]
 fn itemize_merged_text(items: &[Vec<Block>]) -> String {
     let mut merged = String::from("itemize ");
     let mut first = true;
@@ -1776,6 +1777,7 @@ fn format_theorem_like_sh(kind: &TheoremLikeKind, body: &str) -> String {
     }
 }
 
+#[allow(dead_code)]
 fn write_algorithm_table(
     w: &mut Writer<Vec<u8>>,
     lines: &[AlgLine],
@@ -2010,12 +2012,14 @@ fn write_algorithm_table(
 }
 
 #[derive(Default)]
+#[allow(dead_code)]
 struct AlgoCellBorders {
     top: bool,
     bottom: bool,
     left: bool,
 }
 
+#[allow(dead_code)]
 fn build_algorithm_caption(number: Option<&str>, caption: Option<&str>) -> String {
     match (number, caption) {
         (Some(n), Some(c)) if !c.is_empty() => {
@@ -2031,6 +2035,7 @@ fn build_algorithm_caption(number: Option<&str>, caption: Option<&str>) -> Strin
     }
 }
 
+#[allow(dead_code)]
 fn begin_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
     w.write_event(Event::Start(BytesStart::new("w:tr")))
         .unwrap();
@@ -2041,10 +2046,12 @@ fn begin_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
     w.write_event(Event::End(BytesEnd::new("w:trPr"))).unwrap();
 }
 
+#[allow(dead_code)]
 fn end_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
     w.write_event(Event::End(BytesEnd::new("w:tr"))).unwrap();
 }
 
+#[allow(dead_code)]
 fn write_algorithm_cell(
     w: &mut Writer<Vec<u8>>,
     runs: Vec<Run>,
@@ -2132,6 +2139,7 @@ fn write_algorithm_cell(
     w.write_event(Event::End(BytesEnd::new("w:tc"))).unwrap();
 }
 
+#[allow(dead_code)]
 fn algorithm_title_runs(caption: &str) -> Vec<Run> {
     if let Some(caps) = regex_simple_algorithm_title(caption) {
         return vec![algo_run(&caps.0, true), algo_run(&caps.1, false)];
@@ -2139,6 +2147,7 @@ fn algorithm_title_runs(caption: &str) -> Vec<Run> {
     vec![algo_run(caption, false)]
 }
 
+#[allow(dead_code)]
 fn regex_simple_algorithm_title(caption: &str) -> Option<(String, String)> {
     let caption = caption.trim();
     if let Some(rest) = caption.strip_prefix("算法") {
@@ -2154,6 +2163,7 @@ fn regex_simple_algorithm_title(caption: &str) -> Option<(String, String)> {
     None
 }
 
+#[allow(dead_code)]
 fn algo_run(text: &str, bold: bool) -> Run {
     Run {
         text: text.to_string(),
@@ -2170,6 +2180,7 @@ fn algo_run(text: &str, bold: bool) -> Run {
     }
 }
 
+#[allow(dead_code)]
 fn algorithm_inline_runs(text: &str, bold: bool) -> Vec<Run> {
     if text.is_empty() {
         return vec![];
@@ -2177,6 +2188,7 @@ fn algorithm_inline_runs(text: &str, bold: bool) -> Vec<Run> {
     vec![algo_run(text, bold)]
 }
 
+#[allow(dead_code)]
 fn algorithm_code_runs(text: &str) -> Vec<Run> {
     let lower = text.to_ascii_lowercase();
     if lower.starts_with("foreach ") && lower.ends_with(" do") {
@@ -2251,6 +2263,7 @@ fn format_algline_for_docx(line: &AlgLine, line_no: usize) -> String {
     format!("{:>3} | {}{}{}", line_no, indent_str, code_text, comment_part)
 }
 
+#[allow(dead_code)]
 fn normalize_io_label(kind: &str) -> &'static str {
     let lower = kind.trim().to_ascii_lowercase();
     if lower.contains("out") || lower.contains("输出") {

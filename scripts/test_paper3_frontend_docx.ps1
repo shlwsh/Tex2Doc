@@ -97,7 +97,7 @@ if (-not $SkipCargo) {
         "test", "-p", "doc-docx-writer", "inline_math_uses_parsed_omml_not_raw_latex", "--", "--nocapture"
     ) -WorkingDirectory $Root
     Invoke-Native -FilePath "cargo" -Arguments @(
-        "test", "-p", "doc-docx-writer", "algorithm_serializes_as_text_block", "--", "--nocapture"
+        "test", "-p", "doc-docx-writer", "algorithm_serializes_as_joscode", "--", "--nocapture"
     ) -WorkingDirectory $Root
     $oldFrontendOut = $env:TEX2DOC_PAPER3_FRONTEND_OUT
     if ($GenerateDocx) {
