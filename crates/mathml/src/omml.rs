@@ -35,21 +35,7 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             write_run_text(w, s);
         }
         MathExpr::Op(c) => {
-            // Full OMML: use <m:oSupp> with paired <m:begChr>/<m:endChr>
-            let s = c.to_string();
-            w.write_event(Event::Start(BytesStart::new("m:oSupp")))
-                .unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:begChr")))
-                .unwrap();
-            write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:begChr")))
-                .unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:endChr")))
-                .unwrap();
-            write_run_text(w, &s);
-            w.write_event(Event::End(BytesEnd::new("m:endChr")))
-                .unwrap();
-            w.write_event(Event::End(BytesEnd::new("m:oSupp"))).unwrap();
+            write_run_text(w, &c.to_string());
         }
         MathExpr::Space => {}
         MathExpr::Sub { base, sub } => {
@@ -174,11 +160,9 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
             w.write_event(Event::End(BytesEnd::new("m:m"))).unwrap();
         }
         MathExpr::Seq(seq) => {
-            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
             for e in seq {
                 write_expr(w, e);
             }
-            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
         }
         MathExpr::Raw(s) => {
             write_run_text(w, s);
@@ -188,7 +172,9 @@ fn write_expr(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
 
 fn write_run_text(w: &mut Writer<Vec<u8>>, s: &str) {
     w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:t"))).unwrap();
+    let mut m_t = BytesStart::new("m:t");
+    m_t.push_attribute(("xml:space", "preserve"));
+    w.write_event(Event::Start(m_t)).unwrap();
     w.write_event(Event::Text(quick_xml::events::BytesText::new(s)))
         .unwrap();
     w.write_event(Event::End(BytesEnd::new("m:t"))).unwrap();
@@ -204,9 +190,11 @@ mod tests {
     fn omml_basic() {
         let s = to_omml(&parse_latex_math("E = mc^2"));
         let s = String::from_utf8_lossy(&s);
-        assert!(s.contains("<m:oMath"));
-        assert!(s.contains("<m:sSup"));
-        assert!(s.contains("<m:t>E</m:t>"));
+        assert!(s.contains("<m:oMath"), "got: {s}");
+        assert!(s.contains("<m:sSup"), "got: {s}");
+        // Each symbol in the sequence gets its own <m:r> wrapper.
+        assert!(s.contains("E</m:t></m:r>"), "got: {}", s);
+        assert!(s.contains("=</m:t>"), "got: {}", s);
     }
 
     #[test]
@@ -229,22 +217,21 @@ mod tests {
     }
 
     #[test]
-    #[allow(non_snake_case)]
-    fn omml_op_uses_oSupp() {
+    fn omml_op_as_text() {
         let s = to_omml(&parse_latex_math("x + y"));
         let s = String::from_utf8_lossy(&s);
-        assert!(s.contains("<m:oSupp"));
-        assert!(s.contains("<m:begChr"));
-        assert!(s.contains("<m:endChr>"));
+        assert!(s.contains("<m:oMath"));
+        assert!(s.contains(">+</m:t>"), "got: {}", s);
+        assert!(s.contains("<m:r>"));
+        assert!(!s.contains("<m:oSupp"));
     }
 
     #[test]
-    fn omml_seq_uses_r() {
-        // Sequence with operators should wrap in <m:r>
+    fn omml_seq_per_element_runs() {
         let s = to_omml(&parse_latex_math("a + b"));
         let s = String::from_utf8_lossy(&s);
         assert!(s.contains("<m:oMath"));
-        // Should have <m:r> wrappers
         assert!(s.contains("<m:r>"));
+        assert!(s.contains(">+</m:t>"), "got: {}", s);
     }
 }

@@ -7,6 +7,8 @@
 //! - 公式块走 `JOSCode` 居中纯文本（对齐 sh `clean_math`，非 OMML）
 //! - 21 个 JOS 样式由 `styles.rs` 单一来源生成
 
+use doc_mathml::latex::parse_latex_math;
+use doc_mathml::MathExpr;
 use doc_semantic_ast::{
     AlgLine, Block, Document, FigureSizing, Span, TextRun, TextStyle, TheoremLikeKind,
 };
@@ -480,11 +482,21 @@ pub fn serialize_document(
                 // v13.2 F16: bio list 不合并、不加 itemize 前缀——
                 //   每条 bio 独立 JOSBody 段（与 sh 一致）。
                 if !is_jos_ref && !is_bio && !*is_ordered {
-                    let merged = itemize_merged_text(items);
-                    if merged.len() > "itemize ".len() {
+                    // v13.2 F8: preserve Run list in itemize items instead of merging to
+                    // a single string.  This keeps MathInline runs from degrading to raw
+                    // LaTeX text (e.g. `\varepsilon` leaking into ordinary text nodes).
+                    let prefix = "• ";
+                    for sub in items {
+                        if sub.is_empty() {
+                            continue;
+                        }
+                        let runs = itemize_item_runs(sub, prefix);
+                        if runs.is_empty() {
+                            continue;
+                        }
                         let para = Paragraph {
                             style_id: Some(style.to_string()),
-                            runs: vec![Run::plain(merged)],
+                            runs,
                             jc: None,
                             keep_next: false,
                             keep_lines: false,
@@ -841,39 +853,72 @@ pub fn serialize_document(
                 number,
                 ..
             } => {
-                let text_width = page_setup
-                    .map(|ps| ps.text_width_twips())
-                    .unwrap_or_else(|| PageSetup::jos_paper3().text_width_twips());
-                write_algorithm_table(
-                    &mut w,
-                    lines,
-                    io,
-                    caption.as_deref(),
-                    number.as_deref(),
-                    text_width,
-                );
+                // Caption paragraph (centered, above the code).
+                match caption {
+                    Some(cap) if !cap.is_empty() => {
+                        let cap_text = match number.as_deref() {
+                            Some(n) => format!("算法 {}: {}", n, cap),
+                            None => cap.clone(),
+                        };
+                        let para = Paragraph {
+                            style_id: Some(STYLE_CAPTION.to_string()),
+                            runs: vec![Run::plain(cap_text)],
+                            jc: Some("center".to_string()),
+                            keep_next: true,
+                            keep_lines: true,
+                        };
+                        write_paragraph(&mut w, &para);
+                    }
+                    _ => {}
+                }
+                // IO blocks.
+                for (kind, value) in io {
+                    let line = format!("{}: {}", kind, value);
+                    let para = Paragraph {
+                        style_id: Some(STYLE_CODE.to_string()),
+                        runs: vec![Run::plain(line)],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: true,
+                    };
+                    write_paragraph(&mut w, &para);
+                }
+                // Algorithm lines as text: `N | indent+code // comment`.
+                for (line_no, line) in lines.iter().enumerate() {
+                    let text = format_algline_for_docx(line, line_no + 1);
+                    let para = Paragraph {
+                        style_id: Some(STYLE_CODE.to_string()),
+                        runs: vec![Run::plain(text)],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: true,
+                    };
+                    write_paragraph(&mut w, &para);
+                }
             }
             Block::CodeBlock { language, code, .. } => {
-                // Render as a shaded code block using a single-cell table with
-                // Courier New font, light shading, and a monospace run.
+                // Render as per-line JOSCode paragraphs so that long lines wrap
+                // naturally within the paragraph instead of overflowing the page width.
                 let lang_label = language.as_deref().unwrap_or("text");
-                let para = Paragraph {
-                    style_id: Some(STYLE_CODE.to_string()),
-                    runs: vec![Run {
-                        text: code.clone(),
-                        style_id: None,
-                        style: TextStyle::Code,
-                        bold: false,
-                        italic: false,
-                        font_ascii: Some("Courier New".to_string()),
-                        font_east: Some("Courier New".to_string()),
-                    }],
-                    jc: None,
-                    keep_next: false,
-                    keep_lines: false,
-                };
-                write_paragraph(&mut w, &para);
-                // Write language label as a small comment below
+                for line in code.lines() {
+                    let para = Paragraph {
+                        style_id: Some(STYLE_CODE.to_string()),
+                        runs: vec![Run {
+                            text: line.to_string(),
+                            style_id: None,
+                            style: TextStyle::Code,
+                            bold: false,
+                            italic: false,
+                            font_ascii: Some("Courier New".to_string()),
+                            font_east: Some("Courier New".to_string()),
+                        }],
+                        jc: None,
+                        keep_next: false,
+                        keep_lines: true,
+                    };
+                    write_paragraph(&mut w, &para);
+                }
+                // Write language label as a comment below.
                 let label_para = Paragraph {
                     style_id: Some(STYLE_COMMENT.to_string()),
                     runs: vec![Run::plain(format!("// language: {lang_label}"))],
@@ -1646,6 +1691,31 @@ fn itemize_merged_text(items: &[Vec<Block>]) -> String {
     merged
 }
 
+/// Build a Run list for a single itemize item, preserving inline formatting
+/// (MathInline, Bold, Italic, etc.) so that math commands don't degrade to
+/// raw LaTeX strings inside plain text nodes.
+fn itemize_item_runs(sub: &[Block], prefix: &str) -> Vec<Run> {
+    let mut runs = Vec::new();
+    runs.push(Run::plain(prefix.to_string()));
+
+    for block in sub {
+        match block {
+            Block::Paragraph { runs: ps_runs, .. } => {
+                let converted: Vec<Run> = ps_runs.iter().map(from_text_run).collect();
+                runs.extend(converted);
+            }
+            _ => {
+                let text = summarize_to_string(&[block.clone()]);
+                if !text.is_empty() {
+                    runs.push(Run::plain(text));
+                }
+            }
+        }
+    }
+
+    merge_adjacent_runs(runs)
+}
+
 /// 合并连续 TheoremLike 为单段（对齐 sh chunk flatten）。
 fn coalesce_theorem_like_blocks(blocks: &[Block]) -> Vec<Block> {
     let mut out: Vec<Block> = Vec::with_capacity(blocks.len());
@@ -2167,6 +2237,20 @@ fn format_algline_display_code(line: &AlgLine) -> String {
     }
 }
 
+/// Format a single algorithm line for DOCX text output: `N | indent+code // comment`.
+/// Uses text prefix for line numbers, text characters for indentation, and
+/// inline `// ...` for comments, letting Word wrap naturally within the paragraph.
+fn format_algline_for_docx(line: &AlgLine, line_no: usize) -> String {
+    let indent_str = "  ".repeat(u32::from(line.indent) as usize);
+    let code_text = format_algline_display_code(line);
+    let comment_part = if line.comment.is_empty() {
+        String::new()
+    } else {
+        format!(" // {}", line.comment)
+    };
+    format!("{:>3} | {}{}{}", line_no, indent_str, code_text, comment_part)
+}
+
 fn normalize_io_label(kind: &str) -> &'static str {
     let lower = kind.trim().to_ascii_lowercase();
     if lower.contains("out") || lower.contains("输出") {
@@ -2363,44 +2447,206 @@ fn table_row_logical_columns(row: &doc_semantic_ast::TableRow) -> usize {
 }
 
 fn write_paragraph(w: &mut Writer<Vec<u8>>, p: &Paragraph) {
-    eprintln!(
-        "write_paragraph RUNS ({}): {}",
-        p.runs.len(),
-        p.runs
-            .iter()
-            .map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text))
-            .collect::<Vec<_>>()
-            .join(" || ")
-    );
     write_paragraph_with_opts(w, p, false, 0)
 }
 
 /// Write a single inline math run as OMML (`<m:oMath>...</m:oMath>`).
-/// The LaTeX content is already "cleaned" (subscripts/superscripts converted to _/^).
+/// Parses the LaTeX string through doc-mathml and emits proper nested OMML
+/// events, so Greek letters, arrows, and other paper3 commands render
+/// correctly in Word.
 fn write_inline_math_run(w: &mut Writer<Vec<u8>>, latex: &str) {
+    let expr = parse_latex_math(latex);
     w.write_event(Event::Start(BytesStart::new("w:r"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMath")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMathPara")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:oMathParaPr")))
-        .unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:oMathParaPr")))
-        .unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
-    w.write_event(Event::Start(BytesStart::new("m:t"))).unwrap();
-    w.write_event(Event::Text(quick_xml::events::BytesText::new(latex)))
-        .unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:t"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:oMathPara")))
-        .unwrap();
-    w.write_event(Event::End(BytesEnd::new("m:oMath"))).unwrap();
+    write_omath_para(w, &expr);
     w.write_event(Event::End(BytesEnd::new("w:r"))).unwrap();
 }
 
+/// Emit `<m:oMathPara><m:oMath>...</m:oMath></m:oMathPara>` for the expression.
+fn write_omath_para(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
+    w.write_event(Event::Start(BytesStart::new("m:oMath"))).unwrap();
+    write_omath(w, e);
+    w.write_event(Event::End(BytesEnd::new("m:oMath"))).unwrap();
+}
+
+/// Emit the OMML for a single expression, without the outer <m:oMath> wrapper.
+fn write_omath(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
+    match e {
+        MathExpr::Number(s) => {
+            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+            write_omath_text(w, s);
+            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+        }
+        MathExpr::Ident(s) | MathExpr::Text(s) => {
+            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+            write_omath_text(w, s);
+            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+        }
+        MathExpr::Op(c) => {
+            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+            write_omath_text(w, &c.to_string());
+            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+        }
+        MathExpr::Space => {}
+        MathExpr::Sub { base, sub } => {
+            w.write_event(Event::Start(BytesStart::new("m:sSub"))).unwrap();
+            write_omath_e(w, base);
+            write_omath_sub(w, sub);
+            w.write_event(Event::End(BytesEnd::new("m:sSub"))).unwrap();
+        }
+        MathExpr::Sup { base, sup } => {
+            w.write_event(Event::Start(BytesStart::new("m:sSup"))).unwrap();
+            write_omath_e(w, base);
+            write_omath_sup(w, sup);
+            w.write_event(Event::End(BytesEnd::new("m:sSup"))).unwrap();
+        }
+        MathExpr::SubSup { base, sub, sup } => {
+            w.write_event(Event::Start(BytesStart::new("m:sSubSup"))).unwrap();
+            write_omath_e(w, base);
+            write_omath_sub(w, sub);
+            write_omath_sup(w, sup);
+            w.write_event(Event::End(BytesEnd::new("m:sSubSup"))).unwrap();
+        }
+        MathExpr::Frac { num, den } => {
+            w.write_event(Event::Start(BytesStart::new("m:f"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:num"))).unwrap();
+            write_omath(w, num);
+            w.write_event(Event::End(BytesEnd::new("m:num"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:den"))).unwrap();
+            write_omath(w, den);
+            w.write_event(Event::End(BytesEnd::new("m:den"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:f"))).unwrap();
+        }
+        MathExpr::Sqrt { body, index } => {
+            w.write_event(Event::Start(BytesStart::new("m:rad"))).unwrap();
+            if let Some(idx) = index {
+                w.write_event(Event::Start(BytesStart::new("m:deg"))).unwrap();
+                write_omath(w, idx);
+                w.write_event(Event::End(BytesEnd::new("m:deg"))).unwrap();
+            }
+            write_omath_e(w, body);
+            w.write_event(Event::End(BytesEnd::new("m:rad"))).unwrap();
+        }
+        MathExpr::Fenced { open, body, close } => {
+            w.write_event(Event::Start(BytesStart::new("m:d"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:begChr"))).unwrap();
+            write_omath_text(w, open);
+            w.write_event(Event::End(BytesEnd::new("m:begChr"))).unwrap();
+            write_omath_e(w, body);
+            w.write_event(Event::Start(BytesStart::new("m:endChr"))).unwrap();
+            write_omath_text(w, close);
+            w.write_event(Event::End(BytesEnd::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:d"))).unwrap();
+        }
+        MathExpr::Function { name, arg } => {
+            w.write_event(Event::Start(BytesStart::new("m:func"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:fName"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+            write_omath_text(w, name);
+            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:fName"))).unwrap();
+            write_omath_e(w, arg);
+            w.write_event(Event::End(BytesEnd::new("m:func"))).unwrap();
+        }
+        MathExpr::Matrix { rows } => {
+            w.write_event(Event::Start(BytesStart::new("m:m"))).unwrap();
+            for row in rows {
+                w.write_event(Event::Start(BytesStart::new("m:mr"))).unwrap();
+                for cell in row {
+                    w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
+                    write_omath(w, cell);
+                    w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
+                }
+                w.write_event(Event::End(BytesEnd::new("m:mr"))).unwrap();
+            }
+            w.write_event(Event::End(BytesEnd::new("m:m"))).unwrap();
+        }
+        MathExpr::Seq(seq) => {
+            for e in seq {
+                write_omath(w, e);
+            }
+        }
+        MathExpr::Raw(s) => {
+            w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
+            write_omath_text(w, s);
+            w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
+        }
+    }
+}
+
+fn write_omath_e(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
+    w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
+    write_omath(w, e);
+    w.write_event(Event::End(BytesEnd::new("m:e"))).unwrap();
+}
+
+fn write_omath_sub(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
+    w.write_event(Event::Start(BytesStart::new("m:sub"))).unwrap();
+    write_omath(w, e);
+    w.write_event(Event::End(BytesEnd::new("m:sub"))).unwrap();
+}
+
+fn write_omath_sup(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
+    w.write_event(Event::Start(BytesStart::new("m:sup"))).unwrap();
+    write_omath(w, e);
+    w.write_event(Event::End(BytesEnd::new("m:sup"))).unwrap();
+}
+
+fn write_omath_text(w: &mut Writer<Vec<u8>>, s: &str) {
+    w.write_event(Event::Start(BytesStart::new("m:t"))).unwrap();
+    w.write_event(Event::Text(quick_xml::events::BytesText::new(s)))
+        .unwrap();
+    w.write_event(Event::End(BytesEnd::new("m:t"))).unwrap();
+}
+
 /// v13.2.7: 正文段落 run 归一化——合并 plain run 并清理 CJK 内部空格（对齐 sh latex_to_text）。
+/// Special runs (MathInline, Superscript, Subscript) are preserved as-is and not
+/// merged or flattened.
 fn normalize_body_runs(runs: Vec<Run>) -> Vec<Run> {
+    // Preserve MathInline, Superscript, Subscript runs as-is.
+    // Only merge and clean up "plain-like" runs.
+    let special_runs: Vec<_> = runs
+        .iter()
+        .enumerate()
+        .filter(|(_, r)| {
+            matches!(
+                r.style,
+                TextStyle::MathInline | TextStyle::Superscript | TextStyle::Subscript
+            )
+        })
+        .collect();
+    if !special_runs.is_empty() {
+        // Partition: special runs stay put, everything else gets merged + collapsed.
+        let mut result = Vec::with_capacity(runs.len());
+        let mut plain_buf: Vec<&Run> = Vec::new();
+        for r in &runs {
+            if matches!(
+                r.style,
+                TextStyle::MathInline | TextStyle::Superscript | TextStyle::Subscript
+            ) {
+                // Flush accumulated plain runs first.
+                if !plain_buf.is_empty() {
+                    let merged = merge_adjacent_runs(plain_buf.into_iter().cloned().collect());
+                    result.extend(merged.into_iter().map(|mut r| {
+                        r.text = collapse_cjk_internal_spaces(&r.text);
+                        r
+                    }));
+                    plain_buf = Vec::new();
+                }
+                result.push(r.clone());
+            } else {
+                plain_buf.push(r);
+            }
+        }
+        // Flush remaining.
+        if !plain_buf.is_empty() {
+            let merged = merge_adjacent_runs(plain_buf.into_iter().cloned().collect());
+            result.extend(merged.into_iter().map(|mut r| {
+                r.text = collapse_cjk_internal_spaces(&r.text);
+                r
+            }));
+        }
+        return result;
+    }
     let has_script = runs
         .iter()
         .any(|r| matches!(r.style, TextStyle::Superscript | TextStyle::Subscript));
@@ -2431,16 +2677,6 @@ fn is_body_style_for_cjk(style_id: &Option<String>) -> bool {
 
 /// v13.2.1 R1: JOSBody 等正文段落内联 Bold/Italic/Code 降级为 Plain（对齐 sh oracle）。
 fn downgrade_body_inline_styles(p: Paragraph) -> Paragraph {
-    if p.runs.iter().any(|r| r.text.contains("Freq")) {
-        eprintln!(
-            "downgrade RUNS: {}",
-            p.runs
-                .iter()
-                .map(|r| format!("[{:?} b={} i={}]={:?}", r.style, r.bold, r.italic, r.text))
-                .collect::<Vec<_>>()
-                .join(" || ")
-        );
-    }
     let is_body = p.style_id.as_deref().is_some_and(|s| {
         matches!(
             s,
@@ -3217,7 +3453,81 @@ mod tests {
     }
 
     #[test]
-    fn algorithm_serializes_as_table() {
+    fn inline_math_uses_parsed_omml_not_raw_latex() {
+        // Inline math with paper3 commands should go through doc-mathml parser
+        // and produce OMML, not raw LaTeX text.
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::Paragraph {
+                runs: vec![TextRun {
+                    text: r"\varepsilon \in \mathcal{X}".to_string(),
+                    style: TextStyle::MathInline,
+                    span: Span::default(),
+                }],
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        assert!(
+            xml.contains("<m:oMath"),
+            "inline math should produce OMML, got: {}",
+            xml
+        );
+        // Key paper3 commands must not leak as raw LaTeX in the document.
+        assert!(
+            !xml.contains(r"\varepsilon"),
+            "raw \\varepsilon should not appear in document"
+        );
+        assert!(
+            !xml.contains(r"\in"),
+            "raw \\in should not appear in document"
+        );
+    }
+
+    #[test]
+    fn itemize_preserves_inline_math_runs() {
+        // An itemize item containing inline math should NOT degrade to a single
+        // plain text run — the math run must be preserved as OMML.
+        let doc = Document {
+            metadata: Default::default(),
+            blocks: vec![Block::List {
+                is_ordered: false,
+                items: vec![vec![Block::Paragraph {
+                    runs: vec![
+                        TextRun {
+                            text: "the set ".to_string(),
+                            style: TextStyle::Plain,
+                            span: Span::default(),
+                        },
+                        TextRun {
+                            text: r"\varepsilon \in \emptyset".to_string(),
+                            style: TextStyle::MathInline,
+                            span: Span::default(),
+                        },
+                        TextRun {
+                            text: " here".to_string(),
+                            style: TextStyle::Plain,
+                            span: Span::default(),
+                        },
+                    ],
+                    span: Span::default(),
+                }]],
+                span: Span::default(),
+            }],
+        };
+        let mut embedded = Vec::new();
+        let xml = serialize_document(&doc, None, None, None, &mut embedded);
+        let xml = String::from_utf8(xml).expect("document xml utf8");
+        // The inline math must produce OMML inside the itemize item.
+        assert!(xml.contains("<m:oMath"), "itemize item should contain OMML");
+        // No raw LaTeX should leak.
+        assert!(!xml.contains(r"\varepsilon"), "raw \\varepsilon should not appear");
+    }
+
+    #[test]
+    fn algorithm_serializes_as_joscode() {
         let doc = Document {
             metadata: Default::default(),
             blocks: vec![Block::Algorithm {
@@ -3241,7 +3551,7 @@ mod tests {
                 ],
                 io: vec![("Input".to_string(), "logs".to_string())],
                 caption: Some("Attention list".to_string()),
-                number: Some("Algorithm 1".to_string()),
+                number: Some("1".to_string()),
                 span: Span::default(),
             }],
         };
@@ -3249,17 +3559,17 @@ mod tests {
         let xml = serialize_document(&doc, None, None, None, &mut embedded);
         let xml = String::from_utf8(xml).expect("document xml utf8");
 
-        assert!(xml.contains("w:tbl"), "algorithm should use table");
-        assert!(xml.contains("Algorithm 1:"));
-        assert!(xml.contains("Attention list"));
+        // Algorithm caption should be a JOSCode paragraph, not inside a table.
+        assert!(xml.contains("算法 1: Attention list"));
+        // IO lines use JOSCode style.
         assert!(xml.contains("Input:"));
         assert!(xml.contains("logs"));
-        assert!(xml.contains("init H"));
-        assert!(xml.contains("foreach"));
-        assert!(
-            !xml.contains(" | "),
-            "algorithm lines should not merge with | "
-        );
+        // Algorithm lines formatted as text with line numbers.
+        assert!(xml.contains("  1 | init H"));
+        assert!(xml.contains("  2 |   foreach"));
+        assert!(xml.contains("// hot path"));
+        // No table used for algorithm block.
+        assert!(!xml.contains("<w:tbl>"), "algorithm should NOT use table");
     }
 
     #[test]

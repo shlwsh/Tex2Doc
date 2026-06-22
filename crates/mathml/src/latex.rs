@@ -275,6 +275,7 @@ impl<'a> Parser<'a> {
         if matches!(
             cmd,
             "mathrm" | "mathbf" | "mathsf" | "mathtt" | "mathcal" | "mathit"
+            | "operatorname" | "textbf" | "textit"
         ) {
             return Some(self.parse_group_or_single());
         }
@@ -304,11 +305,14 @@ impl<'a> Parser<'a> {
         // 已知命令列表
         let known = [
             "frac", "sqrt", "text", "sin", "cos", "tan", "log", "ln", "exp", "min", "max", "sum",
-            "alpha", "beta", "gamma", "delta", "epsilon", "zeta", "eta", "theta", "iota", "kappa",
-            "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi", "chi", "psi", "omega",
+            "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta",
+            "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi",
+            "chi", "psi", "omega",
             "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi", "Psi", "Omega",
             "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "infty", "int",
             "prod",
+            "rightarrow", "leftarrow", "emptyset", "in", "notin", "subset", "subseteq",
+            "ldots", "dots", "percent", "underscore",
         ];
         if known.contains(&cmd) {
             return Some(self.lower_command(cmd));
@@ -479,6 +483,7 @@ impl<'a> Parser<'a> {
             "gamma" => MathExpr::Ident("γ".into()),
             "delta" => MathExpr::Ident("δ".into()),
             "epsilon" => MathExpr::Ident("ε".into()),
+            "varepsilon" => MathExpr::Ident("ε".into()),
             "zeta" => MathExpr::Ident("ζ".into()),
             "eta" => MathExpr::Ident("η".into()),
             "theta" => MathExpr::Ident("θ".into()),
@@ -519,6 +524,15 @@ impl<'a> Parser<'a> {
             "sum" => MathExpr::Ident("∑".into()),
             "int" => MathExpr::Ident("∫".into()),
             "prod" => MathExpr::Ident("∏".into()),
+            "rightarrow" => MathExpr::Op('→'),
+            "leftarrow" => MathExpr::Op('←'),
+            "emptyset" => MathExpr::Ident("∅".into()),
+            "in" => MathExpr::Op('∈'),
+            "notin" => MathExpr::Op('∉'),
+            "subset" => MathExpr::Op('⊂'),
+            "subseteq" => MathExpr::Op('⊆'),
+            "ldots" => MathExpr::Ident("…".into()),
+            "dots" => MathExpr::Ident("…".into()),
             _ => MathExpr::Raw(format!("\\{cmd}")),
         }
     }
