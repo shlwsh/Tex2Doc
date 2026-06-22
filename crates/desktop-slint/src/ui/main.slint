@@ -1,10 +1,11 @@
-import { Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox } from "std-widgets.slint";
+import { TabWidget, Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox } from "std-widgets.slint";
 
 export component MainWindow inherits Window {
     title: "Tex2Doc Desktop";
-    preferred-width: 920px;
-    preferred-height: 720px;
+    preferred-width: 1080px;
+    preferred-height: 760px;
 
+    // ?? State properties ??????????????????????????????????????????????????????
     in-out property <string> project-path;
     in-out property <string> api-base-url;
     in-out property <string> login-email;
@@ -27,7 +28,7 @@ export component MainWindow inherits Window {
     in-out property <string> profile-confidence: "--";
     in-out property <string> recent-jobs: "No recent jobs.";
 
-    // ── Callbacks (implemented in Rust) ─────────────────────────────────────
+    // ?? Callbacks (implemented in Rust) ?????????????????????????????????????
     callback convert-clicked(string, string, string, string);
     callback cloud-convert-clicked(string, string, string, string, string, string);
     callback detect-profile-clicked(string);
@@ -47,355 +48,475 @@ export component MainWindow inherits Window {
     callback open-report-clicked(string);
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
 
-    VerticalBox {
-        padding: 24px;
-        spacing: 12px;
+    TabWidget {
 
-        Text {
-            text: "Tex2Doc Desktop";
-            font-size: 22px;
-            font-weight: 700;
-            color: #1a73e8;
-        }
-
-        GroupBox {
-            title: "Account";
-
+        // ?? Tab 1: Convert ???????????????????????????????????????????????
+        Tab {
+            title: "Convert";
             VerticalBox {
-                spacing: 8px;
+                padding: 16px;
+                spacing: 10px;
 
-                LineEdit {
-                    placeholder-text: "API base URL";
-                    text <=> api-base-url;
-                }
+                GroupBox {
+                    title: "Project";
 
-                HorizontalBox {
-                    spacing: 8px;
+                    VerticalBox {
+                        spacing: 6px;
 
-                    LineEdit {
-                        placeholder-text: "Email";
-                        text <=> login-email;
-                    }
+                        HorizontalBox {
+                            spacing: 8px;
 
-                    LineEdit {
-                        placeholder-text: "Password";
-                        text <=> login-password;
-                    }
+                            LineEdit {
+                                placeholder-text: "TeX project path or project zip...";
+                                text <=> project-path;
+                            }
 
-                    Button {
-                        text: "Login";
-                        enabled: api-base-url != "" && login-email != "";
-                        clicked => {
-                            root.account-status = "Signing in...";
-                            root.login-clicked(api-base-url, login-email, login-password);
+                            Button {
+                                text: "Folder";
+                                enabled: !is-converting;
+                                clicked => {
+                                    root.choose-project-folder-clicked(root.project-path, root.output-path);
+                                }
+                            }
+
+                            Button {
+                                text: "Zip";
+                                enabled: !is-converting;
+                                clicked => {
+                                    root.choose-project-zip-clicked(root.project-path, root.output-path);
+                                }
+                            }
                         }
-                    }
-
-                    Button {
-                        text: "Register";
-                        enabled: api-base-url != "" && login-email != "";
-                        clicked => {
-                            root.account-status = "Registering...";
-                            root.register-clicked(api-base-url, login-email, login-password);
-                        }
-                    }
-
-                    Button {
-                        text: "Refresh";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.account-status = "Refreshing login...";
-                            root.refresh-login-clicked(api-base-url);
-                        }
-                    }
-
-                    Button {
-                        text: "Logout";
-                        clicked => {
-                            root.logout-clicked();
-                        }
-                    }
-
-                    Button {
-                        text: "Usage";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.usage-status = "Refreshing usage...";
-                            root.refresh-usage-clicked(api-base-url);
-                        }
-                    }
-                }
-
-                Text { text: account-status; font-size: 12px; }
-                Text { text: usage-status; font-size: 12px; }
-            }
-        }
-
-        GroupBox {
-            title: "Billing";
-
-            VerticalBox {
-                spacing: 8px;
-
-                HorizontalBox {
-                    spacing: 8px;
-
-                    LineEdit {
-                        placeholder-text: "Plan ID";
-                        text <=> billing-plan-id;
-                    }
-
-                    Button {
-                        text: "Plans";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.billing-status = "Loading plans...";
-                            root.show-plans-clicked(api-base-url);
-                        }
-                    }
-
-                    Button {
-                        text: "Checkout";
-                        enabled: api-base-url != "" && billing-plan-id != "";
-                        clicked => {
-                            root.billing-status = "Creating checkout session...";
-                            root.checkout-clicked(api-base-url, billing-plan-id);
-                        }
-                    }
-
-                    Button {
-                        text: "Portal";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.billing-status = "Opening billing portal...";
-                            root.billing-portal-clicked(api-base-url);
-                        }
-                    }
-                }
-
-                Text { text: billing-status; font-size: 12px; }
-            }
-        }
-
-        GroupBox {
-            title: "Updates";
-
-            VerticalBox {
-                spacing: 8px;
-
-                HorizontalBox {
-                    spacing: 8px;
-
-                    LineEdit {
-                        placeholder-text: "Release channel";
-                        text <=> update-channel;
-                    }
-
-                    Button {
-                        text: "Check";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.update-status = "Checking for updates...";
-                            root.check-update-clicked(api-base-url, update-channel);
-                        }
-                    }
-                }
-
-                Text { text: update-status; font-size: 12px; }
-            }
-        }
-
-        GroupBox {
-            title: "Project";
-
-            VerticalBox {
-                HorizontalBox {
-                    spacing: 8px;
-
-                    LineEdit {
-                        placeholder-text: "TeX project path or project zip...";
-                        text <=> project-path;
-                    }
-
-                    Button {
-                        text: "Folder";
-                        enabled: !is-converting;
-                        clicked => {
-                            root.choose-project-folder-clicked(project-path, output-path);
-                        }
-                    }
-
-                    Button {
-                        text: "Zip";
-                        enabled: !is-converting;
-                        clicked => {
-                            root.choose-project-zip-clicked(project-path, output-path);
-                        }
-                    }
-                }
-
-                LineEdit {
-                    placeholder-text: "Main TeX for cloud conversion (optional, e.g. main-jos.tex)...";
-                    text <=> main-tex;
-                }
-            }
-        }
-
-        GroupBox {
-            title: "Options";
-
-            HorizontalBox {
-                spacing: 16px;
-
-                VerticalBox {
-                    Text { text: "Profile"; font-size: 12px; }
-                    ComboBox {
-                        current-value: detected-profile;
-                        model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
-                    }
-                }
-
-                VerticalBox {
-                    Text { text: "Quality"; font-size: 12px; }
-                    ComboBox {
-                        current-value: quality-level;
-                        model: ["preview", "standard", "strict"];
-                    }
-                }
-
-                VerticalBox {
-                    Text { text: "Output"; font-size: 12px; }
-                    HorizontalBox {
-                        spacing: 8px;
 
                         LineEdit {
-                            placeholder-text: "Output DOCX path...";
-                            text <=> output-path;
+                            placeholder-text: "Main TeX for cloud conversion (optional, e.g. main-jos.tex)...";
+                            text <=> main-tex;
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Options";
+
+                    HorizontalBox {
+                        spacing: 16px;
+
+                        VerticalBox {
+                            Text { text: "Profile"; font-size: 12px; }
+                            ComboBox {
+                                current-value: detected-profile;
+                                model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                            }
                         }
 
-                        Button {
-                            text: "Save As";
-                            enabled: !is-converting;
-                            clicked => {
-                                root.choose-output-clicked(output-path);
+                        VerticalBox {
+                            Text { text: "Quality"; font-size: 12px; }
+                            ComboBox {
+                                current-value: quality-level;
+                                model: ["preview", "standard", "strict"];
+                            }
+                        }
+
+                        VerticalBox {
+                            Text { text: "Output"; font-size: 12px; }
+                            HorizontalBox {
+                                spacing: 6px;
+                                LineEdit {
+                                    placeholder-text: "Output DOCX path...";
+                                    text <=> output-path;
+                                }
+                                Button {
+                                    text: "Save As";
+                                    enabled: !is-converting;
+                                    clicked => { root.choose-output-clicked(root.output-path); }
+                                }
                             }
                         }
                     }
                 }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Detect Profile";
+                        enabled: project-path != "" && !is-converting;
+                        clicked => {
+                            root.status-text = "[...] Detecting profile for: " + project-path + "...";
+                            root.detect-profile-clicked(root.project-path);
+                        }
+                    }
+
+                    Button {
+                        text: "Local Convert";
+                        enabled: project-path != "" && output-path != "" && !is-converting;
+                        clicked => {
+                            root.is-converting = true;
+                            root.status-text = "[1/3] Reading TeX source...";
+                            root.conversion-progress = 0.1;
+                            root.convert-clicked(root.project-path, root.detected-profile, root.quality-level, root.output-path);
+                        }
+                    }
+
+                    Button {
+                        text: "Cloud Convert";
+                        enabled: api-base-url != "" && project-path != "" && output-path != "" && !is-converting;
+                        clicked => {
+                            root.is-converting = true;
+                            root.status-text = "[cloud] Uploading TeX project...";
+                            root.conversion-progress = 0.1;
+                            root.cloud-convert-clicked(root.api-base-url, root.project-path, root.main-tex, root.detected-profile, root.quality-level, root.output-path);
+                        }
+                    }
+
+                    Button {
+                        text: "Open Output";
+                        enabled: !is-converting && output-path != "";
+                        clicked => { root.open-output-clicked(root.output-path); }
+                    }
+
+                    Button {
+                        text: "Open Report";
+                        enabled: !is-converting && output-path != "";
+                        clicked => { root.open-report-clicked(root.output-path); }
+                    }
+                }
+
+                ProgressIndicator {
+                    progress: conversion-progress;
+                    visible: is-converting;
+                }
+
+                GroupBox {
+                    title: "Report";
+
+                    HorizontalBox {
+                        spacing: 16px;
+
+                        VerticalBox {
+                            Text { text: "Profile"; font-size: 11px; color: #666; }
+                            Text { text: detected-profile; font-size: 14px; font-weight: 600; }
+                        }
+
+                        VerticalBox {
+                            Text { text: "Compatibility"; font-size: 11px; color: #666; }
+                            Text { text: compatibility-score + "%"; font-size: 14px; font-weight: 600; }
+                        }
+
+                        VerticalBox {
+                            Text { text: "Quality"; font-size: 11px; color: #666; }
+                            Text { text: quality-status; font-size: 14px; font-weight: 600; }
+                        }
+
+                        VerticalBox {
+                            Text { text: "Confidence"; font-size: 11px; color: #666; }
+                            Text { text: profile-confidence; font-size: 14px; font-weight: 600; }
+                        }
+                    }
+                }
+
+                GroupBox {
+                    title: "Status";
+
+                    TextEdit {
+                        text <=> status-text;
+                        read-only: true;
+                        min-height: 100px;
+                        font-size: 12px;
+                    }
+                }
             }
         }
 
-        HorizontalBox {
-            spacing: 8px;
+        // ?? Tab 2: Settings ???????????????????????????????????????????????
+        Tab {
+            title: "Settings";
+            VerticalBox {
+                padding: 16px;
+                spacing: 10px;
 
-            Button {
-                text: "Detect Profile";
-                enabled: project-path != "" && !is-converting;
-                clicked => {
-                    root.status-text = "[...] Detecting profile for: " + project-path + "...";
-                    root.detect-profile-clicked(project-path);
+                GroupBox {
+                    title: "Service";
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        LineEdit {
+                            placeholder-text: "API base URL";
+                            text <=> api-base-url;
+                        }
+                    }
                 }
-            }
 
-            Button {
-                text: "Convert";
-                enabled: project-path != "" && output-path != "" && !is-converting;
-                clicked => {
-                    root.is-converting = true;
-                    root.status-text = "[1/3] Reading TeX source...";
-                    root.conversion-progress = 0.1;
-                    root.convert-clicked(project-path, detected-profile, quality-level, output-path);
+                GroupBox {
+                    title: "Default Conversion Parameters";
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        HorizontalBox {
+                            spacing: 16px;
+
+                            VerticalBox {
+                                Text { text: "Default Profile"; font-size: 12px; }
+                                ComboBox {
+                                    current-value: detected-profile;
+                                    model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                                }
+                            }
+
+                            VerticalBox {
+                                Text { text: "Default Quality"; font-size: 12px; }
+                                ComboBox {
+                                    current-value: quality-level;
+                                    model: ["preview", "standard", "strict"];
+                                }
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+                            VerticalBox {
+                                Text { text: "Default Output Directory"; font-size: 12px; }
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+                            LineEdit {
+                                placeholder-text: "Default output DOCX path...";
+                                text <=> output-path;
+                            }
+                            Button {
+                                text: "Save As";
+                                enabled: !is-converting;
+                                clicked => { root.choose-output-clicked(root.output-path); }
+                            }
+                        }
+                    }
                 }
-            }
 
-            Button {
-                text: "Cloud Convert";
-                enabled: api-base-url != "" && project-path != "" && output-path != "" && !is-converting;
-                clicked => {
-                    root.is-converting = true;
-                    root.status-text = "[cloud] Uploading TeX project...";
-                    root.conversion-progress = 0.1;
-                    root.cloud-convert-clicked(api-base-url, project-path, main-tex, detected-profile, quality-level, output-path);
-                }
-            }
+                GroupBox {
+                    title: "Updates";
 
-            Button {
-                text: "Open Output";
-                enabled: !is-converting && output-path != "";
-                clicked => {
-                    root.open-output-clicked(output-path);
-                }
-            }
+                    VerticalBox {
+                        spacing: 6px;
 
-            Button {
-                text: "Open Report";
-                enabled: !is-converting && output-path != "";
-                clicked => {
-                    root.open-report-clicked(output-path);
-                }
-            }
+                        HorizontalBox {
+                            spacing: 8px;
 
-            Button {
-                text: "Diagnostics";
-                enabled: !is-converting;
-                clicked => {
-                    root.export-diagnostics-clicked(project-path, output-path, api-base-url, detected-profile, quality-level, status-text, recent-jobs, update-status);
+                            LineEdit {
+                                placeholder-text: "Release channel";
+                                text <=> update-channel;
+                            }
+
+                            Button {
+                                text: "Check Update";
+                                enabled: api-base-url != "";
+                                clicked => {
+                                    root.update-status = "Checking for updates...";
+                                    root.check-update-clicked(root.api-base-url, root.update-channel);
+                                }
+                            }
+                        }
+
+                        Text { text: update-status; font-size: 12px; }
+                    }
                 }
             }
         }
 
-        ProgressIndicator {
-            progress: conversion-progress;
-            visible: is-converting;
-        }
+        // ?? Tab 3: Account ???????????????????????????????????????????????
+        Tab {
+            title: "Account";
+            VerticalBox {
+                padding: 16px;
+                spacing: 10px;
 
-        GroupBox {
-            title: "Report";
+                GroupBox {
+                    title: "Sign In / Register";
 
-            HorizontalBox {
-                spacing: 16px;
+                    VerticalBox {
+                        spacing: 6px;
 
-                VerticalBox {
-                    Text { text: "Profile"; font-size: 11px; color: #666; }
-                    Text { text: detected-profile; font-size: 14px; font-weight: 600; }
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            LineEdit {
+                                placeholder-text: "Email";
+                                text <=> login-email;
+                            }
+
+                            LineEdit {
+                                placeholder-text: "Password";
+                                text <=> login-password;
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            Button {
+                                text: "Login";
+                                enabled: api-base-url != "" && login-email != "";
+                                clicked => {
+                                    root.account-status = "Signing in...";
+                                    root.login-clicked(root.api-base-url, root.login-email, root.login-password);
+                                }
+                            }
+
+                            Button {
+                                text: "Register";
+                                enabled: api-base-url != "" && login-email != "";
+                                clicked => {
+                                    root.account-status = "Registering...";
+                                    root.register-clicked(root.api-base-url, root.login-email, root.login-password);
+                                }
+                            }
+
+                            Button {
+                                text: "Refresh";
+                                enabled: api-base-url != "";
+                                clicked => {
+                                    root.account-status = "Refreshing login...";
+                                    root.refresh-login-clicked(root.api-base-url);
+                                }
+                            }
+
+                            Button {
+                                text: "Logout";
+                                clicked => { root.logout-clicked(); }
+                            }
+                        }
+                    }
                 }
 
-                VerticalBox {
-                    Text { text: "Compatibility"; font-size: 11px; color: #666; }
-                    Text { text: compatibility-score + "%"; font-size: 14px; font-weight: 600; }
-                }
+                GroupBox {
+                    title: "Session";
 
-                VerticalBox {
-                    Text { text: "Quality"; font-size: 11px; color: #666; }
-                    Text { text: quality-status; font-size: 14px; font-weight: 600; }
-                }
+                    VerticalBox {
+                        spacing: 6px;
 
-                VerticalBox {
-                    Text { text: "Confidence"; font-size: 11px; color: #666; }
-                    Text { text: profile-confidence; font-size: 14px; font-weight: 600; }
+                        Button {
+                            text: "Refresh Usage";
+                            enabled: api-base-url != "";
+                            clicked => {
+                                root.usage-status = "Refreshing usage...";
+                                root.refresh-usage-clicked(root.api-base-url);
+                            }
+                        }
+
+                        Text { text: account-status; font-size: 12px; }
+                        Text { text: usage-status; font-size: 12px; }
+                    }
                 }
             }
         }
 
-        GroupBox {
-            title: "Status";
+        // ?? Tab 4: Plans ?????????????????????????????????????????????????
+        Tab {
+            title: "Plans";
+            VerticalBox {
+                padding: 16px;
+                spacing: 10px;
 
-            TextEdit {
-                text <=> status-text;
-                read-only: true;
-                min-height: 120px;
-                font-size: 12px;
+                GroupBox {
+                    title: "Subscription";
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            LineEdit {
+                                placeholder-text: "Plan ID";
+                                text <=> billing-plan-id;
+                            }
+
+                            Button {
+                                text: "Plans";
+                                enabled: api-base-url != "";
+                                clicked => {
+                                    root.billing-status = "Loading plans...";
+                                    root.show-plans-clicked(root.api-base-url);
+                                }
+                            }
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            Button {
+                                text: "Checkout";
+                                enabled: api-base-url != "" && billing-plan-id != "";
+                                clicked => {
+                                    root.billing-status = "Creating checkout session...";
+                                    root.checkout-clicked(root.api-base-url, root.billing-plan-id);
+                                }
+                            }
+
+                            Button {
+                                text: "Billing Portal";
+                                enabled: api-base-url != "";
+                                clicked => {
+                                    root.billing-status = "Opening billing portal...";
+                                    root.billing-portal-clicked(root.api-base-url);
+                                }
+                            }
+                        }
+
+                        Text { text: billing-status; font-size: 12px; }
+                    }
+                }
             }
         }
 
-        GroupBox {
-            title: "Recent Jobs";
+        // ?? Tab 5: History ???????????????????????????????????????????????
+        Tab {
+            title: "History";
+            VerticalBox {
+                padding: 16px;
+                spacing: 10px;
 
-            TextEdit {
-                text <=> recent-jobs;
-                read-only: true;
-                min-height: 60px;
-                font-size: 11px;
+                GroupBox {
+                    title: "Recent Jobs";
+
+                    VerticalBox {
+                        spacing: 6px;
+
+                        TextEdit {
+                            text <=> recent-jobs;
+                            read-only: true;
+                            min-height: 180px;
+                            font-size: 11px;
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+
+                            Button {
+                                text: "Open Output";
+                                enabled: output-path != "";
+                                clicked => { root.open-output-clicked(root.output-path); }
+                            }
+
+                            Button {
+                                text: "Open Report";
+                                enabled: output-path != "";
+                                clicked => { root.open-report-clicked(root.output-path); }
+                            }
+
+                            Button {
+                                text: "Export Diagnostics";
+                                enabled: !is-converting;
+                                clicked => {
+                                    root.export-diagnostics-clicked(root.project-path, root.output-path, root.api-base-url, root.detected-profile, root.quality-level, root.status-text, root.recent-jobs, root.update-status);
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
