@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 
 import 'bridge.dart';
+import 'commercial_api.dart';
 import 'file_web_stub.dart'
     if (dart.library.js_interop) 'file_web_utils_web.dart';
 import 'logger.dart';
@@ -44,7 +45,10 @@ class DocEngineApp extends StatelessWidget {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               child: Center(
-                child: Text('Platform: $platform', style: Theme.of(context).textTheme.bodySmall),
+                child: Text(
+                  'Platform: $platform',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ),
             ),
           ],
@@ -58,6 +62,8 @@ class DocEngineApp extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _StatusCard(),
+                  const SizedBox(height: 16),
+                  _CommercialApiCard(),
                   const SizedBox(height: 16),
                   _ConvertCard(),
                 ],
@@ -146,6 +152,184 @@ class _StatusCardState extends State<_StatusCard> {
 //   6. 错误卡片
 // ------------------------------------------------------------
 
+class _CommercialApiCard extends StatefulWidget {
+  @override
+  State<_CommercialApiCard> createState() => _CommercialApiCardState();
+}
+
+class _CommercialApiCardState extends State<_CommercialApiCard> {
+  final _baseUrlController = TextEditingController(
+    text: 'http://127.0.0.1:8080/v1/',
+  );
+  final _emailController = TextEditingController(text: 'demo@example.com');
+  final _passwordController = TextEditingController(text: 'secret');
+
+  String? _accessToken;
+  String _status = 'Signed out';
+  bool _busy = false;
+
+  @override
+  void dispose() {
+    _baseUrlController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  CommercialApiClient _client() => CommercialApiClient(_baseUrlController.text);
+
+  Future<void> _run(
+    Future<void> Function(CommercialApiClient client) action,
+  ) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = 'Working...';
+    });
+    try {
+      await action(_client());
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _status = e.toString());
+    } finally {
+      if (mounted) {
+        setState(() => _busy = false);
+      }
+    }
+  }
+
+  Future<void> _register() async {
+    await _run((client) async {
+      final auth = await client.register(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _accessToken = auth.accessToken;
+        _status = 'Registered ${auth.user.email}, plan ${auth.user.planId}';
+      });
+    });
+  }
+
+  Future<void> _login() async {
+    await _run((client) async {
+      final auth = await client.login(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      setState(() {
+        _accessToken = auth.accessToken;
+        _status = 'Signed in ${auth.user.email}, plan ${auth.user.planId}';
+      });
+    });
+  }
+
+  Future<void> _usage() async {
+    final token = _accessToken;
+    if (token == null) {
+      setState(() => _status = 'Sign in before refreshing usage.');
+      return;
+    }
+    await _run((client) async {
+      final usage = await client.usage(token);
+      if (!mounted) return;
+      setState(() {
+        _status =
+            'Plan ${usage.planId}: ${usage.cloudConversionsUsed}/${usage.cloudConversionsLimit}, remaining ${usage.cloudConversionsRemaining}';
+      });
+    });
+  }
+
+  Future<void> _plans() async {
+    await _run((client) async {
+      final plans = await client.plans();
+      if (!mounted) return;
+      setState(() => _status = plans.map((plan) => plan.label).join('\n'));
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      key: const ValueKey('commercial-api-card'),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              'Cloud account',
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _baseUrlController,
+              decoration: const InputDecoration(
+                labelText: 'API base URL',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _emailController,
+              decoration: const InputDecoration(
+                labelText: 'Email',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 10),
+            TextField(
+              controller: _passwordController,
+              obscureText: true,
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+            const SizedBox(height: 12),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.icon(
+                  onPressed: _busy ? null : _register,
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Register'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _busy ? null : _login,
+                  icon: const Icon(Icons.login),
+                  label: const Text('Login'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _usage,
+                  icon: const Icon(Icons.speed),
+                  label: const Text('Usage'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _plans,
+                  icon: const Icon(Icons.receipt_long),
+                  label: const Text('Plans'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(_status, style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 enum _ConvertState { idle, converting, success, error }
 
 class _ConvertCard extends StatefulWidget {
@@ -187,15 +371,22 @@ class _ConvertCardState extends State<_ConvertCard> {
     }
 
     final (bytes, fileName) = result;
-    DocLogger.instance.i(LogTags.file, '文件已选: $fileName, ${(bytes.length / 1024).toStringAsFixed(1)} KB');
+    DocLogger.instance.i(
+      LogTags.file,
+      '文件已选: $fileName, ${(bytes.length / 1024).toStringAsFixed(1)} KB',
+    );
 
     // 5 MB 上限（与 Chrome 扩展一致）
     final sizeMB = bytes.length / (1024 * 1024);
     if (sizeMB >= 5) {
-      DocLogger.instance.w(LogTags.file, '文件过大: ${sizeMB.toStringAsFixed(1)} MB >= 5 MB');
+      DocLogger.instance.w(
+        LogTags.file,
+        '文件过大: ${sizeMB.toStringAsFixed(1)} MB >= 5 MB',
+      );
       setState(() {
         _state = _ConvertState.error;
-        _errorText = '文件 ${sizeMB.toStringAsFixed(1)} MB，超过 5 MB 上限。\n请使用 Doc-engine 桌面 App。';
+        _errorText =
+            '文件 ${sizeMB.toStringAsFixed(1)} MB，超过 5 MB 上限。\n请使用 Doc-engine 桌面 App。';
         _zipBytes = null;
         _zipFileName = null;
         _zipSizeBytes = null;
@@ -203,7 +394,10 @@ class _ConvertCardState extends State<_ConvertCard> {
       return;
     }
 
-    DocLogger.instance.i(LogTags.file, '文件大小合法: ${sizeMB.toStringAsFixed(2)} MB');
+    DocLogger.instance.i(
+      LogTags.file,
+      '文件大小合法: ${sizeMB.toStringAsFixed(2)} MB',
+    );
     setState(() {
       _zipBytes = bytes;
       _zipFileName = fileName;
@@ -222,7 +416,10 @@ class _ConvertCardState extends State<_ConvertCard> {
         ? 'main-jos.tex'
         : _mainTexController.text.trim();
 
-    DocLogger.instance.i(LogTags.convert, '开始转换: 文件=$_zipFileName, 主文件=$mainTex');
+    DocLogger.instance.i(
+      LogTags.convert,
+      '开始转换: 文件=$_zipFileName, 主文件=$mainTex',
+    );
     setState(() {
       _state = _ConvertState.converting;
       _statusText = '正在转换…';
@@ -245,11 +442,14 @@ class _ConvertCardState extends State<_ConvertCard> {
         throw Exception('docx 头部非 ZIP（PK\\x03\\x04）');
       }
 
-      DocLogger.instance.i(LogTags.convert,
-          '转换成功: ${(docx.length / 1024).toStringAsFixed(1)} KB, 耗时 ${_elapsedMs}ms');
+      DocLogger.instance.i(
+        LogTags.convert,
+        '转换成功: ${(docx.length / 1024).toStringAsFixed(1)} KB, 耗时 ${_elapsedMs}ms',
+      );
       setState(() {
         _state = _ConvertState.success;
-        _statusText = '完成 ${(docx.length / 1024).toStringAsFixed(1)} KB（${_elapsedMs}ms）';
+        _statusText =
+            '完成 ${(docx.length / 1024).toStringAsFixed(1)} KB（${_elapsedMs}ms）';
       });
     } on Object catch (e) {
       DocLogger.instance.e(LogTags.convert, '转换失败: $e');
@@ -312,10 +512,7 @@ class _ConvertCardState extends State<_ConvertCard> {
             const SizedBox(height: 16),
 
             // ---- 状态条 ----
-            _StatusBar(
-              state: _state,
-              text: _statusText ?? _statusText,
-            ),
+            _StatusBar(state: _state, text: _statusText ?? _statusText),
 
             // ---- 错误卡片 ----
             if (_state == _ConvertState.error && _errorText != null) ...[
@@ -340,9 +537,7 @@ class _ConvertCardState extends State<_ConvertCard> {
                       ),
                     )
                   : const Icon(Icons.play_arrow),
-              label: Text(
-                _state == _ConvertState.converting ? '转换中…' : '开始转换',
-              ),
+              label: Text(_state == _ConvertState.converting ? '转换中…' : '开始转换'),
             ),
 
             // ---- 结果卡片 ----
@@ -397,7 +592,9 @@ class _FilePickSection extends StatelessWidget {
               ? '$fileName  (${(sizeBytes! / (1024 * 1024)).toStringAsFixed(2)} MB)'
               : '未选择文件',
           style: theme.textTheme.bodySmall?.copyWith(
-            color: hasFile ? colorScheme.primary : theme.textTheme.bodySmall?.color,
+            color: hasFile
+                ? colorScheme.primary
+                : theme.textTheme.bodySmall?.color,
             fontStyle: hasFile ? null : FontStyle.italic,
           ),
         ),
@@ -415,10 +612,30 @@ class _StatusBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (bgColor, fgColor, icon, label) = switch (state) {
-      _ConvertState.idle     => (Colors.grey.shade100, Colors.grey.shade700,  Icons.hourglass_empty, text ?? '就绪'),
-      _ConvertState.converting=> (Colors.blue.shade50,   Colors.blue.shade700,  Icons.sync,            text ?? '转换中…'),
-      _ConvertState.success   => (Colors.green.shade50, Colors.green.shade700, Icons.check_circle,    text ?? '完成'),
-      _ConvertState.error     => (Colors.red.shade50,   Colors.red.shade700,   Icons.error,           text ?? '出错'),
+      _ConvertState.idle => (
+        Colors.grey.shade100,
+        Colors.grey.shade700,
+        Icons.hourglass_empty,
+        text ?? '就绪',
+      ),
+      _ConvertState.converting => (
+        Colors.blue.shade50,
+        Colors.blue.shade700,
+        Icons.sync,
+        text ?? '转换中…',
+      ),
+      _ConvertState.success => (
+        Colors.green.shade50,
+        Colors.green.shade700,
+        Icons.check_circle,
+        text ?? '完成',
+      ),
+      _ConvertState.error => (
+        Colors.red.shade50,
+        Colors.red.shade700,
+        Icons.error,
+        text ?? '出错',
+      ),
     };
 
     return Container(
@@ -434,7 +651,11 @@ class _StatusBar extends StatelessWidget {
           Expanded(
             child: Text(
               label,
-              style: TextStyle(fontSize: 13, color: fgColor, fontWeight: FontWeight.w500),
+              style: TextStyle(
+                fontSize: 13,
+                color: fgColor,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ),
         ],
@@ -470,7 +691,11 @@ class _ResultCard extends StatelessWidget {
         children: [
           Text(
             '产物：${(docxBytes / 1024).toStringAsFixed(1)} KB  耗时 ${elapsedMs}ms',
-            style: TextStyle(fontSize: 13, color: successFg, fontWeight: FontWeight.w500),
+            style: TextStyle(
+              fontSize: 13,
+              color: successFg,
+              fontWeight: FontWeight.w500,
+            ),
           ),
           const SizedBox(height: 10),
           FilledButton.tonalIcon(
