@@ -1,0 +1,114 @@
+﻿[
+    {
+        "paper":  "paper2",
+        "profile_requested":  "generic",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main.tex",
+        "generated_input":  "inputs/paper2/generic/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "jos-paper",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main-ral.tex",
+        "generated_input":  "inputs/paper2/jos-paper/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "tacl",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main.tex",
+        "generated_input":  "inputs/paper2/tacl/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "cvpr",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main-ral.tex",
+        "generated_input":  "inputs/paper2/cvpr/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "nature",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main.tex",
+        "generated_input":  "inputs/paper2/nature/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "springer",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main.tex",
+        "generated_input":  "inputs/paper2/springer/main.tex"
+    },
+    {
+        "paper":  "paper2",
+        "profile_requested":  "chinese-academic",
+        "backend":  "auto",
+        "project_root":  "examples\\paper2\\latex",
+        "main_tex":  "main-zh.tex",
+        "generated_input":  "inputs/paper2/chinese-academic/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "generic",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/generic/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "jos-paper",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/jos-paper/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "tacl",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/tacl/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "cvpr",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/cvpr/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "nature",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/nature/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "springer",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-jos.tex",
+        "generated_input":  "inputs/paper3/springer/main.tex"
+    },
+    {
+        "paper":  "paper3",
+        "profile_requested":  "chinese-academic",
+        "backend":  "auto",
+        "project_root":  "examples\\paper3\\latex",
+        "main_tex":  "main-zh.tex",
+        "generated_input":  "inputs/paper3/chinese-academic/main.tex"
+    }
+]

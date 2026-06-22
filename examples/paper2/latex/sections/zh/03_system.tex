@@ -1,0 +1,64 @@
+\section{系统架构}
+\label{sec:system-zh}
+
+面向中医远程舌诊的机器人舌象采集，本文采用云--边--端分层设计：实时采集与质控在边缘完成，高时延分析在云端或离线进行；算法模块与 ROS 运行时解耦，便于独立测试与回归。
+
+\subsection{设备层}
+设备层包括 Franka Research~3（FR3）机械臂、RGB 相机，以及基于 ROS~2 的运动执行栈。
+MoveIt 提供关节空间点到点（PTP）运动。
+Paper~I 通过边缘网关调用两个具名 \emph{skills}：\texttt{go\_to\_tongue\_pose} 与 \texttt{go\_to\_face\_pose}，关节角配置存于 \texttt{poses.yaml}。
+实验设置 \texttt{PAPER1\_MODE=1}，以禁用阻抗/刚度类接口。
+MoveIt 假硬件与可选 Gazebo 相机支持无真机条件下的辅轨复现。
+
+\subsection{边缘层}
+边缘层是闭环采集的主要贡献所在。
+FastAPI 服务 \texttt{franka\_api\_server}（端口 8000）作为网关，将 HTTP 请求桥接至 ROS~2 运动与错误恢复动作。
+\textbf{Edge-IQA} 以轻量指标 $Q_{\mathrm{img}}$（清晰度与曝光融合）为每帧打分，实现位于 \texttt{doctor/paper1}，自阶段 2 起经子进程挂载至网关。
+\textbf{LangGraph} 实现置信度感知路由：\texttt{capture} $\rightarrow$ \texttt{edge\_iqa} $\rightarrow$ \texttt{route}，分支包括 \texttt{upload\_cloud}、\texttt{resample\_edge} 与 \texttt{fail\_safe}。
+HTTP 客户端 \texttt{sim/franka\_bridge} 连接 LangGraph 与网关（\texttt{/vision/evaluate}、\texttt{/motion/skills/...} 等）。
+
+\subsection{云端层}
+云端托管高层视觉模型与 EMR 对接接口（Paper~I 中为桩实现）。
+仅当边缘质量与路由策略接受该帧时，才触发上云；否则在重试预算 $K$ 内请求边缘重采。
+由此保持 1\,kHz ROS 控制回路中不含学习型感知模块。
+Edge-IQA 不直接写入硬件控制回路，只在网关暴露的预标定 skill 与 fail-safe 返回路径之间选择。
+因此，感知故障影响的是采集流程，而不是低层控制器。
+
+\subsection{数据与时序产物}
+每次闭环 trial 将 ISO~8601 时间戳（\texttt{t\_capture}、\texttt{t\_iqa}、\texttt{t\_route}）与路由决策写入 JSONL。
+主定量结果由离线脚本 \texttt{run\_matrix\_tcm.py} 在 ShezhenV3-COCO 测试图像上生成（基线 B0--B3）；Franka 辅轨（M6）仅报告趋势一致的 RTT，\emph{不}并入主表。
+离线回放与 Franka 辅轨使用同一 JSONL schema，因此每个上传、重采或中止帧均可追溯到分数、标志、重试次数与时间戳。
+
+\subsection{效度威胁}
+离线 RTT 采用文档化延迟模型；ShezhenV3 的模糊标签为合成注入；在真实队列上，Edge-IQA 仍存在组间分数重叠（M5：$\rho{=}0.47$），后续可进一步结合 ROI 裁剪与学习 refinement。
+
+\subsection{实现映射}
+表~\ref{tab:impl-map-zh} 给出架构分层与代码仓的对应关系。
+
+\begin{table}[t]
+\centering
+\caption{Paper~I 分层与代码仓映射。}
+\label{tab:impl-map-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lll}
+\hline
+层级 & 组件 & 位置 \\
+\hline
+设备 & MoveIt、skills & \texttt{franka\_ros2} \\
+边缘 & FastAPI 网关 & \texttt{franka\_api\_server} \\
+边缘 & Edge-IQA、LangGraph & \texttt{doctor/paper1} \\
+云端 & 视觉桩 & \texttt{doctor/paper1}（桩） \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig1_system_overview.pdf}
+  \caption{机器人中医舌象采集的云--边--端架构（Paper~I）。}
+  \label{fig:system-overview-zh}
+\end{figure*}
+
+图~\ref{fig:system-overview-zh} 概括端到端信息流：设备运动仅经边缘网关下发，IQA 不嵌入 ROS 硬件插件。

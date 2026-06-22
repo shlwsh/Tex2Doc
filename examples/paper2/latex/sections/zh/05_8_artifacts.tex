@@ -1,0 +1,31 @@
+\subsection{开放科学工件索引}
+\label{sec:artifacts-zh}
+
+表~\ref{tab:artifacts-zh} 索引 ShezhenV3 全量验证主要产出文件（路径相对 \texttt{franka\_ros2} 根目录）。
+
+\begin{table}[t]
+\centering
+\caption{开放科学工件索引（Paper~I，TCM 全量运行）。}
+\label{tab:artifacts-zh}
+\scriptsize
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+工件 & 路径 \\
+\hline
+数据集划分 & \texttt{doctor/paper1/experiments/splits/tcm\_*.json} \\
+$\tau$ 标定 & \texttt{recommended\_tau.json} \\
+验证集分数 & \texttt{calibration\_val.csv} \\
+主矩阵明细 & \texttt{main\_seed*\_detail.csv} \\
+Table II & \texttt{table\_ii.json} \\
+M5 相关 & \texttt{cross\_tcm\_fd.csv} \\
+图表 & \texttt{figures/fig\_iqa\_hist.pdf} 等 \\
+一键脚本 & \texttt{scripts/paper1\_run\_tcm\_full.sh} \\
+英文 PDF & \texttt{latex/main.pdf} \\
+中文 PDF & \texttt{latex/main-zh.pdf} \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+无 FR3 硬件亦可仅依赖 TCM 挂载与 Python 环境复现表~\ref{tab:main-results-zh}；Franka 辅轨为可选。

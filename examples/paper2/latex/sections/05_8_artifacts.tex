@@ -1,0 +1,30 @@
+\subsection{Open Science Artifacts}
+\label{sec:artifacts}
+
+Table~\ref{tab:artifacts} indexes the primary files produced by ShezhenV3 full validation; all paths are relative to the \texttt{franka\_ros2} repository root unless noted.
+
+\begin{table}[t]
+\centering
+\caption{Open science artifact index (Paper~I, TCM full run).}
+\label{tab:artifacts}
+\scriptsize
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Artifact & Path \\
+\hline
+Dataset splits & \texttt{experiments/splits/tcm\_*.json} \\
+$\tau$ calibration & \texttt{recommended\_tau.json} \\
+Validation scores & \texttt{calibration\_val.csv} \\
+Main matrix detail & \texttt{main\_seed*\_detail.csv} \\
+Table II JSON & \texttt{table\_ii.json} \\
+M5 correlation & \texttt{cross\_tcm\_fd.csv} \\
+Figures & \texttt{figures/fig\_iqa\_hist.pdf}, etc. \\
+One-shot script & \texttt{scripts/paper1\_run\_tcm\_full.sh} \\
+PDFs & \texttt{latex/main.pdf}, \texttt{main-zh.pdf} \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+Researchers without the FR3 hardware can reproduce Table~\ref{tab:main-results} entirely from the TCM mount and Python environment; the Franka auxiliary track remains optional.

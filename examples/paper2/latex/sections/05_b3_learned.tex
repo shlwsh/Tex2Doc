@@ -1,0 +1,20 @@
+% §5.x Learned B3 IQA baseline
+\subsection{Learned IQA Baseline B3 (MobileNetV3-Small)}
+\label{sec:b3-learned}
+
+Baseline B3 replaces the previous simulated $+0.08$ boost on $Q_{\mathrm{img}}$ with a \emph{real} learned scorer trained on the ShezhenV3 \texttt{train} split.
+We fine-tune MobileNetV3-Small (ImageNet-pretrained) for binary clear vs.\ blurred classification on ROI-cropped patches.
+
+\paragraph{Training protocol.}
+For each of $5{,}594$ training images with valid COCO boxes ($5{,}404$ with annotations), we emit two samples: (i) the clear ROI crop (label $1$), and (ii) the same crop after Gaussian blur $r{\sim}\mathcal{U}(2.5,5.0)$ (label $0$).
+Input resolution is $224{\times}224$; optimizer AdamW ($\mathrm{lr}{=}10^{-3}$, weight decay $10^{-4}$); batch size $64$; $5$ epochs on CPU (CUDA optional when driver-compatible).
+Augmentations: horizontal flip, mild brightness/contrast jitter on training only.
+Checkpoint: \texttt{experiments/results/b3\_mobilenet.pt}; inference wrapper \texttt{edge\_iqa/learned\_b3.py} exports $Q_{\mathrm{img}} = P(\mathrm{clear}\mid I)$.
+
+\paragraph{Role in the matrix.}
+B3 uses the learned probability for initial $Q_{\mathrm{img}}$ while sharing the same LangGraph routing and latency model as B2.
+Validation accuracy on held-out ROI pairs reaches **98.3\%** (5 epochs, $11{,}188$ train pairs).
+\paragraph{Main matrix (Tables~\ref{tab:main-results}, \ref{tab:learned-hybrid}).}
+At $\tau_{B2}{=}0.465$, B3 (MobileNet) achieves M2 $=0.934$ vs.\ B2 M2 $=0.604$; B3t at $\tau_{B3}{=}0.5$ yields M2 $=0.929$; Hybrid B4 M2 $=0.936$.
+B2 remains the preferred deployable path for lowest M1 p50 (208.3\,ms mean) and auditable flags.
+Re-calibrating $\tau$ on B3 validation pairs is left to future work; B3 demonstrates blur ranking capacity but B2 remains the primary deployable path.

@@ -1,0 +1,25 @@
+\subsection{COCO Tongue ROI Cropping}
+\label{sec:roi}
+
+ShezhenV3-COCO provides COCO boxes $[x,y,w,h]$; we union multi-instance annotations, pad 8\%, and crop before resize (\texttt{edge\_iqa/coco\_roi.py}).
+Full-frame scoring includes cheeks and background Laplacian energy unrelated to tongue focus; ROI aligns the quality signal with downstream TCM classifiers.
+
+\begin{table}[!t]
+\centering
+\caption{Edge-IQA calibration: full frame vs.\ tongue ROI (val, $n{=}572$ per cohort).}
+\label{tab:roi-ablation}
+\small
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\hline
+Setting & Med.\ clear & Med.\ blur & $\tau$ & Sep. \\
+\hline
+Full frame & 0.564 & 0.431 & 0.498 & $-0.510$ \\
+Tongue ROI & 0.516 & 0.414 & 0.465 & $-0.541$ \\
+\hline
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:roi-ablation} compares calibration settings.
+Minimum-clear minus maximum-blur separation remains negative in both settings, so $\tau_{B2}{=}0.465$ is a cohort operating point---we report routing outcomes and Spearman $\rho$ (M5, $\rho{\approx}0.36$--$0.47$) rather than perfect separability.
+When COCO boxes are unavailable at runtime, Edge-IQA falls back to full-frame scoring (\texttt{use\_roi=false}).

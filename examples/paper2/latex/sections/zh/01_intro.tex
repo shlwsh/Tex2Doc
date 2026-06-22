@@ -1,0 +1,45 @@
+\section{引言}
+\label{sec:intro-zh}
+
+中医远程舌诊要求机械臂搭载相机可重复地采集高质量舌象，以支撑云端分析与电子病历（EMR）集成~\cite{zhang2020tongue,qi2016tongue}。
+临床舌诊依赖颜色、纹理、苔质与形态等特征；在微动模糊、光照不均或拍摄距离失当时，这些特征会显著退化~\cite{zhang2020tongue}。
+若采用「每帧一律上云」的朴素流水线，既浪费带宽，也会在链路较慢时放大端到端时延。
+
+\paragraph{研究动机。}
+云边协同机器人可将重型视觉模型卸载至云端，同时保持采集闭环的响应性。
+但在中医成像场景中，\emph{垃圾进、垃圾出}（GIGO）效应尤为突出：一次模糊上传不仅浪费一次 RTT，还可能将低置信特征传入下游分类器。
+因此，边侧质量门控须同时满足：（i）足够快，可嵌入闭环；（ii）可解释、可审计；（iii）能在真实舌象语料上标定。
+ShezhenV3-COCO 提供舌体边界框，使 ROI 裁剪与下游解剖关注区对齐。
+
+\paragraph{方法概述。}
+本文在 FR3 平台上研究\textbf{云--边--端}架构，采用 ROS~2 与 MoveIt。
+轻量 \emph{Edge-IQA} 在 COCO 舌区 ROI 上融合 Laplacian 清晰度与曝光指标；LangGraph 在预算 $K$ 内完成三分支路由决策。
+可选基线 B3 在训练集上微调 MobileNetV3-Small，用于与可解释路由对比。
+本文的新意在于采集时刻的耦合：被拒绝的舌区 ROI 触发有界物理重采，被接受的 ROI 避免无谓重试，重试耗尽则进入 fail-safe，而不是静默上传低质量证据。
+
+\paragraph{数据集与评估规模。}
+在 ShezhenV3-COCO（6{,}719 张）上：572 对验证样本（ROI + 合成模糊）用于标定 $\tau$；553 张测试图、每 seed 500 帧，采用真实 Edge-IQA 与 B3 分数进行主矩阵评估。
+
+\paragraph{主要贡献。}
+\begin{enumerate}
+  \item \textbf{Edge-IQA + ROI：}在舌区裁剪上标定 $\tau^\ast{=}0.465$，CPU p95 低于 10\,ms。
+  \item \textbf{LangGraph 路由：}物理重采下 B2 将 M2 提升至 0.604（相对 B0 的 0.560），M1 p50 由 374\,ms 降至 208\,ms。
+  \item \textbf{学习型 B3 对比：}MobileNet 验证准确率 98.3\%；在 $\tau_{B2}$ 下 B3 M2 为 0.934，在 $\tau_{B3}{=}0.5$ 下 B3t M2 为 0.929，混合 B4 M2 为 0.936，体现学习型排序与可解释路由之间的延迟--有效帧权衡。
+  \item \textbf{双轨评估：}ShezhenV3 主矩阵与 Franka M6 辅轨分离报告，CSV 结果不混用，并以视频/代码材料说明机器人调用方式。
+\end{enumerate}
+
+\paragraph{章节安排。}
+第~\ref{sec:related-zh}--\ref{sec:conclusion-zh} 节依次介绍相关工作、方法（含 ROI 与 B3）、实验与结论。
+
+\paragraph{范围说明。}
+本文不提出新的舌病分类器，不宣称通用 IQA 排行榜 SOTA，也不替代临床判断；研究焦点是采集时刻的质量门控与路由。
+
+\paragraph{可复现性与临床转化。}
+一键脚本 \texttt{paper1\_run\_tcm\_full.sh} 可重建图表与 PDF，工件存放于 \texttt{experiments/results/}。
+临床试点宜记录 50 次以上会话的 JSONL、在本地重标定 $\tau$，并对比路由前后云端分类置信度。
+人工重拍在流程上类似 \texttt{resample\_edge}，但缺乏统一的 $Q_{\mathrm{img}}$ 阈值；Edge-IQA 将决策标准化，并导出可读的 \texttt{flags}。
+发布版本应固定 \texttt{scorer.py} 与 checkpoint 的 SHA256；修改 ROI padding 后须重新标定。
+双轨设计将算法证据（ShezhenV3）与集成证据（Franka M6）分离，便于在其他机器人传感论文中复用；ShezhenV3 图像路径由 \texttt{tcm\_paths.yaml} 配置。
+
+\paragraph{全文定位。}
+Paper~I 的核心主张，是在真实中医舌象数据上得到验证的\emph{置信度感知路由架构}，而非新的 IQA 回归 SOTA。

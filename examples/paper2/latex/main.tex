@@ -1,0 +1,76 @@
+% Paper I — Draft v1 (RA-L / RCIM style article)
+\documentclass[11pt,twocolumn]{article}
+
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{cite}
+
+% algpseudocode compatibility (appendix algorithms use uppercase macros)
+\let\STATE\State
+\let\RETURN\Return
+\let\REPEAT\Repeat
+\let\UNTIL\Until
+\let\IF\If
+\let\ELSIF\ElsIf
+\let\ENDIF\EndIf
+\let\ELSE\Else
+\let\COMMENT\Comment
+
+\graphicspath{{../figures/}{figures/}}
+
+\hypersetup{
+  pdfauthor  = {Honglei Shi, Juanjuan Zhao},
+  pdftitle   = {Confidence-Aware Edge Routing for Robotic TCM Tongue Imaging},
+}
+
+\title{Confidence-Aware Edge Routing for Robotic TCM Tongue Imaging:\\
+Edge-IQA and LangGraph Closed-Loop Acquisition}
+\author{Honglei Shi\thanks{Corresponding author. E-mail: \href{mailto:shihonglei0042@link.tyut.edu.cn}{shihonglei0042@link.tyut.edu.cn}.} and Juanjuan Zhao\\
+Taiyuan University of Technology, Taiyuan, China}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{sections/00_abstract}
+\input{sections/01_intro}
+\input{sections/02_related}
+
+\section{Method}
+\label{sec:method}
+\input{sections/03_system}
+\input{sections/04_1_edge_iqa}
+\input{sections/04_1_roi}
+\input{sections/04_2_routing}
+
+\section{Experiments}
+\label{sec:experiments}
+\input{sections/05_1_setup}
+\input{sections/05_4_tcm_validation}
+\input{sections/05_2_main_results}
+\input{sections/05_3_ablation}
+\input{sections/05_5_discussion}
+
+\section{Conclusion}
+\input{sections/06_conclusion}
+
+\input{sections/00_disclosures}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\section{Supplementary Materials}
+\label{sec:supp}
+\input{sections/07_supplementary}
+\input{sections/08_appendix_extended}
+\input{sections/09_notation}
+\input{sections/05_appendix_experiments}
+
+\end{document}

@@ -1,0 +1,20 @@
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented Edge-IQA and LangGraph confidence-aware routing for robotic TCM tongue-image acquisition on a Franka ROS~2 stack, validated end-to-end on the public ShezhenV3-COCO corpus (6{,}719 images).
+Keeping IQA and routing outside the 1\,kHz control loop preserves real-time safety while enabling JSONL-audited closed-loop policies.
+On the held-out test split with real ROI Edge-IQA scores, baseline B2 improves median RTT and valid-frame rate versus naive upload (M1 p50 208.3\,ms vs.\ 374.0\,ms; M2 0.604 vs.\ 0.560) at $\tau_{B2}{=}0.465$; M5 $\rho{\approx}0.36$--$0.47$ characterizes overlap under real tongue texture.
+The central contribution is to move image-quality reasoning from post-hoc cloud filtering into the robot acquisition decision itself, with bounded resampling and fail-safe behavior.
+The evidence is layered: public-corpus replay provides repeatable statistics, the auxiliary Franka track checks execution feasibility, and the supplementary video/code package documents robot invocation.
+
+\paragraph{Limitations.}
+(1)~Validation and test blur are synthetically injected (isotropic Gaussian defocus), which may under-represent directional motion smear from micro-vibration or saliva dynamics on the robot path.
+(2)~Edge-IQA overlap between clear and blurred cohorts on real images motivates learned refinement (B3/B4) alongside interpretable B2.
+(3)~M2 (valid-frame rate) is a scorer-internal metric; end-to-end clinical validation correlating Edge-IQA gating with downstream classifier performance remains future work.
+(4)~Three random seeds provide consistent trends but limited formal statistical power; bootstrap confidence intervals on larger seed budgets would strengthen the evidence.
+(5)~Classical NR-IQA rows (BRISQUE / NIQE-style) under the same LangGraph shell are reported in the appendix (Table~\ref{tab:nr-iqa}); full OpenCV scoring requires mounting the public dataset at \texttt{dataset\_root}.
+(6)~Cloud vision and EMR integration remain stubs; M6 confirms execution-stack feasibility but does not replace live clinical deployment data.
+Clinical pilots should re-calibrate $\tau_{B2}$ on 50+ local sessions before claiming site-specific upload policies.
+
+\paragraph{Future work.}
+Tongue-bbox--conditioned scoring, Gazebo camera injection, NR-IQA baselines with identical resampling protocols, train-split fine-tuning for B3 with frozen main-table scripts, and multi-center clinical acquisition studies.

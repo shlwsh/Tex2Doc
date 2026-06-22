@@ -1,0 +1,38 @@
+% §4.1.1 COCO tongue ROI crop
+\subsection{COCO Tongue Region-of-Interest Cropping}
+\label{sec:roi}
+
+ShezhenV3-COCO provides axis-aligned bounding boxes for each tongue instance in COCO format $[x,y,w,h]$.
+When multiple annotations exist on one frame, we take the union box, expand each side by $8\%$ of width/height (clamped to image bounds), and crop before Edge-IQA resize.
+Implementation lives in \texttt{edge\_iqa/coco\_roi.py}; split JSON files store \texttt{bboxes} per image after \texttt{import\_shezhenv3.py}.
+
+\paragraph{Motivation.}
+Full-frame scoring includes cheeks, teeth, and background texture that contribute Laplacian energy unrelated to tongue focus.
+ROI cropping aligns the quality signal with the anatomical target used by downstream TCM classifiers and reduces sensitivity to out-of-field sharp structures (e.g., lip edges, specular highlights on teeth).
+
+\paragraph{Calibration impact.}
+On the full validation split ($n{=}572$ clear images, each paired with synthetic Gaussian blur $r{\in}[2.5,5.0]$, Table~\ref{tab:roi-ablation} compares full-frame vs.\ ROI Edge-IQA.
+ROI lowers absolute medians (clear $0.516$ vs.\ $0.564$; blur $0.414$ vs.\ $0.431$) because background high-frequency content is removed.
+Minimum-clear minus maximum-blur separation remains negative in both settings ($-0.54$ ROI vs.\ $-0.51$ full-frame), confirming that cohort overlap persists; we therefore report Spearman $\rho$ and routing outcomes rather than assuming separable clusters.
+ROI is enabled by default (\texttt{use\_roi: true} in \texttt{tcm\_paths.yaml}) for all ShezhenV3 experiments in this revision.
+
+\begin{table}[t]
+\centering
+\caption{Edge-IQA calibration: full frame vs.\ COCO tongue ROI (ShezhenV3 val, $n{=}572$ per cohort).}
+\label{tab:roi-ablation}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\hline
+Setting & Med.\ clear & Med.\ blur & $\tau$ & Separation \\
+\hline
+Full frame & 0.564 & 0.431 & 0.498 & $-0.510$ \\
+Tongue ROI & 0.516 & 0.414 & 0.465 & $-0.541$ \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Deployment note.}
+When COCO boxes are unavailable at runtime (e.g., a single-camera prototype without detector), Edge-IQA falls back to full-frame scoring by setting \texttt{use\_roi=false}.
+The FastAPI gateway accepts optional bbox metadata in future API extensions; offline calibration always uses dataset annotations for reproducibility.

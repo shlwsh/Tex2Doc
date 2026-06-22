@@ -1,0 +1,97 @@
+% Paper I — 中文版（lualatex + ctex）
+\documentclass[11pt,twocolumn]{article}
+
+% ===== ctex 中文支持（fandol 随 TeX Live 分发，避免 Noto CJK 缺失） =====
+\usepackage[UTF8,scheme=plain,fontset=fandol]{ctex}
+
+% ===== 版面 =====
+\usepackage[margin=0.75in]{geometry}
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{fancyvrb}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{cite}
+
+% 与英文稿 algorithm 块大写命令兼容（algpseudocode 默认可用 \State 等）
+\let\STATE\State
+\let\RETURN\Return
+\let\REPEAT\Repeat
+\let\UNTIL\Until
+\let\IF\If
+\let\ELSIF\ElsIf
+\let\ENDIF\EndIf
+\let\ELSE\Else
+\let\COMMENT\Comment
+
+% ===== 细节优化 =====
+\numberwithin{equation}{section}
+\fvset{fontsize=\small}
+
+\graphicspath{{../figures/},{figures/}}
+
+% ===== 标题格式（raggedright 须作为包选项，不可放入 \titleformat） =====
+\usepackage[raggedright]{titlesec}
+\titleformat{\section}{\bfseries\Large}{\thesection}{0.5em}{}
+\titleformat{\subsection}{\bfseries\large}{\thesubsection}{0.5em}{}
+\titleformat{\subsubsection}{\bfseries\normalsize}{\thesubsubsection}{0.5em}{}
+
+% ===== hyperref =====
+\hypersetup{
+  unicode    = true,
+  pdfauthor  = {石洪雷, 赵涓涓},
+  pdftitle   = {面向机器人中医舌诊采集的置信度感知边缘路由},
+  pdfkeywords = {Edge-IQA, LangGraph, TCM, 云边协同},
+}
+
+% ===== 标题 =====
+\title{面向机器人中医舌诊采集的置信度感知边缘路由：\\
+Edge-IQA 与 LangGraph 闭环采集}
+\author{石洪雷\thanks{通讯作者。E-mail：\href{mailto:shihonglei0042@link.tyut.edu.cn}{shihonglei0042@link.tyut.edu.cn}。} \quad 赵涓涓\\
+太原理工大学}
+\date{}
+
+\begin{document}
+\maketitle
+
+\input{sections/zh/00_abstract}
+\input{sections/zh/01_intro}
+\input{sections/zh/02_related}
+
+\section{方法}
+\label{sec:method-zh}
+\input{sections/zh/03_system}
+\input{sections/zh/04_1_edge_iqa}
+\input{sections/zh/04_1_roi}
+\input{sections/zh/04_2_routing}
+\input{sections/zh/04_3_closed_loop}
+
+\section{实验}
+\label{sec:experiments-zh}
+\input{sections/zh/05_1_setup}
+\input{sections/zh/05_4_tcm_validation}
+\input{sections/zh/05_2_main_results}
+\input{sections/zh/05_3_ablation}
+\input{sections/zh/05_5_discussion}
+
+\section{结论}
+\input{sections/zh/06_conclusion}
+
+\input{sections/zh/00_disclosures}
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\section{补充材料}
+\label{sec:supp-zh}
+\input{sections/zh/07_supplementary}
+\input{sections/zh/08_appendix_extended}
+\input{sections/zh/09_notation}
+\input{sections/zh/05_appendix_experiments}
+
+\end{document}

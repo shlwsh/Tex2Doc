@@ -1,0 +1,24 @@
+\subsection{System Architecture}
+\label{sec:system}
+
+Fig.~\ref{fig:system-overview} shows the stack.
+\textbf{Device layer:} FR3 manipulator, RGB camera, and ROS~2/MoveIt PTP execution; named skills invoke calibrated joint poses via the edge gateway (\texttt{PAPER1\_MODE=1} disables stiffness routes in experiments).
+\textbf{Edge layer:} FastAPI gateway (\texttt{franka\_api\_server}) hosts Edge-IQA and LangGraph; \texttt{sim/franka\_bridge} connects graph nodes to \texttt{/vision/evaluate} and skill endpoints.
+\textbf{Cloud layer:} higher-level vision and EMR integration (stub); upload occurs only when edge quality and routing accept the frame.
+
+The boundary between control and perception is explicit.
+Edge-IQA never writes directly to the 1\,kHz hardware loop; it only selects among pre-calibrated skills or a fail-safe return path exposed by the gateway.
+Thus a perception fault degrades the acquisition workflow, not the low-level controller.
+This design mirrors RA-L systems that place the algorithmic contribution inside a real robot execution envelope while keeping the safety-critical path simple enough to audit.
+
+Each trial logs ISO~8601 timestamps (\texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route}) and decisions to JSONL; main RTT metrics are computed offline by \texttt{run\_matrix\_tcm.py} on ShezhenV3 test images.
+Offline RTT aggregates a documented latency model: capture 5\,ms, IQA $\mathcal{N}(9,2^2)$\,ms, routing 1.5\,ms, resample p50$\approx$50\,ms, cloud upload 50--550\,ms (see \texttt{sim/NETEM.md}).
+Relative baseline ordering is the primary claim; ShezhenV3 blur labels are synthetically injected Gaussian defocus when human quality annotations are unavailable.
+The same JSONL schema is used for offline replay and the auxiliary Franka track, so every uploaded, retried, or aborted frame can be traced to a score, flag set, retry count, and timestamp.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{fig1_system_overview.pdf}
+  \caption{Cloud--edge--device stack for robotic tongue-image acquisition.}
+  \label{fig:system-overview}
+\end{figure}

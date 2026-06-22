@@ -1,0 +1,29 @@
+\section{相关工作}
+\label{sec:related-zh}
+
+\paragraph{机器人医学成像。}
+手术与诊断机器人广泛采用 ROS~2 与 MoveIt~\cite{moore2021ros2,chitta2009moveit}。
+遥操作与自主相机须满足关节限位、避障与可重复视点，因此多采用\emph{skills}（标定位姿），而非临时关节遥操作。
+本文以 \texttt{go\_to\_tongue\_pose}、\texttt{go\_to\_face\_pose} 等具名 skill 替代在线阻抗调参，既满足临床可重复性，又与力控研究线程解耦。
+
+\paragraph{图像质量评估。}
+\textbf{全参考}指标（PSNR、SSIM）需要 pristine 参考图，不适用于逐患者在线采集。
+\textbf{手工 NR-IQA}（Laplacian、BRISQUE、NIQE 等）无需参考图；BRISQUE~\cite{mittal2012brisque} 与 NIQE~\cite{mittal2012niqe} 建模自然场景统计，但在路由前常需额外分数映射，且难以提供可供临床审计的 blur/曝光 语义。
+\textbf{深度 NR-IQA}（DB-CNN~\cite{zhang2018blind}、HyperIQA~\cite{su2020hyperiqa}、MUSIQ~\cite{ke2021musiq}、TReS~\cite{golestaneh2022tres}、CLIP-IQA~\cite{wang2023clipiqa}、TOPIQ~\cite{chen2024topiq}、PromptIQA~\cite{chen2024promptiqa}、DR.Experts~\cite{fu2026dr.experts}）在 benchmark 上感知相关性强，但依赖 GPU、模型版本管理与黑盒解释。
+
+边侧闭环机器人更偏好线性复杂度与可审计的失效模式；本文 Edge-IQA 显式输出 blur/曝光 标志，并以 $\tau$ 驱动 LangGraph（见表~\ref{tab:iqa-compare-zh}）。
+本文不追求通用 MOS 排行榜冠军，而关注 TCM 舌象场景下、在 CPU 延迟与可复现约束下的\textbf{边侧采集门控}。
+
+\paragraph{边云协同。}
+边缘计算将时延敏感感知前移至设备附近~\cite{wang2014edge}；分流推理与早退策略可降低移动视觉带宽~\cite{kang2017neurosurgeon,li2018edge}；Zhou 等~\cite{zhou2019edge}及 Xu 等~\cite{xu2021a}分别探讨了从云端到设备端的边缘智能分类体系。
+Neurosurgeon 类框架按层切分 DNN；本文则在重型云模型运行之前，以轻量打分器和 MobileNetV3~\cite{howard2019mobilenetv3} 对照（Edge-IQA p95 $\approx$9.6\,ms CPU）门控\emph{上传决策}。
+LangGraph 式状态机可表达可审计的分支逻辑；ReAct 范式~\cite{yao2023react}交替生成推理链与工具调用行动，Toolformer~\cite{schick2023toolformer}和 GPT-4~\cite{openai2023gpt-4}展示了语言模型的自主工具调用机制（详见近期综述~\cite{wang2024a}）——本文将其实例化为 Edge-IQA 打分与 ROS 技能调用。
+
+\paragraph{中医舌象分析。}
+远程医疗系统需要可靠的前端采集~\cite{chen2021telemed}与图像增强~\cite{deng2026op4ksr}；云端舌象分类、分割与颜色分析已较为成熟~\cite{zhang2020tongue,qi2016tongue,huang2015tcn}。
+ShezhenV3-COCO 等公开语料提供框标注与类别标签，主要服务\emph{下游}诊断模型。
+Paper~I 聚焦这些模型\emph{上游}的采集质量与路由：微动模糊与曝光漂移仍会削弱 SOTA 分类器的输入质量。
+在全部 6{,}719 张图像上的评估，将 Edge-IQA 标定与社区资源对接，而非仅依赖合成占位数据。
+
+\paragraph{定位小结。}
+相对通用边侧卸载，本文面向机器人\emph{采集}闭环；相对 NR-IQA 文献，优先可阈值化的 $Q_{\mathrm{img}}$ 与 JSONL 审计；相对 TCM 诊断论文，解决分类之前的帧可用性问题。

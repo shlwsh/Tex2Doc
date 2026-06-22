@@ -1,0 +1,38 @@
+{
+  "synthetic": true,
+  "reason": "semantic-convert exited before writing a CompileReport; quality gate failure is recorded in log.",
+  "paper": "paper2",
+  "profile_requested": "jos-paper",
+  "backend_requested": "auto",
+  "exit_code": 7,
+  "grade": "D",
+  "status": "generated",
+  "docx": "docx/paper2__jos-paper__auto.docx",
+  "log": "logs/paper2__jos-paper__auto.log",
+  "issues": [
+    "command-exit-7",
+    "no-media-files",
+    "compatibility-below-plan-threshold",
+    "requested-effective-profile-mismatch"
+  ],
+  "docx_metrics": {
+    "exists": true,
+    "bytes": 21474,
+    "zip_openable": true,
+    "has_content_types": true,
+    "has_document_xml": true,
+    "has_styles_xml": true,
+    "has_relationships": true,
+    "paragraphs": 282,
+    "tables": 8,
+    "media_files": 0,
+    "omml_equations": 73,
+    "raw_latex_hits": 4,
+    "text_chars": 0
+  },
+  "quality_gate_failure": [
+    "[rule-engine] unknown macro: \\begin{abstract} (arity=0) - using verbatim fallback",
+    "[rule-engine] unknown macro: \\begin{IEEEkeywords} (arity=0) - using verbatim fallback",
+    "raw_fallback_blocks: 2 unknown macro(s) > 0 max: FAIL"
+  ]
+}

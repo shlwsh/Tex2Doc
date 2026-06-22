@@ -1,0 +1,22 @@
+\subsection{ShezhenV3 扩展分析}
+\label{sec:extended-analysis-zh}
+
+\paragraph{标定队列统计。}
+572 张清晰验证图 $Q_{\mathrm{img}}$ 均值 0.519（标准差 0.116）；572 对合成模糊均值 0.414（标准差 0.102）。
+验证 CSV 中标志频次：\texttt{blur}=797、\texttt{underexposed}=12。
+模糊组以 blur 标志为主；曝光标志在两组均出现，反映 ShezhenV3 光照多样性。
+
+\paragraph{B2 RTT 按注入类型（seed 0）。}
+B2 试验中清晰源帧（$n=263$）RTT p50 225.2\,ms，模糊源帧（$n=237$）p50 202.2\,ms，说明恢复重试集中于初始退化帧。
+
+\paragraph{种子稳定性。}
+三个种子共享各自帧计划但独立抽样云/重采延迟；B2 的 M2 在各 seed 均为 1.000，M1 p50 方差小（341--348\,ms），表明路由结果主要由确定性 Edge-IQA 分数驱动。
+
+\paragraph{复现清单。}
+\begin{enumerate}
+  \item 导入划分：\texttt{python3 scripts/import\_shezhenv3.py}
+  \item 标定 $\tau$：\texttt{python3 experiments/edge\_iqa/calibrate\_tau\_tcm.py}
+  \item 主矩阵：\texttt{python3 experiments/run\_matrix\_tcm.py}
+  \item 一键：\texttt{bash scripts/paper1\_run\_tcm\_full.sh}
+\end{enumerate}
+路径见 \texttt{tcm\_paths.yaml}；Windows 盘符挂载 WSL 后修改 \texttt{dataset\_root} 即可。

@@ -1,0 +1,114 @@
+[
+  {
+    "case": "paper2__chinese-academic__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 61
+  },
+  {
+    "case": "paper2__cvpr__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 16
+  },
+  {
+    "case": "paper2__generic__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 25
+  },
+  {
+    "case": "paper2__jos-paper__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 24
+  },
+  {
+    "case": "paper2__nature__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 26
+  },
+  {
+    "case": "paper2__springer__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 20
+  },
+  {
+    "case": "paper2__tacl__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 19
+  },
+  {
+    "case": "paper3__chinese-academic__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 24
+  },
+  {
+    "case": "paper3__cvpr__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 29
+  },
+  {
+    "case": "paper3__generic__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 21
+  },
+  {
+    "case": "paper3__jos-paper__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 24
+  },
+  {
+    "case": "paper3__nature__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 23
+  },
+  {
+    "case": "paper3__springer__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 20
+  },
+  {
+    "case": "paper3__tacl__auto",
+    "word_open": false,
+    "word_error": "Word reports possible file corruption.",
+    "word_paragraphs": null,
+    "word_words": null,
+    "elapsed_ms": 17
+  }
+]

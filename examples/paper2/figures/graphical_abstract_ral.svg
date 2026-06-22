@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="600" viewBox="0 0 1200 600">
+  <defs>
+    <linearGradient id="bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f8fafc"/>
+      <stop offset="100%" style="stop-color:#eef2ff"/>
+    </linearGradient>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L8,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+    <filter id="shadow" x="-4%" y="-4%" width="108%" height="108%">
+      <feDropShadow dx="0" dy="2" stdDeviation="3" flood-opacity="0.12"/>
+    </filter>
+  </defs>
+  <rect width="1200" height="600" fill="url(#bg)"/>
+  <rect x="0" y="0" width="1200" height="72" fill="#1e3a5f"/>
+  <text x="600" y="32" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="22" font-weight="bold" fill="#ffffff">
+    Confidence-Aware Edge Routing for Robotic TCM Tongue Imaging
+  </text>
+  <text x="600" y="58" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" fill="#cbd5e1">
+    Edge-IQA + LangGraph closed-loop acquisition (ShezhenV3-COCO)
+  </text>
+
+  <g filter="url(#shadow)">
+    <rect x="40" y="110" width="200" height="200" rx="12" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+    <text x="140" y="145" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" fill="#0f172a">Device</text>
+    <text x="140" y="178" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#334155">FR3 + camera</text>
+    <text x="140" y="202" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#334155">ROS 2 / MoveIt</text>
+    <text x="140" y="226" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#64748b">tongue / face skills</text>
+    <rect x="70" y="248" width="140" height="44" rx="6" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+    <text x="140" y="275" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" font-weight="bold" fill="#0369a1">capture frame</text>
+  </g>
+
+  <g filter="url(#shadow)">
+    <rect x="300" y="95" width="340" height="230" rx="12" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+    <text x="470" y="128" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" fill="#0f172a">Edge gateway</text>
+    <rect x="330" y="142" width="280" height="52" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+    <text x="470" y="165" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="bold" fill="#92400e">Edge-IQA</text>
+    <text x="470" y="184" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#78350f">Q_img, blur / exposure flags</text>
+    <rect x="330" y="204" width="280" height="52" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+    <text x="470" y="227" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" font-weight="bold" fill="#5b21b6">LangGraph router</text>
+    <text x="470" y="246" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#4c1d95">JSONL-audited branches</text>
+    <text x="470" y="298" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#64748b">outside 1 kHz control loop</text>
+  </g>
+
+  <rect x="300" y="348" width="110" height="36" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="355" y="371" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" font-weight="bold" fill="#166534">upload_cloud</text>
+  <rect x="420" y="348" width="110" height="36" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="475" y="371" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" font-weight="bold" fill="#1d4ed8">resample_edge</text>
+  <rect x="540" y="348" width="100" height="36" rx="6" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+  <text x="590" y="371" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" font-weight="bold" fill="#991b1b">fail_safe</text>
+  <line x1="355" y1="340" x2="355" y2="348" stroke="#7c3aed" stroke-width="1.5"/>
+  <line x1="475" y1="340" x2="475" y2="348" stroke="#7c3aed" stroke-width="1.5"/>
+  <line x1="590" y1="340" x2="590" y2="348" stroke="#7c3aed" stroke-width="1.5"/>
+
+  <g filter="url(#shadow)">
+    <rect x="700" y="110" width="200" height="200" rx="12" fill="#ffffff" stroke="#334155" stroke-width="2"/>
+    <text x="800" y="145" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="16" font-weight="bold" fill="#0f172a">Cloud</text>
+    <text x="800" y="178" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#334155">TCM analytics</text>
+    <text x="800" y="202" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#64748b">async inference stub</text>
+    <text x="800" y="240" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#16a34a">valid frames only</text>
+  </g>
+
+  <line x1="240" y1="210" x2="300" y2="210" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arr)"/>
+  <line x1="640" y1="210" x2="700" y2="210" stroke="#2563eb" stroke-width="2.5" marker-end="url(#arr)"/>
+  <path d="M 475 384 Q 475 430 140 430 Q 100 430 100 280" fill="none" stroke="#2563eb" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arr)"/>
+  <text x="300" y="448" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#1d4ed8">physical resample (K=2)</text>
+
+  <g filter="url(#shadow)">
+    <rect x="940" y="110" width="220" height="280" rx="12" fill="#ffffff" stroke="#1e3a5f" stroke-width="2"/>
+    <text x="1050" y="142" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="15" font-weight="bold" fill="#0f172a">Table II (3 seeds)</text>
+    <text x="1050" y="164" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#64748b">simulated RTT model</text>
+    <line x1="960" y1="178" x2="1140" y2="178" stroke="#e2e8f0" stroke-width="1"/>
+    <text x="980" y="208" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#334155">M1 p50 (ms)</text>
+    <text x="1080" y="208" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#64748b">B0</text>
+    <text x="1120" y="208" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#64748b">B2</text>
+    <text x="1080" y="232" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#334155">374</text>
+    <text x="1120" y="232" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="bold" fill="#059669">208</text>
+    <text x="980" y="268" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" fill="#334155">M2 valid rate</text>
+    <text x="1080" y="268" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="13" fill="#334155">0.560</text>
+    <text x="1120" y="268" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="14" font-weight="bold" fill="#059669">0.604</text>
+    <rect x="960" y="288" width="180" height="48" rx="6" fill="#f0fdf4" stroke="#86efac" stroke-width="1"/>
+    <text x="1050" y="310" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#166534">tau_B2 = 0.465</text>
+    <text x="1050" y="328" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#166534">ROI Edge-IQA, CPU p95 ~ 9.6 ms</text>
+    <text x="1050" y="368" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="10" fill="#64748b">B3/B4: higher M2 (~0.93)</text>
+    <text x="1050" y="384" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="10" fill="#64748b">at higher edge RTT</text>
+  </g>
+
+  <rect x="940" y="410" width="220" height="130" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="1050" y="432" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="12" font-weight="bold" fill="#334155">M2 vs M1 p50 trade-off</text>
+  <line x1="970" y1="520" x2="1130" y2="520" stroke="#64748b" stroke-width="1"/>
+  <line x1="970" y1="520" x2="970" y2="450" stroke="#64748b" stroke-width="1"/>
+  <text x="1050" y="535" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="10" fill="#64748b">M1 p50 --&gt;</text>
+  <text x="958" y="485" text-anchor="end" font-family="DejaVu Sans, Arial, sans-serif" font-size="10" fill="#64748b">M2</text>
+  <circle cx="1095" cy="505" r="7" fill="#94a3b8"/>
+  <text x="1095" y="498" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="9" fill="#fff">B0</text>
+  <circle cx="1005" cy="468" r="8" fill="#059669"/>
+  <text x="1005" y="461" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="9" font-weight="bold" fill="#fff">B2</text>
+  <circle cx="1080" cy="455" r="7" fill="#7c3aed"/>
+  <text x="1080" y="448" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="9" fill="#fff">B3</text>
+
+  <text x="600" y="575" text-anchor="middle" font-family="DejaVu Sans, Arial, sans-serif" font-size="11" fill="#475569">
+    Graphical Abstract | IEEE RA-L | Primary offline evidence on ShezhenV3-COCO; Franka M6 in Supplementary Material
+  </text>
+</svg>

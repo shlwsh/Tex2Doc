@@ -1,0 +1,59 @@
+% Paper I — RA-L submission (IEEEtran, max 8 pages incl. refs/figs)
+\documentclass[lettersize,journal]{IEEEtran}
+
+\usepackage{cite}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{algorithmic}
+\usepackage{algorithm}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{url}
+
+\graphicspath{{../figures/}{figures/}}
+
+\begin{document}
+
+\title{Confidence-Aware Edge Routing for Robotic TCM Tongue Imaging:\\
+Edge-IQA and LangGraph Closed-Loop Acquisition}
+
+\author{Anonymous Authors}
+
+\markboth{IEEE Robotics and Automation Letters,~Vol.~XX, No.~X, Month~2026}%
+{Anonymous Authors: Confidence-Aware Edge Routing for Robotic TCM Tongue Imaging}
+
+\maketitle
+
+\input{sections/ral/00_abstract}
+
+\begin{IEEEkeywords}
+Robotics and automation, edge computing, image quality assessment, cloud--edge collaboration, medical robotics.
+\end{IEEEkeywords}
+
+\input{sections/ral/01_intro}
+\input{sections/ral/02_related}
+
+\section{Method}
+\label{sec:method}
+\input{sections/ral/03_system}
+\input{sections/ral/04_1_edge_iqa}
+\input{sections/ral/04_1_roi}
+\input{sections/ral/04_2_routing}
+
+\section{Experiments}
+\label{sec:experiments}
+\input{sections/ral/05_1_setup}
+\input{sections/ral/05_4_tcm_validation}
+\input{sections/ral/05_2_main_results}
+\input{sections/ral/05_3_ablation}
+\input{sections/ral/05_5_discussion}
+
+\section{Conclusion}
+\label{sec:conclusion}
+\input{sections/ral/06_conclusion}
+
+\input{sections/ral/00_disclosures}
+
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

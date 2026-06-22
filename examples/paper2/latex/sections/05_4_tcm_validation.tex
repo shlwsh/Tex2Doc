@@ -1,0 +1,26 @@
+% §5.4 Real-TCM Edge-IQA validation — ShezhenV3-COCO
+\subsection{Edge-IQA Validation on ShezhenV3-COCO}
+\label{sec:tcm-iqa}
+
+We replace the phase-2 synthetic cohort with the public \textbf{ShezhenV3-COCO} tongue dataset (6{,}719 images, COCO bounding boxes, ten tongue-condition categories).
+Validation images ($n{=}572$) provide the \emph{clear} cohort; we synthesize motion-blur degradations (Gaussian radius $2.5$--$5.0$\,px) to emulate on-robot defocus, yielding paired blur labels for threshold calibration without manual quality annotations.
+
+\input{sections/table_dataset}
+
+Figure~\ref{fig:iqa-hist} shows $Q_{\mathrm{img}}$ histograms on the validation split.
+With COCO tongue ROI, clear/blur medians are $0.516$ and $0.414$ and the deployed threshold is $\tau_{B2}{=}0.465$ (Table~\ref{tab:iqa-calibration}, from \texttt{recommended\_tau.json}).
+The same artifact reports $\min Q_{\mathrm{clear}}-\max Q_{\mathrm{blur}}{=}{-}0.541$: some blurred validation crops score above the weakest clear crops on Laplacian--exposure features, so $\tau$ is a cohort-median operating point rather than a hard separator.
+Full-frame medians are $0.564$ and $0.431$ with $\tau_{\mathrm{full}}{=}0.498$ (Table~\ref{tab:roi-ablation}).
+Figure~\ref{fig:iqa-hist} visualizes the overlapping histograms; we therefore pair $\tau$ calibration with Spearman correlation (M5, $\rho{\approx}0.36$--$0.47$) and learned comparators B3/B4 (\S\ref{sec:main-results}) instead of claiming perfect separability.
+The main matrix (\texttt{run\_matrix\_tcm.py}) always uses ROI scores and $\tau_{B2}$ from \texttt{recommended\_tau.json}.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig_iqa_hist.pdf}
+  \caption{Edge-IQA $Q_{\mathrm{img}}$ on ShezhenV3 validation: clear vs.\ synthetically blurred pairs ($n{=}1{,}144$).}
+  \label{fig:iqa-hist}
+\end{figure*}
+
+\paragraph{Protocol integrity.}
+Each test frame is scored by the same \texttt{edge\_iqa/scorer.py} invoked offline; latency components (capture, IQA, routing, resampling, cloud upload) follow \S\ref{sec:setup}.
+This ensures Table~\ref{tab:main-results} reflects \emph{real} quality scores while preserving the reproducible closed-loop simulator for RTT aggregation.

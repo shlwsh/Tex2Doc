@@ -1,0 +1,88 @@
+% §4.2 Confidence-Aware Routing — expanded with benchmark analysis
+\subsection{Confidence-Aware Routing}
+\label{sec:routing}
+
+Given edge quality score $Q_{\mathrm{img}}$ and retry counter $r$, the router implements a testable three-way policy with threshold $\tau$ and budget $K$:
+\begin{equation}
+\text{route}(s)=
+\begin{cases}
+\text{upload\_cloud}, & Q_{\mathrm{img}}\geq\tau \land r\leq K,\\
+\text{resample\_edge}, & Q_{\mathrm{img}}<\tau \land r\leq K,\\
+\text{fail\_safe}, & r>K.
+\end{cases}
+\label{eq:routing}
+\end{equation}
+
+The retry budget $K$ limits the number of edge re-shoots before the system aborts; $K=2$ in our experiments.
+
+\subsubsection{State machine nodes and edges.}
+Table~\ref{tab:langgraph-nodes} enumerates the six nodes and their conditional edges implemented in \texttt{graph.py}. \texttt{TrialState} (a LangGraph-compatible TypedDict) carries \texttt{image\_path}, \texttt{q\_img}, \texttt{flags}, \texttt{retry\_count}, \texttt{route\_decision}, three ISO-8601 timestamps, and \texttt{latency\_ms}. All three branches and the $r>K$ guard are covered by unit tests (\texttt{tests/test\_routing.py}, 4 passing).
+
+\begin{table}[t]
+\centering
+\caption{LangGraph nodes and conditional edges for closed-loop acquisition.}
+\label{tab:langgraph-nodes}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lll}
+\hline
+Node & Input & Output / edge \\
+\hline
+\texttt{capture} & skill trigger & RGB frame path \\
+\texttt{edge\_iqa} & frame path & $Q_{\mathrm{img}}$, \texttt{flags} \\
+\texttt{route} & $Q_{\mathrm{img}}$, $r$ & decision \\
+\texttt{resample\_edge} & decision & re-invoke \texttt{capture} \\
+\texttt{upload\_cloud} & decision & cloud stub handoff \\
+\texttt{fail\_safe} & $r>K$ & abort + JSONL log \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{algorithm}[t]
+\caption{Confidence-aware routing loop (B2)}
+\begin{algorithmic}[1]
+\STATE $r \leftarrow 0$, capture frame $I$
+\REPEAT
+  \STATE $(Q,\texttt{flags}) \leftarrow \text{EdgeIQA}(I)$
+  \STATE $d \leftarrow \text{Route}(Q,r,\tau,K)$ \COMMENT{see Eq. \ref{eq:routing}}
+  \IF{$d = \texttt{upload\_cloud}$}
+    \STATE \textbf{break} \COMMENT{quality sufficient, cloud upload}
+  \ELSIF{$d = \texttt{resample\_edge}$}
+    \STATE $r \leftarrow r+1$; recapture $I$
+  \ELSE
+    \STATE \textbf{fail\_safe}; \textbf{break} \COMMENT{$r>K$, abort trial}
+  \ENDIF
+\UNTIL{$r > K$}
+\end{algorithmic}
+\label{alg:routing-loop}
+\end{algorithm}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=\columnwidth]{fig2_routing_flow.pdf}
+  \caption{LangGraph confidence-aware routing flow (nodes and conditional edges).}
+  \label{fig:routing-flow}
+\end{figure}
+
+On ShezhenV3 replay, each \texttt{resample\_edge} applies a \emph{physical skill transform} before re-scoring: \texttt{adaptive\_visual\_damping} reduces Gaussian blur radius on the clear reference frame; \texttt{exposure\_loop\_tuning} applies gain/bias correction when exposure flags fire (\S\ref{sec:implementation}, \texttt{resample\_physics.yaml}).
+No stochastic score inflation is applied.
+
+\subsubsection{Why LangGraph over a plain Python FSM?}
+We benchmarked six alternatives on 1{,}000 trials (Table~S1, supplementary): LangGraph adds $\approx$3.6\,\textmu s/trial (0.004\% of a 360\,ms RTT budget), fully absorbed by the 10\,ms IQA step.
+Beyond throughput, LangGraph provides checkpoint persistence, conditional-edge visualization (Fig.~\ref{fig:routing-flow}), and reuse in multi-agent orchestration (Paper~II).
+
+\subsubsection{Algorithm extensions.}
+Baseline B2 uses fixed $\tau_{B2}$ from validation.
+Three extensions---dynamic $\tau_t$ (B2d), multi-frame EMA (B2m), and utility routing (B2u)---raise M2 from 0.60 to 0.65 on a quick ablation (60 frames, seed~0); full 3-seed results and equations are in the supplementary (Table~S2).
+
+\subsection{Closed-Loop Protocol and Logging}
+\label{sec:closed-loop}
+
+Each trial executes \texttt{capture} $\rightarrow$ \texttt{edge\_iqa} $\rightarrow$ \texttt{route} $\rightarrow$ action. Wall-clock segment timestamps and the decision are appended as one JSON object per line (JSONL) for supplementary audit trails and auxiliary M6 trend analysis.
+
+Required JSONL fields: \texttt{trial\_id}, \texttt{image\_path} (relative, privacy-safe), \texttt{q\_img}, \texttt{flags}, \texttt{retry\_count}, \texttt{route\_decision}, \texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route}, \texttt{latency\_ms}. Automated validation: \texttt{scripts/validate\_jsonl.py}.
+
+The driver \texttt{python\ -m\ langgraph\_router.run\ --trials\ 10} produces \texttt{experiments/logs/run\_001.jsonl}. Main quantitative RTT (M1) is computed offline by \texttt{run\_matrix.py} on ShezhenV3 frames; JSONL logs serve protocol demonstration and trend verification only.
+
+JSONL stores relative paths; supplementary samples use synthetic or de-identified frames. No raw patient data appears in Paper~I outputs.

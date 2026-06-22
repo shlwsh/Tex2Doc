@@ -17,8 +17,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use doc_latex_reader::{
-    lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_bib, parse_tex,
-    IncludeGraph, JoinedStream, Parse,
+    latex_to_text::extract_front_matter, lower_to_document, lower_to_document_with_cite_map,
+    parse_bbl, parse_bib, parse_tex, IncludeGraph, JoinedStream, Parse,
 };
 use doc_rule_engine::{
     route_rule_output, DecisionSource, MacroRule, RoutingConfig, RuleEngine, RuleOutput,
@@ -569,6 +569,11 @@ impl CompileOptions {
     pub fn effective_page_setup(&self) -> Option<doc_docx_writer::PageSetup> {
         self.page_setup
             .clone()
+            .or_else(|| {
+                self.active_profile
+                    .as_ref()
+                    .and_then(active_profile_page_setup)
+            })
             .or_else(|| self.profile.spec().default_page_setup())
     }
 
@@ -577,6 +582,11 @@ impl CompileOptions {
     pub fn effective_style_map(&self) -> Option<doc_docx_writer::ProfileStyleMap> {
         self.style_map
             .clone()
+            .or_else(|| {
+                self.active_profile
+                    .as_ref()
+                    .and_then(active_profile_style_map)
+            })
             .or_else(|| self.profile.spec().style_map.clone())
     }
 
@@ -599,6 +609,138 @@ impl CompileOptions {
     /// P1: Convenience — resolve profile without mutating self (for one-shot calls).
     pub fn resolve_profile(vfs: &doc_utils::VirtualFs) -> Result<ActiveProfile, EngineError> {
         ActiveProfile::resolve(&ProfileRef::Auto, vfs)
+    }
+}
+
+fn active_profile_page_setup(active: &ActiveProfile) -> Option<doc_docx_writer::PageSetup> {
+    active_profile_page_setup_label(active).and_then(|kind| match kind.as_str() {
+        "jos-paper3" => Some(doc_docx_writer::PageSetup::jos_paper3()),
+        "a4" => Some(page_setup_from_mm(
+            active.spec.page_setup.width_mm.unwrap_or(210.0),
+            active.spec.page_setup.height_mm.unwrap_or(297.0),
+            active.spec.page_setup.margin_top_mm,
+            active.spec.page_setup.margin_right_mm,
+            active.spec.page_setup.margin_bottom_mm,
+            active.spec.page_setup.margin_left_mm,
+        )),
+        "default" => None,
+        _ => None,
+    })
+}
+
+fn apply_source_page_setup_overrides(
+    options: &mut CompileOptions,
+    active: &ActiveProfile,
+    main_tex: &str,
+    vfs: &VirtualFs,
+) -> bool {
+    if active.id != "jos-paper" {
+        return false;
+    }
+
+    let Ok(bytes) = vfs.read(main_tex) else {
+        return false;
+    };
+    let Ok(source) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+
+    let front_matter = extract_front_matter(source, source, &std::collections::HashMap::new());
+    let running_header = front_matter.running_header.trim();
+    if running_header.is_empty() {
+        return false;
+    }
+
+    let mut page_setup = options
+        .effective_page_setup()
+        .unwrap_or_else(doc_docx_writer::PageSetup::jos_paper3);
+    page_setup.header_text = Some(running_header.to_string());
+    if page_setup
+        .even_header_text
+        .as_deref()
+        .is_none_or(|text| text.trim().is_empty())
+    {
+        page_setup.even_header_text = Some(doc_docx_writer::PageSetup::JOS_EVEN_HEADER.to_string());
+    }
+    options.page_setup = Some(page_setup);
+    true
+}
+
+fn active_profile_page_setup_label(active: &ActiveProfile) -> Option<String> {
+    active
+        .spec
+        .page_setup
+        .kind
+        .clone()
+        .or_else(|| match active.id.as_str() {
+            "jos-paper" => Some("jos-paper3".to_string()),
+            "chinese-academic" => Some("a4".to_string()),
+            _ => None,
+        })
+}
+
+fn page_setup_from_mm(
+    width_mm: f64,
+    height_mm: f64,
+    margin_top_mm: Option<f64>,
+    margin_right_mm: Option<f64>,
+    margin_bottom_mm: Option<f64>,
+    margin_left_mm: Option<f64>,
+) -> doc_docx_writer::PageSetup {
+    doc_docx_writer::PageSetup {
+        width_twips: mm_to_twips(width_mm),
+        height_twips: mm_to_twips(height_mm),
+        margin_top: margin_top_mm.map(mm_to_twips).or(Some(1440)),
+        margin_right: margin_right_mm.map(mm_to_twips).or(Some(1440)),
+        margin_bottom: margin_bottom_mm.map(mm_to_twips).or(Some(1440)),
+        margin_left: margin_left_mm.map(mm_to_twips).or(Some(1440)),
+        margin_header: Some(720),
+        margin_footer: Some(720),
+        cols_space: Some(720),
+        cols_num: Some(1),
+        header_text: None,
+        footer_text: None,
+        first_header_text: None,
+        first_footer_text: None,
+        even_header_text: None,
+        first_footer_indent_twips: None,
+    }
+}
+
+fn mm_to_twips(mm: f64) -> u32 {
+    ((mm / 25.4) * 1440.0).round().max(0.0) as u32
+}
+
+fn active_profile_style_map(active: &ActiveProfile) -> Option<doc_docx_writer::ProfileStyleMap> {
+    match active.id.as_str() {
+        "jos-paper" => return Some(doc_docx_writer::ProfileStyleMap::jos()),
+        "generic" | "generic-article" | "generic-article-toml" => {
+            return Some(doc_docx_writer::ProfileStyleMap::generic());
+        }
+        _ => {}
+    }
+
+    if active.spec.style_map.is_empty() {
+        return None;
+    }
+
+    let mut by_role = std::collections::BTreeMap::new();
+    for entry in &active.spec.style_map {
+        let role = normalize_style_role(&entry.semantic);
+        by_role.insert(role.to_string(), entry.docx_style.clone());
+    }
+    Some(doc_docx_writer::ProfileStyleMap { by_role })
+}
+
+fn normalize_style_role(role: &str) -> &str {
+    match role {
+        "heading.level1" => "heading1",
+        "heading.level2" => "heading2",
+        "heading.level3" => "heading3",
+        "paragraph.body" => "body",
+        "caption.figure" | "caption.table" => "caption",
+        "bibliography.item" => "reference",
+        other => other,
     }
 }
 
@@ -687,15 +829,30 @@ impl SemanticTexEngine {
         vfs: &mut VirtualFs,
         options: &CompileOptions,
     ) -> Result<CompileArtifact, EngineError> {
+        let active = ActiveProfile::resolve(
+            options
+                .profile_ref
+                .as_ref()
+                .unwrap_or(&ProfileRef::Legacy(options.profile)),
+            vfs,
+        )?;
+        let mut render_options = options.clone();
+        render_options.set_active_profile(active.clone());
+        let source_page_setup_override =
+            apply_source_page_setup_overrides(&mut render_options, &active, main_tex, vfs);
+
         let mut graph = self.compile_vfs_to_graph(main_tex, vfs, options)?;
-        let page_setup = options.effective_page_setup();
+        let page_setup = render_options.effective_page_setup();
         let page_setup_label = if options.page_setup.is_some() {
             "explicit page setup override".to_string()
         } else {
-            format!(
-                "profile default page setup: {}",
-                options.profile.spec().page_setup.id()
-            )
+            let label = active_profile_page_setup_label(&active)
+                .unwrap_or_else(|| options.profile.spec().page_setup.id().to_string());
+            if source_page_setup_override {
+                format!("profile default page setup: {label} with source header override")
+            } else {
+                format!("profile default page setup: {label}")
+            }
         };
         graph.report.push(
             CompileStage::DocxRender,
@@ -705,10 +862,10 @@ impl SemanticTexEngine {
             ),
         );
 
-        let style_map = options.effective_style_map();
+        let style_map = render_options.effective_style_map();
         let mut docx = doc_docx_writer::pack_with_page_setup(
             &graph.document,
-            options.template_bytes.as_deref(),
+            render_options.template_bytes.as_deref(),
             Some(&graph.image_assets),
             page_setup.as_ref(),
             style_map.as_ref(),
@@ -4610,6 +4767,91 @@ E = mc^2
     }
 
     #[test]
+    fn profile_ref_id_page_setup_is_used_for_docx_render() {
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            profile_ref: Some(ProfileRef::Id("jos-paper".to_string())),
+            semantic_backend: SemanticBackendKind::RuleBased,
+            page_setup: None,
+            ..CompileOptions::default()
+        };
+        let artifact = engine
+            .compile_source_to_docx("main.tex", SAMPLE, &options)
+            .expect("compile source with active profile setup");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(
+            artifact
+                .report
+                .active_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+            Some("jos-paper")
+        );
+        assert!(document_xml.contains(r#"w:w="10433""#));
+        assert!(document_xml.contains(r#"w:h="14742""#));
+        assert!(artifact.report.stages.iter().any(|stage| stage
+            .message
+            .contains("profile default page setup: jos-paper3")));
+
+        let names = docx_entry_names(&artifact.docx);
+        assert!(names.iter().any(|name| name == "word/header0.xml"));
+        assert!(names.iter().any(|name| name == "word/header1.xml"));
+        assert!(names.iter().any(|name| name == "word/footer1.xml"));
+    }
+
+    #[test]
+    fn profile_ref_auto_rjthesis_uses_jos_page_setup_for_docx_render() {
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            profile_ref: Some(ProfileRef::Auto),
+            semantic_backend: SemanticBackendKind::RuleBased,
+            page_setup: None,
+            ..CompileOptions::default()
+        };
+        let source = r#"
+\PassOptionsToClass{fontset=fandol,twoside,UTF8}{ctexart}
+\documentclass{rjthesis}
+\rjhead{Paper Three Running Header}
+\begin{document}
+\section{Introduction}
+Body.
+\end{document}
+"#;
+        let artifact = engine
+            .compile_source_to_docx("main.tex", source, &options)
+            .expect("compile source with auto-detected JOS profile setup");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(
+            artifact
+                .report
+                .active_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+            Some("jos-paper")
+        );
+        assert!(document_xml.contains(r#"w:w="10433""#));
+        assert!(document_xml.contains(r#"w:h="14742""#));
+
+        let names = docx_entry_names(&artifact.docx);
+        assert!(names.iter().any(|name| name == "word/header0.xml"));
+        assert!(names.iter().any(|name| name == "word/header1.xml"));
+        assert!(names.iter().any(|name| name == "word/footer1.xml"));
+
+        let header1_xml = docx_part_xml(&artifact.docx, "word/header1.xml");
+        assert!(
+            header1_xml.contains("Paper Three Running Header"),
+            "default odd header should use \\rjhead text: {header1_xml}"
+        );
+        let header2_xml = docx_part_xml(&artifact.docx, "word/header2.xml");
+        assert!(
+            header2_xml.contains(doc_docx_writer::PageSetup::JOS_EVEN_HEADER),
+            "even header should use JOS journal header: {header2_xml}"
+        );
+    }
+
+    #[test]
     fn explicit_runtime_backend_falls_back_to_rule_based() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
@@ -5242,6 +5484,21 @@ a+b=c
             .expect("document.xml part");
         let mut xml = String::new();
         file.read_to_string(&mut xml).expect("read document.xml");
+        xml
+    }
+
+    fn docx_entry_names(docx: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx)).expect("docx zip");
+        (0..archive.len())
+            .map(|idx| archive.by_index(idx).unwrap().name().to_string())
+            .collect()
+    }
+
+    fn docx_part_xml(docx: &[u8], part_name: &str) -> String {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx)).expect("docx zip");
+        let mut file = archive.by_name(part_name).expect("docx part");
+        let mut xml = String::new();
+        file.read_to_string(&mut xml).expect("read docx part");
         xml
     }
 

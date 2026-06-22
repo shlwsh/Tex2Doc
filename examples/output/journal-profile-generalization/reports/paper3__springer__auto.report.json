@@ -1,0 +1,35 @@
+{
+  "synthetic": true,
+  "reason": "semantic-convert exited before writing a CompileReport; quality gate failure is recorded in log.",
+  "paper": "paper3",
+  "profile_requested": "springer",
+  "backend_requested": "auto",
+  "exit_code": 7,
+  "grade": "D",
+  "status": "generated",
+  "docx": "docx/paper3__springer__auto.docx",
+  "log": "logs/paper3__springer__auto.log",
+  "issues": [
+    "command-exit-7",
+    "compatibility-below-plan-threshold",
+    "requested-effective-profile-mismatch"
+  ],
+  "docx_metrics": {
+    "exists": true,
+    "bytes": 3054777,
+    "zip_openable": true,
+    "has_content_types": true,
+    "has_document_xml": true,
+    "has_styles_xml": true,
+    "has_relationships": true,
+    "paragraphs": 650,
+    "tables": 11,
+    "media_files": 10,
+    "omml_equations": 192,
+    "raw_latex_hits": 0,
+    "text_chars": 0
+  },
+  "quality_gate_failure": [
+    "compatibility_score: compatibility score 58 < 60: FAIL"
+  ]
+}

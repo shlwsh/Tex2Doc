@@ -1,0 +1,35 @@
+% 失效模式与案例分析（中文）
+\subsection{失效模式与代表案例}
+\label{sec:failure-cases-zh}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig_failure_modes_schematic.pdf}
+  \caption{示意性脱敏舌区 ROI：清晰采集（左）与合成模糊注入（右），与验证协议一致。}
+  \label{fig:failure-modes-zh}
+\end{figure}
+
+\paragraph{ROI 后仍存在分数重叠。}
+表~\ref{tab:roi-ablation-zh} 显示，全图与 ROI 的「最小清晰减最大模糊」分离度均为负。
+典型情况：全图中颊部边缘清晰导致 $S$ 偏高，而舌面已虚焦；ROI 可缓解但无法消除重叠，因为苔质纹理在轻度散焦下仍具较高 Laplacian 能量。
+
+\paragraph{B3 与 B2 的路由差异。}
+MobileNetV3-Small 在 ROI 上训练后，验证准确率 98.3\%。
+全量矩阵中，B3 在 $\tau_{B2}$ 下 M2 为 $0.934$，B2 为 $0.604$（物理重采，见表~\ref{tab:learned-hybrid-zh}）。
+学习概率与可解释 $Q_{\mathrm{img}}$ 的标度不一致；若对 B3 单独重标定 $\tau$，可缩小差距，但会引入第二套阈值工件。
+因此 B2 仍是首选部署路径，B3 作为可选的学习型对比。
+
+\paragraph{合成模糊与临床运动。}
+验证模糊采用高斯核 $r{\in}[2.5,5.0]$，而真实微动多为方向性拖影；Spearman $\rho$ 约 $0.36$--$0.47$ 反映了这一域差距。
+
+\paragraph{缺框回退与延迟离群。}
+部分训练图无 COCO 标注时，ROI 回退全图；标定元数据记录 \texttt{n\_with\_bbox}。
+B3 的 CPU 推理增加每帧耗时；表 II 中 B3 的 p95 RTT 相对 B2 上升，与更重评分一致。
+
+\paragraph{操作缓解与审计。}
+重复 \texttt{resample\_edge} 时，应检查 JSONL 中的 \texttt{flags}；若同时出现 \texttt{blur} 与曝光异常，优先调整光照。
+Edge-IQA 具有确定性，任意 JSONL 行可用 \texttt{compute\_q(..., use\_roi=True)} 离线复核路由决策。
+
+\paragraph{小结。}
+ROI 聚焦解剖区；B3 可学习模糊排序，但需独立 $\tau$ 方能与 B2 的路由表现对齐。
+分数重叠与合成模糊仍是主要残余风险。

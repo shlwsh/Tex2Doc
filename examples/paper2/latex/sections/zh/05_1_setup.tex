@@ -1,0 +1,62 @@
+% §5.1 实验设置 — ShezhenV3 全量验证
+\subsection{实验设置}
+\label{sec:setup-zh}
+
+在 \textbf{ShezhenV3-COCO} 测试集上评估离线基线 B0--B4。
+主矩阵在 COCO 舌区 ROI 上打分，路由阈值 $\tau_{B2}{=}0.465$（验证集标定，\S\ref{sec:tcm-iqa-zh}，表~\ref{tab:iqa-calibration-zh}）；全图标定阈值为 $\tau_{\mathrm{full}}{=}0.498$（仅用于 ROI 消融）。
+重试预算 $K{=}2$。
+
+\paragraph{数据集。}
+ShezhenV3-COCO 含 6{,}719 张 RGB 舌象及 COCO 框标注，覆盖十种舌象类别。
+表~\ref{tab:tongue-conditions-zh} 汇总各类别标注数；类别描述的是诊断形态而非采集质量，因此需要独立的 Edge-IQA blur/曝光 维度。
+\input{sections/zh/table_tongue_conditions}
+官方测试集（$n{=}553$）用于主矩阵；验证集（$n{=}572$）仅用于 $\tau$ 标定。
+训练集（$n{=}5{,}594$）用于可选 MobileNet B3 对照（\S\ref{sec:b3-learned-zh}）。
+
+\paragraph{基线。}
+\begin{itemize}
+  \item \textbf{B0}：仅上云，无边侧质量门控与智能路由。
+  \item \textbf{B1}：每次上云前执行 Edge-IQA，但无 LangGraph 路由（不重采）。
+  \item \textbf{B2}：Edge-IQA + LangGraph 路由器 + 物理边缘重采（本文主路径）。
+  \item \textbf{B3/B3t/B4}：学习型 MobileNet IQA 与混合门控（表~\ref{tab:learned-hybrid-zh}），与主表 B0--B2 分表报告。
+\end{itemize}
+
+\paragraph{质量注入。}
+每帧随机抽取一张测试图像；以 0.5 概率使用原图（清晰组），否则施加高斯模糊（$r\in[2.5,5.0]$\,px）后再打分——与验证集标定协议一致。
+每帧 $Q_{\mathrm{img}}$ 由 \texttt{edge\_iqa/scorer.py} 计算；RTT 各分量见下文延迟模型。
+
+\paragraph{延迟模型。}
+端到端 RTT 包括：采集（5\,ms）、边侧 IQA（$\mathcal{N}(9,2^2)$\,ms）、路由（1.5\,ms）、可选边缘重采（对数正态，p50 $\approx$ 50\,ms）与上云（均匀 50--550\,ms）。
+完整机械臂运动延迟仅在 Franka 辅轨 M6 中评估；详见 \texttt{sim/NETEM.md}。
+
+\paragraph{实验协议。}
+每个基线、每个随机种子模拟 500 帧（种子集合 $\{0,1,2\}$），得到表~\ref{tab:main-results-zh} 中的指标 M1--M3。
+主表数字由 \texttt{experiments/run\_matrix\_tcm.py} 读取 \texttt{recommended\_tau.json} 生成；Franka 辅轨（M6）单独报告于图~S1，不与主表合并。
+
+\paragraph{评价指标。}
+\textbf{M1}：端到端 RTT；\textbf{M2}：路由后 $Q_{\mathrm{img}}\geq\tau$ 的比例（有效帧率）；\textbf{M3}：至少发生一次重采的比例；\textbf{M4}：$\tau$ 扫描；\textbf{M5}：验证集 Spearman $\rho$。
+
+\paragraph{超参数。}
+表~\ref{tab:hyperparams-zh} 列出 ShezhenV3 主矩阵常量，与 \texttt{scorer.py} 默认配置一致。
+
+\begin{table}[t]
+\centering
+\caption{关键超参数（Paper~I，ShezhenV3 主矩阵）。}
+\label{tab:hyperparams-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lll}
+\hline
+符号 & 取值 & 作用 \\
+\hline
+$\tau_{B2}$（ROI） & 0.465 & 路由阈值（主表 II） \\
+$\tau_{\mathrm{full}}$ & 0.498 & 全图标定（仅消融） \\
+$K$ & 2 & 最大边缘重采次数 \\
+$w_s, w_e$ & 0.65, 0.35 & 清晰度/曝光权重 \\
+缩放 & $512^2$ & Edge-IQA 输入 \\
+模糊 $r$ & 2.5--5.0 px & val/test 合成失焦 \\
+$\tau_{B3}$ & 0.5 & 学习 IQA（表 III） \\
+\hline
+\end{tabular}%
+}
+\end{table}

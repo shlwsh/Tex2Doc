@@ -1,0 +1,27 @@
+% 符号表（Paper I 中文）
+\section{符号说明}
+\label{sec:notation-zh}
+
+\begin{table}[h]
+\centering
+\caption{主要符号与指标。}
+\label{tab:notation-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\toprule
+符号 & 含义 \\
+\midrule
+$Q_{\mathrm{img}}$ & Edge-IQA 质量分数，$[0,1]$ \\
+$\tau_{B2}$ & 舌区 ROI 路由阈值（主矩阵；0.465） \\
+$\tau_{\mathrm{full}}$ & 全图标定阈值（0.498） \\
+$\tau_{B3}$ & 学习 IQA 阈值（0.5） \\
+$K$ & 最大边缘重采次数 \\
+M1 & 端到端 RTT（报告 p50/p95） \\
+M2 & 有效帧率（路由后 $Q_{\mathrm{img}}\geq\tau$） \\
+M3 & 重拍率（至少一次重采） \\
+M5 & 验证集清晰/模糊对的 Spearman $\rho$ \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

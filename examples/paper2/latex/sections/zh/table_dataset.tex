@@ -1,0 +1,42 @@
+% 表：ShezhenV3-COCO — 自动生成
+\begin{table}[t]
+\centering
+\caption{Paper~I 使用的 ShezhenV3-COCO 舌象数据集划分。}
+\label{tab:dataset-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrr}
+\hline
+划分 & 图像数 & 用途 \\
+\hline
+训练集 & 5594 & 预留（未来微调） \\
+验证集 & 572 & Edge-IQA $\tau$ 标定 \\
+测试集 & 553 & 主实验矩阵 B0--B3 \\
+\hline
+合计 & 6719 & COCO 格式框标注 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{ShezhenV3 验证集 Edge-IQA 标定结果（清晰 $n=572$ + 合成模糊 $n=572$）。}
+\label{tab:iqa-calibration-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcc}
+\hline
+指标 & 清晰组 & 模糊组 \\
+\hline
+$Q_{\mathrm{img}}$ 中位数 & 0.516 & 0.414 \\
+$Q_{\mathrm{img}}$ 均值 & 0.519 & 0.414 \\
+标准差 & 0.116 & 0.102 \\
+\hline
+路由阈值 $\tau$ & \multicolumn{2}{c}{0.465} \\
+Spearman $\rho$（M5） & \multicolumn{2}{c}{0.335（$n=1144$）} \\
+\hline
+\end{tabular}%
+}
+\end{table}

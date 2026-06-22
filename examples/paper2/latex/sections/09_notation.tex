@@ -1,0 +1,27 @@
+% Symbol table (Paper I)
+\section{Notation}
+\label{sec:notation}
+
+\begin{table}[h]
+\centering
+\caption{Principal symbols and metrics.}
+\label{tab:notation}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+$Q_{\mathrm{img}}$ & Edge-IQA quality score in $[0,1]$ \\
+$\tau_{B2}$ & ROI routing threshold (main matrix; 0.465) \\
+$\tau_{\mathrm{full}}$ & Full-frame calibration threshold (0.498) \\
+$\tau_{B3}$ & Learned IQA threshold (0.5) \\
+$K$ & Maximum edge resample attempts \\
+M1 & End-to-end RTT (p50 / p95 reported) \\
+M2 & Valid-frame rate ($Q_{\mathrm{img}}\geq\tau$ after routing) \\
+M3 & Retry rate (at least one resample) \\
+M5 & Spearman $\rho$ on validation clear/blur pairs \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}

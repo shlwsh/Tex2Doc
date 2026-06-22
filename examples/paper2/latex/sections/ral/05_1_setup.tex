@@ -1,0 +1,12 @@
+\subsection{Experimental Setup}
+\label{sec:setup}
+
+We evaluate offline baselines B0--B4 on the ShezhenV3-COCO test split~\cite{zhang2020tongue} (553 images; validation $n{=}572$ for $\tau$; train $n{=}5{,}594$ for B3; total 6{,}719 with COCO boxes).
+Diagnostic morphology labels describe tongue pathology rather than capture quality; their counts are moved to the Supplementary Material to keep the RA-L main text focused on acquisition and routing.
+\textbf{B0}: cloud upload only; \textbf{B1}: Edge-IQA gate without resampling; \textbf{B2}: Edge-IQA + LangGraph with physical resampling (proposed); \textbf{B3/B3t/B4}: learned MobileNet and hybrid Tier-A/B gates (Table~\ref{tab:learned-hybrid}).
+
+Each test frame uses real \texttt{scorer.py} scores; with probability 0.5 we use the original capture (clear cohort) and otherwise apply Gaussian blur ($r\in[2.5,5.0]$\,px)---mirroring validation calibration.
+We simulate 500 frames per seed ($\{0,1,2\}$) under the latency model in \S\ref{sec:system}; metrics are M1 (RTT p50/p95), M2 (valid-frame rate), and M3 (retry rate).
+All main-text numbers are produced by \texttt{run\_matrix\_tcm.py} reading \texttt{recommended\_tau.json}; auxiliary Franka closed-loop trials (M6, 50 trials) confirm routing trends but do not alter Table~\ref{tab:main-results}.
+
+Key hyperparameters: $\tau_{B2}{=}0.465$ (ROI), $K{=}2$, sharpness/exposure weights $0.65/0.35$, resize $512^2$, blur $r\in[2.5,5.0]$\,px, $\tau_{B3}{=}0.5$ for learned gates.

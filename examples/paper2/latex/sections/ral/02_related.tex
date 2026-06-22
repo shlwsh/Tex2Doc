@@ -1,0 +1,22 @@
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Robotic medical imaging.}
+ROS~2 and MoveIt enable repeatable manipulator-mounted cameras~\cite{moore2021ros2,chitta2009moveit}; robot-cloud systems highlight the need to separate safety-critical motion from high-latency perception services~\cite{liu2019robotcloud}.
+We adopt named \emph{skills} (\texttt{go\_to\_tongue\_pose}, \texttt{go\_to\_face\_pose}) instead of online impedance tuning, matching clinical repeatability while keeping quality routing outside force-control threads.
+
+\paragraph{Image quality assessment.}
+\textbf{Full-reference} metrics (PSNR, SSIM) require pristine references unavailable per patient.
+\textbf{Hand-crafted NR-IQA} (Laplacian, BRISQUE~\cite{mittal2012brisque}, NIQE~\cite{mittal2012niqe}) runs on CPU but seldom exposes blur/exposure semantics for audit logs.
+\textbf{Deep NR-IQA} (DB-CNN~\cite{zhang2018blind}, HyperIQA~\cite{su2020hyperiqa}, MUSIQ~\cite{ke2021musiq}, TReS~\cite{golestaneh2022tres}, CLIP-IQA~\cite{wang2023clipiqa}, TOPIQ~\cite{chen2024topiq}, PromptIQA~\cite{chen2024promptiqa}, DR.Experts~\cite{fu2026dr.experts}) improves MOS correlation at GPU cost and limited interpretability.
+Edge closed-loop capture favors linear-time operators with auditable failure modes; Edge-IQA follows this line with explicit flags and calibrated $\tau$ (Table~\ref{tab:iqa-compare}).
+
+\paragraph{Edge--cloud orchestration.}
+Edge computing frames latency-sensitive perception near the device~\cite{wang2014edge}, and split inference reduces bandwidth in mobile vision~\cite{kang2017neurosurgeon,li2018edge,zhou2019edge}; Zhou et al.~\cite{zhou2019edge} and Xu et al.~\cite{xu2021a} taxonomize edge intelligence tiers.
+We gate \emph{upload decisions} before heavy cloud models execute, using a lightweight scorer (p95 $\approx$9.6\,ms CPU) rather than partial DNN migration.
+LangGraph-style routers express branching policies with logs; ReAct~\cite{yao2023react}, Toolformer~\cite{schick2023toolformer}, and GPT-4~\cite{openai2023gpt-4} motivate explicit tool-use traces (see surveys~\cite{wang2024a}) rather than opaque one-shot prediction.
+
+\paragraph{TCM tongue analysis and positioning.}
+Telemedicine systems need reliable front-end acquisition~\cite{chen2021telemed} and image enhancement~\cite{deng2026op4ksr}; TCM tongue pipelines and color-analysis studies~\cite{zhang2020tongue,qi2016tongue,huang2015tcn} assume usable inputs, while ShezhenV3-COCO supplies boxes for \emph{downstream} classifiers.
+Paper~I addresses \emph{acquisition quality and routing} upstream on the full public corpus.
+Compared with generic edge offloading, we target robotic \emph{capture} loops where quality varies shot-to-shot; compared with NR-IQA literature, we prioritize thresholdable $Q_{\mathrm{img}}$ and JSONL auditability aligned with medical device software trends.

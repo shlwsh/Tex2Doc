@@ -1,0 +1,35 @@
+\subsection{消融与跨队列分析}
+\label{sec:ablation-zh}
+
+\paragraph{算法扩展（快速消融）。}
+表~\ref{tab:algo-ablation-zh} 在 60 帧 ShezhenV3 测试计划（seed~0、物理重采）上，对比固定 $\tau$ 的 B2 与 B2d/B2m/B2u。
+B2m/B2u 将 M2 从 0.60 提升至 0.65；B2m 因多帧 IQA 增加约 69\,ms 的 p50 延迟；B2d 在模拟丢包下略偏保守。
+全量 3 seeds 与网络扰动曲线见补充材料。
+
+\begin{table}[t]
+\centering
+\caption{路由扩展快速消融（seed~0，$n{=}60$，物理重采）。}
+\label{tab:algo-ablation-zh}
+\small
+\begin{tabular}{lrrr}
+\hline
+基线 & M1 p50 (ms) & M2 & M3 \\
+\hline
+B2（固定 $\tau$） & 211.3 & 0.600 & 0.417 \\
+B2d（动态 $\tau_t$） & 209.0 & 0.550 & 0.467 \\
+B2m（EMA 融合） & 280.4 & \textbf{0.650} & 0.417 \\
+B2u（效用 $U$） & 205.4 & \textbf{0.650} & 0.367 \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{阈值 $\tau$（M4）。}
+对 B2 在 ShezhenV3 测试帧计划上扫描五个 $\tau$ 值（500 帧，seed~0）。
+图~\ref{fig:ablation-tau-zh} 给出 M4 的有效帧率--RTT 权衡；主矩阵采用 ROI 标定的 $\tau_{B2}{=}0.465$（表~\ref{tab:iqa-calibration-zh}），全图 $\tau_{\mathrm{full}}{=}0.498$ 见 ROI 消融表。
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig7_ablation_tau.pdf}
+  \caption{$\tau$ 消融（M4）：TCM 测试帧上 B2 的有效帧率与 RTT p50。}
+  \label{fig:ablation-tau-zh}
+\end{figure}

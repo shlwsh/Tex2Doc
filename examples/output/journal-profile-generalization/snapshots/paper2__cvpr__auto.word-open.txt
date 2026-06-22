@@ -1,0 +1,23 @@
+﻿word_open_check=not-run
+reason=Microsoft Word/WPS/LibreOffice automation was not invoked in this run.
+zip_openable=True
+has_document_xml=True
+has_styles_xml=True
+has_relationships=True
+header1_text=
+header2_text=
+---
+word_com_check=run
+word_open=False
+word_error=文件可能已经损坏。
+word_paragraphs=
+word_words=
+word_elapsed_ms=16
+---
+soffice_headless_check=run
+soffice_open=True
+soffice_exit_code=0
+soffice_pdf=D:\work\Tex2Doc\examples\output\journal-profile-generalization\soffice-pdf\paper2__cvpr__auto.pdf
+soffice_pdf_bytes=281809
+soffice_elapsed_ms=7072
+soffice_output=Could not find platform independent libraries <prefix> | convert D:\work\Tex2Doc\examples\output\journal-profile-generalization\docx\paper2__cvpr__auto.docx as a Writer document -> D:\work\Tex2Doc\examples\output\journal-profile-generalization\soffice-pdf\paper2__cvpr__auto.pdf using filter : writer_pdf_Export

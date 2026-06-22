@@ -691,6 +691,22 @@ mod tests {
     }
 
     #[test]
+    fn detect_rjthesis_as_jos_paper() {
+        let vfs = vfs_with_source(
+            "main.tex",
+            r#"\PassOptionsToClass{fontset=fandol,twoside,UTF8}{ctexart}
+\documentclass{rjthesis}
+\begin{document}
+\rjmaketitle
+\end{document}"#,
+        );
+        let detector = JournalDetector::new();
+        let report = detector.detect(&vfs);
+        assert_eq!(report.selected_profile_id, "jos-paper");
+        assert!(report.confidence >= 0.75);
+    }
+
+    #[test]
     fn detect_acl_aclang() {
         let vfs = vfs_with_source(
             "main.tex",

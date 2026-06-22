@@ -89,7 +89,7 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
     HeaderFooterParts {
         masthead_header_xml: Some(wrap_header(masthead_body(text_width))),
         default_header_xml: Some(wrap_header(header_line_body(running, text_width))),
-        even_header_xml: Some(wrap_header(header_line_body(even, text_width))),
+        even_header_xml: Some(wrap_header(even_header_line_body(even, text_width))),
         first_footer_xml: Some(wrap_footer(jos_first_footer_body(first_footer, indent))),
         default_footer_xml: Some(wrap_footer(empty_footer_body())),
         even_footer_xml: Some(wrap_footer(empty_footer_body())),
@@ -136,6 +136,18 @@ fn header_line_body(text: &str, text_width: u32) -> String {
     para.push_str("</w:t></w:r><w:r><w:tab/></w:r>");
     para.push_str(r#"<w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple>"#);
     para.push_str("</w:p>");
+    para
+}
+
+fn even_header_line_body(text: &str, text_width: u32) -> String {
+    let clean = text.lines().next().unwrap_or(text).trim();
+    let mut para = format!(
+        r#"<w:p><w:pPr><w:pStyle w:val="JOSMasthead"/><w:tabs><w:tab w:val="right" w:pos="{text_width}"/></w:tabs></w:pPr>"#,
+    );
+    para.push_str(r#"<w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple>"#);
+    para.push_str(r#"<w:r><w:tab/></w:r><w:r><w:t xml:space="preserve">"#);
+    para.push_str(&xml_escape_local(clean));
+    para.push_str("</w:t></w:r></w:p>");
     para
 }
 
@@ -707,6 +719,23 @@ mod tests {
         assert!(
             header1.contains(&format!(r#"<w:tab w:val="right" w:pos="{text_width}"/>"#)),
             "header1 tab pos should equal text_width {text_width}: {header1}"
+        );
+        let header2 = {
+            let mut h = r.by_name("word/header2.xml").unwrap();
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut h, &mut s).unwrap();
+            s
+        };
+        assert!(
+            header2.contains(PageSetup::JOS_EVEN_HEADER),
+            "header2.xml must contain even journal header: {header2}"
+        );
+        assert!(
+            header2
+                .find("PAGE")
+                .zip(header2.find(PageSetup::JOS_EVEN_HEADER))
+                .is_some_and(|(page, text)| page < text),
+            "header2.xml must put PAGE before even journal header: {header2}"
         );
         // 首页页脚
         let footer1 = {

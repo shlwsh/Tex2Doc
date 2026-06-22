@@ -1,0 +1,93 @@
+% Appendix B — Extended algorithms and tables
+\section{Extended Algorithms and Tables}
+\label{sec:app-extended}
+
+\begin{algorithm}[h]
+\caption{COCO ROI crop (union + padding)}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} image $I$, boxes $\{b_j=[x,y,w,h]\}$, padding $p$
+\STATE $B \leftarrow \mathrm{union}(\{b_j\})$
+\STATE Expand $B$ by fraction $p$ on each side; clamp to image bounds
+\STATE \RETURN $\mathrm{crop}(I, B)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{algorithm}[h]
+\caption{B3 inference (MobileNetV3-Small)}
+\begin{algorithmic}[1]
+\STATE \textbf{Input:} RGB image, optional boxes
+\STATE $I' \leftarrow \mathrm{ROIcrop}(I,\mathrm{boxes})$
+\STATE $x \leftarrow \mathrm{normalize}(\mathrm{resize}(I', 224))$
+\STATE $p \leftarrow \mathrm{softmax}(\mathrm{MobileNetV3}(x))$
+\STATE \RETURN $Q_{\mathrm{img}} \leftarrow p_{\mathrm{clear}}$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{table}[h]
+\centering
+\caption{B3 training hyperparameters (ShezhenV3 train).}
+\label{tab:b3-hparams}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Hyperparameter & Value \\
+\hline
+Architecture & MobileNetV3-Small (ImageNet init) \\
+Input size & $224\times224$ \\
+Optimizer & AdamW, lr $10^{-3}$, wd $10^{-4}$ \\
+Batch size & 64 \\
+Epochs & 5 \\
+Train pairs & 11{,}188 (5594 clear + 5594 blur) \\
+Blur radius & $\mathcal{U}(2.5, 5.0)$ \\
+ROI padding & 8\% \\
+Val accuracy & 98.34\% \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Latency model components (milliseconds).}
+\label{tab:latency-model}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Component & Value \\
+\hline
+Capture & 5.0 (fixed) \\
+Edge-IQA & $\mathcal{N}(9, 2^2)$ \\
+Route decision & 1.5 \\
+Resample (lognormal) & p50 $\approx$50 \\
+Cloud upload & $\mathcal{U}(50, 550)$ \\
+B3 extra (approx.) & +15--40 on CPU \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Per-seed Table II breakdown.}
+Seed~0: B2 M1 p50$=211.1$\,ms, M2$=0.610$; B3 M2$=0.944$.
+Seed~1: B2 M1 p50$=205.6$\,ms, M2$=0.602$; B3 M2$=0.938$.
+Seed~2: B2 M1 p50$=208.3$\,ms, M2$=0.600$; B3 M2$=0.920$.
+Variance across seeds is modest relative to B0--B1 gaps.
+
+\paragraph{Import statistics.}
+Train 5594, val 572, test 553; 5404/5594 train images carry at least one COCO box.
+
+\paragraph{File checksums (operational).}
+Record SHA256 of \texttt{b3\_mobilenet.pt} and \texttt{recommended\_tau.json} in lab notebooks when freezing a submission tag.
+
+\paragraph{Gateway environment variables.}
+\texttt{PAPER1\_MODE}, \texttt{PAPER1\_ROOT}, \texttt{PAPER1\_IQA\_SUBPROCESS}, \texttt{PAPER1\_VISION\_THRESHOLD\_TAU}---see \texttt{docs-zh/paper1/V19/ENV.md}.
+
+\paragraph{Extended related datasets.}
+Other tongue corpora (without robotic acquisition metadata) may fine-tune B3 but require new $\tau$ calibration before routing claims transfer.
+
+\paragraph{Glossary.}
+\textbf{M1} end-to-end RTT; \textbf{M2} valid upload rate; \textbf{M3} retry rate; \textbf{M5} Spearman correlation between $Q_{\mathrm{img}}$ and clear/blur label.
+
+\paragraph{Contact for artifacts.}
+Issue tracker and \texttt{REPRODUCE.md} in \texttt{doctor/paper1/}.

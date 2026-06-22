@@ -1,0 +1,11 @@
+% Appendix: classical NR-IQA under LangGraph shell (AP-005)
+\subsection{Classical NR-IQA Baselines (BRISQUE / NIQE-style)}
+\label{sec:nr-iqa-baselines}
+
+To isolate routing from the Edge-IQA feature design, we add \textbf{Bbrisque} (OpenCV BRISQUE on tongue ROI) and \textbf{Bniqe} (NSS Mahalanobis distance, NIQE-style) under the \emph{same} LangGraph resampling policy and retry budget as B2.
+Validation medians set $\tau$ independently per scorer (Table~\ref{tab:nr-iqa}); edge latency means follow Table~\ref{tab:iqa-compare} ($\approx$85\,ms / 150\,ms vs.\ Edge-IQA $\approx$9\,ms).
+
+\input{sections/table_nr_iqa}
+
+Bbrisque and Bniqe achieve higher M2 than B2 at substantially higher M1 p50 (Table~\ref{tab:nr-iqa}), illustrating the trade-off in Fig.~\ref{fig:pareto-m2-m1}: classical NR scorers raise valid-frame rate but add 85--150\,ms edge scoring cost per attempt versus Edge-IQA.
+Reproduce with \texttt{calibrate\_tau\_nr.py} and \texttt{run\_matrix\_tcm.py --config experiments/configs/main\_exp\_nr.yaml --tag nr}.

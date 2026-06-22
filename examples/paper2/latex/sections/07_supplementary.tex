@@ -1,0 +1,48 @@
+% Expanded supplementary (Paper I)
+\paragraph{Reproduction one-liner.}
+From repository root: \texttt{bash scripts/paper1\_run\_tcm\_full.sh} imports ShezhenV3 splits, trains B3 MobileNet, calibrates $\tau$ with ROI, runs the main matrix (3 seeds), rebuilds figures/tables, and compiles PDFs.
+
+\paragraph{Artifact inventory.}
+\begin{itemize}
+  \item \texttt{experiments/splits/tcm\_\{train,val,test\}.json} --- 6{,}719 images with COCO \texttt{bboxes};
+  \item \texttt{experiments/results/recommended\_tau.json} --- ROI calibration ($n{=}1{,}144$);
+  \item \texttt{experiments/results/roi\_ablation.json} --- full-frame vs.\ ROI comparison;
+  \item \texttt{experiments/results/b3\_mobilenet.pt} --- learned B3 checkpoint;
+  \item \texttt{experiments/results/b3\_training\_meta.json} --- validation accuracy and sample counts;
+  \item \texttt{experiments/results/calibration\_val.csv} --- per-image Edge-IQA scores;
+  \item \texttt{experiments/results/main\_seed\{0,1,2\}\_detail.csv} --- frame-level matrix logs;
+  \item \texttt{figures/fig\_iqa\_hist.pdf}, \texttt{fig\_main.pdf} --- histogram and bar charts.
+\end{itemize}
+
+\paragraph{Environment.}
+Edge-IQA requires NumPy and Pillow only.
+B3 training uses PyTorch/torchvision in \texttt{doctor/paper1/.venv} (see \texttt{train\_b3\_mobilenet.py}).
+WSL users mount ShezhenV3 at \texttt{/mnt/d/.../shezhenv3-coco} per \texttt{tcm\_paths.yaml}.
+
+\paragraph{Hyperparameter log.}
+Edge-IQA: $512$ resize, $0.65/0.35$ sharpness/exposure weights, Laplacian scale $0.002$.
+ROI: $8\%$ padding on union COCO box.
+B3: MobileNetV3-Small, $224$ input, AdamW $10^{-3}$, $5$ epochs, batch $64$, clear vs.\ blur ($r{\in}[2.5,5.0]$).
+Routing: $\tau$ from validation medians, $K{=}2$, latency model unchanged from phase-2.
+
+\paragraph{JSONL schema (10 fields).}
+\texttt{trial\_id}, \texttt{image\_path}, \texttt{q\_img}, \texttt{flags}, \texttt{retry\_count}, \texttt{route\_decision}, \texttt{latency\_ms}, \texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route}.
+
+\paragraph{Ablation scripts.}
+\texttt{run\_ablation\_tau.py} sweeps $\tau$; \texttt{roi\_ablation.py} compares full vs.\ ROI Edge-IQA; \texttt{cross\_dataset\_report.py} computes M5 Spearman.
+
+\paragraph{NR-IQA baselines.}
+Appendix Table~\ref{tab:nr-iqa} reports Bbrisque/Bniqe under the B2 LangGraph shell.
+Reproduce with \texttt{calibrate\_tau\_nr.py} and \texttt{run\_matrix\_tcm.py --config experiments/configs/main\_exp\_nr.yaml --tag nr} (OpenCV BRISQUE models under \texttt{edge\_iqa/models/}).
+
+\paragraph{Ethics.}
+ShezhenV3-COCO is used under its public license for algorithm validation; no new human subjects were recruited for Paper~I offline experiments.
+
+\paragraph{Limitations (supplementary).}
+(1) Blur labels are synthetic Gaussian, not clinical motion traces.
+(2) ROI requires detector or dataset boxes at runtime.
+(3) B3 lacks exposure flags unless hybridized with Edge-IQA.
+(4) M6 Franka RTT uses a different latency stack than Table~II.
+
+\paragraph{Future checklist.}
+Integrate on-device tongue detector for ROI when COCO boxes absent; joint train multi-task blur+exposure head; federated $\tau$ calibration across clinics.

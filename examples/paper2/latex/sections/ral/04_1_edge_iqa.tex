@@ -1,0 +1,44 @@
+\subsection{Edge Image Quality Assessment}
+\label{sec:edge-iqa}
+
+Edge-IQA scores each frame on CPU with $O(HW)$ cost on a $512\times512$ resize.
+Let $S=\mathrm{Var}(\nabla^2 I)$ normalized to $[0,1]$ and $E$ an exposure term peaked at mid-gray:
+\begin{equation}
+Q_{\mathrm{img}} = 0.65\, S + 0.35\, E .
+\end{equation}
+Binary flags mark \texttt{blur} ($S<\tau_s$), \texttt{underexposed}, or \texttt{overexposed} means.
+Robotic tongue capture fails mainly from motion blur and exposure drift; a single threshold $\tau$ gates LangGraph routing.
+On ShezhenV3 validation with COCO tongue ROI, clear/blur medians are $0.516$ and $0.414$ ($\tau_{B2}{=}0.465$); CPU p95 is 9.6\,ms (\texttt{edge\_iqa/scorer.py}).
+The implementation uses OpenCV-style image operators; the gateway spawns \texttt{python -m edge\_iqa.cli --json} in a subprocess to avoid GIL contention with \texttt{rclpy}.
+Optional baseline B3 fine-tunes MobileNetV3-Small~\cite{howard2019mobilenetv3} on the train split; the primary deployable path is interpretable B2.
+
+\begin{table}[!t]
+\centering
+\caption{IQA approaches for edge acquisition gating (qualitative).}
+\label{tab:iqa-compare}
+\small
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccccc}
+\hline
+Method & Lat. & GPU & Flags & $\tau$ & Audit \\
+\hline
+Edge-IQA & $\sim$10\,ms & No & Yes & Yes & Yes \\
+Laplacian & $\sim$5\,ms & No & Part. & Yes & Yes \\
+NIQE/BRISQUE & 50--200\,ms & No & Lim. & Map & Wrap. \\
+Deep NR-IQA & 10--100+\,ms & Often & No & Map & Svc. \\
+B3 (learned) & 15--40\,ms & Opt. & No & Yes & Sep. \\
+\hline
+\end{tabular}
+\end{table}
+
+\begin{algorithm}[!t]
+\caption{Edge-IQA scoring}
+\label{alg:edge-iqa}
+\begin{algorithmic}[1]
+\STATE Resize $I$ to $512\times512$, convert to grayscale
+\STATE $S \leftarrow \mathrm{normalize}(\mathrm{Var}(\nabla^2 I))$
+\STATE $E \leftarrow 1 - | \mathrm{mean}(I) - 0.5 | / 0.5$
+\STATE $Q_{\mathrm{img}} \leftarrow 0.65 S + 0.35 E$; derive flags from $(S,E)$
+\STATE \RETURN $Q_{\mathrm{img}}$, flags
+\end{algorithmic}
+\end{algorithm}

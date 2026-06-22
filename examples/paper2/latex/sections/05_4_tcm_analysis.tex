@@ -1,0 +1,13 @@
+% §5.4 extended analysis paragraphs
+\paragraph{Score overlap and calibration policy.}
+Real ShezhenV3 validation pairs exhibit score overlap (minimum clear $Q_{\mathrm{img}}$ below maximum blur $Q_{\mathrm{img}}$) because tongue texture and coating contribute to Laplacian energy even under mild defocus.
+With COCO tongue ROI enabled, validation medians are $0.516$ (clear) and $0.414$ (blur) at $\tau{=}0.465$; full-frame medians were $0.564/0.431$ at $\tau{=}0.498$.
+We therefore report both cohort medians and Spearman $\rho$ rather than assuming separable clusters.
+
+\paragraph{Implications for deployment.}
+Despite overlap, B2 achieves M2$=0.604$ on the test matrix (physical resampling, 3 seeds) because closed-loop resampling with real scores still crosses $\tau$ within $K{=}2$ retries for many trials.
+Operators can inspect \texttt{flags} (\texttt{blur}, \texttt{underexposed}, \texttt{overexposed}) in JSONL logs to diagnose failures without inspecting raw cloud uploads.
+
+\paragraph{Comparison to synthetic phase-2.}
+Synthetic calibration yielded $\tau{=}0.505$ with medians $0.819/0.191$; ShezhenV3 yields $\tau{=}0.498$ with medians $0.564/0.431$ and M5 $\rho{=}0.47$ (vs.\ $\rho{\approx}0.75$ synthetic).
+Absolute $Q_{\mathrm{img}}$ shifts downward on real texture, but relative routing benefits (B2 vs.\ B0/B1) persist on the test split, supporting external validity of the architecture beyond toy images.

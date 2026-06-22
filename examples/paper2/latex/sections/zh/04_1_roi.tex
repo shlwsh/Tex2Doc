@@ -1,0 +1,38 @@
+% §4.1.1 COCO 舌框 ROI 裁剪（中文）
+\subsection{COCO 舌区 ROI 裁剪}
+\label{sec:roi-zh}
+
+ShezhenV3-COCO 以 COCO 格式 $[x,y,w,h]$ 提供舌体边界框。
+存在多框时取并集，各边外扩 $8\%$（不超出图像边界）后裁剪，再送入 Edge-IQA 的 $512{\times}512$ 缩放流程。
+实现位于 \texttt{edge\_iqa/coco\_roi.py}；\texttt{import\_shezhenv3.py} 导入数据后，在划分 JSON 中写入 \texttt{bboxes} 字段。
+
+\paragraph{动机。}
+全图评分会纳入脸颊、牙齿与背景纹理，其 Laplacian 能量与舌面清晰度并不一致。
+ROI 裁剪使质量信号与下游 TCM 分类器的解剖关注区对齐，并降低对视野外高对比结构（如唇缘、牙面高光）的敏感度。
+
+\paragraph{标定影响。}
+在完整验证集（572 张清晰图，各配对一个合成高斯模糊，$r{\in}[2.5,5.0]$）上，表~\ref{tab:roi-ablation-zh} 对比全图与 ROI 两种 Edge-IQA 设置。
+ROI 降低绝对中位数（清晰 $0.516$ vs.\ $0.564$；模糊 $0.414$ vs.\ $0.431$），原因是背景高频成分被移除。
+「最小清晰减最大模糊」的分离度在两种设置下均为负（ROI：$-0.541$；全图：$-0.510$），说明队列重叠仍然存在；因此同时报告 Spearman $\rho$ 与路由指标，而非假设分数区间完全可分。
+本修订中，ShezhenV3 实验默认启用 ROI（\texttt{tcm\_paths.yaml} 中 \texttt{use\_roi: true}）。
+
+\begin{table}[t]
+\centering
+\caption{Edge-IQA 标定：全图 vs.\ COCO 舌区 ROI（ShezhenV3 val，每类 $n{=}572$）。}
+\label{tab:roi-ablation-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcccc}
+\hline
+设置 & 清晰中位数 & 模糊中位数 & $\tau$ & 分离度 \\
+\hline
+全图 & 0.564 & 0.431 & 0.498 & $-0.510$ \\
+舌区 ROI & 0.516 & 0.414 & 0.465 & $-0.541$ \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{部署说明。}
+运行时若无 COCO 框（例如未接检测器的单相机原型），可设 \texttt{use\_roi=false} 回退至全图评分。
+离线标定始终使用数据集标注，以保证可复现。

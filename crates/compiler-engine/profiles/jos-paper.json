@@ -8,6 +8,17 @@
   "page_setup": {
     "kind": "jos-paper3"
   },
+  "detection": {
+    "min_confidence": 0.75,
+    "fallback_profile": "generic",
+    "signals": [
+      {
+        "kind": "documentclass",
+        "value": "rjthesis",
+        "weight": 0.80
+      }
+    ]
+  },
   "font_policy": {
     "latin_main": "Times New Roman",
     "cjk_main": "SimSun/FangSong/KaiTi",

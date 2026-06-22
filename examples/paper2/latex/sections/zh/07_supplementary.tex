@@ -1,0 +1,53 @@
+% 补充材料（中文扩展）
+\paragraph{一键复现。}
+在仓库根目录执行 \texttt{bash scripts/paper1\_run\_tcm\_full.sh}，将依次完成：导入划分、训练 B3、ROI 标定 $\tau$、主矩阵（3 seeds）、图表与 PDF 生成。
+
+\paragraph{工件清单。}
+\begin{itemize}
+  \item \texttt{tcm\_\{train,val,test\}.json}：共 6719 张，含 COCO \texttt{bboxes}；
+  \item \texttt{recommended\_tau.json}：ROI 标定（$n{=}1144$）；
+  \item \texttt{roi\_ablation.json}：全图 vs.\ 舌区 ROI；
+  \item \texttt{b3\_mobilenet.pt}、\texttt{b3\_training\_meta.json}：B3 权重与验证准确率；
+  \item \texttt{calibration\_val.csv}、\texttt{main\_seed*\_detail.csv}：分数与帧级日志。
+\end{itemize}
+
+\paragraph{环境与超参数。}
+Edge-IQA 仅需 NumPy/Pillow；B3 训练使用 \texttt{doctor/paper1/.venv}（PyTorch）。
+WSL 下数据集路径见 \texttt{tcm\_paths.yaml}。
+Edge-IQA：512 缩放，清晰度/曝光权重 0.65/0.35；ROI padding 8\%。
+B3：MobileNetV3-Small，224 输入，AdamW $10^{-3}$，5 epoch，batch 64。
+路由：$\tau$ 来自验证集中位数，$K{=}2$。
+
+\paragraph{JSONL 字段。}
+\texttt{trial\_id}、\texttt{image\_path}、\texttt{q\_img}、\texttt{flags}、\texttt{retry\_count}、\texttt{route\_decision}、\texttt{latency\_ms}、\texttt{t\_capture}、\texttt{t\_iqa}、\texttt{t\_route}。
+
+\paragraph{局限与伦理。}
+合成高斯模糊；运行时需检测框或检测器；B3 与 Edge-IQA 的 $\tau$ 标度不一致；M6 不与表 II 直接对比。
+使用公开 ShezhenV3-COCO；JSONL 不含患者标识。
+
+\paragraph{未来工作与摘要表。}
+端侧舌检测 ROI；混合 Edge-IQA+B3 头；基于 FR3 日志的运动模糊增广。
+表 S1：全图 $\tau{=}0.498$，ROI $\tau{=}0.465$（详见 \texttt{roi\_ablation.json}）。
+表 S2：5594 训练图，11188 对，验证准确率 98.3\%。
+
+\paragraph{计划中的 NR-IQA 基线。}
+附录表~\ref{tab:nr-iqa-zh} 给出 Bbrisque/Bniqe 与 B2 相同 LangGraph 外壳下的定量行。
+完整复现：\texttt{calibrate\_tau\_nr.py} + \texttt{run\_matrix\_tcm.py --config experiments/configs/main\_exp\_nr.yaml --tag nr}（模型见 \texttt{edge\_iqa/models/}）。
+
+\paragraph{命令清单。}
+标定：\texttt{python3 experiments/edge\_iqa/calibrate\_tau\_tcm.py}；
+B3 训练：\texttt{.venv/bin/python experiments/edge\_iqa/train\_b3\_mobilenet.py}；
+主矩阵：\texttt{.venv/bin/python experiments/run\_matrix\_tcm.py}。
+
+\paragraph{版本、许可与排查。}
+2026-05-30：ROI + 真实 B3 + ShezhenV3 全量验证纳入正文。
+算法问题见 \texttt{docs/study/}；代码许可 Apache-2.0，ShezhenV3 遵循其公开许可。
+图 S1：M6 Franka RTT 直方图见 \texttt{fig\_s1\_franka\_rtt.pdf}。
+扩展阅读：V19 大纲 \texttt{docs-zh/paper1/V19/}；网关环境变量 \texttt{docs-zh/paper1/V19/ENV.md}。
+若 \texttt{b3\_mobilenet.pt} 缺失，主矩阵 B3 回退 \texttt{b3\_q\_boost}（默认已关闭 \texttt{b3\_use\_learned}）。
+B3 训练在 CPU 上约 45 分钟（5594 图 $\times$ 5 epoch）；可用 \texttt{--max-train} 做 smoke test。
+中文稿与英文稿章节同步；表 II 由 \texttt{sync\_table\_ii\_zh.py} 自动生成。
+投稿包不含原始患者图像，仅含统计与脚本；生产环境须配置 \texttt{FRANKA\_API\_KEY}。
+
+\paragraph{补充材料定位。}
+本补充材料旨在使审稿人与学生可在无 FR3 硬件条件下复现表 II 与标定数字。

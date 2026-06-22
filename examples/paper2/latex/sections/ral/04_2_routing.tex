@@ -1,0 +1,42 @@
+\subsection{Confidence-Aware Routing}
+\label{sec:routing}
+
+Given score $Q_{\mathrm{img}}$ and retry counter $r$, the router implements:
+\begin{equation}
+\text{route}(s)=
+\begin{cases}
+\text{upload\_cloud}, & Q_{\mathrm{img}}\geq\tau \land r\leq K,\\
+\text{resample\_edge}, & Q_{\mathrm{img}}<\tau \land r\leq K,\\
+\text{fail\_safe}, & r>K.
+\end{cases}
+\label{eq:routing}
+\end{equation}
+with $K{=}2$ in our experiments.
+LangGraph nodes \texttt{capture} $\rightarrow$ \texttt{edge\_iqa} $\rightarrow$ \texttt{route} branch to resample, upload, or abort; \texttt{TrialState} carries \texttt{q\_img}, \texttt{flags}, \texttt{retry\_count}, and ISO-8601 timestamps.
+Routing overhead ($\approx$3.6\,\textmu s/trial on 1{,}000 trials) is negligible versus the 9\,ms IQA step; LangGraph additionally provides checkpoint persistence and graph visualization (Fig.~\ref{fig:routing-flow}).
+
+Each \texttt{resample\_edge} applies \emph{physical skill transforms} before re-scoring: \texttt{adaptive\_visual\_damping} reduces Gaussian blur radius on the clear reference; \texttt{exposure\_loop\_tuning} corrects gain/bias when exposure flags fire---no stochastic score inflation.
+JSONL logs ten fields per frame for audit (\texttt{trial\_id}, \texttt{q\_img}, \texttt{flags}, \texttt{route\_decision}, timestamps, \texttt{latency\_ms}).
+
+\begin{algorithm}[!t]
+\caption{Confidence-aware routing loop (B2)}
+\label{alg:routing-loop}
+\begin{algorithmic}[1]
+\STATE $r \leftarrow 0$; capture frame $I$
+\REPEAT
+  \STATE $(Q,\texttt{flags}) \leftarrow \text{EdgeIQA}(I)$
+  \STATE $d \leftarrow \text{Route}(Q,r,\tau,K)$ \COMMENT{Eq.~\ref{eq:routing}}
+  \IF{$d = \texttt{upload\_cloud}$} \STATE \textbf{break}
+  \ELSIF{$d = \texttt{resample\_edge}$} \STATE $r \leftarrow r+1$; recapture $I$
+  \ELSE \STATE \textbf{fail\_safe}; \textbf{break}
+  \ENDIF
+\UNTIL{$r > K$}
+\end{algorithmic}
+\end{algorithm}
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{fig2_routing_flow.pdf}
+  \caption{LangGraph confidence-aware routing flow.}
+  \label{fig:routing-flow}
+\end{figure}

@@ -1,0 +1,25 @@
+% 自正文实验节移至附录（P0 结构压缩）
+\section{补充实验与工程细节}
+\label{sec:app-experiments-zh}
+
+\paragraph{跨队列相关（M5）。}
+在完整 ShezhenV3 验证集（$n{=}1{,}144$ 清晰/模糊对）上，$Q_{\mathrm{img}}$ 与二值标签的 Spearman 相关系数为 $\rho{=}0.363$（\texttt{cross\_tcm\_fd.csv}）。
+低于合成阶段 2（$\rho{\approx}0.75$），但平均意义下仍单调可分；$\tau$ 标定采用组中位数而非假设分数区间不交。
+
+\paragraph{Franka 辅轨（M6）。}
+执行栈上 50 次闭环试验生成图~S1；本地回路延迟不含模拟上云，不得与表~\ref{tab:main-results-zh} 数值直接对比。
+
+\paragraph{可复现性。}
+数据集导入、$\tau$ 标定、矩阵回放与作图由 \texttt{scripts/paper1\_run\_tcm\_full.sh} 编排，路径见 \texttt{experiments/configs/tcm\_paths.yaml}。
+
+\input{sections/zh/05_nr_iqa_baselines}
+\input{sections/zh/05_4_tcm_analysis}
+\input{sections/zh/05_b3_learned}
+\input{sections/zh/05_6_extended_analysis}
+\input{sections/zh/05_7_implementation}
+\input{sections/zh/05_8_artifacts}
+\input{sections/zh/05_9_deployment}
+\input{sections/zh/05_10_failure_cases}
+
+\paragraph{在线逐步示例。}
+为节省 RA-L 页数，B2 逐步走查移至 \texttt{supplementary/online\_walkthrough.md}。
