@@ -94,15 +94,39 @@ $profileDir = if ($Profile -eq "release") {
 
 $exeName = if ($env:OS -eq "Windows_NT") { "$packageName.exe" } else { $packageName }
 $exePath = Join-Path $profileDir $exeName
+$processName = [System.IO.Path]::GetFileNameWithoutExtension($exeName)
 
-if ($NoBuild) {
+function Stop-ExistingSlint {
+    $existing = Get-Process -Name $processName -ErrorAction SilentlyContinue
+    if ($existing) {
+        $ids = ($existing | Select-Object -ExpandProperty Id) -join ", "
+        Write-Host "[runSlint] stopping existing $processName process(es): $ids"
+        $existing | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Milliseconds 500
+    }
+}
+
+function Start-Slint {
     if (-not (Test-Path -LiteralPath $exePath)) {
         throw "Binary not found (run without -NoBuild first): $exePath"
     }
+
+    Stop-ExistingSlint
     Write-Host "[runSlint] launching $exePath ..."
-    & $exePath
+    $process = Start-Process -FilePath $exePath -WorkingDirectory $profileDir -PassThru
+    Start-Sleep -Milliseconds 800
+    if ($process.HasExited) {
+        throw "Slint app exited immediately with code $($process.ExitCode)."
+    }
+    Write-Host "[runSlint] started PID $($process.Id)"
+}
+
+if ($NoBuild) {
+    Start-Slint
     return
 }
+
+Stop-ExistingSlint
 
 $displayProfile = if ($Profile -eq "release") { "release" } else { "dev" }
 Write-Host "[runSlint] building ($displayProfile) $packageName ..."
@@ -135,5 +159,4 @@ if ($BuildOnly) {
     return
 }
 
-Write-Host "[runSlint] launching $exePath ..."
-& $exePath
+Start-Slint

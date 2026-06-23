@@ -24,7 +24,7 @@ pub fn wire_diagnostics(ui: &MainWindow, _app_state: Arc<AppState>) {
                 status_text: status_text.to_string(),
                 recent_jobs: recent_jobs.to_string(),
                 update_status: update_status.to_string(),
-                app_version: env!("CARGO_PKG_VERSION").to_string(),
+                app_version: env!("TEX2DOC_DESKTOP_VERSION").to_string(),
             };
 
             let result = crate::diagnostics::export_diagnostic_bundle(&input);

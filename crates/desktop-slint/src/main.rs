@@ -19,16 +19,14 @@ mod report;
 mod settings;
 mod theme;
 mod ui;
+mod ui_bindings;
 mod updater;
 
 use app_state::{AppState, JobUpdate};
 use settings::Settings;
-use slint::include_modules;
-use slint::{Color, SharedString};
+use slint::{Color, ComponentHandle, SharedString};
 use std::sync::Arc;
-
-// Re-export generated Slint components
-include_modules!();
+use ui::MainWindow;
 
 const DESKTOP_VERSION: &str = env!("TEX2DOC_DESKTOP_VERSION");
 
@@ -866,6 +864,8 @@ fn main() {
             }
         },
     );
+
+    ui_bindings::wire_all(&ui, Arc::clone(&app_state));
 
     log::info!("Tex2Doc Desktop UI initialized, entering event loop");
 

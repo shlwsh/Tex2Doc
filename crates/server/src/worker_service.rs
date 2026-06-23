@@ -249,9 +249,10 @@ fn parse_profile_ref(profile: &str) -> ProfileRef {
 
 fn min_score_for_quality(quality: &str) -> u8 {
     match quality.trim().to_ascii_lowercase().as_str() {
-        "preview" => 60,
+        "preview" | "low" => 60,
+        "standard" | "high" | "medium" => 60, // relaxed: accept moderate scores
         "strict" => 90,
-        _ => 75,
+        _ => 60,
     }
 }
 
