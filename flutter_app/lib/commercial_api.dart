@@ -300,6 +300,9 @@ class UsageSummary {
   final int cloudConversionsLimit;
   final int storageBytesUsed;
   final int storageBytesLimit;
+  final int countBalance;
+  final String? dateValidUntil;
+  final String? entitlementSourceOrderId;
 
   UsageSummary({
     required this.planId,
@@ -307,10 +310,22 @@ class UsageSummary {
     required this.cloudConversionsLimit,
     required this.storageBytesUsed,
     required this.storageBytesLimit,
+    required this.countBalance,
+    required this.dateValidUntil,
+    required this.entitlementSourceOrderId,
   });
 
   int get cloudConversionsRemaining =>
       cloudConversionsLimit - cloudConversionsUsed;
+
+  String get entitlementLabel {
+    final parts = <String>[];
+    if (countBalance > 0) parts.add('$countBalance count credits');
+    if (dateValidUntil != null && dateValidUntil!.isNotEmpty) {
+      parts.add('valid until $dateValidUntil');
+    }
+    return parts.isEmpty ? 'preview quota' : parts.join(', ');
+  }
 
   factory UsageSummary.fromJson(Map<String, dynamic> json) {
     return UsageSummary(
@@ -319,6 +334,9 @@ class UsageSummary {
       cloudConversionsLimit: json['cloud_conversions_limit'] as int,
       storageBytesUsed: json['storage_bytes_used'] as int,
       storageBytesLimit: json['storage_bytes_limit'] as int,
+      countBalance: json['count_balance'] as int? ?? 0,
+      dateValidUntil: json['date_valid_until'] as String?,
+      entitlementSourceOrderId: json['entitlement_source_order_id'] as String?,
     );
   }
 }
