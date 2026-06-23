@@ -110,9 +110,11 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'convert.mainTex': '主 TeX 文件',
     'convert.mainTexHint': 'main-jos.tex',
     'convert.noFile': '未选择文件',
-    'convert.fileTooLarge': '文件 {size} MB，超过 5 MB 上限。请使用桌面 App。',
+    'convert.fileTooLarge': '文件 {size} MB，超过 10 MB 上限。请使用桌面 App。',
+    'convert.signInRequired': '请先注册或登录，以使用云端语义引擎转换。',
     'convert.converting': '正在转换...',
     'convert.success': '完成 {size} KB，用时 {elapsed} ms',
+    'convert.cloudSuccess': '云端语义引擎完成 {size} KB，用时 {elapsed} ms',
     'convert.output': '产物',
     'metrics.quota': '云端额度',
     'metrics.engine': '引擎状态',
@@ -170,9 +172,13 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'convert.mainTexHint': 'main-jos.tex',
     'convert.noFile': 'No file selected',
     'convert.fileTooLarge':
-        'File {size} MB exceeds the 5 MB limit. Use the desktop app.',
+        'File {size} MB exceeds the 10 MB limit. Use the desktop app.',
+    'convert.signInRequired':
+        'Register or sign in first to use the cloud semantic engine.',
     'convert.converting': 'Converting...',
     'convert.success': 'Completed {size} KB in {elapsed} ms',
+    'convert.cloudSuccess':
+        'Cloud semantic engine completed {size} KB in {elapsed} ms',
     'convert.output': 'Output',
     'metrics.quota': 'Cloud quota',
     'metrics.engine': 'Engine status',

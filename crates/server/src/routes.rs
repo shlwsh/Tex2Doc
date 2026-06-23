@@ -9,6 +9,7 @@ use mime::Mime;
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Cursor;
+use tower_http::cors::{Any, CorsLayer};
 
 use doc_core::{convert_zip, ConvertOptions};
 
@@ -69,6 +70,12 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
         .with_state(state)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY))
 }
 

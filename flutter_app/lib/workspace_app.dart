@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'bridge.dart';
 import 'commercial_api.dart';
 import 'file_web_stub.dart'
     if (dart.library.js_interop) 'file_web_utils_web.dart';
@@ -425,16 +424,34 @@ class _MetricsRow extends StatelessWidget {
   }
 }
 
-class _ResponsiveCards extends StatelessWidget {
+class _ResponsiveCards extends StatefulWidget {
   const _ResponsiveCards();
+
+  @override
+  State<_ResponsiveCards> createState() => _ResponsiveCardsState();
+}
+
+class _ResponsiveCardsState extends State<_ResponsiveCards> {
+  String _apiBaseUrl = 'http://127.0.0.1:8080/v1/';
+  String? _accessToken;
+
+  void _handleSignedIn(String apiBaseUrl, String accessToken) {
+    setState(() {
+      _apiBaseUrl = apiBaseUrl;
+      _accessToken = accessToken;
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final stack = constraints.maxWidth < AppBreakpoints.tablet;
-        final account = const _CommercialApiPanel();
-        final convert = const _ConvertPanel();
+        final account = _CommercialApiPanel(onSignedIn: _handleSignedIn);
+        final convert = _ConvertPanel(
+          apiBaseUrl: _apiBaseUrl,
+          accessToken: _accessToken,
+        );
         if (stack) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -459,7 +476,9 @@ class _ResponsiveCards extends StatelessWidget {
 }
 
 class _CommercialApiPanel extends StatefulWidget {
-  const _CommercialApiPanel();
+  final void Function(String apiBaseUrl, String accessToken) onSignedIn;
+
+  const _CommercialApiPanel({required this.onSignedIn});
 
   @override
   State<_CommercialApiPanel> createState() => _CommercialApiPanelState();
@@ -470,7 +489,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
     text: 'http://127.0.0.1:8080/v1/',
   );
   final _emailController = TextEditingController(text: 'demo@example.com');
-  final _passwordController = TextEditingController(text: 'secret');
+  final _passwordController = TextEditingController(text: 'demo');
 
   String? _accessToken;
   String? _status;
@@ -523,6 +542,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
           'plan': auth.user.planId,
         });
       });
+      widget.onSignedIn(_baseUrlController.text, auth.accessToken);
     });
   }
 
@@ -540,6 +560,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
           'plan': auth.user.planId,
         });
       });
+      widget.onSignedIn(_baseUrlController.text, auth.accessToken);
     });
   }
 
@@ -661,7 +682,10 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
 enum _ConvertState { idle, converting, success, error }
 
 class _ConvertPanel extends StatefulWidget {
-  const _ConvertPanel();
+  final String apiBaseUrl;
+  final String? accessToken;
+
+  const _ConvertPanel({required this.apiBaseUrl, required this.accessToken});
 
   @override
   State<_ConvertPanel> createState() => _ConvertPanelState();
@@ -692,7 +716,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
 
     final (bytes, fileName) = result;
     final sizeMB = bytes.length / (1024 * 1024);
-    if (sizeMB >= 5) {
+    if (sizeMB >= 10) {
       setState(() {
         _state = _ConvertState.error;
         _errorText = strings.t('convert.fileTooLarge').fill({
@@ -724,6 +748,14 @@ class _ConvertPanelState extends State<_ConvertPanel> {
     final mainTex = _mainTexController.text.trim().isEmpty
         ? 'main-jos.tex'
         : _mainTexController.text.trim();
+    final token = widget.accessToken;
+    if (token == null) {
+      setState(() {
+        _state = _ConvertState.error;
+        _errorText = strings.t('convert.signInRequired');
+      });
+      return;
+    }
 
     setState(() {
       _state = _ConvertState.converting;
@@ -733,12 +765,13 @@ class _ConvertPanelState extends State<_ConvertPanel> {
 
     try {
       final t0 = DateTime.now();
-      final docx = await DocEngineFacade.convertZipToDocx(bytes, mainTex);
+      final docx = await _convertCloud(bytes, mainTex, token);
       if (!mounted) return;
 
       _elapsedMs = DateTime.now().difference(t0).inMilliseconds;
       _docxBytes = docx;
-      if (docx.length < 4 * 1024) {
+      const minDocxBytes = 1024;
+      if (docx.length < minDocxBytes) {
         throw Exception('docx too small: ${docx.length} bytes');
       }
       if (docx[0] != 0x50 || docx[1] != 0x4B) {
@@ -747,7 +780,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
 
       setState(() {
         _state = _ConvertState.success;
-        _statusText = strings.t('convert.success').fill({
+        _statusText = strings.t('convert.cloudSuccess').fill({
           'size': (docx.length / 1024).toStringAsFixed(1),
           'elapsed': _elapsedMs ?? 0,
         });
@@ -759,6 +792,47 @@ class _ConvertPanelState extends State<_ConvertPanel> {
         _errorText = e.toString();
       });
     }
+  }
+
+  Future<Uint8List> _convertCloud(
+    Uint8List bytes,
+    String mainTex,
+    String accessToken,
+  ) async {
+    final client = CommercialApiClient(widget.apiBaseUrl);
+    final upload = await client.uploadProjectZip(
+      accessToken: accessToken,
+      bytes: bytes,
+      fileName: _zipFileName ?? 'project.zip',
+    );
+    final created = await client.createConversion(
+      accessToken: accessToken,
+      uploadId: upload.uploadId,
+      mainTex: mainTex,
+      profile: 'jos',
+      quality: 'high',
+    );
+    var job = created;
+    for (var attempt = 0; attempt < 120; attempt += 1) {
+      if (job.status == ConversionStatus.completed) {
+        final docx = await client.downloadConversionDocx(
+          accessToken: accessToken,
+          jobId: job.jobId,
+        );
+        return Uint8List.fromList(docx);
+      }
+      if (job.status == ConversionStatus.failed ||
+          job.status == ConversionStatus.expired) {
+        final detail = job.error ?? job.errorCode ?? job.status.name;
+        throw Exception('cloud conversion failed: $detail');
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+      job = await client.getConversion(
+        accessToken: accessToken,
+        jobId: job.jobId,
+      );
+    }
+    throw Exception('cloud conversion timeout: ${job.jobId}');
   }
 
   void _downloadDocx() {

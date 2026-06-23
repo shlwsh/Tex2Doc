@@ -30,6 +30,17 @@
     // ================================================================
     const fileInput = document.getElementById('zip-file-input');
 
+    function arrayBufferToBase64(buffer) {
+      const bytes = new Uint8Array(buffer);
+      const chunkSize = 0x8000;
+      let binary = '';
+      for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+        const chunk = bytes.subarray(offset, offset + chunkSize);
+        binary += String.fromCharCode(...chunk);
+      }
+      return btoa(binary);
+    }
+
     window.addEventListener('flutter-file-trigger', () => {
       console.log('[doc-engine] 文件选择器触发');
       fileInput.click();
@@ -41,7 +52,7 @@
       console.log('[doc-engine] 文件已选:', file.name, (file.size / 1024).toFixed(1) + ' KB');
       try {
         const buffer = await file.arrayBuffer();
-        const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)));
+        const base64 = arrayBufferToBase64(buffer);
         window.dispatchEvent(new CustomEvent('flutter-file-selected', {
           detail: {
             name: file.name,

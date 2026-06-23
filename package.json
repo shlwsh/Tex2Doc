@@ -17,6 +17,7 @@
     "serve:web": "node scripts/serve_flutter_web.mjs",
     "e2e:paper3": "node scripts/e2e_paper3.mjs",
     "e2e:server": "node scripts/e2e_server.mjs",
+    "e2e:flutter-web": "node scripts/e2e_flutter_commercial_web.mjs",
     "e2e:desktop": "cd flutter_app && dart run bin/native_smoke.dart",
     "e2e:extension": "node scripts/e2e_extension.mjs",
     "verify:e2e": "node scripts/build_paper3_zip.mjs && node scripts/e2e_paper3.mjs && node scripts/e2e_server.mjs && npm run e2e:desktop && npm run e2e:extension"
