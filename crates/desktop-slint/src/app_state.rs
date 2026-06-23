@@ -163,6 +163,30 @@ impl AppState {
             .map(|j| j.iter().take(10).cloned().collect())
             .unwrap_or_default()
     }
+
+    pub fn all_jobs(&self) -> Vec<JobEntry> {
+        self.jobs
+            .read()
+            .ok()
+            .map(|jobs| jobs.clone())
+            .unwrap_or_default()
+    }
+
+    pub fn remove_job(&self, id: &str) -> Option<JobEntry> {
+        self.jobs.write().ok().and_then(|mut jobs| {
+            jobs.iter()
+                .position(|job| job.id == id)
+                .map(|index| jobs.remove(index))
+        })
+    }
+
+    pub fn clear_jobs(&self) -> Vec<JobEntry> {
+        self.jobs
+            .write()
+            .ok()
+            .map(|mut jobs| std::mem::take(&mut *jobs))
+            .unwrap_or_default()
+    }
 }
 
 #[derive(Debug, Clone)]

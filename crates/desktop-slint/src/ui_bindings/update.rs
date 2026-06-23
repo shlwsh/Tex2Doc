@@ -18,7 +18,7 @@ pub fn wire_update(ui: &MainWindow, _app_state: Arc<AppState>) {
                 let result = crate::desktop_update::check_update_blocking(
                     &base_url,
                     &release_channel,
-                    env!("CARGO_PKG_VERSION"),
+                    env!("TEX2DOC_DESKTOP_VERSION"),
                 )
                 .map(|check| crate::desktop_update::update_status_line(&check));
                 let invoke_result = slint::invoke_from_event_loop(move || {

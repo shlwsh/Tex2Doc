@@ -19,16 +19,14 @@ mod report;
 mod settings;
 mod theme;
 mod ui;
+mod ui_bindings;
 mod updater;
 
 use app_state::{AppState, JobUpdate};
 use settings::Settings;
-use slint::include_modules;
-use slint::{Color, SharedString};
+use slint::{Color, ComponentHandle, SharedString};
 use std::sync::Arc;
-
-// Re-export generated Slint components
-include_modules!();
+use ui::MainWindow;
 
 const DESKTOP_VERSION: &str = env!("TEX2DOC_DESKTOP_VERSION");
 
@@ -867,6 +865,8 @@ fn main() {
         },
     );
 
+    ui_bindings::wire_all(&ui, Arc::clone(&app_state));
+
     log::info!("Tex2Doc Desktop UI initialized, entering event loop");
 
     ui.run().unwrap();
@@ -1145,6 +1145,42 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
         set_t_history_exporting_diagnostics,
         "history.exporting_diagnostics"
     );
+    set_text!(set_t_nav_recharge, "nav.recharge");
+    set_text!(set_t_nav_conversion_records, "nav.conversion_records");
+    set_text!(set_t_nav_recharge_records, "nav.recharge_records");
+    set_text!(set_t_nav_sign_in_first, "nav.sign_in_first");
+    set_text!(set_t_nav_quota_billing, "nav.quota_billing");
+    set_text!(set_t_nav_cloud_engine, "nav.cloud_engine");
+    set_text!(set_t_nav_jobs_reports, "nav.jobs_reports");
+    set_text!(set_t_nav_mock_payment_history, "nav.mock_payment_history");
+    set_text!(set_t_auth_required_title, "auth.required_title");
+    set_text!(set_t_auth_required_subtitle, "auth.required_subtitle");
+    set_text!(set_t_auth_demo_hint, "auth.demo_hint");
+    set_text!(set_t_auth_api_hint, "auth.api_hint");
+    set_text!(set_t_account_overview_title, "account.overview_title");
+    set_text!(set_t_account_active_subscription, "account.active_subscription");
+    set_text!(set_t_account_guest_mode, "account.guest_mode");
+    set_text!(set_t_account_signed_in_short, "account.signed_in_short");
+    set_text!(set_t_account_status, "account.status");
+    set_text!(set_t_recharge_title, "recharge.title");
+    set_text!(set_t_recharge_subtitle, "recharge.subtitle");
+    set_text!(set_t_recharge_by_count, "recharge.by_count");
+    set_text!(set_t_recharge_by_date, "recharge.by_date");
+    set_text!(set_t_recharge_mock_pay, "recharge.mock_pay");
+    set_text!(set_t_records_conversion_title, "records.conversion_title");
+    set_text!(
+        set_t_records_conversion_subtitle,
+        "records.conversion_subtitle"
+    );
+    set_text!(set_t_records_recharge_title, "records.recharge_title");
+    set_text!(set_t_records_recharge_subtitle, "records.recharge_subtitle");
+    set_text!(set_t_records_no_recharge, "records.no_recharge");
+    set_text!(set_t_dialog_view_profile, "dialog.view_profile");
+    set_text!(set_t_dialog_change_password, "dialog.change_password");
+    set_text!(set_t_dialog_account_details, "dialog.account_details");
+    set_text!(set_t_dialog_close, "dialog.close");
+    set_text!(set_t_dialog_cancel, "dialog.cancel");
+    set_text!(set_t_dialog_confirm, "dialog.confirm");
 }
 
 fn tr_ui(ui: &MainWindow, key: &str) -> String {

@@ -40,9 +40,12 @@ dependencies:
   # web 平台 JS interop 包装
   web: ^1.1.0
 
-  # 桌面端 dart:ffi 调本地 Rust 库（doc_engine.dll/.so/.dylib）
+  # desktop dart:ffi 调本地 Rust 库（doc_engine.dll/.so/.dylib）
   ffi: ^2.1.3
   http: ^1.2.2
+
+  # 桌面端原生文件选择器（Windows/macOS/Linux）
+  file_picker: ^8.0.0
 
 dev_dependencies:
   flutter_test:
