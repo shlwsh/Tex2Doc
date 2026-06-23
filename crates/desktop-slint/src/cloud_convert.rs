@@ -32,7 +32,13 @@ pub enum CloudConvertError {
     #[error("cloud conversion timed out for job {0}")]
     Timeout(String),
     #[error("cloud conversion failed for job {job_id}: {error}")]
-    ConversionFailed { job_id: String, error: String },
+    ConversionFailed {
+        job_id: String,
+        error_code: Option<String>,
+        error: String,
+    },
+    #[error("cloud conversion quota exceeded: used={used}, limit={limit}")]
+    QuotaExceeded { used: u32, limit: u32 },
     #[error("runtime error: {0}")]
     Runtime(String),
     #[error("IO error: {0}")]
@@ -67,6 +73,13 @@ pub fn convert_project_blocking(
 
     runtime.block_on(async move {
         let client = authenticated_client(base_url, &access_token)?;
+        let usage = client.usage().await?;
+        if usage.cloud_conversions_used >= usage.cloud_conversions_limit {
+            return Err(CloudConvertError::QuotaExceeded {
+                used: usage.cloud_conversions_used,
+                limit: usage.cloud_conversions_limit,
+            });
+        }
         let upload = client
             .upload_project_zip(package.bytes, package.file_name)
             .await?;
@@ -233,6 +246,7 @@ async fn poll_until_ready(
             JobStatus::Failed | JobStatus::Expired => {
                 return Err(CloudConvertError::ConversionFailed {
                     job_id: job.job_id,
+                    error_code: job.error_code,
                     error: job.error.unwrap_or_else(|| "unknown error".to_string()),
                 });
             }

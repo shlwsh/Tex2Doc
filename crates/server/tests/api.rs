@@ -3,6 +3,7 @@
 //! - 复用 [examples/paper3/upload.zip] 作为夹具
 //! - 覆盖：health / version / 成功 convert / 缺 file 字段 / 主文件找不到 / 超大 body
 
+use std::io::{Cursor, Write};
 use std::net::SocketAddr;
 use std::time::Duration;
 
@@ -48,6 +49,21 @@ fn test_client() -> reqwest::Client {
         .timeout(Duration::from_secs(30))
         .build()
         .expect("build reqwest client with timeout")
+}
+
+fn minimal_project_zip() -> Vec<u8> {
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("minimal.tex", options)
+            .expect("start minimal tex");
+        zip.write_all(br#"\documentclass{article}\begin{document}Hello Tex2Doc\end{document}"#)
+            .expect("write minimal tex");
+        zip.finish().expect("finish zip");
+    }
+    cursor.into_inner()
 }
 
 async fn register_preview_token(client: &reqwest::Client, addr: SocketAddr) -> String {
@@ -148,7 +164,10 @@ async fn p6_commercial_contract_endpoints_return_json() {
     let upload_resp: serde_json::Value = client
         .post(format!("http://{addr}/v1/uploads"))
         .bearer_auth(&token)
-        .multipart(Form::new().part("file", Part::bytes(vec![1, 2, 3, 4]).file_name("demo.zip")))
+        .multipart(Form::new().part(
+            "file",
+            Part::bytes(minimal_project_zip()).file_name("demo.zip"),
+        ))
         .send()
         .await
         .expect("send upload")
@@ -349,6 +368,82 @@ async fn p7_cloud_worker_converts_uploaded_zip() {
         .expect("docx bytes");
     assert_eq!(&docx[..4], b"PK\x03\x04");
     assert!(docx.len() > 4 * 1024, "docx too small: {}", docx.len());
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn p7_failed_cloud_conversion_returns_error_code_and_report() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+
+    let upload_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/uploads"))
+        .bearer_auth(&token)
+        .multipart(Form::new().part(
+            "file",
+            Part::bytes(minimal_project_zip()).file_name("minimal.zip"),
+        ))
+        .send()
+        .await
+        .expect("send upload")
+        .json()
+        .await
+        .expect("upload json");
+    let upload_id = upload_resp["upload_id"].as_str().unwrap().to_string();
+
+    let conversion: serde_json::Value = client
+        .post(format!("http://{addr}/v1/conversions"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "upload_id": upload_id,
+            "main_tex": "missing.tex",
+            "profile": "generic",
+            "quality": "standard"
+        }))
+        .send()
+        .await
+        .expect("send conversion")
+        .json()
+        .await
+        .expect("conversion json");
+    let job_id = conversion["job_id"].as_str().unwrap().to_string();
+
+    let mut failed_job = None;
+    for _ in 0..40 {
+        let job: serde_json::Value = client
+            .get(format!("http://{addr}/v1/conversions/{job_id}"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("poll conversion")
+            .json()
+            .await
+            .expect("job json");
+        if job["status"] == "failed" {
+            failed_job = Some(job);
+            break;
+        }
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    let failed_job = failed_job.expect("job should fail");
+    assert_eq!(failed_job["error_code"], "convert_failed");
+    assert!(failed_job["error"].as_str().unwrap().contains("missing"));
+
+    let report: serde_json::Value = client
+        .get(format!("http://{addr}/v1/conversions/{job_id}/report"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("get report")
+        .json()
+        .await
+        .expect("report json");
+    assert_eq!(report["status"], "failed");
+    assert_eq!(report["error_code"], "convert_failed");
+    assert_eq!(report["docx_bytes"], 0);
 
     let _ = shutdown.send(());
 }

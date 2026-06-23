@@ -4,7 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
-import 'bridge.dart';
 import 'commercial_api.dart';
 import 'file_web_stub.dart'
     if (dart.library.js_interop) 'file_web_utils_web.dart';
@@ -14,6 +13,8 @@ import 'ui/app_i18n.dart';
 import 'ui/app_preferences.dart';
 import 'ui/app_theme.dart';
 import 'ui/app_tokens.dart';
+
+const _appIconAsset = 'assets/app_icon.jpg';
 
 class DocEngineApp extends StatefulWidget {
   final bool isWeb;
@@ -83,7 +84,25 @@ class _DocEngineAppState extends State<DocEngineApp> {
   }
 }
 
-class _WorkspaceShell extends StatelessWidget {
+enum _WorkspaceSection { dashboard, account, recharge, convert }
+
+extension _WorkspaceSectionMeta on _WorkspaceSection {
+  IconData get icon => switch (this) {
+    _WorkspaceSection.dashboard => Icons.dashboard_outlined,
+    _WorkspaceSection.account => Icons.person_outline,
+    _WorkspaceSection.recharge => Icons.payments_outlined,
+    _WorkspaceSection.convert => Icons.sync_alt,
+  };
+
+  String label(AppStrings strings) => switch (this) {
+    _WorkspaceSection.dashboard => strings.t('nav.dashboard'),
+    _WorkspaceSection.account => strings.t('nav.account'),
+    _WorkspaceSection.recharge => strings.t('nav.recharge'),
+    _WorkspaceSection.convert => strings.t('nav.convert'),
+  };
+}
+
+class _WorkspaceShell extends StatefulWidget {
   final bool isWeb;
   final AppThemeTone themeTone;
   final AppLocale locale;
@@ -99,9 +118,29 @@ class _WorkspaceShell extends StatelessWidget {
   });
 
   @override
+  State<_WorkspaceShell> createState() => _WorkspaceShellState();
+}
+
+class _WorkspaceShellState extends State<_WorkspaceShell> {
+  _WorkspaceSection _selectedSection = _WorkspaceSection.dashboard;
+  String _apiBaseUrl = 'http://127.0.0.1:8080/v1/';
+  String? _accessToken;
+
+  void _selectSection(_WorkspaceSection section) {
+    setState(() => _selectedSection = section);
+  }
+
+  void _handleSignedIn(String apiBaseUrl, String accessToken) {
+    setState(() {
+      _apiBaseUrl = apiBaseUrl;
+      _accessToken = accessToken;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final platform = isWeb ? 'Web' : 'Desktop';
+    final platform = widget.isWeb ? 'Web' : 'Desktop';
 
     DocLogger.instance.i(LogTags.app, 'DocEngineApp build, platform=$platform');
 
@@ -111,11 +150,12 @@ class _WorkspaceShell extends StatelessWidget {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < AppBreakpoints.tablet;
             final content = _WorkspaceContent(
-              isWeb: isWeb,
-              themeTone: themeTone,
-              locale: locale,
-              onThemeChanged: onThemeChanged,
-              onLocaleChanged: onLocaleChanged,
+              selectedSection: _selectedSection,
+              compact: compact,
+              apiBaseUrl: _apiBaseUrl,
+              accessToken: _accessToken,
+              onSignedIn: _handleSignedIn,
+              onSectionChanged: _selectSection,
             );
 
             if (compact) {
@@ -123,10 +163,10 @@ class _WorkspaceShell extends StatelessWidget {
                 children: [
                   _TopBar(
                     platform: platform,
-                    themeTone: themeTone,
-                    locale: locale,
-                    onThemeChanged: onThemeChanged,
-                    onLocaleChanged: onLocaleChanged,
+                    themeTone: widget.themeTone,
+                    locale: widget.locale,
+                    onThemeChanged: widget.onThemeChanged,
+                    onLocaleChanged: widget.onLocaleChanged,
                   ),
                   Expanded(child: content),
                 ],
@@ -135,16 +175,20 @@ class _WorkspaceShell extends StatelessWidget {
 
             return Row(
               children: [
-                _Sidebar(strings: strings),
+                _Sidebar(
+                  strings: strings,
+                  selectedSection: _selectedSection,
+                  onSectionChanged: _selectSection,
+                ),
                 Expanded(
                   child: Column(
                     children: [
                       _TopBar(
                         platform: platform,
-                        themeTone: themeTone,
-                        locale: locale,
-                        onThemeChanged: onThemeChanged,
-                        onLocaleChanged: onLocaleChanged,
+                        themeTone: widget.themeTone,
+                        locale: widget.locale,
+                        onThemeChanged: widget.onThemeChanged,
+                        onLocaleChanged: widget.onLocaleChanged,
                       ),
                       Expanded(child: content),
                     ],
@@ -161,8 +205,14 @@ class _WorkspaceShell extends StatelessWidget {
 
 class _Sidebar extends StatelessWidget {
   final AppStrings strings;
+  final _WorkspaceSection selectedSection;
+  final ValueChanged<_WorkspaceSection> onSectionChanged;
 
-  const _Sidebar({required this.strings});
+  const _Sidebar({
+    required this.strings,
+    required this.selectedSection,
+    required this.onSectionChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -177,17 +227,37 @@ class _Sidebar extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(strings.t('app.title'), style: theme.textTheme.titleLarge),
+          Row(
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: Image.asset(
+                  _appIconAsset,
+                  width: 44,
+                  height: 44,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  strings.t('app.title'),
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleLarge,
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.xs),
           Text(strings.t('app.subtitle'), style: theme.textTheme.bodySmall),
           const SizedBox(height: AppSpacing.xl),
-          _NavItem(
-            icon: Icons.dashboard_outlined,
-            label: strings.t('nav.dashboard'),
-            selected: true,
-          ),
-          _NavItem(icon: Icons.person_outline, label: strings.t('nav.account')),
-          _NavItem(icon: Icons.sync_alt, label: strings.t('nav.convert')),
+          for (final section in _WorkspaceSection.values)
+            _NavItem(
+              icon: section.icon,
+              label: section.label(strings),
+              selected: selectedSection == section,
+              onTap: () => onSectionChanged(section),
+            ),
           const Spacer(),
           StatusPill(
             icon: Icons.lock_outline,
@@ -204,48 +274,66 @@ class _NavItem extends StatelessWidget {
   final IconData icon;
   final String label;
   final bool selected;
+  final VoidCallback onTap;
 
   const _NavItem({
     required this.icon,
     required this.label,
+    required this.onTap,
     this.selected = false,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return AnimatedContainer(
-      duration: AppMotion.fast,
-      curve: AppMotion.curve,
-      margin: const EdgeInsets.only(bottom: AppSpacing.xs),
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.md,
-        vertical: AppSpacing.sm,
-      ),
-      decoration: BoxDecoration(
-        color: selected
-            ? theme.colorScheme.primary.withValues(alpha: 0.10)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 18,
-            color: selected ? theme.colorScheme.primary : theme.hintColor,
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              label,
-              overflow: TextOverflow.ellipsis,
-              style: theme.textTheme.labelLarge?.copyWith(
-                color: selected ? theme.colorScheme.primary : null,
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: label,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            onTap: onTap,
+            child: AnimatedContainer(
+              duration: AppMotion.fast,
+              curve: AppMotion.curve,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: selected
+                    ? theme.colorScheme.primary.withValues(alpha: 0.10)
+                    : Colors.transparent,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    icon,
+                    size: 18,
+                    color: selected
+                        ? theme.colorScheme.primary
+                        : theme.hintColor,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      label,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: selected ? theme.colorScheme.primary : null,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ),
-        ],
+        ),
       ),
     );
   }
@@ -284,6 +372,15 @@ class _TopBar extends StatelessWidget {
         runSpacing: AppSpacing.sm,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            child: Image.asset(
+              _appIconAsset,
+              width: 40,
+              height: 40,
+              fit: BoxFit.cover,
+            ),
+          ),
           ConstrainedBox(
             constraints: const BoxConstraints(minWidth: 220),
             child: Column(
@@ -357,31 +454,91 @@ class _LocaleDropdown extends StatelessWidget {
 }
 
 class _WorkspaceContent extends StatelessWidget {
-  final bool isWeb;
-  final AppThemeTone themeTone;
-  final AppLocale locale;
-  final ValueChanged<AppThemeTone> onThemeChanged;
-  final ValueChanged<AppLocale> onLocaleChanged;
+  final _WorkspaceSection selectedSection;
+  final bool compact;
+  final String apiBaseUrl;
+  final String? accessToken;
+  final void Function(String apiBaseUrl, String accessToken) onSignedIn;
+  final ValueChanged<_WorkspaceSection> onSectionChanged;
 
   const _WorkspaceContent({
-    required this.isWeb,
-    required this.themeTone,
-    required this.locale,
-    required this.onThemeChanged,
-    required this.onLocaleChanged,
+    required this.selectedSection,
+    required this.compact,
+    required this.apiBaseUrl,
+    required this.accessToken,
+    required this.onSignedIn,
+    required this.onSectionChanged,
   });
 
   @override
   Widget build(BuildContext context) {
+    final body = switch (selectedSection) {
+      _WorkspaceSection.dashboard => <Widget>[
+        const _MetricsRow(),
+        const SizedBox(height: AppSpacing.lg),
+        _ResponsiveCards(
+          apiBaseUrl: apiBaseUrl,
+          accessToken: accessToken,
+          onSignedIn: onSignedIn,
+        ),
+      ],
+      _WorkspaceSection.account => <Widget>[
+        _CommercialApiPanel(onSignedIn: onSignedIn),
+        const SizedBox(height: AppSpacing.lg),
+        _AccountOverviewPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
+      _WorkspaceSection.recharge => <Widget>[
+        _RechargePanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
+      _WorkspaceSection.convert => <Widget>[
+        _ConvertPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
+    };
+
     return PageContainer(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: const [
-          _MetricsRow(),
-          SizedBox(height: AppSpacing.lg),
-          _ResponsiveCards(),
+        children: [
+          if (compact) ...[
+            _SectionTabs(
+              selectedSection: selectedSection,
+              onSectionChanged: onSectionChanged,
+            ),
+            const SizedBox(height: AppSpacing.lg),
+          ],
+          ...body,
         ],
       ),
+    );
+  }
+}
+
+class _SectionTabs extends StatelessWidget {
+  final _WorkspaceSection selectedSection;
+  final ValueChanged<_WorkspaceSection> onSectionChanged;
+
+  const _SectionTabs({
+    required this.selectedSection,
+    required this.onSectionChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    return SegmentedButton<_WorkspaceSection>(
+      showSelectedIcon: false,
+      segments: [
+        for (final section in _WorkspaceSection.values)
+          ButtonSegment<_WorkspaceSection>(
+            value: section,
+            icon: Icon(section.icon),
+            label: Text(section.label(strings)),
+          ),
+      ],
+      selected: {selectedSection},
+      onSelectionChanged: (sections) {
+        if (sections.isNotEmpty) onSectionChanged(sections.first);
+      },
     );
   }
 }
@@ -426,31 +583,54 @@ class _MetricsRow extends StatelessWidget {
 }
 
 class _ResponsiveCards extends StatelessWidget {
-  const _ResponsiveCards();
+  final String apiBaseUrl;
+  final String? accessToken;
+  final void Function(String apiBaseUrl, String accessToken) onSignedIn;
+
+  const _ResponsiveCards({
+    required this.apiBaseUrl,
+    required this.accessToken,
+    required this.onSignedIn,
+  });
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
         final stack = constraints.maxWidth < AppBreakpoints.tablet;
-        final account = const _CommercialApiPanel();
-        final convert = const _ConvertPanel();
+        final account = _CommercialApiPanel(onSignedIn: onSignedIn);
+        final convert = _ConvertPanel(
+          apiBaseUrl: apiBaseUrl,
+          accessToken: accessToken,
+        );
+        final recharge = _RechargePanel(
+          apiBaseUrl: apiBaseUrl,
+          accessToken: accessToken,
+        );
         if (stack) {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               account,
               const SizedBox(height: AppSpacing.lg),
+              recharge,
+              const SizedBox(height: AppSpacing.lg),
               convert,
             ],
           );
         }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        return Column(
           children: [
-            Expanded(child: account),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(child: convert),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: account),
+                const SizedBox(width: AppSpacing.lg),
+                Expanded(child: recharge),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            convert,
           ],
         );
       },
@@ -459,7 +639,9 @@ class _ResponsiveCards extends StatelessWidget {
 }
 
 class _CommercialApiPanel extends StatefulWidget {
-  const _CommercialApiPanel();
+  final void Function(String apiBaseUrl, String accessToken) onSignedIn;
+
+  const _CommercialApiPanel({required this.onSignedIn});
 
   @override
   State<_CommercialApiPanel> createState() => _CommercialApiPanelState();
@@ -470,7 +652,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
     text: 'http://127.0.0.1:8080/v1/',
   );
   final _emailController = TextEditingController(text: 'demo@example.com');
-  final _passwordController = TextEditingController(text: 'secret');
+  final _passwordController = TextEditingController(text: 'demo');
 
   String? _accessToken;
   String? _status;
@@ -523,6 +705,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
           'plan': auth.user.planId,
         });
       });
+      widget.onSignedIn(_baseUrlController.text, auth.accessToken);
     });
   }
 
@@ -540,6 +723,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
           'plan': auth.user.planId,
         });
       });
+      widget.onSignedIn(_baseUrlController.text, auth.accessToken);
     });
   }
 
@@ -658,10 +842,432 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
   }
 }
 
+class _AccountOverviewPanel extends StatefulWidget {
+  final String apiBaseUrl;
+  final String? accessToken;
+
+  const _AccountOverviewPanel({
+    required this.apiBaseUrl,
+    required this.accessToken,
+  });
+
+  @override
+  State<_AccountOverviewPanel> createState() => _AccountOverviewPanelState();
+}
+
+class _AccountOverviewPanelState extends State<_AccountOverviewPanel> {
+  UserProfile? _profile;
+  UsageSummary? _usage;
+  List<RechargeRecord> _recharges = const [];
+  List<ConversionJob> _conversions = const [];
+  String? _status;
+  bool _busy = false;
+
+  Future<void> _refresh() async {
+    final strings = AppStrings.of(context);
+    final token = widget.accessToken;
+    if (token == null) {
+      setState(() => _status = strings.t('account.signInGate'));
+      return;
+    }
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = strings.t('status.working');
+    });
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final profile = await client.me(token);
+      final usage = await client.usage(token);
+      final recharges = await client.recharges(token);
+      final conversions = await client.conversions(token);
+      if (!mounted) return;
+      setState(() {
+        _profile = profile;
+        _usage = usage;
+        _recharges = recharges;
+        _conversions = conversions;
+        _status = strings.t('account.overviewLoaded').fill({
+          'recharges': recharges.length,
+          'conversions': conversions.length,
+        });
+      });
+    } on Object catch (e) {
+      if (mounted) setState(() => _status = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final theme = Theme.of(context);
+    final signedIn = widget.accessToken != null;
+    return AppCard(
+      key: const ValueKey('account-overview-card'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppSectionHeader(
+            title: strings.t('account.overviewTitle'),
+            description: strings.t('account.overviewDescription'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: signedIn && !_busy ? _refresh : null,
+                icon: const Icon(Icons.manage_search),
+                label: Text(strings.t('account.queryRecords')),
+              ),
+              StatusPill(
+                icon: signedIn ? Icons.verified_user_outlined : Icons.lock,
+                label: signedIn
+                    ? strings.t('account.signedInShort')
+                    : strings.t('account.signInGate'),
+                color: signedIn
+                    ? theme.colorScheme.primary
+                    : theme.disabledColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_busy)
+            LoadingState(label: strings.t('common.loading'))
+          else ...[
+            if (_profile != null || _usage != null)
+              _KeyValueList(
+                entries: [
+                  if (_profile != null)
+                    '${strings.t('account.email')}: ${_profile!.email}',
+                  if (_profile != null)
+                    '${strings.t('account.plan')}: ${_profile!.planId}',
+                  if (_usage != null)
+                    '${strings.t('metrics.quota')}: ${_usage!.cloudConversionsUsed}/${_usage!.cloudConversionsLimit}',
+                ],
+              ),
+            if (_status != null) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Text(_status!, style: theme.textTheme.bodySmall),
+            ],
+            const SizedBox(height: AppSpacing.md),
+            _RecordPreview(
+              title: strings.t('recharge.records'),
+              emptyLabel: strings.t('empty.noData'),
+              items: _recharges.map((record) => record.label).toList(),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _RecordPreview(
+              title: strings.t('convert.records'),
+              emptyLabel: strings.t('empty.noData'),
+              items: _conversions
+                  .map((job) => '${job.jobId} / ${job.status.name}')
+                  .toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RechargePanel extends StatefulWidget {
+  final String apiBaseUrl;
+  final String? accessToken;
+
+  const _RechargePanel({required this.apiBaseUrl, required this.accessToken});
+
+  @override
+  State<_RechargePanel> createState() => _RechargePanelState();
+}
+
+class _RechargePanelState extends State<_RechargePanel> {
+  RechargeOptions? _options;
+  List<RechargeRecord> _records = const [];
+  String? _status;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.accessToken != null) {
+      unawaited(_loadRecords());
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant _RechargePanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.accessToken != widget.accessToken ||
+        oldWidget.apiBaseUrl != widget.apiBaseUrl) {
+      _loadRecords();
+    }
+  }
+
+  Future<void> _loadRecords() async {
+    final token = widget.accessToken;
+    if (token == null) return;
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final options = await client.rechargeOptions();
+      final records = await client.recharges(token);
+      if (!mounted) return;
+      setState(() {
+        _options = options;
+        _records = records;
+      });
+    } on Object catch (e) {
+      if (mounted) setState(() => _status = e.toString());
+    }
+  }
+
+  Future<void> _recharge(String rechargeType, RechargePackage package) async {
+    final strings = AppStrings.of(context);
+    final token = widget.accessToken;
+    if (token == null) {
+      setState(() => _status = strings.t('recharge.signInRequired'));
+      return;
+    }
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = strings.t('status.working');
+    });
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final record = await client.createRecharge(
+        accessToken: token,
+        rechargeType: rechargeType,
+        packageId: package.id,
+        quantity: rechargeType == 'count' ? package.quantity : null,
+      );
+      final records = await client.recharges(token);
+      if (!mounted) return;
+      setState(() {
+        _records = records;
+        _status = strings.t('recharge.mockPaid').fill({
+          'amount': (record.amountCents / 100).toStringAsFixed(0),
+          'provider': record.provider,
+        });
+      });
+    } on Object catch (e) {
+      if (mounted) setState(() => _status = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final theme = Theme.of(context);
+    final signedIn = widget.accessToken != null;
+    final fallbackOptions = RechargeOptions(
+      currency: 'CNY',
+      provider: 'mock-pay',
+      countPackages: [
+        RechargePackage(
+          id: 'count_3',
+          name: '3 次',
+          quantity: 3,
+          amountCents: 300,
+        ),
+        RechargePackage(
+          id: 'count_10',
+          name: '10 次',
+          quantity: 10,
+          amountCents: 1000,
+        ),
+        RechargePackage(
+          id: 'count_30',
+          name: '30 次',
+          quantity: 30,
+          amountCents: 3000,
+        ),
+      ],
+      datePackages: [
+        RechargePackage(id: 'day', name: '日卡', quantity: 1, amountCents: 500),
+        RechargePackage(id: 'week', name: '周卡', quantity: 7, amountCents: 1400),
+        RechargePackage(
+          id: 'month',
+          name: '月卡',
+          quantity: 30,
+          amountCents: 3000,
+        ),
+        RechargePackage(
+          id: 'year',
+          name: '年卡',
+          quantity: 365,
+          amountCents: 12000,
+        ),
+      ],
+    );
+    final options = _options ?? fallbackOptions;
+    return AppCard(
+      key: const ValueKey('recharge-card'),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          AppSectionHeader(
+            title: strings.t('recharge.title'),
+            description: strings.t('recharge.description'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              OutlinedButton.icon(
+                onPressed: signedIn && !_busy ? _loadRecords : null,
+                icon: const Icon(Icons.history),
+                label: Text(strings.t('recharge.queryRecords')),
+              ),
+              StatusPill(
+                icon: signedIn ? Icons.payments_outlined : Icons.lock,
+                label: signedIn
+                    ? strings.t('recharge.mockProvider')
+                    : strings.t('recharge.signInRequired'),
+                color: signedIn
+                    ? theme.colorScheme.primary
+                    : theme.disabledColor,
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            strings.t('recharge.countTitle'),
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _RechargeButtons(
+            enabled: signedIn && !_busy,
+            currency: options.currency,
+            packages: options.countPackages,
+            onRecharge: (package) => _recharge('count', package),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            strings.t('recharge.dateTitle'),
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _RechargeButtons(
+            enabled: signedIn && !_busy,
+            currency: options.currency,
+            packages: options.datePackages,
+            onRecharge: (package) => _recharge('date', package),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          if (_busy)
+            LoadingState(label: strings.t('common.loading'))
+          else if (_status != null)
+            Text(_status!, style: theme.textTheme.bodySmall),
+          const SizedBox(height: AppSpacing.md),
+          _RecordPreview(
+            title: strings.t('recharge.records'),
+            emptyLabel: strings.t('empty.noData'),
+            items: _records.map((record) => record.label).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RechargeButtons extends StatelessWidget {
+  final bool enabled;
+  final String currency;
+  final List<RechargePackage> packages;
+  final ValueChanged<RechargePackage> onRecharge;
+
+  const _RechargeButtons({
+    required this.enabled,
+    required this.currency,
+    required this.packages,
+    required this.onRecharge,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: AppSpacing.sm,
+      runSpacing: AppSpacing.sm,
+      children: [
+        for (final package in packages)
+          FilledButton.tonalIcon(
+            onPressed: enabled ? () => onRecharge(package) : null,
+            icon: const Icon(Icons.add_card),
+            label: Text(package.priceLabel(currency)),
+          ),
+      ],
+    );
+  }
+}
+
+class _KeyValueList extends StatelessWidget {
+  final List<String> entries;
+
+  const _KeyValueList({required this.entries});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final entry in entries)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Text(entry, style: theme.textTheme.bodySmall),
+          ),
+      ],
+    );
+  }
+}
+
+class _RecordPreview extends StatelessWidget {
+  final String title;
+  final String emptyLabel;
+  final List<String> items;
+
+  const _RecordPreview({
+    required this.title,
+    required this.emptyLabel,
+    required this.items,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final visibleItems = items.take(6).toList(growable: false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(title, style: theme.textTheme.titleSmall),
+        const SizedBox(height: AppSpacing.xs),
+        if (visibleItems.isEmpty)
+          Text(emptyLabel, style: theme.textTheme.bodySmall)
+        else
+          for (final item in visibleItems)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Text(item, style: theme.textTheme.bodySmall),
+            ),
+      ],
+    );
+  }
+}
+
 enum _ConvertState { idle, converting, success, error }
 
 class _ConvertPanel extends StatefulWidget {
-  const _ConvertPanel();
+  final String apiBaseUrl;
+  final String? accessToken;
+
+  const _ConvertPanel({required this.apiBaseUrl, required this.accessToken});
 
   @override
   State<_ConvertPanel> createState() => _ConvertPanelState();
@@ -673,6 +1279,8 @@ class _ConvertPanelState extends State<_ConvertPanel> {
   int? _zipSizeBytes;
   Uint8List? _docxBytes;
   int? _elapsedMs;
+  List<String> _logs = const [];
+  List<ConversionJob> _records = const [];
   _ConvertState _state = _ConvertState.idle;
   String? _statusText;
   String? _errorText;
@@ -685,14 +1293,29 @@ class _ConvertPanelState extends State<_ConvertPanel> {
     super.dispose();
   }
 
+  void _addLog(String message) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final stamp =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
+    setState(() => _logs = ['$stamp $message', ..._logs].take(12).toList());
+  }
+
   Future<void> _pickFile() async {
     final strings = AppStrings.of(context);
+    if (widget.accessToken == null) {
+      setState(() {
+        _state = _ConvertState.error;
+        _errorText = strings.t('convert.signInRequired');
+      });
+      return;
+    }
     final result = await pickZipFile();
     if (result == null) return;
 
     final (bytes, fileName) = result;
     final sizeMB = bytes.length / (1024 * 1024);
-    if (sizeMB >= 5) {
+    if (sizeMB >= 10) {
       setState(() {
         _state = _ConvertState.error;
         _errorText = strings.t('convert.fileTooLarge').fill({
@@ -702,6 +1325,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
         _zipFileName = null;
         _zipSizeBytes = null;
       });
+      _addLog(strings.t('convert.logRejectedSize'));
       return;
     }
 
@@ -714,6 +1338,12 @@ class _ConvertPanelState extends State<_ConvertPanel> {
       _statusText = null;
       _errorText = null;
     });
+    _addLog(
+      strings.t('convert.logFileSelected').fill({
+        'file': fileName,
+        'size': sizeMB.toStringAsFixed(2),
+      }),
+    );
   }
 
   Future<void> _startConvert() async {
@@ -724,21 +1354,31 @@ class _ConvertPanelState extends State<_ConvertPanel> {
     final mainTex = _mainTexController.text.trim().isEmpty
         ? 'main-jos.tex'
         : _mainTexController.text.trim();
+    final token = widget.accessToken;
+    if (token == null) {
+      setState(() {
+        _state = _ConvertState.error;
+        _errorText = strings.t('convert.signInRequired');
+      });
+      return;
+    }
 
     setState(() {
       _state = _ConvertState.converting;
       _statusText = strings.t('convert.converting');
       _errorText = null;
     });
+    _addLog(strings.t('convert.logStarted').fill({'main': mainTex}));
 
     try {
       final t0 = DateTime.now();
-      final docx = await DocEngineFacade.convertZipToDocx(bytes, mainTex);
+      final docx = await _convertCloud(bytes, mainTex, token);
       if (!mounted) return;
 
       _elapsedMs = DateTime.now().difference(t0).inMilliseconds;
       _docxBytes = docx;
-      if (docx.length < 4 * 1024) {
+      const minDocxBytes = 1024;
+      if (docx.length < minDocxBytes) {
         throw Exception('docx too small: ${docx.length} bytes');
       }
       if (docx[0] != 0x50 || docx[1] != 0x4B) {
@@ -747,18 +1387,97 @@ class _ConvertPanelState extends State<_ConvertPanel> {
 
       setState(() {
         _state = _ConvertState.success;
-        _statusText = strings.t('convert.success').fill({
+        _statusText = strings.t('convert.cloudSuccess').fill({
           'size': (docx.length / 1024).toStringAsFixed(1),
           'elapsed': _elapsedMs ?? 0,
         });
       });
+      _addLog(strings.t('convert.logFinished'));
+      await _loadRecords(showStatus: false);
     } on Object catch (e) {
       if (!mounted) return;
       setState(() {
         _state = _ConvertState.error;
         _errorText = e.toString();
       });
+      _addLog(strings.t('convert.logFailed').fill({'error': e}));
     }
+  }
+
+  Future<void> _loadRecords({bool showStatus = true}) async {
+    final strings = AppStrings.of(context);
+    final token = widget.accessToken;
+    if (token == null) {
+      setState(() {
+        _state = _ConvertState.error;
+        _errorText = strings.t('convert.signInRequired');
+      });
+      return;
+    }
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final records = await client.conversions(token);
+      if (!mounted) return;
+      setState(() {
+        _records = records;
+        if (showStatus) {
+          _statusText = strings.t('convert.recordsLoaded').fill({
+            'count': records.length,
+          });
+        }
+      });
+      if (showStatus) _addLog(strings.t('convert.logRecordsLoaded'));
+    } on Object catch (e) {
+      if (mounted) setState(() => _errorText = e.toString());
+    }
+  }
+
+  Future<Uint8List> _convertCloud(
+    Uint8List bytes,
+    String mainTex,
+    String accessToken,
+  ) async {
+    final strings = AppStrings.of(context);
+    final client = CommercialApiClient(widget.apiBaseUrl);
+    _addLog(strings.t('convert.logUploading'));
+    final upload = await client.uploadProjectZip(
+      accessToken: accessToken,
+      bytes: bytes,
+      fileName: _zipFileName ?? 'project.zip',
+    );
+    _addLog(strings.t('convert.logUploaded').fill({'upload': upload.uploadId}));
+    final created = await client.createConversion(
+      accessToken: accessToken,
+      uploadId: upload.uploadId,
+      mainTex: mainTex,
+      profile: 'jos',
+      quality: 'high',
+    );
+    _addLog(strings.t('convert.logJobCreated').fill({'job': created.jobId}));
+    var job = created;
+    for (var attempt = 0; attempt < 120; attempt += 1) {
+      if (job.status == ConversionStatus.completed) {
+        final docx = await client.downloadConversionDocx(
+          accessToken: accessToken,
+          jobId: job.jobId,
+        );
+        return Uint8List.fromList(docx);
+      }
+      if (job.status == ConversionStatus.failed ||
+          job.status == ConversionStatus.expired) {
+        final detail = job.error ?? job.errorCode ?? job.status.name;
+        throw Exception('cloud conversion failed: $detail');
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+      job = await client.getConversion(
+        accessToken: accessToken,
+        jobId: job.jobId,
+      );
+      _addLog(
+        strings.t('convert.logPolling').fill({'status': job.status.name}),
+      );
+    }
+    throw Exception('cloud conversion timeout: ${job.jobId}');
   }
 
   void _downloadDocx() {
@@ -776,6 +1495,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
     final selectedFile = _zipFileName == null
         ? strings.t('convert.noFile')
         : '$_zipFileName (${((_zipSizeBytes ?? 0) / (1024 * 1024)).toStringAsFixed(2)} MB)';
+    final signedIn = widget.accessToken != null;
 
     return AppCard(
       key: const ValueKey('convert-card'),
@@ -787,13 +1507,34 @@ class _ConvertPanelState extends State<_ConvertPanel> {
             description: strings.t('convert.description'),
           ),
           const SizedBox(height: AppSpacing.lg),
+          _KeyValueList(
+            entries: [
+              strings.t('convert.stepUpload'),
+              strings.t('convert.stepMainTex'),
+              strings.t('convert.stepConvert'),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          StatusPill(
+            icon: signedIn ? Icons.verified_user_outlined : Icons.lock,
+            label: signedIn
+                ? strings.t('convert.signedInReady')
+                : strings.t('convert.signInRequired'),
+            color: signedIn ? tokens.info : tokens.disabledText,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            strings.t('convert.packageHint'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: AppSpacing.lg),
           Wrap(
             spacing: AppSpacing.sm,
             runSpacing: AppSpacing.sm,
             crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               OutlinedButton.icon(
-                onPressed: _state == _ConvertState.converting
+                onPressed: !signedIn || _state == _ConvertState.converting
                     ? null
                     : _pickFile,
                 icon: const Icon(Icons.upload_file),
@@ -815,18 +1556,34 @@ class _ConvertPanelState extends State<_ConvertPanel> {
             hint: strings.t('convert.mainTexHint'),
           ),
           const SizedBox(height: AppSpacing.md),
-          FilledButton.icon(
-            onPressed: _state == _ConvertState.converting || _zipBytes == null
-                ? null
-                : _startConvert,
-            icon: _state == _ConvertState.converting
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.play_arrow),
-            label: Text(strings.t('common.convert')),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              FilledButton.icon(
+                onPressed:
+                    !signedIn ||
+                        _state == _ConvertState.converting ||
+                        _zipBytes == null
+                    ? null
+                    : _startConvert,
+                icon: _state == _ConvertState.converting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.play_arrow),
+                label: Text(strings.t('common.convert')),
+              ),
+              OutlinedButton.icon(
+                onPressed: signedIn && _state != _ConvertState.converting
+                    ? _loadRecords
+                    : null,
+                icon: const Icon(Icons.manage_search),
+                label: Text(strings.t('convert.queryRecords')),
+              ),
+            ],
           ),
           const SizedBox(height: AppSpacing.md),
           AnimatedSwitcher(
@@ -852,6 +1609,23 @@ class _ConvertPanelState extends State<_ConvertPanel> {
                 label: strings.t('empty.noData'),
               ),
             },
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _RecordPreview(
+            title: strings.t('convert.logs'),
+            emptyLabel: strings.t('empty.noData'),
+            items: _logs,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _RecordPreview(
+            title: strings.t('convert.records'),
+            emptyLabel: strings.t('empty.noData'),
+            items: _records
+                .map(
+                  (job) =>
+                      '${job.jobId} / ${job.status.name} / ${job.mainTex ?? '-'}',
+                )
+                .toList(),
           ),
         ],
       ),

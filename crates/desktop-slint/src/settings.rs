@@ -125,6 +125,6 @@ mod tests {
         let settings: Settings = serde_json::from_str(json).unwrap();
         assert_eq!(settings.release_channel, "stable");
         assert_eq!(settings.locale, "en");
-        assert_eq!(settings.theme, "system");
+        assert_eq!(settings.theme, crate::theme::DEFAULT_THEME);
     }
 }

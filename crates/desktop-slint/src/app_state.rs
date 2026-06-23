@@ -25,6 +25,8 @@ pub struct AppState {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct JobEntry {
     pub id: String,
+    #[serde(default)]
+    pub remote_job_id: Option<String>,
     pub project_path: String,
     pub profile: String,
     pub status: JobStatus,
@@ -136,10 +138,12 @@ impl AppState {
                 match update {
                     JobUpdate::Running => job.status = JobStatus::Running,
                     JobUpdate::Succeeded {
+                        remote_job_id,
                         output_path,
                         report_path,
                     } => {
                         job.status = JobStatus::Succeeded;
+                        job.remote_job_id = remote_job_id;
                         job.output_path = Some(output_path);
                         job.report_path = report_path;
                     }
@@ -165,6 +169,7 @@ impl AppState {
 pub enum JobUpdate {
     Running,
     Succeeded {
+        remote_job_id: Option<String>,
         output_path: String,
         report_path: Option<String>,
     },

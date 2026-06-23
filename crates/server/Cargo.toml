@@ -21,7 +21,7 @@ doc-compiler-engine = { path = "../compiler-engine" }
 
 axum         = { version = "0.7", features = ["multipart", "macros"] }
 tower        = "0.5"
-tower-http   = { version = "0.6", features = ["limit", "trace"] }
+tower-http   = { version = "0.6", features = ["cors", "limit", "trace"] }
 tokio        = { workspace = true, features = ["macros", "rt-multi-thread", "signal"] }
 tokio-util   = { version = "0.7", features = ["io"] }
 memchr       = "2"
@@ -34,6 +34,7 @@ tracing      = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mime         = "0.3"
 async-trait  = "0.1"
+zip          = { workspace = true }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "rustls-tls", "json"] }

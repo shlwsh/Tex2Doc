@@ -8,6 +8,7 @@ use std::time::Duration;
 use doc_commercial_api_client::{
     ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession, CheckoutRequest,
     ClientConfig, LoginRequest, PlanSummary, RefreshRequest, RegisterRequest, UsageSummary,
+    UserProfile,
 };
 use thiserror::Error;
 
@@ -107,8 +108,9 @@ pub fn refresh_and_fetch_usage_blocking(
         })?;
         let auth = anonymous.refresh(&RefreshRequest { refresh_token }).await?;
         let authenticated = authenticated_client(base_url, &auth.access_token)?;
+        let user = authenticated.me().await?;
         let usage = authenticated.usage().await?;
-        Ok(session_from_auth(auth, usage))
+        Ok(session_from_user(auth, user, usage))
     })
 }
 
@@ -225,12 +227,28 @@ pub fn plans_line(plans: &[PlanSummary]) -> String {
 }
 
 fn session_from_auth(auth: AuthResponse, usage: UsageSummary) -> CloudAccountSession {
+    let user = auth.user;
     CloudAccountSession {
         access_token: auth.access_token,
         refresh_token: auth.refresh_token,
-        display_name: auth.user.display_name,
-        email: auth.user.email,
-        plan_id: auth.user.plan_id,
+        display_name: user.display_name,
+        email: user.email,
+        plan_id: user.plan_id,
+        usage,
+    }
+}
+
+fn session_from_user(
+    auth: AuthResponse,
+    user: UserProfile,
+    usage: UsageSummary,
+) -> CloudAccountSession {
+    CloudAccountSession {
+        access_token: auth.access_token,
+        refresh_token: auth.refresh_token,
+        display_name: user.display_name,
+        email: user.email,
+        plan_id: user.plan_id,
         usage,
     }
 }

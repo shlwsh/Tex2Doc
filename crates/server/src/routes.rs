@@ -8,12 +8,19 @@ use axum::{extract::Request, Json, Router};
 use mime::Mime;
 use serde::Deserialize;
 use serde_json::json;
+use std::io::Cursor;
+use tower_http::cors::{Any, CorsLayer};
 
 use doc_core::{convert_zip, ConvertOptions};
 
 use crate::error::ApiError;
-use crate::limits::MAX_BODY;
-use crate::state::{ConversionJobRecord, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT};
+use crate::limits::{
+    MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
+    MAX_UPLOAD_ZIP_BYTES,
+};
+use crate::state::{
+    ConversionJobRecord, RechargeRecord, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
+};
 use crate::worker_service;
 
 /// 默认主 tex 路径（与 paper3 e2e 一致）。
@@ -42,14 +49,27 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/api/v1/usage", get(usage))
         .route("/v1/plans", get(plans))
         .route("/api/v1/plans", get(plans))
+        .route("/v1/recharge/options", get(recharge_options))
+        .route("/api/v1/recharge/options", get(recharge_options))
+        .route("/v1/recharges", get(list_recharges).post(create_recharge))
+        .route(
+            "/api/v1/recharges",
+            get(list_recharges).post(create_recharge),
+        )
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/api/v1/billing/checkout", post(billing_checkout))
         .route("/v1/billing/portal", post(billing_portal))
         .route("/api/v1/billing/portal", post(billing_portal))
         .route("/v1/uploads", post(upload_project))
         .route("/api/v1/uploads", post(upload_project))
-        .route("/v1/conversions", post(create_conversion))
-        .route("/api/v1/conversions", post(create_conversion))
+        .route(
+            "/v1/conversions",
+            get(list_conversions).post(create_conversion),
+        )
+        .route(
+            "/api/v1/conversions",
+            get(list_conversions).post(create_conversion),
+        )
         .route("/v1/conversions/:id", get(get_conversion))
         .route("/api/v1/conversions/:id", get(get_conversion))
         .route(
@@ -65,6 +85,12 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
         .with_state(state)
+        .layer(
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(Any)
+                .allow_headers(Any),
+        )
         .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY))
 }
 
@@ -102,6 +128,13 @@ struct ConversionBody {
     quality: Option<String>,
     engine: Option<String>,
     backend: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RechargeBody {
+    recharge_type: Option<String>,
+    package_id: Option<String>,
+    quantity: Option<u64>,
 }
 
 async fn auth_register(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
@@ -177,6 +210,64 @@ async fn plans() -> Json<serde_json::Value> {
     ]))
 }
 
+async fn recharge_options() -> Json<serde_json::Value> {
+    Json(json!({
+        "currency": "CNY",
+        "provider": "mock-pay",
+        "count": {
+            "unit_price_cents": 100,
+            "minimum_quantity": 3,
+            "packages": [
+                {"id": "count_3", "name": "3 次", "quantity": 3, "amount_cents": 300},
+                {"id": "count_10", "name": "10 次", "quantity": 10, "amount_cents": 1000},
+                {"id": "count_30", "name": "30 次", "quantity": 30, "amount_cents": 3000}
+            ]
+        },
+        "date": {
+            "packages": [
+                {"id": "day", "name": "日卡", "days": 1, "amount_cents": 500},
+                {"id": "week", "name": "周卡", "days": 7, "amount_cents": 1400},
+                {"id": "month", "name": "月卡", "days": 30, "amount_cents": 3000},
+                {"id": "year", "name": "年卡", "days": 365, "amount_cents": 12000}
+            ]
+        }
+    }))
+}
+
+async fn create_recharge(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<RechargeBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let recharge_type = payload.recharge_type.unwrap_or_else(|| "count".to_string());
+    let package_id = payload.package_id.unwrap_or_else(|| "count_3".to_string());
+    let (normalized_type, quantity, amount_cents) =
+        compute_recharge_amount(&recharge_type, &package_id, payload.quantity)?;
+    let record = state
+        .create_recharge(
+            session.user_id,
+            normalized_type,
+            package_id,
+            quantity,
+            amount_cents,
+        )
+        .await;
+    Ok(Json(recharge_json(&record)))
+}
+
+async fn list_recharges(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let records = state.list_recharges(&session.user_id).await;
+    Ok(Json(json!(records
+        .iter()
+        .map(recharge_json)
+        .collect::<Vec<_>>())))
+}
+
 async fn billing_checkout(
     headers: HeaderMap,
     Json(payload): Json<CheckoutBody>,
@@ -223,6 +314,7 @@ async fn upload_project(
     if file_part.is_empty() {
         return Err(ApiError::MissingField("file"));
     }
+    validate_project_zip(&file_part)?;
     let record = state
         .store_upload("project.zip".to_string(), file_part)
         .await;
@@ -265,13 +357,29 @@ async fn create_conversion(
             ))
         })?;
     let job = state
-        .create_job(upload_id, main_tex, profile, quality, engine)
+        .create_job(
+            session.user_id.clone(),
+            upload_id,
+            main_tex,
+            profile,
+            quality,
+            engine,
+        )
         .await;
     state
         .enqueue_job(job.job_id.clone())
         .await
         .map_err(ApiError::Io)?;
     Ok(Json(job_json(&job)))
+}
+
+async fn list_conversions(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let jobs = state.list_jobs_by_user(&session.user_id).await;
+    Ok(Json(json!(jobs.iter().map(job_json).collect::<Vec<_>>())))
 }
 
 async fn get_conversion(
@@ -395,9 +503,72 @@ fn demo_user(email: &str, display_name: Option<String>) -> serde_json::Value {
     })
 }
 
+fn compute_recharge_amount(
+    recharge_type: &str,
+    package_id: &str,
+    quantity: Option<u64>,
+) -> Result<(String, u64, u64), ApiError> {
+    match recharge_type {
+        "count" => {
+            let resolved_quantity = quantity.unwrap_or_else(|| match package_id {
+                "count_10" => 10,
+                "count_30" => 30,
+                _ => 3,
+            });
+            if resolved_quantity < 3 {
+                return Err(ApiError::BadRequest {
+                    code: "invalid_recharge_quantity",
+                    message: "count recharge requires at least 3 conversions".to_string(),
+                });
+            }
+            Ok((
+                "count".to_string(),
+                resolved_quantity,
+                resolved_quantity * 100,
+            ))
+        }
+        "date" => {
+            let (days, amount_cents) = match package_id {
+                "day" => (1, 500),
+                "week" => (7, 1400),
+                "month" => (30, 3000),
+                "year" => (365, 12000),
+                _ => {
+                    return Err(ApiError::BadRequest {
+                        code: "invalid_recharge_package",
+                        message: format!("unsupported date package: {package_id}"),
+                    });
+                }
+            };
+            Ok(("date".to_string(), days, amount_cents))
+        }
+        other => Err(ApiError::BadRequest {
+            code: "invalid_recharge_type",
+            message: format!("unsupported recharge type: {other}"),
+        }),
+    }
+}
+
+fn recharge_json(record: &RechargeRecord) -> serde_json::Value {
+    json!({
+        "recharge_id": record.recharge_id,
+        "user_id": record.user_id,
+        "recharge_type": record.recharge_type,
+        "package_id": record.package_id,
+        "quantity": record.quantity,
+        "amount_cents": record.amount_cents,
+        "currency": record.currency,
+        "status": record.status,
+        "provider": record.provider,
+        "provider_trade_id": record.provider_trade_id,
+        "created_at": record.created_at,
+    })
+}
+
 fn job_json(job: &ConversionJobRecord) -> serde_json::Value {
     json!({
         "job_id": job.job_id,
+        "user_id": job.user_id,
         "upload_id": job.upload_id,
         "main_tex": job.main_tex,
         "profile": job.profile,
@@ -408,8 +579,80 @@ fn job_json(job: &ConversionJobRecord) -> serde_json::Value {
         "updated_at": job.updated_at,
         "docx_ready": job.docx.is_some(),
         "report_ready": job.report.is_some(),
+        "error_code": job.error_code,
         "error": job.error,
     })
+}
+
+fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
+    if bytes.len() > MAX_UPLOAD_ZIP_BYTES {
+        return Err(ApiError::BadRequest {
+            code: "upload_too_large",
+            message: format!(
+                "uploaded zip is too large: {} bytes, limit={}",
+                bytes.len(),
+                MAX_UPLOAD_ZIP_BYTES
+            ),
+        });
+    }
+
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| ApiError::BadRequest {
+        code: "invalid_zip",
+        message: format!("invalid zip archive: {e}"),
+    })?;
+
+    if archive.is_empty() {
+        return Err(ApiError::BadRequest {
+            code: "empty_zip",
+            message: "uploaded zip is empty".to_string(),
+        });
+    }
+    if archive.len() > MAX_UPLOAD_FILE_COUNT {
+        return Err(ApiError::BadRequest {
+            code: "too_many_files",
+            message: format!(
+                "uploaded zip contains too many entries: {}, limit={}",
+                archive.len(),
+                MAX_UPLOAD_FILE_COUNT
+            ),
+        });
+    }
+
+    let mut total_uncompressed = 0_u64;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|e| ApiError::BadRequest {
+            code: "invalid_zip_entry",
+            message: format!("invalid zip entry #{index}: {e}"),
+        })?;
+        let name = file.name();
+        if name.contains('\\') || file.enclosed_name().is_none() {
+            return Err(ApiError::BadRequest {
+                code: "zip_slip",
+                message: format!("unsafe zip entry path: {name}"),
+            });
+        }
+        if file.size() > MAX_UPLOAD_FILE_BYTES {
+            return Err(ApiError::BadRequest {
+                code: "file_too_large",
+                message: format!(
+                    "zip entry is too large: {name}, bytes={}, limit={}",
+                    file.size(),
+                    MAX_UPLOAD_FILE_BYTES
+                ),
+            });
+        }
+        total_uncompressed = total_uncompressed.saturating_add(file.size());
+        if total_uncompressed > MAX_UPLOAD_UNCOMPRESSED_BYTES {
+            return Err(ApiError::BadRequest {
+                code: "uncompressed_too_large",
+                message: format!(
+                    "zip uncompressed size is too large: {total_uncompressed}, limit={MAX_UPLOAD_UNCOMPRESSED_BYTES}"
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// 在 body 中找第一个 boundary 行。
@@ -514,6 +757,7 @@ async fn convert(request: Request) -> Result<Response, ApiError> {
     if file_part.is_empty() {
         return Err(ApiError::MissingField("file"));
     }
+    validate_project_zip(&file_part)?;
 
     let main_tex = extract_multipart_field(&full_body, "main_tex")?
         .and_then(|v| String::from_utf8(v).ok())

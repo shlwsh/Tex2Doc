@@ -2,6 +2,7 @@ import { TabWidget, Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, Comb
 
 export component MainWindow inherits Window {
     title: is-signed-in ? t-app-title-signed-out + " " + app-version + " - " + account-display-name : t-app-title-signed-out + " " + app-version;
+    icon: @image-url("assets/app_icon.jpg");
     preferred-width: 1080px;
     preferred-height: 760px;
     background: color-window-bg;
@@ -170,7 +171,45 @@ export component MainWindow inherits Window {
     callback open-report-clicked(string);
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
 
-    TabWidget {
+    VerticalBox {
+        spacing: 0px;
+
+        Rectangle {
+            height: 72px;
+            background: color-surface;
+            border-color: color-border;
+
+            HorizontalBox {
+                padding: 14px;
+                spacing: 12px;
+
+                Image {
+                    source: @image-url("assets/app_icon.jpg");
+                    width: 44px;
+                    height: 44px;
+                    image-fit: cover;
+                }
+
+                VerticalBox {
+                    spacing: 2px;
+
+                    Text {
+                        text: t-app-title-signed-out;
+                        font-size: 20px;
+                        font-weight: 700;
+                        color: color-text-primary;
+                    }
+
+                    Text {
+                        text: app-version == "" ? "Research document conversion workspace" : "Version " + app-version;
+                        font-size: 12px;
+                        color: color-text-secondary;
+                    }
+                }
+            }
+        }
+
+        TabWidget {
 
         // ?? Tab 1: Convert ???????????????????????????????????????????????
         Tab {
@@ -780,6 +819,7 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+        }
         }
     }
 }

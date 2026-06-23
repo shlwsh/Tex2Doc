@@ -51,6 +51,7 @@ struct DiagnosticManifest<'a> {
     update_status: &'a str,
     report_path: Option<String>,
     report_included: bool,
+    cloud_report_included: bool,
 }
 
 pub fn export_diagnostic_bundle(input: &DiagnosticInput) -> Result<PathBuf> {
@@ -79,6 +80,7 @@ pub fn export_diagnostic_bundle(input: &DiagnosticInput) -> Result<PathBuf> {
         update_status: &input.update_status,
         report_path: report_path.as_ref().map(|path| path.display().to_string()),
         report_included,
+        cloud_report_included: report_included,
     };
 
     let file = File::create(&bundle_path)?;
@@ -97,6 +99,9 @@ pub fn export_diagnostic_bundle(input: &DiagnosticInput) -> Result<PathBuf> {
     if let Some(report_path) = report_path.filter(|path| path.is_file()) {
         zip.start_file("compile-report.json", options)?;
         let report = fs::read(report_path)?;
+        zip.write_all(&report)?;
+
+        zip.start_file("cloud-job-report.json", options)?;
         zip.write_all(&report)?;
     }
 
@@ -260,6 +265,7 @@ mod tests {
         assert!(archive.by_name("status.txt").is_ok());
         assert!(archive.by_name("recent_jobs.txt").is_ok());
         assert!(archive.by_name("compile-report.json").is_ok());
+        assert!(archive.by_name("cloud-job-report.json").is_ok());
 
         let _ = std::fs::remove_file(bundle);
         let _ = std::fs::remove_file(report_path);

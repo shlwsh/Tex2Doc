@@ -171,6 +171,7 @@ pub struct ConversionJob {
     pub updated_at: String,
     pub docx_ready: bool,
     pub report_ready: bool,
+    pub error_code: Option<String>,
     pub error: Option<String>,
 }
 
@@ -187,6 +188,7 @@ pub struct ConversionReport {
     pub compatibility_score: Option<u8>,
     pub docx_bytes: Option<usize>,
     pub warnings: Option<Vec<String>>,
+    pub error_code: Option<String>,
     pub message: String,
 }
 
