@@ -46,6 +46,7 @@ impl ConvertJob {
                 Ok(r) => app.update_job(
                     &id,
                     JobUpdate::Succeeded {
+                        remote_job_id: None,
                         output_path: r.docx_path.display().to_string(),
                         report_path: Some(r.report_path.display().to_string()),
                     },
@@ -72,6 +73,7 @@ pub fn start_job(
     // Register pending job
     let entry = JobEntry {
         id: id.clone(),
+        remote_job_id: None,
         project_path: project_path.clone(),
         profile: profile.clone(),
         status: JobStatus::Pending,
@@ -103,6 +105,7 @@ pub fn register_external_job(
     let id = commands::generate_job_id();
     let entry = JobEntry {
         id: id.clone(),
+        remote_job_id: None,
         project_path,
         profile,
         status: JobStatus::Pending,

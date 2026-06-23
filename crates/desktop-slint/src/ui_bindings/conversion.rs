@@ -151,6 +151,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                     Ok(result) => app.update_job(
                         &cloud_job_id,
                         JobUpdate::Succeeded {
+                            remote_job_id: Some(result.job_id.clone()),
                             output_path: result.docx_path.display().to_string(),
                             report_path: Some(result.report_path.display().to_string()),
                         },

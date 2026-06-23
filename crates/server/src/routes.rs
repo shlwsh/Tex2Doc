@@ -8,11 +8,15 @@ use axum::{extract::Request, Json, Router};
 use mime::Mime;
 use serde::Deserialize;
 use serde_json::json;
+use std::io::Cursor;
 
 use doc_core::{convert_zip, ConvertOptions};
 
 use crate::error::ApiError;
-use crate::limits::MAX_BODY;
+use crate::limits::{
+    MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
+    MAX_UPLOAD_ZIP_BYTES,
+};
 use crate::state::{ConversionJobRecord, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT};
 use crate::worker_service;
 
@@ -223,6 +227,7 @@ async fn upload_project(
     if file_part.is_empty() {
         return Err(ApiError::MissingField("file"));
     }
+    validate_project_zip(&file_part)?;
     let record = state
         .store_upload("project.zip".to_string(), file_part)
         .await;
@@ -408,8 +413,80 @@ fn job_json(job: &ConversionJobRecord) -> serde_json::Value {
         "updated_at": job.updated_at,
         "docx_ready": job.docx.is_some(),
         "report_ready": job.report.is_some(),
+        "error_code": job.error_code,
         "error": job.error,
     })
+}
+
+fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
+    if bytes.len() > MAX_UPLOAD_ZIP_BYTES {
+        return Err(ApiError::BadRequest {
+            code: "upload_too_large",
+            message: format!(
+                "uploaded zip is too large: {} bytes, limit={}",
+                bytes.len(),
+                MAX_UPLOAD_ZIP_BYTES
+            ),
+        });
+    }
+
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| ApiError::BadRequest {
+        code: "invalid_zip",
+        message: format!("invalid zip archive: {e}"),
+    })?;
+
+    if archive.is_empty() {
+        return Err(ApiError::BadRequest {
+            code: "empty_zip",
+            message: "uploaded zip is empty".to_string(),
+        });
+    }
+    if archive.len() > MAX_UPLOAD_FILE_COUNT {
+        return Err(ApiError::BadRequest {
+            code: "too_many_files",
+            message: format!(
+                "uploaded zip contains too many entries: {}, limit={}",
+                archive.len(),
+                MAX_UPLOAD_FILE_COUNT
+            ),
+        });
+    }
+
+    let mut total_uncompressed = 0_u64;
+    for index in 0..archive.len() {
+        let file = archive.by_index(index).map_err(|e| ApiError::BadRequest {
+            code: "invalid_zip_entry",
+            message: format!("invalid zip entry #{index}: {e}"),
+        })?;
+        let name = file.name();
+        if name.contains('\\') || file.enclosed_name().is_none() {
+            return Err(ApiError::BadRequest {
+                code: "zip_slip",
+                message: format!("unsafe zip entry path: {name}"),
+            });
+        }
+        if file.size() > MAX_UPLOAD_FILE_BYTES {
+            return Err(ApiError::BadRequest {
+                code: "file_too_large",
+                message: format!(
+                    "zip entry is too large: {name}, bytes={}, limit={}",
+                    file.size(),
+                    MAX_UPLOAD_FILE_BYTES
+                ),
+            });
+        }
+        total_uncompressed = total_uncompressed.saturating_add(file.size());
+        if total_uncompressed > MAX_UPLOAD_UNCOMPRESSED_BYTES {
+            return Err(ApiError::BadRequest {
+                code: "uncompressed_too_large",
+                message: format!(
+                    "zip uncompressed size is too large: {total_uncompressed}, limit={MAX_UPLOAD_UNCOMPRESSED_BYTES}"
+                ),
+            });
+        }
+    }
+    Ok(())
 }
 
 /// 在 body 中找第一个 boundary 行。
@@ -514,6 +591,7 @@ async fn convert(request: Request) -> Result<Response, ApiError> {
     if file_part.is_empty() {
         return Err(ApiError::MissingField("file"));
     }
+    validate_project_zip(&file_part)?;
 
     let main_tex = extract_multipart_field(&full_body, "main_tex")?
         .and_then(|v| String::from_utf8(v).ok())

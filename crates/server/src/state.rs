@@ -78,6 +78,7 @@ pub struct ConversionJobRecord {
     pub updated_at: String,
     pub docx: Option<Vec<u8>>,
     pub report: Option<ConversionReportRecord>,
+    pub error_code: Option<String>,
     pub error: Option<String>,
 }
 
@@ -94,6 +95,7 @@ pub struct ConversionReportRecord {
     pub compatibility_score: Option<u8>,
     pub docx_bytes: usize,
     pub warnings: Vec<String>,
+    pub error_code: Option<String>,
     pub message: String,
 }
 
@@ -152,6 +154,7 @@ impl ServerState {
             updated_at: now,
             docx: None,
             report: None,
+            error_code: None,
             error: None,
         };
         self.inner.jobs.write().await.insert(job_id, job.clone());
@@ -207,10 +210,26 @@ impl ServerState {
         }
     }
 
-    pub async fn fail_job(&self, job_id: &str, error: String) {
+    pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
         if let Some(job) = self.inner.jobs.write().await.get_mut(job_id) {
             job.status = ConversionStatus::Failed;
             job.updated_at = now_timestamp();
+            job.error_code = Some(error_code.to_string());
+            job.report = Some(ConversionReportRecord {
+                job_id: job.job_id.clone(),
+                status: ConversionStatus::Failed,
+                quality_score: 0,
+                profile: job.profile.clone(),
+                main_tex: job.main_tex.clone(),
+                executor: job.engine.clone(),
+                backend: "unavailable".to_string(),
+                quality_status: "Failed".to_string(),
+                compatibility_score: None,
+                docx_bytes: 0,
+                warnings: Vec::new(),
+                error_code: Some(error_code.to_string()),
+                message: error.clone(),
+            });
             job.error = Some(error);
         }
     }

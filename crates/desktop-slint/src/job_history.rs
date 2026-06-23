@@ -66,6 +66,7 @@ mod tests {
     fn job(id: &str, status: JobStatus) -> JobEntry {
         JobEntry {
             id: id.to_string(),
+            remote_job_id: None,
             project_path: "/tmp/project".to_string(),
             profile: "auto".to_string(),
             status,

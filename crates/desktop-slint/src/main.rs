@@ -75,7 +75,8 @@ fn main() {
     apply_theme(&ui, &settings.theme);
     ui.set_status_text(i18n::translate(&settings.locale, "convert.ready").into());
     let mut account_status_set = false;
-    if let Some(email) = settings.last_login_email.clone() {
+    let stored_session_email = settings.last_login_email.clone();
+    if let Some(email) = stored_session_email.clone() {
         ui.set_login_email(email.clone().into());
         match credential_store::load_refresh_token(&settings.api_base_url, &email) {
             Ok(Some(refresh_token)) => {
@@ -122,6 +123,38 @@ fn main() {
     ui.set_profile_confidence_progress(0.0);
     ui.set_recent_jobs(recent_jobs_for_ui(&app_state, &settings.locale).into());
     ui.set_main_tex("".into());
+
+    if stored_session_email.is_some() && app_state.refresh_token().is_some() {
+        ui.set_is_account_busy(true);
+        let base_url = settings.api_base_url.clone();
+        let app = Arc::clone(&app_state);
+        let ui_weak = ui.as_weak();
+        std::thread::spawn(move || {
+            let result =
+                cloud_account::refresh_and_fetch_usage_blocking(&base_url, app.refresh_token());
+            let invoke_result = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_account_busy(false);
+                    match result {
+                        Ok(session) => apply_account_session(&app, &ui, &base_url, session),
+                        Err(error) => {
+                            ui.set_is_signed_in(false);
+                            ui.set_account_status(
+                                format!("Stored session refresh failed: {}", error).into(),
+                            );
+                            ui.set_usage_status("--".into());
+                        }
+                    }
+                }
+            });
+            if let Err(error) = invoke_result {
+                log::error!(
+                    "Failed to update UI after startup session refresh: {}",
+                    error
+                );
+            }
+        });
+    }
 
     // Wire up the Convert button callback
     let app_state_clone = Arc::clone(&app_state);
@@ -285,6 +318,7 @@ fn main() {
                     Ok(result) => app.update_job(
                         &cloud_job_id,
                         JobUpdate::Succeeded {
+                            remote_job_id: Some(result.job_id.clone()),
                             output_path: result.docx_path.display().to_string(),
                             report_path: Some(result.report_path.display().to_string()),
                         },
@@ -900,14 +934,18 @@ fn recent_jobs_for_ui(app_state: &AppState, locale: &str) -> String {
     jobs.into_iter()
         .map(|job| {
             let output = job.output_path.unwrap_or_else(|| "-".to_string());
+            let remote = job
+                .remote_job_id
+                .map(|id| format!(" | remote {}", id))
+                .unwrap_or_default();
             let report = job
                 .report_path
                 .map(|path| format!(" | report {}", path))
                 .unwrap_or_default();
             let error = job.error.map(|e| format!(" | {}", e)).unwrap_or_default();
             format!(
-                "{} | {} | {} | {}{}{}",
-                job.created_at, job.status, job.profile, output, report, error
+                "{} | {} | {} | {}{}{}{}",
+                job.created_at, job.status, job.profile, output, remote, report, error
             )
         })
         .collect::<Vec<_>>()

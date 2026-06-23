@@ -34,7 +34,11 @@ async fn process_job(state: ServerState, job_id: String) {
     };
     let Some(upload) = state.get_upload(&job.upload_id).await else {
         state
-            .fail_job(&job_id, format!("upload not found: {}", job.upload_id))
+            .fail_job_with_code(
+                &job_id,
+                "upload_not_found",
+                format!("upload not found: {}", job.upload_id),
+            )
             .await;
         return;
     };
@@ -61,12 +65,18 @@ async fn process_job(state: ServerState, job_id: String) {
     let output = match result {
         Ok(Ok(result)) => result,
         Ok(Err(error)) => {
-            state.fail_job(&job_id, error).await;
+            state
+                .fail_job_with_code(&job_id, "convert_failed", error)
+                .await;
             return;
         }
         Err(error) => {
             state
-                .fail_job(&job_id, format!("worker join error: {error}"))
+                .fail_job_with_code(
+                    &job_id,
+                    "worker_join_error",
+                    format!("worker join error: {error}"),
+                )
                 .await;
             return;
         }
@@ -81,8 +91,9 @@ async fn process_job(state: ServerState, job_id: String) {
 
     if output.docx.len() < 4 || &output.docx[..4] != b"PK\x03\x04" {
         state
-            .fail_job(
+            .fail_job_with_code(
                 &job_id,
+                "invalid_docx",
                 "generated docx does not have a valid ZIP header".to_string(),
             )
             .await;
@@ -101,6 +112,7 @@ async fn process_job(state: ServerState, job_id: String) {
         compatibility_score: output.compatibility_score,
         docx_bytes: output.docx.len(),
         warnings: output.warnings,
+        error_code: None,
         message: format!(
             "Converted upload {} ({}) with profile={} quality={} engine={}",
             upload.upload_id, upload.file_name, job.profile, job.quality, job.engine

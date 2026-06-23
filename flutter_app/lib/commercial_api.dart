@@ -56,6 +56,115 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Future<AuthResponse> refresh(String refreshToken) async {
+    return AuthResponse.fromJson(
+      await _postJson('auth/refresh', {'refresh_token': refreshToken}),
+    );
+  }
+
+  Future<UserProfile> me(String accessToken) async {
+    return UserProfile.fromJson(
+      await _getJson('me', accessToken: accessToken) as Map<String, dynamic>,
+    );
+  }
+
+  Future<BillingSession> checkout({
+    required String accessToken,
+    required String planId,
+    required String successUrl,
+    required String cancelUrl,
+  }) async {
+    return BillingSession.fromJson(
+      await _postJson('billing/checkout', {
+        'plan_id': planId,
+        'success_url': successUrl,
+        'cancel_url': cancelUrl,
+      }, accessToken: accessToken),
+    );
+  }
+
+  Future<BillingSession> portal({
+    required String accessToken,
+    required String returnUrl,
+  }) async {
+    return BillingSession.fromJson(
+      await _postJson('billing/portal', {
+        'return_url': returnUrl,
+      }, accessToken: accessToken),
+    );
+  }
+
+  Future<UploadResponse> uploadProjectZip({
+    required String accessToken,
+    required List<int> bytes,
+    String fileName = 'project.zip',
+  }) async {
+    final request = http.MultipartRequest('POST', baseUri.resolve('uploads'));
+    request.headers.addAll(
+      _headers(accessToken: accessToken)..remove('content-type'),
+    );
+    request.files.add(
+      http.MultipartFile.fromBytes('file', bytes, filename: fileName),
+    );
+    final streamed = await _http.send(request);
+    final response = await http.Response.fromStream(streamed);
+    return UploadResponse.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<ConversionJob> createConversion({
+    required String accessToken,
+    required String uploadId,
+    required String mainTex,
+    required String profile,
+    required String quality,
+  }) async {
+    return ConversionJob.fromJson(
+      await _postJson('conversions', {
+        'upload_id': uploadId,
+        'main_tex': mainTex,
+        'profile': profile,
+        'quality': quality,
+      }, accessToken: accessToken),
+    );
+  }
+
+  Future<ConversionJob> getConversion({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    return ConversionJob.fromJson(
+      await _getJson('conversions/$jobId', accessToken: accessToken)
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<List<int>> downloadConversionDocx({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final response = await _http.get(
+      baseUri.resolve('conversions/$jobId/download/docx'),
+      headers: _headers(accessToken: accessToken),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw CommercialApiException(
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
+      );
+    }
+    return response.bodyBytes;
+  }
+
+  Future<ConversionReport> getConversionReport({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    return ConversionReport.fromJson(
+      await _getJson('conversions/$jobId/report', accessToken: accessToken)
+          as Map<String, dynamic>,
+    );
+  }
+
   Future<dynamic> _getJson(String path, {String? accessToken}) async {
     final response = await _http.get(
       baseUri.resolve(path),
@@ -205,4 +314,170 @@ class PlanSummary {
 
   String get label =>
       '$id: $currency ${(priceCents / 100).toStringAsFixed(2)}/mo, $monthlyConversions conversions';
+}
+
+class BillingSession {
+  final String url;
+  final String expiresAt;
+
+  BillingSession({required this.url, required this.expiresAt});
+
+  factory BillingSession.fromJson(Map<String, dynamic> json) {
+    return BillingSession(
+      url: json['url'] as String,
+      expiresAt: json['expires_at'] as String,
+    );
+  }
+}
+
+class UploadResponse {
+  final String uploadId;
+  final String status;
+  final int bytes;
+  final String? fileName;
+
+  UploadResponse({
+    required this.uploadId,
+    required this.status,
+    required this.bytes,
+    this.fileName,
+  });
+
+  factory UploadResponse.fromJson(Map<String, dynamic> json) {
+    return UploadResponse(
+      uploadId: json['upload_id'] as String,
+      status: json['status'] as String,
+      bytes: json['bytes'] as int,
+      fileName: json['file_name'] as String?,
+    );
+  }
+}
+
+enum ConversionStatus {
+  queued,
+  normalizing,
+  detecting,
+  analyzing,
+  compiling,
+  rendering,
+  verifying,
+  completed,
+  failed,
+  expired,
+  pending,
+  processing,
+}
+
+ConversionStatus _conversionStatusFromJson(String value) {
+  return ConversionStatus.values.firstWhere(
+    (status) => status.name == value,
+    orElse: () => ConversionStatus.queued,
+  );
+}
+
+class ConversionJob {
+  final String jobId;
+  final String? uploadId;
+  final String? mainTex;
+  final String? profile;
+  final String? quality;
+  final String? engine;
+  final ConversionStatus status;
+  final String createdAt;
+  final String updatedAt;
+  final bool docxReady;
+  final bool reportReady;
+  final String? errorCode;
+  final String? error;
+
+  ConversionJob({
+    required this.jobId,
+    required this.uploadId,
+    required this.mainTex,
+    required this.profile,
+    required this.quality,
+    required this.engine,
+    required this.status,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.docxReady,
+    required this.reportReady,
+    required this.errorCode,
+    required this.error,
+  });
+
+  bool get isTerminal =>
+      status == ConversionStatus.completed ||
+      status == ConversionStatus.failed ||
+      status == ConversionStatus.expired;
+
+  factory ConversionJob.fromJson(Map<String, dynamic> json) {
+    return ConversionJob(
+      jobId: json['job_id'] as String,
+      uploadId: json['upload_id'] as String?,
+      mainTex: json['main_tex'] as String?,
+      profile: json['profile'] as String?,
+      quality: json['quality'] as String?,
+      engine: json['engine'] as String?,
+      status: _conversionStatusFromJson(json['status'] as String),
+      createdAt: json['created_at'] as String,
+      updatedAt: json['updated_at'] as String,
+      docxReady: json['docx_ready'] as bool,
+      reportReady: json['report_ready'] as bool,
+      errorCode: json['error_code'] as String?,
+      error: json['error'] as String?,
+    );
+  }
+}
+
+class ConversionReport {
+  final String jobId;
+  final ConversionStatus status;
+  final int qualityScore;
+  final String profile;
+  final String? mainTex;
+  final String? executor;
+  final String? backend;
+  final String? qualityStatus;
+  final int? compatibilityScore;
+  final int? docxBytes;
+  final List<String> warnings;
+  final String? errorCode;
+  final String message;
+
+  ConversionReport({
+    required this.jobId,
+    required this.status,
+    required this.qualityScore,
+    required this.profile,
+    required this.mainTex,
+    required this.executor,
+    required this.backend,
+    required this.qualityStatus,
+    required this.compatibilityScore,
+    required this.docxBytes,
+    required this.warnings,
+    required this.errorCode,
+    required this.message,
+  });
+
+  factory ConversionReport.fromJson(Map<String, dynamic> json) {
+    return ConversionReport(
+      jobId: json['job_id'] as String,
+      status: _conversionStatusFromJson(json['status'] as String),
+      qualityScore: json['quality_score'] as int,
+      profile: json['profile'] as String,
+      mainTex: json['main_tex'] as String?,
+      executor: json['executor'] as String?,
+      backend: json['backend'] as String?,
+      qualityStatus: json['quality_status'] as String?,
+      compatibilityScore: json['compatibility_score'] as int?,
+      docxBytes: json['docx_bytes'] as int?,
+      warnings: ((json['warnings'] as List<dynamic>?) ?? const <dynamic>[])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      errorCode: json['error_code'] as String?,
+      message: json['message'] as String,
+    );
+  }
 }
