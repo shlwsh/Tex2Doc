@@ -37,6 +37,9 @@ async-trait  = "0.1"
 zip          = { workspace = true }
 rand         = "0.8"
 sha2         = "0.10"
+chrono       = { workspace = true }
+sqlx         = { version = "0.8", default-features = false, features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"] }
+uuid         = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "rustls-tls", "json"] }

@@ -121,6 +121,31 @@ impl ApiClient {
             .map_err(|e| ApiError::Decode(e.to_string()))
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn patch<R: Serialize + ?Sized, B: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: &R,
+    ) -> Result<B, ApiError> {
+        let url = self.endpoint(path)?;
+        let resp = self
+            .http
+            .patch(url)
+            .header("Authorization", format!("Bearer {}", self.config.api_key))
+            .json(body)
+            .send()
+            .await
+            .map_err(|e| ApiError::Transport(e.to_string()))?;
+        let status = resp.status();
+        if !status.is_success() {
+            let body = resp.text().await.unwrap_or_default();
+            return Err(ApiError::Http { status, body });
+        }
+        resp.json()
+            .await
+            .map_err(|e| ApiError::Decode(e.to_string()))
+    }
+
     pub(crate) async fn post_multipart<B: DeserializeOwned>(
         &self,
         path: &str,

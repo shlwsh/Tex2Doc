@@ -216,6 +216,12 @@ pub fn wire_billing_cloud(ui: &MainWindow, app_state: Arc<AppState>) {
                                     status: row.status.into(),
                                     updated_at: row.updated_at.into(),
                                     error: row.error.into(),
+                                    has_zip: row.has_zip,
+                                    has_docx: row.has_docx,
+                                    has_log: row.has_log,
+                                    docx_size: row.docx_size.into(),
+                                    zip_size: row.zip_size.into(),
+                                    log_size: row.log_size.into(),
                                 })
                                 .collect::<Vec<_>>();
                             let count = rows.len();

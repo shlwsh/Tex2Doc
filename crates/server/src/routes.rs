@@ -3,7 +3,7 @@
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post};
 use axum::{extract::Request, Json, Router};
 use mime::Mime;
 use serde::Deserialize;
@@ -21,6 +21,10 @@ use crate::limits::{
 use crate::state::{
     redeem_packages, ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
     RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
+};
+use crate::feedback_service::{
+    AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
+    FeedbackError, ThreadFilters,
 };
 use crate::worker_service;
 
@@ -97,6 +101,18 @@ pub fn router_with_state(state: ServerState) -> Router {
         )
         .route("/v1/conversions/:id/report", get(get_conversion_report))
         .route("/api/v1/conversions/:id/report", get(get_conversion_report))
+        // Conversion file download (enhanced)
+        .route("/v1/conversions/:id/download/zip", get(download_conversion_zip))
+        .route("/v1/conversions/:id/download/log", get(download_conversion_log))
+        // Feedback routes (user)
+        .route("/v1/feedback/threads", get(list_feedback_threads).post(create_feedback_thread))
+        .route("/v1/feedback/threads/:id", get(get_feedback_thread))
+        .route("/v1/feedback/threads/:id/messages", post(add_feedback_message))
+        // Admin feedback routes
+        .route("/admin/v1/feedback/threads", get(admin_list_feedback_threads))
+        .route("/admin/v1/feedback/threads/export.xlsx", get(admin_export_feedback_threads))
+        .route("/admin/v1/feedback/threads/:id", patch(admin_update_feedback_thread))
+        .route("/admin/v1/feedback/threads/:id/messages", post(admin_reply_feedback_message))
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
         .with_state(state)
@@ -1155,6 +1171,352 @@ async fn convert(request: Request) -> Result<Response, ApiError> {
         .body(axum::body::Body::from(result.docx))
         .map_err(|e| ApiError::Io(e.to_string()))?;
     Ok(resp.into_response())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conversion file download handlers (enhanced session storage)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Download the original ZIP for a conversion job.
+async fn download_conversion_zip(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let session = require_session(&headers)?;
+    let job = state
+        .get_job(&job_id)
+        .await
+        .filter(|j| j.user_id == session.user_id)
+        .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
+
+    let bytes = state
+        .load_session_file(&job_id, "source.zip")
+        .ok_or_else(|| ApiError::NotFound("ZIP file not found for this conversion".to_string()))?;
+
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/zip")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{}.zip\"", sanitize(&job.main_tex)),
+        )
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| ApiError::Io(e.to_string()))?;
+    Ok(resp.into_response())
+}
+
+/// Download the conversion log for a conversion job.
+async fn download_conversion_log(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(job_id): Path<String>,
+) -> Result<Response, ApiError> {
+    let session = require_session(&headers)?;
+    let job = state
+        .get_job(&job_id)
+        .await
+        .filter(|j| j.user_id == session.user_id)
+        .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
+
+    let bytes = state
+        .load_session_file(&job_id, "conversion.log")
+        .ok_or_else(|| ApiError::NotFound("conversion log not found for this job".to_string()))?;
+
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"conversion-{}.log\"", sanitize(&job.main_tex)),
+        )
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| ApiError::Io(e.to_string()))?;
+    Ok(resp.into_response())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback handlers (user-facing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+struct CreateThreadJson {
+    conversion_job_id: Option<String>,
+    title: String,
+    feedback_type: String,
+    content: String,
+    priority: Option<String>,
+}
+
+async fn create_feedback_thread(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<CreateThreadJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let request = CreateThreadRequest {
+        conversion_job_id: payload.conversion_job_id,
+        title: payload.title,
+        feedback_type: payload.feedback_type,
+        content: payload.content,
+        priority: payload.priority,
+    };
+    let store = state.feedback_store();
+    let result = store.create_thread(session.user_id, request).await;
+    match result {
+        Ok((thread, msg)) => Ok(Json(serde_json::json!({
+            "thread_id": thread.thread_id,
+            "status": thread.status.as_str(),
+            "created_at": thread.created_at,
+            "message_id": msg.message_id,
+        }))),
+        Err(e) => Err(feedback_error_to_api_error(e)),
+    }
+}
+
+async fn list_feedback_threads(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let store = state.feedback_store();
+    let threads = store.list_user_threads(&session.user_id).await;
+    let summaries: Vec<_> = threads
+        .into_iter()
+        .map(|t| thread_summary_from_summary(&t))
+        .collect();
+    Ok(Json(serde_json::json!(summaries)))
+}
+
+async fn get_feedback_thread(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let store = state.feedback_store();
+    let result = store.get_thread_for_user(&session.user_id, &thread_id).await;
+    match result {
+        Ok((t, messages)) => {
+            let msgs: Vec<_> = messages.into_iter().map(|m| message_json(&m)).collect();
+            Ok(Json(serde_json::json!({
+                "thread": thread_json(&t),
+                "messages": msgs,
+            })))
+        }
+        Err(FeedbackError::NotFound) => Err(ApiError::NotFound("feedback thread not found".to_string())),
+        Err(FeedbackError::Forbidden) | Err(FeedbackError::Unauthorized) => {
+            Err(ApiError::Unauthorized("not authorized".to_string()))
+        }
+        Err(e) => Err(feedback_error_to_api_error(e)),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AddMessageJson {
+    content: String,
+    parent_message_id: Option<String>,
+}
+
+async fn add_feedback_message(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<AddMessageJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let request = AddMessageRequest {
+        content: payload.content,
+        parent_message_id: payload.parent_message_id,
+    };
+    let store = state.feedback_store();
+    let result = store.add_message(session.user_id, &thread_id, request).await;
+    match result {
+        Ok(msg) => Ok(Json(serde_json::json!(message_json(&msg)))),
+        Err(e) => Err(feedback_error_to_api_error(e)),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback handlers (admin-facing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn admin_list_feedback_threads(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<ThreadFilters>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&headers)?;
+    let store = state.feedback_store();
+    let threads = store.admin_list(&params).await;
+    let summaries: Vec<_> = threads
+        .into_iter()
+        .map(|t| thread_summary_from_summary(&t))
+        .collect();
+    Ok(Json(serde_json::json!(summaries)))
+}
+
+async fn admin_export_feedback_threads(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<ThreadFilters>,
+) -> Result<Response, ApiError> {
+    let _session = require_admin_session(&headers)?;
+    let store = state.feedback_store();
+    let threads = store.admin_list(&params).await;
+    let bytes = state.build_feedback_export(threads);
+    let resp = Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"feedback-export.xlsx\"",
+        )
+        .header(header::CONTENT_LENGTH, bytes.len())
+        .body(axum::body::Body::from(bytes))
+        .map_err(|e| ApiError::Io(e.to_string()))?;
+    Ok(resp.into_response())
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminUpdateJson {
+    status: Option<String>,
+    priority: Option<String>,
+    admin_assignee: Option<String>,
+}
+
+async fn admin_update_feedback_thread(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<AdminUpdateJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&headers)?;
+    let request = AdminUpdateThreadRequest {
+        status: payload.status,
+        priority: payload.priority,
+        admin_assignee: payload.admin_assignee.or(Some(session.user_id)),
+    };
+    let store = state.feedback_store();
+    let result = store.admin_update(&thread_id, request).await;
+    match result {
+        Ok(thread) => Ok(Json(serde_json::json!(thread_json(&thread)))),
+        Err(e) => Err(feedback_error_to_api_error(e)),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminReplyJson {
+    content: String,
+    is_internal: Option<bool>,
+}
+
+async fn admin_reply_feedback_message(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(thread_id): Path<String>,
+    Json(payload): Json<AdminReplyJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&headers)?;
+    let request = AdminReplyRequest {
+        content: payload.content,
+        is_internal: payload.is_internal,
+    };
+    let store = state.feedback_store();
+    let result = store.admin_reply(session.user_id, &thread_id, request).await;
+    match result {
+        Ok(msg) => Ok(Json(serde_json::json!(message_json(&msg)))),
+        Err(e) => Err(feedback_error_to_api_error(e)),
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper functions for feedback JSON serialization
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn thread_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value {
+    serde_json::json!({
+        "thread_id": t.thread_id,
+        "user_id": t.user_id,
+        "conversion_job_id": t.conversion_job_id,
+        "title": t.title,
+        "feedback_type": t.feedback_type.as_str(),
+        "status": t.status.as_str(),
+        "priority": t.priority.as_str(),
+        "admin_assignee": t.admin_assignee,
+        "created_at": t.created_at,
+        "updated_at": t.updated_at,
+    })
+}
+
+fn thread_summary_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value {
+    serde_json::json!({
+        "thread_id": t.thread_id,
+        "user_id": t.user_id,
+        "conversion_job_id": t.conversion_job_id,
+        "title": t.title,
+        "feedback_type": t.feedback_type.as_str(),
+        "status": t.status.as_str(),
+        "priority": t.priority.as_str(),
+        "message_count": t.message_count,
+        "latest_message_at": t.latest_message_at,
+        "created_at": t.created_at,
+        "updated_at": t.updated_at,
+    })
+}
+
+fn thread_summary_from_summary(t: &crate::feedback_service::FeedbackThreadSummary) -> serde_json::Value {
+    serde_json::json!({
+        "thread_id": t.thread_id,
+        "conversion_job_id": t.conversion_job_id,
+        "title": t.title,
+        "feedback_type": t.feedback_type,
+        "status": t.status,
+        "priority": t.priority,
+        "message_count": t.message_count,
+        "latest_message_at": t.latest_message_at,
+        "created_at": t.created_at,
+        "updated_at": t.updated_at,
+    })
+}
+
+fn thread_summary_json_from_thread(t: &crate::feedback_service::FeedbackThread, message_count: u32, latest_message_at: Option<String>) -> serde_json::Value {
+    serde_json::json!({
+        "thread_id": t.thread_id,
+        "user_id": t.user_id,
+        "conversion_job_id": t.conversion_job_id,
+        "title": t.title,
+        "feedback_type": t.feedback_type.as_str(),
+        "status": t.status.as_str(),
+        "priority": t.priority.as_str(),
+        "message_count": message_count,
+        "latest_message_at": latest_message_at,
+        "created_at": t.created_at,
+        "updated_at": t.updated_at,
+    })
+}
+
+fn message_json(m: &crate::feedback_service::FeedbackMessage) -> serde_json::Value {
+    serde_json::json!({
+        "message_id": m.message_id,
+        "thread_id": m.thread_id,
+        "parent_message_id": m.parent_message_id,
+        "sender_user_id": m.sender_user_id,
+        "sender_type": m.sender_type.as_str(),
+        "content": m.content,
+        "created_at": m.created_at,
+    })
+}
+
+fn feedback_error_to_api_error(e: crate::feedback_service::FeedbackError) -> ApiError {
+    match e {
+        FeedbackError::NotFound => ApiError::NotFound("feedback thread not found".to_string()),
+        FeedbackError::Forbidden => ApiError::Unauthorized("not authorized to access this feedback".to_string()),
+        FeedbackError::Unauthorized => ApiError::Unauthorized("not authorized".to_string()),
+        FeedbackError::Validation(msg) => ApiError::BadRequest { code: "validation", message: msg },
+    }
 }
 
 fn sanitize(name: &str) -> String {

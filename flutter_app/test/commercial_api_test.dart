@@ -6,9 +6,20 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 void main() {
+  test('commercial API default base URL uses local doc-server port', () {
+    expect(
+      CommercialApiClient('').baseUri.toString(),
+      'http://127.0.0.1:2624/v1/',
+    );
+    expect(
+      CommercialApiClient('http://127.0.0.1:8080/v1/').baseUri.toString(),
+      'http://127.0.0.1:2624/v1/',
+    );
+  });
+
   test('register, usage, and plans map commercial API responses', () async {
     final client = CommercialApiClient(
-      'http://localhost:8080/v1/',
+      'http://localhost:2624/v1/',
       httpClient: MockClient((request) async {
         if (request.url.path == '/v1/auth/register') {
           expect(request.method, 'POST');
@@ -65,7 +76,7 @@ void main() {
 
   test('redeem code endpoints map commercial API responses', () async {
     final client = CommercialApiClient(
-      'http://localhost:8080/v1/',
+      'http://localhost:2624/v1/',
       httpClient: MockClient((request) async {
         expect(request.headers['authorization'], 'Bearer demo-access');
         if (request.url.path == '/v1/redeem-codes/options') {
@@ -134,6 +145,58 @@ void main() {
 
     final records = await client.redeemCodeRecords('demo-access');
     expect(records.single.codePreview, 'T2DDEMO****CODE');
+  });
+
+  test('admin redeem code batch endpoints generate and export codes', () async {
+    final client = CommercialApiClient(
+      'http://localhost:2624/v1/',
+      httpClient: MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer demo-admin');
+        if (request.url.path == '/admin/v1/redeem-code-batches') {
+          expect(request.method, 'POST');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['package_id'], 'count_10');
+          expect(body['quantity'], 2);
+          return _json({
+            'batch_id': 'redeem_batch_1',
+            'batch_no': 'RC0001',
+            'package_id': 'count_10',
+            'package_name': '10 次转换包',
+            'recharge_type': 'count',
+            'quantity': 10,
+            'generated_count': 2,
+            'exported_count': 0,
+            'status': 'active',
+            'channel': 'web',
+            'note': 'demo',
+            'expires_at': null,
+            'created_at': '2026-06-24T12:00:00Z',
+            'codes': ['T2D-DEMO-0001', 'T2D-DEMO-0002'],
+          });
+        }
+        if (request.url.path ==
+            '/admin/v1/redeem-code-batches/redeem_batch_1/export.xlsx') {
+          return http.Response.bytes([0x50, 0x4b, 0x03, 0x04], 200);
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final batch = await client.createRedeemCodeBatch(
+      adminToken: 'demo-admin',
+      packageId: 'count_10',
+      quantity: 2,
+      channel: 'web',
+      note: 'demo',
+    );
+    expect(batch.batchNo, 'RC0001');
+    expect(batch.codes, hasLength(2));
+
+    final bytes = await client.exportRedeemCodeBatch(
+      adminToken: 'demo-admin',
+      batchId: batch.batchId,
+    );
+    expect(bytes, [0x50, 0x4b, 0x03, 0x04]);
   });
 }
 

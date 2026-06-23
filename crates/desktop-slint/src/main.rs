@@ -1158,7 +1158,10 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_auth_demo_hint, "auth.demo_hint");
     set_text!(set_t_auth_api_hint, "auth.api_hint");
     set_text!(set_t_account_overview_title, "account.overview_title");
-    set_text!(set_t_account_active_subscription, "account.active_subscription");
+    set_text!(
+        set_t_account_active_subscription,
+        "account.active_subscription"
+    );
     set_text!(set_t_account_guest_mode, "account.guest_mode");
     set_text!(set_t_account_signed_in_short, "account.signed_in_short");
     set_text!(set_t_account_status, "account.status");

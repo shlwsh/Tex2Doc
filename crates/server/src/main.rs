@@ -15,6 +15,9 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 mod error;
+mod excel_export;
+mod feedback_service;
+mod file_storage;
 mod limits;
 mod routes;
 mod state;

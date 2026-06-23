@@ -28,4 +28,16 @@ impl ApiClient {
     pub async fn get_conversion_report(&self, job_id: &str) -> Result<ConversionReport, ApiError> {
         self.get(&format!("conversions/{job_id}/report")).await
     }
+
+    /// Download the original ZIP uploaded for a conversion job.
+    pub async fn download_conversion_zip(&self, job_id: &str) -> Result<Vec<u8>, ApiError> {
+        self.get_bytes(&format!("conversions/{job_id}/download/zip"))
+            .await
+    }
+
+    /// Download the conversion log for a job.
+    pub async fn download_conversion_log(&self, job_id: &str) -> Result<Vec<u8>, ApiError> {
+        self.get_bytes(&format!("conversions/{job_id}/download/log"))
+            .await
+    }
 }

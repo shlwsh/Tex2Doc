@@ -36,6 +36,24 @@ export struct CloudConversionRow {
     status: string,
     updated-at: string,
     error: string,
+    has-zip: bool,
+    has-docx: bool,
+    has-log: bool,
+    docx-size: string,
+    zip-size: string,
+    log-size: string,
+}
+
+export struct FeedbackThreadRow {
+    thread-id: string,
+    title: string,
+    feedback-type: string,
+    status: string,
+    priority: string,
+    message-count: int,
+    latest-message-at: string,
+    created-at: string,
+    conversion-job-id: string,
 }
 
 export enum ConversionMode {

@@ -9,7 +9,7 @@ import {
     ListView,
     Switch,
 } from "std-widgets.slint";
-import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode } from "types.slint";
+import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode, FeedbackThreadRow } from "types.slint";
 
 component NavButton inherits Rectangle {
     in property <string> label;
@@ -160,6 +160,7 @@ export component MainWindow inherits Window {
     in-out property <[PlanEntry]> plan-catalog;
     in-out property <[RechargeRow]> recharge-records;
     in-out property <[CloudConversionRow]> cloud-conversion-records;
+    in-out property <[FeedbackThreadRow]> feedback-threads;
     in-out property <int> current-plan-index: 0;
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
@@ -204,6 +205,7 @@ export component MainWindow inherits Window {
     in-out property <string> t-tab-account: "Account";
     in-out property <string> t-tab-billing: "Billing";
     in-out property <string> t-tab-history: "History";
+    in-out property <string> t-tab-feedback: "Feedback";
     in-out property <string> t-app-title-signed-out: "Tex2Doc Desktop";
     in-out property <string> t-common-account: "Account";
     in-out property <string> t-common-quota: "Quota";
@@ -489,6 +491,7 @@ export component MainWindow inherits Window {
                 NavButton { label: t-tab-convert; detail: t-nav-cloud-engine; selected: selected-page == 2; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 2; } }
                 NavButton { label: t-nav-conversion-records; detail: t-nav-jobs-reports; selected: selected-page == 3; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 3; } }
                 NavButton { label: t-nav-recharge-records; detail: t-nav-mock-payment-history; selected: selected-page == 4; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 4; } }
+                NavButton { label: t-tab-feedback; detail: t-nav-jobs-reports; selected: selected-page == 5; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 5; } }
 
                 Rectangle { vertical-stretch: 1; }
 
@@ -520,7 +523,7 @@ export component MainWindow inherits Window {
                         horizontal-stretch: 1;
                         spacing: 1px;
                         Text {
-                            text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : t-records-recharge-title)));
+                            text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : (selected-page == 4 ? t-records-recharge-title : t-tab-feedback))));
                             font-size: 20px;
                             font-weight: 700;
                             color: color-text-primary;
@@ -866,6 +869,51 @@ export component MainWindow inherits Window {
                                 }
                                 Text { text: "Account: " + account-display-name + " | Quota: " + quota-remaining + " / " + quota-total; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
                                 Button { text: "Go to Recharge"; clicked => { selected-page = 1; } }
+                            }
+                        }
+                    }
+                }
+
+                if selected-page == 5: Rectangle {
+                    background: color-window-bg;
+                    VerticalBox {
+                        padding: 22px;
+                        spacing: 14px;
+                        SectionPanel { title: t-tab-feedback; subtitle: "Submit issues or feature requests linked to a specific conversion record."; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
+                        Rectangle {
+                            border-radius: 8px;
+                            border-color: color-border;
+                            background: color-surface;
+                            VerticalBox {
+                                padding: 14px;
+                                spacing: 8px;
+                                HorizontalBox {
+                                    spacing: 10px;
+                                    Text { text: "Feedback Threads (" + feedback-threads.length + ")"; font-size: 14px; font-weight: 700; color: color-text-primary; }
+                                }
+                                if feedback-threads.length == 0: Text { text: "No feedback threads yet. Submit your first issue or request from the Flutter app."; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
+                                ListView {
+                                    visible: feedback-threads.length > 0;
+                                    height: 390px;
+                                    for row[idx] in feedback-threads: Rectangle {
+                                        min-height: 52px;
+                                        border-radius: 6px;
+                                        border-color: color-border;
+                                        background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
+                                        VerticalBox {
+                                            padding: 10px;
+                                            spacing: 4px;
+                                            HorizontalBox {
+                                                spacing: 8px;
+                                                StatusPill { text: row.feedback-type; bg: row.feedback-type == "issue" ? #fef2f2 : #eff6ff; fg: row.feedback-type == "issue" ? color-danger : color-accent; }
+                                                StatusPill { text: row.status; bg: row.status == "open" ? #fef2f2 : (row.status == "resolved" ? #ecfdf5 : #eff6ff); fg: row.status == "open" ? color-danger : (row.status == "resolved" ? color-success : color-warning); }
+                                                StatusPill { text: row.priority; bg: row.priority == "high" || row.priority == "urgent" ? #fef2f2 : #eff6ff; fg: row.priority == "high" || row.priority == "urgent" ? color-danger : color-text-muted; }
+                                                Text { text: row.title; horizontal-stretch: 1; font-size: 13px; font-weight: 600; color: color-text-primary; overflow: elide; }
+                                            }
+                                            Text { text: "Job: " + row.conversion-job-id + " | Msgs: " + row.message-count + " | Updated: " + row.latest-message-at; font-size: 11px; color: color-text-muted; overflow: elide; }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }

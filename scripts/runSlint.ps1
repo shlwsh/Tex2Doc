@@ -18,6 +18,9 @@
 .PARAMETER NoServer
     Skip starting the local doc-server backend before launching the desktop app.
 
+.PARAMETER ServerPort
+    Local doc-server port. Default: 2624.
+
 .PARAMETER CargoPath
     Optional path to cargo.exe/cargo. When omitted, the script checks PATH and
     common rustup install locations.
@@ -37,6 +40,8 @@ param(
     [switch]$BuildOnly,
 
     [switch]$NoServer,
+
+    [int]$ServerPort = 2624,
 
     [string]$CargoPath
 )
@@ -91,7 +96,7 @@ function Resolve-CargoPath {
 $packageName = "doc-desktop-slint"
 $serverPackageName = "doc-server"
 $serverHost = "127.0.0.1"
-$serverPort = 8080
+$serverPort = $ServerPort
 $serverHealthUrl = "http://${serverHost}:${serverPort}/api/v1/health"
 
 $targetDir = Join-Path $Root "target"
@@ -145,20 +150,52 @@ function Test-ServerPortOpen {
     }
 }
 
+function Get-PortProcessIds {
+    try {
+        $connections = Get-NetTCPConnection -LocalAddress $serverHost -LocalPort $serverPort -State Listen -ErrorAction Stop
+        return @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+    } catch {
+        return @()
+    }
+}
+
+function Clear-ServerPort {
+    $processIds = Get-PortProcessIds
+    if (-not $processIds -or $processIds.Count -eq 0) {
+        return
+    }
+
+    $ids = ($processIds -join ", ")
+    Write-Host "[runSlint] clearing ${serverHost}:${serverPort}, stopping process(es): $ids"
+    foreach ($processId in $processIds) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "[runSlint] failed to stop PID ${processId}: $($_.Exception.Message)"
+        }
+    }
+
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Test-ServerPortOpen)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    throw "Port ${serverHost}:${serverPort} is still occupied after cleanup."
+}
+
 function Start-LocalServer {
     param(
         [string]$CargoExe
     )
 
-    if (Test-ServerPortOpen) {
-        Write-Host "[runSlint] doc-server already listening on ${serverHost}:${serverPort}"
-        return
-    }
+    Clear-ServerPort
 
     Write-Host "[runSlint] starting local $serverPackageName on ${serverHost}:${serverPort} ..."
     $serverArgs = @("run", "-p", $serverPackageName)
     $envBlock = @{
-        "DOC_SERVER_ADDR" = "127.0.0.1:8080"
+        "DOC_SERVER_ADDR" = "${serverHost}:${serverPort}"
     }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()

@@ -10,6 +10,12 @@
 .PARAMETER SkipBuild
     Skip the build step entirely and run the existing build artefact.
 
+.PARAMETER NoServer
+    Skip starting the local doc-server backend before launching the app.
+
+.PARAMETER ServerPort
+    Local doc-server port. Default: 2624.
+
 .EXAMPLE
     .\scripts\run_flutter_desk.ps1
 .EXAMPLE
@@ -17,7 +23,11 @@
 #>
 
 param(
-    [switch]$SkipBuild
+    [switch]$SkipBuild,
+
+    [switch]$NoServer,
+
+    [int]$ServerPort = 2624
 )
 
 $ErrorActionPreference = 'Stop'
@@ -28,6 +38,9 @@ $EXE_DIR      = [System.IO.Path]::GetFullPath(
     [System.IO.Path]::Combine($FLUTTER_APP, 'build', 'windows', 'x64', 'runner', 'Release')
 )
 $EXE_PATH     = [System.IO.Path]::Combine($EXE_DIR, 'doc_engine.exe')
+$SERVER_HOST  = '127.0.0.1'
+$SERVER_PORT  = $ServerPort
+$SERVER_HEALTH_URL = "http://${SERVER_HOST}:${SERVER_PORT}/api/v1/health"
 
 function Write-Info($msg) { Write-Host "[run-flutter-desk] $msg" -ForegroundColor Cyan }
 function Write-Warn($msg) { Write-Host "[run-flutter-desk] WARN: $msg" -ForegroundColor Yellow }
@@ -46,10 +59,113 @@ function Assert-FlutterInstalled() {
 function Assert-CargoInstalled() {
     $cargo = Get-Command cargo -ErrorAction SilentlyContinue
     if (-not $cargo) {
-        Write-Err "'cargo' not found in PATH. Install Rust toolchain and retry."
+        $defaultCargo = Join-Path $env:USERPROFILE '.cargo\bin\cargo.exe'
+        if (Test-Path $defaultCargo) {
+            $cargoBin = Split-Path $defaultCargo -Parent
+            $env:Path = "$cargoBin;$env:Path"
+            $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+        }
+    }
+
+    if (-not $cargo) {
+        Write-Err "'cargo' not found in PATH. Install Rust toolchain or add '$env:USERPROFILE\.cargo\bin' to PATH, then retry."
         exit 1
     }
     Write-Info "Cargo:  $($cargo.Source)"
+}
+
+function Get-CargoCommand() {
+    $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+    if (-not $cargo) {
+        Write-Err "'cargo' not found in PATH. Install Rust toolchain or add '$env:USERPROFILE\.cargo\bin' to PATH, then retry."
+        exit 1
+    }
+    return $cargo.Source
+}
+
+function Test-ServerPortOpen() {
+    try {
+        $client = [System.Net.Sockets.TcpClient]::new()
+        $connect = $client.BeginConnect($SERVER_HOST, $SERVER_PORT, $null, $null)
+        $success = $connect.AsyncWaitHandle.WaitOne(500)
+        if ($success) {
+            $client.EndConnect($connect)
+        }
+        $client.Close()
+        return $success
+    } catch {
+        return $false
+    }
+}
+
+function Get-PortProcessIds() {
+    try {
+        $connections = Get-NetTCPConnection -LocalAddress $SERVER_HOST -LocalPort $SERVER_PORT -State Listen -ErrorAction Stop
+        return @($connections | Select-Object -ExpandProperty OwningProcess -Unique)
+    } catch {
+        return @()
+    }
+}
+
+function Clear-ServerPort() {
+    $processIds = Get-PortProcessIds
+    if (-not $processIds -or $processIds.Count -eq 0) {
+        return
+    }
+
+    Write-Warn "Clearing ${SERVER_HOST}:${SERVER_PORT}, stopping PID(s): $($processIds -join ', ')"
+    foreach ($processId in $processIds) {
+        try {
+            Stop-Process -Id $processId -Force -ErrorAction Stop
+        } catch {
+            Write-Warn "Failed to stop PID ${processId}: $($_.Exception.Message)"
+        }
+    }
+
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        if (-not (Test-ServerPortOpen)) {
+            return
+        }
+        Start-Sleep -Milliseconds 250
+    }
+
+    Write-Err "Port ${SERVER_HOST}:${SERVER_PORT} is still occupied after cleanup."
+    exit 1
+}
+
+function Start-LocalServer() {
+    Clear-ServerPort
+
+    $cargoExe = Get-CargoCommand
+    Write-Info "Starting doc-server on ${SERVER_HOST}:${SERVER_PORT}..."
+
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $cargoExe
+    $psi.Arguments = 'run -p doc-server'
+    $psi.WorkingDirectory = $PROJECT_ROOT
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.Environment['DOC_SERVER_ADDR'] = "${SERVER_HOST}:${SERVER_PORT}"
+    $process = [System.Diagnostics.Process]::Start($psi)
+
+    for ($attempt = 0; $attempt -lt 45; $attempt++) {
+        if ($process.HasExited) {
+            Write-Err "doc-server exited immediately with code $($process.ExitCode)."
+            exit 1
+        }
+        try {
+            $response = Invoke-RestMethod -Uri $SERVER_HEALTH_URL -TimeoutSec 1
+            if ($response.status -eq 'ok') {
+                Write-Succ "doc-server ready (PID $($process.Id))"
+                return
+            }
+        } catch {
+            Start-Sleep -Milliseconds 700
+        }
+    }
+
+    Write-Err "doc-server did not become healthy at $SERVER_HEALTH_URL."
+    exit 1
 }
 
 function Build-RustCrate() {
@@ -135,6 +251,13 @@ if (-not $SkipBuild) {
     Build-FlutterDesktop
 } else {
     Write-Info "-SkipBuild specified; skipping all build steps."
+    if (-not $NoServer) {
+        Assert-CargoInstalled
+    }
+}
+
+if (-not $NoServer) {
+    Start-LocalServer
 }
 
 Launch-App

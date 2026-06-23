@@ -10,6 +10,9 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, RwLock};
 
+use crate::excel_export;
+use crate::feedback_service::FeedbackStore;
+use crate::file_storage::FileStorage;
 use crate::worker_service::WorkerCommand;
 
 pub const PREVIEW_CLOUD_CONVERSION_LIMIT: u64 = 100;
@@ -30,6 +33,8 @@ struct ServerStateInner {
     redeem_events: RwLock<Vec<RedeemCodeEventRecord>>,
     usage: RwLock<HashMap<String, u64>>,
     seq: AtomicU64,
+    file_storage: FileStorage,
+    feedback_store: FeedbackStore,
 }
 
 #[derive(Debug, Clone)]
@@ -88,6 +93,14 @@ pub struct ConversionJobRecord {
     pub report: Option<ConversionReportRecord>,
     pub error_code: Option<String>,
     pub error: Option<String>,
+    // Session file storage
+    pub storage_path: Option<String>,
+    pub source_zip_key: Option<String>,
+    pub result_docx_key: Option<String>,
+    pub result_log_key: Option<String>,
+    pub zip_bytes: Option<u64>,
+    pub docx_bytes: Option<u64>,
+    pub log_bytes: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -214,6 +227,8 @@ pub struct ConversionReportRecord {
 
 impl ServerState {
     pub fn new(queue: mpsc::Sender<WorkerCommand>) -> Self {
+        let file_storage = FileStorage::new(std::path::PathBuf::from("sessions"))
+            .expect("sessions root directory should be creatable");
         Self {
             inner: Arc::new(ServerStateInner {
                 uploads: RwLock::new(HashMap::new()),
@@ -225,6 +240,8 @@ impl ServerState {
                 redeem_events: RwLock::new(Vec::new()),
                 usage: RwLock::new(HashMap::new()),
                 seq: AtomicU64::new(1),
+                file_storage,
+                feedback_store: FeedbackStore::new(),
             }),
             queue,
         }
@@ -276,6 +293,13 @@ impl ServerState {
             report: None,
             error_code: None,
             error: None,
+            storage_path: None,
+            source_zip_key: None,
+            result_docx_key: None,
+            result_log_key: None,
+            zip_bytes: None,
+            docx_bytes: None,
+            log_bytes: None,
         };
         self.inner.jobs.write().await.insert(job_id, job.clone());
         job
@@ -776,6 +800,36 @@ impl ServerState {
                 reason: reason.map(str::to_string),
                 created_at: now_timestamp(),
             });
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // File storage helpers (session-based)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /// Load a session file for a conversion job.
+    pub fn load_session_file(&self, job_id: &str, filename: &str) -> Option<Vec<u8>> {
+        self.inner.file_storage.load(job_id, filename).ok()
+    }
+
+    /// Check if a session file exists for a conversion job.
+    pub fn session_file_exists(&self, job_id: &str, filename: &str) -> bool {
+        self.inner.file_storage.exists(job_id, filename)
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // Feedback store passthrough methods
+    // ─────────────────────────────────────────────────────────────────────────
+
+    pub fn feedback_store(&self) -> &FeedbackStore {
+        &self.inner.feedback_store
+    }
+
+    /// Build an Excel export for feedback threads.
+    pub fn build_feedback_export(
+        &self,
+        threads: Vec<crate::feedback_service::FeedbackThreadSummary>,
+    ) -> Vec<u8> {
+        excel_export::build_admin_feedback_export(&threads)
     }
 }
 

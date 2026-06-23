@@ -3,10 +3,10 @@
 // 验证：bridge.dart → DocEngineFacade.version() 在 widget 上下文能跑通
 // （desktop：调 doc_engine.dll；web：调 window.docEngine）
 
-import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:doc_engine/bridge.dart';
+import 'package:doc_engine/ui/auth_window.dart';
 import 'package:doc_engine/workspace_app.dart';
 
 void main() {
@@ -16,8 +16,8 @@ void main() {
     await tester.pumpWidget(const DocEngineApp(isWeb: false));
     await tester.pump();
     expect(find.text('Tex2Doc'), findsWidgets);
-    expect(find.byKey(const ValueKey('commercial-api-card')), findsOneWidget);
-    expect(find.byKey(const ValueKey('convert-card')), findsOneWidget);
+    expect(find.byType(AuthWindow), findsOneWidget);
+    expect(find.text('http://127.0.0.1:2624/v1/'), findsOneWidget);
   });
 
   test('DocEngineFacade.version() returns non-empty string', () async {

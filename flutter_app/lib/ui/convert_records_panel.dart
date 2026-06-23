@@ -85,7 +85,7 @@ class _ConvertRecordsPanelState extends State<ConvertRecordsPanel> {
         else if (_records.isEmpty)
           EmptyState(label: strings.t('empty.noData'))
         else
-          _RecordsTable(records: _records),
+          _RecordsTable(records: _records, accessToken: widget.accessToken),
       ],
     );
   }
@@ -93,8 +93,9 @@ class _ConvertRecordsPanelState extends State<ConvertRecordsPanel> {
 
 class _RecordsTable extends StatelessWidget {
   final List<ConversionJob> records;
+  final String accessToken;
 
-  const _RecordsTable({required this.records});
+  const _RecordsTable({required this.records, required this.accessToken});
 
   Color _statusColor(ConversionStatus status) {
     return switch (status) {
@@ -132,6 +133,7 @@ class _RecordsTable extends StatelessWidget {
             DataColumn(label: Text('Quality', style: theme.textTheme.labelLarge)),
             DataColumn(label: Text('Status', style: theme.textTheme.labelLarge)),
             DataColumn(label: Text('Created', style: theme.textTheme.labelLarge)),
+            DataColumn(label: Text('Files', style: theme.textTheme.labelLarge)),
           ],
           rows: [
             for (final job in records)
@@ -148,6 +150,7 @@ class _RecordsTable extends StatelessWidget {
                   _formatDate(job.createdAt),
                   style: theme.textTheme.bodySmall,
                 )),
+                DataCell(_FileButtons(job: job, accessToken: accessToken)),
               ]),
           ],
         ),
@@ -189,5 +192,91 @@ class _StatusChip extends StatelessWidget {
         style: TextStyle(color: color, fontSize: 12),
       ),
     );
+  }
+}
+
+class _FileButtons extends StatelessWidget {
+  final ConversionJob job;
+  final String accessToken;
+
+  const _FileButtons({required this.job, required this.accessToken});
+
+  @override
+  Widget build(BuildContext context) {
+    final storage = job.storageInfo;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (storage?.hasDocx ?? false)
+          Tooltip(
+            message: 'Download DOCX',
+            child: IconButton(
+              icon: const Icon(Icons.description, size: 18),
+              onPressed: () => _download(context, 'docx'),
+              color: Colors.blue,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        if (storage?.hasZip ?? false)
+          Tooltip(
+            message: 'Download ZIP',
+            child: IconButton(
+              icon: const Icon(Icons.archive, size: 18),
+              onPressed: () => _download(context, 'zip'),
+              color: Colors.orange,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        if (storage?.hasLog ?? false)
+          Tooltip(
+            message: 'Download Log',
+            child: IconButton(
+              icon: const Icon(Icons.article, size: 18),
+              onPressed: () => _download(context, 'log'),
+              color: Colors.green,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        if (storage == null || !storage.hasAny)
+          Text('-', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: Colors.grey[400])),
+      ],
+    );
+  }
+
+  void _download(BuildContext context, String type) async {
+    final api = CommercialApiClient(
+      (context.findAncestorWidgetOfExactType<ConvertRecordsPanel>() as ConvertRecordsPanel?)?.apiBaseUrl ?? '',
+    );
+    try {
+      List<int> bytes;
+      String filename;
+      switch (type) {
+        case 'docx':
+          bytes = await api.downloadConversionDocx(accessToken: accessToken, jobId: job.jobId);
+          filename = '${job.jobId}.docx';
+          break;
+        case 'zip':
+          bytes = await api.downloadConversionZip(accessToken: accessToken, jobId: job.jobId);
+          filename = '${job.jobId}.zip';
+          break;
+        case 'log':
+          bytes = await api.downloadConversionLog(accessToken: accessToken, jobId: job.jobId);
+          filename = '${job.jobId}.log';
+          break;
+        default:
+          return;
+      }
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Downloaded $filename (${bytes.length} bytes)')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Download failed: $e')),
+        );
+      }
+    }
   }
 }

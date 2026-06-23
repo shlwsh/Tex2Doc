@@ -6,10 +6,11 @@
 use std::time::Duration;
 
 use doc_commercial_api_client::{
-    ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession, CheckoutRequest,
-    ClientConfig, ConversionJob, LoginRequest, PlanSummary, RechargeRecord, RedeemCodeRecord,
-    RedeemCodeRequest, RedeemCodeResult, RefreshRequest, RegisterRequest, UsageSummary,
-    UserProfile,
+    AddMessageRequest, ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession,
+    CheckoutRequest, ClientConfig, ConversionJob, CreateFeedbackRequest, CreateFeedbackResponse,
+    FeedbackMessage, FeedbackThread, FeedbackThreadDetail, LoginRequest, PlanSummary,
+    RechargeRecord, RedeemCodeRecord, RedeemCodeRequest, RedeemCodeResult, RefreshRequest,
+    RegisterRequest, UsageSummary, UserProfile,
 };
 use thiserror::Error;
 
@@ -272,6 +273,146 @@ pub fn fetch_conversion_table_blocking(
     })
 }
 
+pub fn fetch_feedback_threads_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+) -> Result<Vec<FeedbackThreadRow>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before querying feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let mut rows = Vec::new();
+        for thread in client.feedback_threads().await? {
+            rows.push(FeedbackThreadRow::from_thread(thread));
+        }
+        rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(rows)
+    })
+}
+
+pub fn fetch_feedback_detail_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    thread_id: &str,
+) -> Result<FeedbackDetailRow> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before querying feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+    let thread_id = thread_id.to_string();
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let detail = client.feedback_thread(&thread_id).await?;
+        Ok(FeedbackDetailRow::from_detail(detail))
+    })
+}
+
+pub fn create_feedback_thread_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    title: &str,
+    feedback_type: &str,
+    content: &str,
+    conversion_job_id: Option<&str>,
+    priority: Option<&str>,
+) -> Result<String> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before creating feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let result = client
+            .create_feedback_thread(&CreateFeedbackRequest {
+                title: title.to_string(),
+                feedback_type: feedback_type.to_string(),
+                content: content.to_string(),
+                conversion_job_id: conversion_job_id.map(String::from),
+                priority: priority.map(String::from),
+            })
+            .await?;
+        Ok(result.thread_id)
+    })
+}
+
+pub fn add_feedback_message_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    thread_id: &str,
+    content: &str,
+) -> Result<()> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before replying to feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+    let thread_id = thread_id.to_string();
+    let content = content.to_string();
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        client
+            .add_feedback_message(
+                &thread_id,
+                &AddMessageRequest {
+                    content,
+                    parent_message_id: None,
+                },
+            )
+            .await?;
+        Ok(())
+    })
+}
+
+pub fn download_conversion_file_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    job_id: &str,
+    file_type: &str,
+) -> Result<Vec<u8>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before downloading files".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+    let job_id = job_id.to_string();
+    let file_type = file_type.to_string();
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let bytes = match file_type.as_str() {
+            "docx" => client.download_conversion_docx(&job_id).await?,
+            "zip" => client.download_conversion_zip(&job_id).await?,
+            "log" => client.download_conversion_log(&job_id).await?,
+            _ => return Err(CloudAccountError::Runtime(format!("unknown file type: {file_type}"))),
+        };
+        Ok(bytes)
+    })
+}
+
 pub fn usage_line(usage: &UsageSummary) -> String {
     let remaining = usage
         .cloud_conversions_limit
@@ -397,10 +538,20 @@ pub struct ConversionTableRow {
     pub status: String,
     pub updated_at: String,
     pub error: String,
+    pub has_zip: bool,
+    pub has_docx: bool,
+    pub has_log: bool,
+    pub docx_size: String,
+    pub zip_size: String,
+    pub log_size: String,
 }
 
 impl ConversionTableRow {
     fn from_conversion(record: ConversionJob) -> Self {
+        let storage = record.storage_info.as_ref();
+        let has_docx = storage.map(|s| s.has_docx()).unwrap_or(false);
+        let has_zip = storage.map(|s| s.has_zip()).unwrap_or(false);
+        let has_log = storage.map(|s| s.has_log()).unwrap_or(false);
         Self {
             id: record.job_id,
             main_tex: record.main_tex.unwrap_or_default(),
@@ -411,6 +562,103 @@ impl ConversionTableRow {
                 .error_code
                 .or(record.error)
                 .unwrap_or_else(|| "-".to_string()),
+            has_docx,
+            has_zip,
+            has_log,
+            docx_size: storage
+                .and_then(|s| s.result_docx.as_ref())
+                .and_then(|d| d.bytes)
+                .map(format_size)
+                .unwrap_or_default(),
+            zip_size: storage
+                .and_then(|s| s.source_zip.as_ref())
+                .and_then(|d| d.bytes)
+                .map(format_size)
+                .unwrap_or_default(),
+            log_size: storage
+                .and_then(|s| s.conversion_log.as_ref())
+                .and_then(|d| d.bytes)
+                .map(format_size)
+                .unwrap_or_default(),
+        }
+    }
+}
+
+fn format_size(bytes: u64) -> String {
+    if bytes < 1024 {
+        format!("{}B", bytes)
+    } else if bytes < 1024 * 1024 {
+        format!("{:.1}KB", bytes as f64 / 1024.0)
+    } else {
+        format!("{:.1}MB", bytes as f64 / 1024.0 / 1024.0)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedbackThreadRow {
+    pub thread_id: String,
+    pub title: String,
+    pub feedback_type: String,
+    pub status: String,
+    pub priority: String,
+    pub message_count: i32,
+    pub latest_message_at: String,
+    pub created_at: String,
+    pub conversion_job_id: String,
+}
+
+impl FeedbackThreadRow {
+    fn from_thread(record: FeedbackThread) -> Self {
+        Self {
+            thread_id: record.thread_id,
+            title: record.title,
+            feedback_type: record.feedback_type,
+            status: record.status,
+            priority: record.priority,
+            message_count: record.message_count.unwrap_or(0) as i32,
+            latest_message_at: record.latest_message_at.unwrap_or_default(),
+            created_at: record.created_at,
+            conversion_job_id: record.conversion_job_id.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct FeedbackDetailRow {
+    pub thread: FeedbackThreadRow,
+    pub messages: Vec<FeedbackMessageRow>,
+}
+
+impl FeedbackDetailRow {
+    fn from_detail(record: FeedbackThreadDetail) -> Self {
+        Self {
+            thread: FeedbackThreadRow::from_thread(record.thread),
+            messages: record
+                .messages
+                .into_iter()
+                .map(FeedbackMessageRow::from_message)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+#[allow(dead_code)]
+pub struct FeedbackMessageRow {
+    pub message_id: String,
+    pub sender_type: String,
+    pub content: String,
+    pub created_at: String,
+}
+
+impl FeedbackMessageRow {
+    fn from_message(record: FeedbackMessage) -> Self {
+        Self {
+            message_id: record.message_id,
+            sender_type: record.sender_type,
+            content: record.content,
+            created_at: record.created_at,
         }
     }
 }
@@ -432,6 +680,10 @@ fn runtime() -> Result<tokio::runtime::Runtime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::{Read, Write};
+    use std::net::{TcpListener, TcpStream};
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn usage_line_includes_remaining_quota() {
@@ -467,4 +719,212 @@ mod tests {
 
         assert_eq!(plans_line(&plans), "pro: USD 29.00/mo, 1000 conversions");
     }
+
+    #[test]
+    fn slint_cloud_account_blocking_calls_work_against_demo_server() {
+        let base_url = spawn_demo_server();
+
+        let session =
+            login_and_fetch_usage_blocking(&base_url, " demo@example.com ", "password").unwrap();
+        assert_eq!(session.email, "demo@example.com");
+        assert_eq!(session.plan_id, "preview");
+        assert_eq!(session.usage.count_balance, 8);
+        assert_eq!(session.usage.period_start, "");
+
+        let refreshed =
+            refresh_and_fetch_usage_blocking(&base_url, Some(session.refresh_token.clone()))
+                .unwrap();
+        assert_eq!(refreshed.email, "demo@example.com");
+
+        let registered =
+            register_and_fetch_usage_blocking(&base_url, "new-demo@example.com", "password")
+                .unwrap();
+        assert_eq!(registered.display_name.as_deref(), Some("Demo User"));
+
+        let usage = fetch_usage_blocking(&base_url, &session.access_token).unwrap();
+        assert_eq!(usage.cloud_conversions_limit, 100);
+
+        let plans = fetch_plans_blocking(&base_url).unwrap();
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].id, "pro");
+
+        let checkout =
+            create_checkout_blocking(&base_url, Some(session.access_token.clone()), "pro").unwrap();
+        assert_eq!(checkout.url, "https://billing.example/checkout");
+
+        let portal =
+            create_billing_portal_blocking(&base_url, Some(session.access_token.clone())).unwrap();
+        assert_eq!(portal.url, "https://billing.example/portal");
+
+        let (redeemed, usage_after_redeem) = redeem_code_blocking(
+            &base_url,
+            Some(session.access_token.clone()),
+            "T2D-DEMO-001",
+        )
+        .unwrap();
+        assert_eq!(redeemed.package_id, "count_100");
+        assert_eq!(usage_after_redeem.count_balance, 8);
+
+        let recharge_rows =
+            fetch_recharge_table_blocking(&base_url, Some(session.access_token.clone())).unwrap();
+        assert_eq!(recharge_rows.len(), 2);
+        assert_eq!(recharge_rows[0].id, "redeem_1");
+
+        let conversion_rows =
+            fetch_conversion_table_blocking(&base_url, Some(session.access_token)).unwrap();
+        assert_eq!(conversion_rows.len(), 1);
+        assert_eq!(conversion_rows[0].status, "Completed");
+    }
+
+    fn spawn_demo_server() -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+
+        thread::spawn(move || {
+            for stream in listener.incoming().take(32) {
+                let Ok(stream) = stream else {
+                    continue;
+                };
+                handle_demo_request(stream);
+            }
+        });
+
+        format!("http://{addr}/v1/")
+    }
+
+    fn handle_demo_request(mut stream: TcpStream) {
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut buffer = [0_u8; 8192];
+        let n = stream.read(&mut buffer).unwrap_or(0);
+        let request = String::from_utf8_lossy(&buffer[..n]);
+        let request_line = request.lines().next().unwrap_or_default();
+
+        let (status, body) = demo_response(request_line);
+        let response = format!(
+            "HTTP/1.1 {status}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        );
+        let _ = stream.write_all(response.as_bytes());
+    }
+
+    fn demo_response(request_line: &str) -> (&'static str, &'static str) {
+        match request_line {
+            line if line.starts_with("POST /v1/auth/login ") => ("200 OK", AUTH_BODY),
+            line if line.starts_with("POST /v1/auth/register ") => ("200 OK", AUTH_BODY),
+            line if line.starts_with("POST /v1/auth/refresh ") => ("200 OK", AUTH_BODY),
+            line if line.starts_with("GET /v1/me ") => ("200 OK", USER_BODY),
+            line if line.starts_with("GET /v1/usage ") => ("200 OK", USAGE_BODY),
+            line if line.starts_with("GET /v1/plans ") => ("200 OK", PLANS_BODY),
+            line if line.starts_with("POST /v1/billing/checkout ") => ("200 OK", CHECKOUT_BODY),
+            line if line.starts_with("POST /v1/billing/portal ") => ("200 OK", PORTAL_BODY),
+            line if line.starts_with("POST /v1/redeem-codes/redeem ") => ("200 OK", REDEEM_BODY),
+            line if line.starts_with("GET /v1/recharges ") => ("200 OK", RECHARGES_BODY),
+            line if line.starts_with("GET /v1/redeem-codes/records ") => {
+                ("200 OK", REDEEM_RECORDS_BODY)
+            }
+            line if line.starts_with("GET /v1/conversions ") => ("200 OK", CONVERSIONS_BODY),
+            _ => ("404 Not Found", r#"{"error":"not found"}"#),
+        }
+    }
+
+    const AUTH_BODY: &str = r#"{
+        "access_token":"demo-access-token",
+        "refresh_token":"demo-refresh-token",
+        "user":{
+            "id":"user_demo",
+            "email":"demo@example.com",
+            "display_name":"Demo User",
+            "plan_id":"preview"
+        }
+    }"#;
+
+    const USER_BODY: &str = r#"{
+        "id":"user_demo",
+        "email":"demo@example.com",
+        "display_name":"Demo User",
+        "plan_id":"preview"
+    }"#;
+
+    const USAGE_BODY: &str = r#"{
+        "plan_id":"preview",
+        "cloud_conversions_used":2,
+        "cloud_conversions_limit":100,
+        "count_balance":8,
+        "storage_bytes_used":0,
+        "storage_bytes_limit":1073741824
+    }"#;
+
+    const PLANS_BODY: &str = r#"[{
+        "id":"pro",
+        "name":"Pro",
+        "price_cents":2900,
+        "currency":"USD",
+        "monthly_conversions":1000,
+        "features":["cloud"]
+    }]"#;
+
+    const CHECKOUT_BODY: &str = r#"{
+        "url":"https://billing.example/checkout",
+        "expires_at":"2026-06-24T12:00:00Z"
+    }"#;
+
+    const PORTAL_BODY: &str = r#"{
+        "url":"https://billing.example/portal",
+        "expires_at":"2026-06-24T12:00:00Z"
+    }"#;
+
+    const REDEEM_BODY: &str = r#"{
+        "redeem_id":"redeem_1",
+        "recharge_id":"recharge_1",
+        "package_id":"count_100",
+        "package_name":"100 Count",
+        "recharge_type":"count",
+        "quantity":100,
+        "count_balance":108,
+        "date_valid_until":null,
+        "redeemed_at":"2026-06-24T12:00:00Z"
+    }"#;
+
+    const RECHARGES_BODY: &str = r#"[{
+        "recharge_id":"recharge_1",
+        "recharge_type":"count",
+        "package_id":"count_100",
+        "quantity":100,
+        "amount_cents":0,
+        "currency":"USD",
+        "status":"completed",
+        "provider":"redeem-code",
+        "provider_trade_id":"redeem_1",
+        "created_at":"2026-06-24T12:00:00Z"
+    }]"#;
+
+    const REDEEM_RECORDS_BODY: &str = r#"[{
+        "redeem_id":"redeem_1",
+        "batch_id":"batch_1",
+        "batch_no":"BATCH-001",
+        "code_preview":"T2D-****-001",
+        "package_id":"count_100",
+        "package_name":"100 Count",
+        "recharge_type":"count",
+        "quantity":100,
+        "status":"redeemed",
+        "redeemed_recharge_id":"recharge_1",
+        "redeemed_at":"2026-06-24T12:01:00Z"
+    }]"#;
+
+    const CONVERSIONS_BODY: &str = r#"[{
+        "job_id":"job_1",
+        "upload_id":"upload_1",
+        "main_tex":"main.tex",
+        "profile":"standard",
+        "quality":"balanced",
+        "engine":"tectonic",
+        "status":"completed",
+        "created_at":"2026-06-24T11:00:00Z",
+        "updated_at":"2026-06-24T12:00:00Z",
+        "docx_ready":true,
+        "report_ready":true,
+        "error_code":null,
+        "error":null
+    }]"#;
 }

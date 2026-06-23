@@ -8,8 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
-const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:8080/v1/";
+const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:2624/v1/";
 const LEGACY_ONLINE_API_BASE_URL: &str = "https://api.tex2doc.cn/v1/";
+const LEGACY_LOCAL_API_BASE_URL: &str = "http://127.0.0.1:8080/v1/";
 
 /// P5: User settings for the desktop client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,7 +89,10 @@ impl Settings {
 
 fn normalize_api_base_url(value: &str) -> String {
     let trimmed = value.trim();
-    if trimmed.is_empty() || trimmed == LEGACY_ONLINE_API_BASE_URL {
+    if trimmed.is_empty()
+        || trimmed == LEGACY_ONLINE_API_BASE_URL
+        || trimmed == LEGACY_LOCAL_API_BASE_URL
+    {
         DEFAULT_API_BASE_URL.to_string()
     } else {
         trimmed.to_string()
@@ -127,7 +131,7 @@ mod tests {
     #[test]
     fn missing_release_channel_defaults_to_stable() {
         let json = r#"{
-            "api_base_url": "http://127.0.0.1:8080/v1/",
+            "api_base_url": "http://127.0.0.1:2624/v1/",
             "output_dir": "/tmp/tex2doc",
             "quality": "standard",
             "default_profile": "auto",
@@ -145,6 +149,10 @@ mod tests {
     fn legacy_online_api_base_url_migrates_to_local_demo_server() {
         assert_eq!(
             normalize_api_base_url("https://api.tex2doc.cn/v1/"),
+            DEFAULT_API_BASE_URL
+        );
+        assert_eq!(
+            normalize_api_base_url("http://127.0.0.1:8080/v1/"),
             DEFAULT_API_BASE_URL
         );
         assert_eq!(
