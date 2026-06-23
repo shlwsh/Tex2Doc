@@ -13,7 +13,7 @@
  * - SKIP_FLUTTER_BUILD=1 to reuse flutter_app/build/web
  */
 import { spawn } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright';
@@ -23,6 +23,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const flutterAppDir = resolve(repoRoot, 'flutter_app');
 const targetDir = resolve(repoRoot, 'target', 'playwright');
+const flutterWebDir = resolve(flutterAppDir, 'build', 'web');
+const logPath = resolve(targetDir, 'commercial-web-e2e.log');
 const webPort = Number(process.env.WEB_PORT ?? 4174);
 const apiPort = Number(process.env.API_PORT ?? 8080);
 const webUrl = `http://127.0.0.1:${webPort}/`;
@@ -30,9 +32,12 @@ const apiBase = `http://127.0.0.1:${apiPort}`;
 const spawned = [];
 
 mkdirSync(targetDir, { recursive: true });
+writeFileSync(logPath, '');
 
 function log(message) {
-  process.stdout.write(`[e2e-flutter-web] ${message}\n`);
+  const line = `[e2e-flutter-web] ${message}\n`;
+  process.stdout.write(line);
+  appendFileSync(logPath, line);
 }
 
 function spawnProcess(command, args, options = {}) {
@@ -94,6 +99,12 @@ async function ensureApiServer() {
 }
 
 async function ensureWebServer() {
+  if (!existsSync(resolve(flutterWebDir, 'index.html'))) {
+    throw new Error(
+      `Flutter Web build output is missing at ${flutterWebDir}. ` +
+        'Run without SKIP_FLUTTER_BUILD=1 or run flutter build web --debug first.',
+    );
+  }
   if (await fetchOk(webUrl)) {
     log(`Flutter Web static server already ready: ${webUrl}`);
     return;
@@ -141,18 +152,45 @@ function createFixtureZip() {
   return zipPath;
 }
 
+function findChromiumExecutable() {
+  if (process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE) {
+    return process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE;
+  }
+  const localAppData = process.env.LOCALAPPDATA;
+  if (!localAppData) return null;
+  const browsersDir = resolve(localAppData, 'ms-playwright');
+  if (!existsSync(browsersDir)) return null;
+  const chromiumDirs = readdirSync(browsersDir)
+    .filter((name) => name.startsWith('chromium-'))
+    .sort()
+    .reverse();
+  for (const dir of chromiumDirs) {
+    for (const platformDir of ['chrome-win64', 'chrome-win']) {
+      const exe = resolve(browsersDir, dir, platformDir, 'chrome.exe');
+      if (existsSync(exe)) return exe;
+    }
+  }
+  return null;
+}
+
 async function enableFlutterSemantics(page) {
-  await page.waitForSelector('[aria-label="Enable accessibility"]', {
-    state: 'attached',
-    timeout: 60000,
-  });
-  await page.evaluate(() =>
-    document.querySelector('[aria-label="Enable accessibility"]')?.click(),
-  );
+  log('waiting for Flutter semantics');
+  const existingButtons = await page.locator('flt-semantics[role="button"]').count();
+  if (existingButtons === 0) {
+    await page.waitForSelector('[aria-label="Enable accessibility"]', {
+      state: 'attached',
+      timeout: 60000,
+    });
+    log('enabling Flutter accessibility semantics');
+    await page.evaluate(() =>
+      document.querySelector('[aria-label="Enable accessibility"]')?.click(),
+    );
+  }
   await page.waitForSelector('flt-semantics[role="button"]', {
     state: 'attached',
     timeout: 60000,
   });
+  log('Flutter semantics ready');
 }
 
 async function buttonLabels(page) {
@@ -162,6 +200,24 @@ async function buttonLabels(page) {
 }
 
 async function clickButton(page, name) {
+  const exact = page
+    .locator('flt-semantics[role="button"]')
+    .filter({ hasText: new RegExp(`^${escapeRegExp(name)}$`) })
+    .first();
+  if ((await exact.count()) > 0) {
+    await exact.click({ timeout: 10000 });
+    return;
+  }
+
+  const partial = page
+    .locator('flt-semantics[role="button"]')
+    .filter({ hasText: name })
+    .first();
+  if ((await partial.count()) > 0) {
+    await partial.click({ timeout: 10000 });
+    return;
+  }
+
   const box = await page.locator('flt-semantics[role="button"]').evaluateAll(
     (nodes, buttonName) => {
       const node =
@@ -179,9 +235,14 @@ async function clickButton(page, name) {
     name,
   );
   if (!box) {
-    throw new Error(`button not found: ${name}`);
+    const labels = await buttonLabels(page);
+    throw new Error(`button not found: ${name}; found: ${labels.join(', ')}`);
   }
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 async function fillSemanticInput(page, index, value) {
@@ -197,11 +258,13 @@ async function fillSemanticInput(page, index, value) {
   await page.keyboard.type(value);
 }
 
-async function expectJsonResponse(page, path, trigger) {
+async function expectJsonResponse(page, path, trigger, method) {
   const responsePromise = page.waitForResponse(
     (response) =>
       response.url().includes(path) &&
-      response.request().method() !== 'OPTIONS',
+      (method
+        ? response.request().method() === method
+        : response.request().method() !== 'OPTIONS'),
     { timeout: 45000 },
   );
   await trigger();
@@ -216,12 +279,23 @@ async function expectJsonResponse(page, path, trigger) {
 
 async function runBrowserTest() {
   const fixtureZip = createFixtureZip();
-  const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    acceptDownloads: true,
-    viewport: { width: 1440, height: 900 },
-  });
-  const page = await context.newPage();
+  const chromiumExecutable = findChromiumExecutable();
+  if (chromiumExecutable) {
+    log(`using Chromium executable: ${chromiumExecutable}`);
+  }
+  let browser;
+  let context;
+  try {
+    browser = await chromium.launch({
+      headless: true,
+      args: ['--headless=new'],
+      ...(chromiumExecutable ? { executablePath: chromiumExecutable } : {}),
+    });
+    context = await browser.newContext({
+      acceptDownloads: true,
+      viewport: { width: 1440, height: 900 },
+    });
+    const page = await context.newPage();
   page.on('pageerror', (error) => {
     throw error;
   });
@@ -236,12 +310,14 @@ async function runBrowserTest() {
     }
   });
 
-  await page.goto(webUrl, { waitUntil: 'networkidle', timeout: 60000 });
+  await page.goto(webUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
   await enableFlutterSemantics(page);
 
+  log('reading semantic button labels');
   const labels = await buttonLabels(page);
+  log(`semantic buttons: ${labels.join(' | ')}`);
   for (const expected of ['注册', '登录', '刷新', '套餐', '选择 ZIP', '开始转换', '充值']) {
-    if (!labels.includes(expected)) {
+    if (!labels.some((label) => label.includes(expected))) {
       throw new Error(`missing semantic button ${expected}; found: ${labels.join(', ')}`);
     }
   }
@@ -329,6 +405,7 @@ async function runBrowserTest() {
   await clickButton(page, '充值');
   const recharge = await expectJsonResponse(page, '/v1/recharges', () =>
     clickButton(page, '3 次'),
+    'POST',
   );
   if (recharge.status !== 'paid_mock' || recharge.amount_cents !== 300) {
     throw new Error(`unexpected recharge response: ${JSON.stringify(recharge)}`);
@@ -368,6 +445,11 @@ async function runBrowserTest() {
 
   log('select paper3 ZIP');
   await clickButton(page, '转换');
+  await page.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+      .map((node) => node.textContent?.trim() ?? '');
+    return buttons.some((text) => text === '选择 ZIP');
+  }, undefined, { timeout: 30000 });
   await clickButton(page, '选择 ZIP');
   await page.setInputFiles('#zip-file-input', fixtureZip);
   await page.waitForTimeout(1000);
@@ -438,11 +520,17 @@ async function runBrowserTest() {
   const screenshotPath = resolve(targetDir, 'commercial-web-buttons.png');
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await context.close();
+  context = null;
   await browser.close();
+  browser = null;
 
   log(`PASS register/login/usage/plans/recharge/account-records/convert/download`);
   log(`screenshot: ${screenshotPath}`);
   log(`download: ${docxPath} (${docx.length} bytes)`);
+  } finally {
+    await context?.close().catch(() => {});
+    await browser?.close().catch(() => {});
+  }
 }
 
 async function main() {
@@ -456,6 +544,7 @@ async function main() {
 
 main()
   .catch((error) => {
+    log(`FAIL ${error.stack ?? error}`);
     console.error(error);
     process.exitCode = 1;
   })

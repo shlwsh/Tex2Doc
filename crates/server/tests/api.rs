@@ -271,6 +271,90 @@ async fn p6_commercial_user_endpoints_require_bearer_token() {
 }
 
 #[tokio::test]
+async fn p8_recharge_count_entitlement_is_consumed_before_preview_quota() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+
+    let recharge: serde_json::Value = client
+        .post(format!("http://{addr}/v1/recharges"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "recharge_type": "count",
+            "package_id": "count_3",
+            "quantity": 3
+        }))
+        .send()
+        .await
+        .expect("send recharge")
+        .json()
+        .await
+        .expect("recharge json");
+    assert_eq!(recharge["status"], "paid_mock");
+    assert_eq!(recharge["quantity"], 3);
+
+    let usage_after_recharge: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage after recharge")
+        .json()
+        .await
+        .expect("usage after recharge json");
+    assert_eq!(usage_after_recharge["plan_id"], "count");
+    assert_eq!(usage_after_recharge["count_balance"], 3);
+    assert_eq!(usage_after_recharge["cloud_conversions_used"], 0);
+
+    let upload_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/uploads"))
+        .bearer_auth(&token)
+        .multipart(Form::new().part(
+            "file",
+            Part::bytes(minimal_project_zip()).file_name("demo.zip"),
+        ))
+        .send()
+        .await
+        .expect("send upload")
+        .json()
+        .await
+        .expect("upload json");
+    let upload_id = upload_resp["upload_id"].as_str().unwrap().to_string();
+
+    let conversion: serde_json::Value = client
+        .post(format!("http://{addr}/v1/conversions"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "upload_id": upload_id,
+            "main_tex": "minimal.tex",
+            "profile": "generic",
+            "quality": "standard"
+        }))
+        .send()
+        .await
+        .expect("send conversion")
+        .json()
+        .await
+        .expect("conversion json");
+    assert!(conversion["job_id"].as_str().unwrap().starts_with("conv_"));
+
+    let usage_after_conversion: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage after conversion")
+        .json()
+        .await
+        .expect("usage after conversion json");
+    assert_eq!(usage_after_conversion["plan_id"], "count");
+    assert_eq!(usage_after_conversion["count_balance"], 2);
+    assert_eq!(usage_after_conversion["cloud_conversions_used"], 0);
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p7_cloud_worker_converts_uploaded_zip() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();

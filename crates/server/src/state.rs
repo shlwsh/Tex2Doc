@@ -22,6 +22,7 @@ struct ServerStateInner {
     uploads: RwLock<HashMap<String, UploadRecord>>,
     jobs: RwLock<HashMap<String, ConversionJobRecord>>,
     recharges: RwLock<HashMap<String, Vec<RechargeRecord>>>,
+    entitlements: RwLock<HashMap<String, EntitlementRecord>>,
     usage: RwLock<HashMap<String, u64>>,
     seq: AtomicU64,
 }
@@ -99,6 +100,15 @@ pub struct RechargeRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct EntitlementRecord {
+    pub user_id: String,
+    pub count_balance: u64,
+    pub valid_until: Option<String>,
+    pub source_order_id: Option<String>,
+    pub updated_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConversionReportRecord {
     pub job_id: String,
@@ -123,6 +133,7 @@ impl ServerState {
                 uploads: RwLock::new(HashMap::new()),
                 jobs: RwLock::new(HashMap::new()),
                 recharges: RwLock::new(HashMap::new()),
+                entitlements: RwLock::new(HashMap::new()),
                 usage: RwLock::new(HashMap::new()),
                 seq: AtomicU64::new(1),
             }),
@@ -216,7 +227,43 @@ impl ServerState {
             .unwrap_or_default()
     }
 
+    pub async fn entitlement(&self, user_id: &str) -> EntitlementRecord {
+        self.inner
+            .entitlements
+            .read()
+            .await
+            .get(user_id)
+            .cloned()
+            .unwrap_or_else(|| EntitlementRecord {
+                user_id: user_id.to_string(),
+                updated_at: now_timestamp(),
+                ..EntitlementRecord::default()
+            })
+    }
+
     pub async fn try_consume_cloud_conversion(&self, user_id: &str) -> Result<u64, u64> {
+        {
+            let mut entitlements = self.inner.entitlements.write().await;
+            if let Some(entitlement) = entitlements.get_mut(user_id) {
+                if entitlement
+                    .valid_until
+                    .as_deref()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .is_some_and(|valid_until| valid_until >= now_secs())
+                {
+                    entitlement.updated_at = now_timestamp();
+                    let used = self.cloud_conversions_used(user_id).await;
+                    return Ok(used);
+                }
+                if entitlement.count_balance > 0 {
+                    entitlement.count_balance -= 1;
+                    entitlement.updated_at = now_timestamp();
+                    let used = self.cloud_conversions_used(user_id).await;
+                    return Ok(used);
+                }
+            }
+        }
+
         let mut usage = self.inner.usage.write().await;
         let used = usage.get(user_id).copied().unwrap_or_default();
         if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
@@ -256,6 +303,7 @@ impl ServerState {
             .entry(user_id)
             .or_default()
             .push(record.clone());
+        self.apply_recharge_entitlement(&record).await;
         record
     }
 
@@ -317,12 +365,45 @@ impl ServerState {
         let next = self.inner.seq.fetch_add(1, Ordering::Relaxed);
         format!("{prefix}_{next:016x}")
     }
+
+    async fn apply_recharge_entitlement(&self, record: &RechargeRecord) {
+        let mut entitlements = self.inner.entitlements.write().await;
+        let entitlement = entitlements
+            .entry(record.user_id.clone())
+            .or_insert_with(|| EntitlementRecord {
+                user_id: record.user_id.clone(),
+                updated_at: now_timestamp(),
+                ..EntitlementRecord::default()
+            });
+        match record.recharge_type.as_str() {
+            "count" => {
+                entitlement.count_balance =
+                    entitlement.count_balance.saturating_add(record.quantity);
+            }
+            "date" => {
+                let current_until = entitlement
+                    .valid_until
+                    .as_deref()
+                    .and_then(|value| value.parse::<u64>().ok())
+                    .unwrap_or_default();
+                let base = current_until.max(now_secs());
+                let next_until = base.saturating_add(record.quantity.saturating_mul(86_400));
+                entitlement.valid_until = Some(next_until.to_string());
+            }
+            _ => {}
+        }
+        entitlement.source_order_id = Some(record.recharge_id.clone());
+        entitlement.updated_at = now_timestamp();
+    }
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
 pub fn now_timestamp() -> String {
-    let secs = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    format!("{secs}")
+    now_secs().to_string()
 }

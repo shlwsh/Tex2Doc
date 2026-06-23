@@ -178,10 +178,27 @@ async fn usage(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_session(&headers)?;
     let used = state.cloud_conversions_used(&session.user_id).await;
+    let entitlement = state.entitlement(&session.user_id).await;
+    let date_valid = entitlement
+        .valid_until
+        .as_deref()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|valid_until| {
+            valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
+        });
     Ok(Json(json!({
-        "plan_id": "preview",
+        "plan_id": if date_valid {
+            "date"
+        } else if entitlement.count_balance > 0 {
+            "count"
+        } else {
+            "preview"
+        },
         "cloud_conversions_used": used,
         "cloud_conversions_limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
+        "count_balance": entitlement.count_balance,
+        "date_valid_until": entitlement.valid_until,
+        "entitlement_source_order_id": entitlement.source_order_id,
         "storage_bytes_used": 0,
         "storage_bytes_limit": 1_073_741_824_u64,
         "period_start": "2026-06-01T00:00:00Z",
@@ -353,7 +370,7 @@ async fn create_conversion(
         .await
         .map_err(|used| {
             ApiError::PaymentRequired(format!(
-                "preview cloud conversion quota exceeded: used={used}, limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
+                "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
             ))
         })?;
     let job = state

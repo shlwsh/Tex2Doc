@@ -743,6 +743,7 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
           'used': usage.cloudConversionsUsed,
           'limit': usage.cloudConversionsLimit,
           'remaining': usage.cloudConversionsRemaining,
+          'entitlement': _formatEntitlement(strings, usage),
         });
       });
     });
@@ -840,6 +841,20 @@ class _CommercialApiPanelState extends State<_CommercialApiPanel> {
       ),
     );
   }
+}
+
+String _formatEntitlement(AppStrings strings, UsageSummary usage) {
+  final parts = <String>[];
+  if (usage.countBalance > 0) {
+    parts.add(
+      strings.t('metrics.countBalance').fill({'count': usage.countBalance}),
+    );
+  }
+  final validUntil = usage.dateValidUntil;
+  if (validUntil != null && validUntil.isNotEmpty) {
+    parts.add(strings.t('metrics.dateValidUntil').fill({'time': validUntil}));
+  }
+  return parts.isEmpty ? strings.t('metrics.previewQuota') : parts.join(', ');
 }
 
 class _AccountOverviewPanel extends StatefulWidget {
@@ -947,6 +962,8 @@ class _AccountOverviewPanelState extends State<_AccountOverviewPanel> {
                     '${strings.t('account.plan')}: ${_profile!.planId}',
                   if (_usage != null)
                     '${strings.t('metrics.quota')}: ${_usage!.cloudConversionsUsed}/${_usage!.cloudConversionsLimit}',
+                  if (_usage != null)
+                    '${strings.t('metrics.entitlement')}: ${_formatEntitlement(strings, _usage!)}',
                 ],
               ),
             if (_status != null) ...[
