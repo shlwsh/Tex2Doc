@@ -106,30 +106,24 @@ class _AuthState {
 
 // ─── Workspace sections ────────────────────────────────────────────────────────
 
-enum _NavSection {
-  account,
-  recharge,
-  convert,
-  convertRecords,
-  rechargeRecords,
-}
+enum _NavSection { account, recharge, convert, convertRecords, rechargeRecords }
 
 extension _NavSectionMeta on _NavSection {
   IconData get icon => switch (this) {
-        _NavSection.account => Icons.person_outline,
-        _NavSection.recharge => Icons.payments_outlined,
-        _NavSection.convert => Icons.sync_alt,
-        _NavSection.convertRecords => Icons.history,
-        _NavSection.rechargeRecords => Icons.receipt_long,
-      };
+    _NavSection.account => Icons.person_outline,
+    _NavSection.recharge => Icons.payments_outlined,
+    _NavSection.convert => Icons.sync_alt,
+    _NavSection.convertRecords => Icons.history,
+    _NavSection.rechargeRecords => Icons.receipt_long,
+  };
 
   String label(AppStrings s) => switch (this) {
-        _NavSection.account => s.t('nav.account'),
-        _NavSection.recharge => s.t('nav.recharge'),
-        _NavSection.convert => s.t('nav.convert'),
-        _NavSection.convertRecords => s.t('nav.convertRecords'),
-        _NavSection.rechargeRecords => s.t('nav.rechargeRecords'),
-      };
+    _NavSection.account => s.t('nav.account'),
+    _NavSection.recharge => s.t('nav.recharge'),
+    _NavSection.convert => s.t('nav.convert'),
+    _NavSection.convertRecords => s.t('nav.convertRecords'),
+    _NavSection.rechargeRecords => s.t('nav.rechargeRecords'),
+  };
 }
 
 // ─── Workspace shell ──────────────────────────────────────────────────────────
@@ -191,18 +185,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
     // Gate: show auth window when not signed in
     if (_auth == null) {
-      return AuthWindow(
-        apiBaseUrl: _apiBaseUrl,
-        onSignedIn: _handleSignedIn,
-      );
+      return AuthWindow(apiBaseUrl: _apiBaseUrl, onSignedIn: _handleSignedIn);
     }
 
     return Scaffold(
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) {
-            final compact =
-                constraints.maxWidth < AppBreakpoints.tablet;
+            final compact = constraints.maxWidth < AppBreakpoints.tablet;
             final content = _NavContent(
               selectedSection: _selectedSection,
               compact: compact,
@@ -312,8 +302,7 @@ class _Sidebar extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
-          Text(strings.t('app.subtitle'),
-              style: theme.textTheme.bodySmall),
+          Text(strings.t('app.subtitle'), style: theme.textTheme.bodySmall),
           const SizedBox(height: AppSpacing.xl),
           for (final section in _NavSection.values)
             _NavItem(
@@ -449,10 +438,7 @@ class _TopBar extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                strings.t('app.title'),
-                style: theme.textTheme.titleMedium,
-              ),
+              Text(strings.t('app.title'), style: theme.textTheme.titleMedium),
               Text(
                 '${strings.t('topbar.platform')}: $platform',
                 style: theme.textTheme.bodySmall,
@@ -545,7 +531,9 @@ class _AccountAvatarButton extends StatelessWidget {
 
     return PopupMenuButton<String>(
       offset: const Offset(0, 40),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
         child: Row(
@@ -560,11 +548,7 @@ class _AccountAvatarButton extends StatelessWidget {
               ),
             ),
             const SizedBox(width: AppSpacing.xs),
-            Icon(
-              Icons.arrow_drop_down,
-              color: theme.hintColor,
-              size: 20,
-            ),
+            Icon(Icons.arrow_drop_down, color: theme.hintColor, size: 20),
           ],
         ),
       ),
@@ -574,10 +558,7 @@ class _AccountAvatarButton extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                profile.email,
-                style: theme.textTheme.titleSmall,
-              ),
+              Text(profile.email, style: theme.textTheme.titleSmall),
               Text(
                 '${strings.t('account.currentPlan')}: ${profile.planId}',
                 style: theme.textTheme.bodySmall?.copyWith(
@@ -670,7 +651,9 @@ class _ProfileDialog extends StatelessWidget {
         : '?';
 
     return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
       title: Text(strings.t('account.profileTitle')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -685,7 +668,10 @@ class _ProfileDialog extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           _InfoRow(label: strings.t('account.email'), value: profile.email),
-          _InfoRow(label: strings.t('account.currentPlan'), value: profile.planId),
+          _InfoRow(
+            label: strings.t('account.currentPlan'),
+            value: profile.planId,
+          ),
           if (profile.displayName != null && profile.displayName!.isNotEmpty)
             _InfoRow(
               label: strings.t('account.displayName'),
@@ -800,7 +786,9 @@ class _ChangePasswordDialogState extends State<_ChangePasswordDialog> {
     final strings = widget.strings;
 
     return AlertDialog(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.lg)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+      ),
       title: Text(strings.t('account.changePasswordTitle')),
       content: Column(
         mainAxisSize: MainAxisSize.min,
@@ -913,34 +901,25 @@ class _NavContent extends StatelessWidget {
   Widget build(BuildContext context) {
     final body = switch (selectedSection) {
       _NavSection.account => <Widget>[
-          _AccountPanel(
-            apiBaseUrl: apiBaseUrl,
-            accessToken: accessToken,
-            profile: profile,
-            onSignedOut: onSignedOut,
-          ),
-        ],
+        _AccountPanel(
+          apiBaseUrl: apiBaseUrl,
+          accessToken: accessToken,
+          profile: profile,
+          onSignedOut: onSignedOut,
+        ),
+      ],
       _NavSection.recharge => <Widget>[
-          _RechargePanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
-        ],
+        _RechargePanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
       _NavSection.convert => <Widget>[
-          _ConvertPanel(
-            apiBaseUrl: apiBaseUrl,
-            accessToken: accessToken,
-          ),
-        ],
+        _ConvertPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
       _NavSection.convertRecords => <Widget>[
-          ConvertRecordsPanel(
-            apiBaseUrl: apiBaseUrl,
-            accessToken: accessToken,
-          ),
-        ],
+        ConvertRecordsPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
       _NavSection.rechargeRecords => <Widget>[
-          RechargeRecordsPanel(
-            apiBaseUrl: apiBaseUrl,
-            accessToken: accessToken,
-          ),
-        ],
+        RechargeRecordsPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
     };
 
     return PageContainer(
@@ -980,7 +959,10 @@ class _CompactSectionTabs extends StatelessWidget {
           ButtonSegment<_NavSection>(
             value: section,
             icon: Icon(section.icon, size: 16),
-            label: Text(section.label(strings), style: const TextStyle(fontSize: 11)),
+            label: Text(
+              section.label(strings),
+              style: const TextStyle(fontSize: 11),
+            ),
           ),
       ],
       selected: {selectedSection},
@@ -1053,7 +1035,9 @@ class _AccountPanelState extends State<_AccountPanel> {
                 children: [
                   Expanded(child: _MetricsRow(usage: _usage)),
                   const SizedBox(width: AppSpacing.lg),
-                  Expanded(child: _AccountCard(profile: _profile ?? widget.profile)),
+                  Expanded(
+                    child: _AccountCard(profile: _profile ?? widget.profile),
+                  ),
                 ],
               );
             }
@@ -1152,9 +1136,7 @@ class _MetricsRow extends StatelessWidget {
             ),
             MetricTile(
               label: strings.t('metrics.countBalance'),
-              value: usage != null
-                  ? '${usage!.countBalance}'
-                  : '-',
+              value: usage != null ? '${usage!.countBalance}' : '-',
               icon: Icons.inventory_2_outlined,
             ),
             MetricTile(
@@ -1182,7 +1164,9 @@ class _RechargePanel extends StatefulWidget {
 }
 
 class _RechargePanelState extends State<_RechargePanel> {
-  RechargeOptions? _options;
+  final TextEditingController _codeController = TextEditingController();
+  RedeemCodeOptions? _redeemOptions;
+  List<RedeemCodeRecord> _redeemRecords = const [];
   String? _status;
   bool _busy = false;
 
@@ -1201,14 +1185,21 @@ class _RechargePanelState extends State<_RechargePanel> {
     }
   }
 
+  @override
+  void dispose() {
+    _codeController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadRecords() async {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
-      final options = await client.rechargeOptions();
-      await client.recharges(widget.accessToken); // records shown on dedicated page
+      final options = await client.redeemCodeOptions(widget.accessToken);
+      final records = await client.redeemCodeRecords(widget.accessToken);
       if (!mounted) return;
       setState(() {
-        _options = options;
+        _redeemOptions = options;
+        _redeemRecords = records;
       });
     } on Object catch (e) {
       if (!mounted) return;
@@ -1216,8 +1207,13 @@ class _RechargePanelState extends State<_RechargePanel> {
     }
   }
 
-  Future<void> _recharge(String rechargeType, RechargePackage package) async {
+  Future<void> _redeem() async {
     final strings = AppStrings.of(context);
+    final code = _codeController.text.trim();
+    if (code.isEmpty) {
+      setState(() => _status = strings.t('recharge.codeRequired'));
+      return;
+    }
     if (_busy) return;
     setState(() {
       _busy = true;
@@ -1225,18 +1221,19 @@ class _RechargePanelState extends State<_RechargePanel> {
     });
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
-      final record = await client.createRecharge(
+      final result = await client.redeemCode(
         accessToken: widget.accessToken,
-        rechargeType: rechargeType,
-        packageId: package.id,
-        quantity: rechargeType == 'count' ? package.quantity : null,
+        code: code,
       );
-      // ignore: unnecessary_local_variable
-      await client.recharges(widget.accessToken); // refresh from dedicated page
+      final records = await client.redeemCodeRecords(widget.accessToken);
+      if (!mounted) return;
       setState(() {
-        _status = strings.t('recharge.mockPaid').fill({
-          'amount': (record.amountCents / 100).toStringAsFixed(0),
-          'provider': record.provider,
+        _codeController.clear();
+        _redeemRecords = records;
+        _status = strings.t('recharge.redeemed').fill({
+          'package': result.packageName,
+          'quantity': result.quantity,
+          'balance': result.countBalance,
         });
       });
     } on Object catch (e) {
@@ -1251,29 +1248,7 @@ class _RechargePanelState extends State<_RechargePanel> {
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
     final theme = Theme.of(context);
-    final fallbackOptions = RechargeOptions(
-      currency: 'CNY',
-      provider: 'mock-pay',
-      countPackages: [
-        RechargePackage(
-            id: 'count_3', name: '3 次', quantity: 3, amountCents: 300),
-        RechargePackage(
-            id: 'count_10', name: '10 次', quantity: 10, amountCents: 1000),
-        RechargePackage(
-            id: 'count_30', name: '30 次', quantity: 30, amountCents: 3000),
-      ],
-      datePackages: [
-        RechargePackage(
-            id: 'day', name: '日卡', quantity: 1, amountCents: 500),
-        RechargePackage(
-            id: 'week', name: '周卡', quantity: 7, amountCents: 1400),
-        RechargePackage(
-            id: 'month', name: '月卡', quantity: 30, amountCents: 3000),
-        RechargePackage(
-            id: 'year', name: '年卡', quantity: 365, amountCents: 12000),
-      ],
-    );
-    final options = _options ?? fallbackOptions;
+    final options = _redeemOptions;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1292,70 +1267,63 @@ class _RechargePanelState extends State<_RechargePanel> {
             ),
             const SizedBox(width: AppSpacing.sm),
             StatusPill(
-              icon: Icons.payments_outlined,
-              label: strings.t('recharge.mockProvider'),
+              icon: Icons.confirmation_number_outlined,
+              label: strings.t('recharge.redeemProvider'),
               color: theme.colorScheme.primary,
             ),
           ],
         ),
         const SizedBox(height: AppSpacing.lg),
+        TextField(
+          controller: _codeController,
+          enabled: !_busy,
+          textCapitalization: TextCapitalization.characters,
+          decoration: InputDecoration(
+            labelText: strings.t('recharge.codeLabel'),
+            hintText: options?.codeFormatHint ?? strings.t('recharge.codeHint'),
+            prefixIcon: const Icon(Icons.confirmation_number_outlined),
+            suffixIcon: IconButton(
+              tooltip: strings.t('recharge.submitCode'),
+              onPressed: _busy ? null : _redeem,
+              icon: const Icon(Icons.check_circle_outline),
+            ),
+          ),
+          onSubmitted: (_) => _busy ? null : _redeem(),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        FilledButton.icon(
+          onPressed: _busy ? null : _redeem,
+          icon: const Icon(Icons.redeem),
+          label: Text(strings.t('recharge.submitCode')),
+        ),
+        const SizedBox(height: AppSpacing.lg),
         Text(
-          strings.t('recharge.countTitle'),
+          strings.t('recharge.packageTitle'),
           style: theme.textTheme.titleSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        _RechargeButtons(
-          enabled: !_busy,
-          currency: options.currency,
-          packages: options.countPackages,
-          onRecharge: (package) => _recharge('count', package),
+        _KeyValueList(
+          entries: (options?.packages ?? const [])
+              .map((package) => package.label)
+              .toList(growable: false),
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          strings.t('recharge.dateTitle'),
+          strings.t('recharge.redeemRecords'),
           style: theme.textTheme.titleSmall,
         ),
         const SizedBox(height: AppSpacing.sm),
-        _RechargeButtons(
-          enabled: !_busy,
-          currency: options.currency,
-          packages: options.datePackages,
-          onRecharge: (package) => _recharge('date', package),
+        _KeyValueList(
+          entries: _redeemRecords.isEmpty
+              ? [strings.t('empty.noData')]
+              : _redeemRecords
+                    .map((record) => record.label)
+                    .toList(growable: false),
         ),
         if (_status != null) ...[
           const SizedBox(height: AppSpacing.md),
           Text(_status!, style: theme.textTheme.bodySmall),
         ],
-      ],
-    );
-  }
-}
-
-class _RechargeButtons extends StatelessWidget {
-  final bool enabled;
-  final String currency;
-  final List<RechargePackage> packages;
-  final ValueChanged<RechargePackage> onRecharge;
-
-  const _RechargeButtons({
-    required this.enabled,
-    required this.currency,
-    required this.packages,
-    required this.onRecharge,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Wrap(
-      spacing: AppSpacing.sm,
-      runSpacing: AppSpacing.sm,
-      children: [
-        for (final package in packages)
-          FilledButton.tonalIcon(
-            onPressed: enabled ? () => onRecharge(package) : null,
-            icon: const Icon(Icons.add_card),
-            label: Text(package.priceLabel(currency)),
-          ),
       ],
     );
   }
@@ -1399,8 +1367,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
     final now = DateTime.now();
     final stamp =
         '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}:${now.second.toString().padLeft(2, '0')}';
-    setState(
-        () => _logs = ['$stamp $message', ..._logs].take(12).toList());
+    setState(() => _logs = ['$stamp $message', ..._logs].take(12).toList());
   }
 
   Future<void> _pickFile() async {
@@ -1433,9 +1400,12 @@ class _ConvertPanelState extends State<_ConvertPanel> {
       _statusText = null;
       _errorText = null;
     });
-    _addLog(strings
-        .t('convert.logFileSelected')
-        .fill({'file': fileName, 'size': sizeMB.toStringAsFixed(2)}));
+    _addLog(
+      strings.t('convert.logFileSelected').fill({
+        'file': fileName,
+        'size': sizeMB.toStringAsFixed(2),
+      }),
+    );
   }
 
   Future<void> _startConvert() async {
@@ -1489,9 +1459,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
       bytes: bytes,
       fileName: _zipFileName ?? 'project.zip',
     );
-    _addLog(strings
-        .t('convert.logUploaded')
-        .fill({'upload': upload.uploadId}));
+    _addLog(strings.t('convert.logUploaded').fill({'upload': upload.uploadId}));
     final created = await client.createConversion(
       accessToken: widget.accessToken,
       uploadId: upload.uploadId,
@@ -1499,8 +1467,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
       profile: 'jos',
       quality: 'high',
     );
-    _addLog(
-        strings.t('convert.logJobCreated').fill({'job': created.jobId}));
+    _addLog(strings.t('convert.logJobCreated').fill({'job': created.jobId}));
     var job = created;
     for (var attempt = 0; attempt < 120; attempt += 1) {
       if (job.status == ConversionStatus.completed) {
@@ -1521,7 +1488,8 @@ class _ConvertPanelState extends State<_ConvertPanel> {
         jobId: job.jobId,
       );
       _addLog(
-          strings.t('convert.logPolling').fill({'status': job.status.name}));
+        strings.t('convert.logPolling').fill({'status': job.status.name}),
+      );
     }
     throw Exception('cloud conversion timeout: ${job.jobId}');
   }
@@ -1529,8 +1497,7 @@ class _ConvertPanelState extends State<_ConvertPanel> {
   void _downloadDocx() {
     final docx = _docxBytes;
     if (docx == null) return;
-    final base =
-        _zipFileName?.replaceAll(RegExp(r'\.[^.]+$'), '') ?? 'output';
+    final base = _zipFileName?.replaceAll(RegExp(r'\.[^.]+$'), '') ?? 'output';
     downloadBlob(docx, '$base.docx');
   }
 
@@ -1576,18 +1543,16 @@ class _ConvertPanelState extends State<_ConvertPanel> {
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
             OutlinedButton.icon(
-              onPressed:
-                  _state == _ConvertState.converting ? null : _pickFile,
+              onPressed: _state == _ConvertState.converting ? null : _pickFile,
               icon: const Icon(Icons.upload_file),
               label: Text(strings.t('common.upload')),
             ),
             StatusPill(
-              icon:
-                  _zipFileName == null ? Icons.inbox_outlined : Icons.folder_zip,
+              icon: _zipFileName == null
+                  ? Icons.inbox_outlined
+                  : Icons.folder_zip,
               label: selectedFile,
-              color: _zipFileName == null
-                  ? tokens.disabledText
-                  : tokens.info,
+              color: _zipFileName == null ? tokens.disabledText : tokens.info,
             ),
           ],
         ),
@@ -1622,24 +1587,24 @@ class _ConvertPanelState extends State<_ConvertPanel> {
           duration: AppMotion.normal,
           child: switch (_state) {
             _ConvertState.converting => LoadingState(
-                key: const ValueKey('convert-loading'),
-                label: strings.t('convert.converting'),
-              ),
+              key: const ValueKey('convert-loading'),
+              label: strings.t('convert.converting'),
+            ),
             _ConvertState.error => ErrorState(
-                key: ValueKey(_errorText),
-                message: _errorText ?? strings.t('common.error'),
-              ),
+              key: ValueKey(_errorText),
+              message: _errorText ?? strings.t('common.error'),
+            ),
             _ConvertState.success => _ResultCard(
-                key: const ValueKey('convert-success'),
-                status: _statusText ?? '',
-                docxBytes: _docxBytes?.length ?? 0,
-                elapsedMs: _elapsedMs ?? 0,
-                onDownload: _downloadDocx,
-              ),
+              key: const ValueKey('convert-success'),
+              status: _statusText ?? '',
+              docxBytes: _docxBytes?.length ?? 0,
+              elapsedMs: _elapsedMs ?? 0,
+              onDownload: _downloadDocx,
+            ),
             _ConvertState.idle => EmptyState(
-                key: const ValueKey('convert-empty'),
-                label: strings.t('empty.noData'),
-              ),
+              key: const ValueKey('convert-empty'),
+              label: strings.t('empty.noData'),
+            ),
           },
         ),
         const SizedBox(height: AppSpacing.md),

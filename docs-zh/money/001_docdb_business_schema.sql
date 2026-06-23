@@ -102,6 +102,94 @@ CREATE TABLE IF NOT EXISTS usage_events (
 CREATE INDEX IF NOT EXISTS idx_usage_events_user_period
     ON usage_events(user_id, usage_period_id, event_type);
 
+CREATE TABLE IF NOT EXISTS redeem_packages (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    package_type TEXT NOT NULL CHECK (package_type IN ('count', 'date')),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    suggested_amount_cents INTEGER NOT NULL DEFAULT 0,
+    active BOOLEAN NOT NULL DEFAULT true,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS recharges (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    recharge_type TEXT NOT NULL CHECK (recharge_type IN ('count', 'date')),
+    package_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL CHECK (status IN ('paid', 'paid_mock', 'refunded', 'voided')),
+    provider TEXT NOT NULL,
+    provider_trade_id TEXT NOT NULL UNIQUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_recharges_user_created
+    ON recharges(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS redeem_code_batches (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    batch_no TEXT NOT NULL UNIQUE,
+    package_id TEXT NOT NULL REFERENCES redeem_packages(id),
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    generated_count INTEGER NOT NULL DEFAULT 0,
+    exported_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active'
+        CHECK (status IN ('active', 'paused', 'voided', 'exhausted')),
+    channel TEXT,
+    note TEXT,
+    expires_at TIMESTAMPTZ,
+    created_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS redeem_codes (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    batch_id UUID NOT NULL REFERENCES redeem_code_batches(id) ON DELETE CASCADE,
+    package_id TEXT NOT NULL REFERENCES redeem_packages(id),
+    code_hash TEXT NOT NULL UNIQUE,
+    code_ciphertext BYTEA NOT NULL,
+    code_nonce BYTEA NOT NULL,
+    code_preview TEXT NOT NULL,
+    key_version TEXT NOT NULL DEFAULT 'v1',
+    status TEXT NOT NULL DEFAULT 'unused'
+        CHECK (status IN ('unused', 'redeemed', 'voided', 'expired')),
+    redeemed_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    redeemed_recharge_id UUID REFERENCES recharges(id) ON DELETE SET NULL,
+    redeemed_at TIMESTAMPTZ,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_batch_status
+    ON redeem_codes(batch_id, status);
+
+CREATE INDEX IF NOT EXISTS idx_redeem_codes_redeemed_by
+    ON redeem_codes(redeemed_by, redeemed_at DESC);
+
+CREATE TABLE IF NOT EXISTS redeem_code_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    redeem_code_id UUID REFERENCES redeem_codes(id) ON DELETE SET NULL,
+    user_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'generated', 'exported', 'redeem_success', 'redeem_failed',
+        'voided', 'expired'
+    )),
+    ip_hash TEXT,
+    user_agent TEXT,
+    reason TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 CREATE TABLE IF NOT EXISTS uploads (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
@@ -167,4 +255,17 @@ ON CONFLICT (id) DO UPDATE SET
     monthly_conversions = EXCLUDED.monthly_conversions,
     storage_bytes = EXCLUDED.storage_bytes,
     features = EXCLUDED.features,
+    active = true;
+
+INSERT INTO redeem_packages (id, name, package_type, quantity, currency, suggested_amount_cents)
+VALUES
+    ('count_3', '3 次转换包', 'count', 3, 'CNY', 300),
+    ('count_10', '10 次转换包', 'count', 10, 'CNY', 1000),
+    ('count_30', '30 次转换包', 'count', 30, 'CNY', 3000)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    package_type = EXCLUDED.package_type,
+    quantity = EXCLUDED.quantity,
+    currency = EXCLUDED.currency,
+    suggested_amount_cents = EXCLUDED.suggested_amount_cents,
     active = true;

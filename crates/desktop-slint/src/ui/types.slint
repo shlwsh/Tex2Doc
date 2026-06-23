@@ -19,6 +19,25 @@ export struct JobRow {
     html-report: string,
 }
 
+export struct RechargeRow {
+    id: string,
+    kind: string,
+    package: string,
+    quantity: string,
+    status: string,
+    provider: string,
+    created-at: string,
+}
+
+export struct CloudConversionRow {
+    id: string,
+    main-tex: string,
+    profile: string,
+    status: string,
+    updated-at: string,
+    error: string,
+}
+
 export enum ConversionMode {
     local,
     cloud,

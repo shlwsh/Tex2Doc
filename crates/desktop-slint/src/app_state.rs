@@ -94,6 +94,12 @@ impl AppState {
         self.auth_token.read().ok().and_then(|token| token.clone())
     }
 
+    pub fn set_quota_remaining(&self, quota_remaining: Option<usize>) {
+        if let Ok(mut quota) = self.quota_remaining.write() {
+            *quota = quota_remaining;
+        }
+    }
+
     pub fn refresh_token(&self) -> Option<String> {
         self.refresh_token
             .read()

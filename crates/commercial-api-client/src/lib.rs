@@ -13,6 +13,7 @@ pub use client::{ApiClient, ClientConfig};
 pub use models::{
     AnalysisJob, AnalysisResult, ApiError, AuthResponse, BillingPortalRequest, BillingSession,
     CheckResult, CheckoutRequest, ConversionJob, ConversionReport, CreateConversionRequest,
-    DetailedReport, JobStatus, LoginRequest, PlanSummary, RefreshRequest, RegisterRequest,
-    ReleaseManifest, SubmitRequest, UploadResponse, UsageSummary, UserProfile,
+    DetailedReport, JobStatus, LoginRequest, PlanSummary, RechargeRecord, RedeemCodeOptions,
+    RedeemCodeRecord, RedeemCodeRequest, RedeemCodeResult, RedeemPackageSummary, RefreshRequest,
+    RegisterRequest, ReleaseManifest, SubmitRequest, UploadResponse, UsageSummary, UserProfile,
 };

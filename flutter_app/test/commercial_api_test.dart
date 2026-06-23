@@ -62,6 +62,79 @@ void main() {
     final plans = await client.plans();
     expect(plans.single.label, 'pro: USD 29.00/mo, 1000 conversions');
   });
+
+  test('redeem code endpoints map commercial API responses', () async {
+    final client = CommercialApiClient(
+      'http://localhost:8080/v1/',
+      httpClient: MockClient((request) async {
+        expect(request.headers['authorization'], 'Bearer demo-access');
+        if (request.url.path == '/v1/redeem-codes/options') {
+          return _json({
+            'enabled': true,
+            'provider': 'redeem-code',
+            'code_format_hint': 'T2D-XXXX-XXXX-XXXX-XX',
+            'support_text': 'Enter code',
+            'packages': [
+              {
+                'id': 'count_10',
+                'name': '10 次转换包',
+                'recharge_type': 'count',
+                'quantity': 10,
+              },
+            ],
+          });
+        }
+        if (request.url.path == '/v1/redeem-codes/redeem') {
+          expect(request.method, 'POST');
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          expect(body['code'], 'T2D-DEMO-CODE');
+          return _json({
+            'redeem_id': 'redeem_1',
+            'recharge_id': 'recharge_1',
+            'package_id': 'count_10',
+            'package_name': '10 次转换包',
+            'recharge_type': 'count',
+            'quantity': 10,
+            'count_balance': 12,
+            'date_valid_until': null,
+            'redeemed_at': '2026-06-23T15:01:00Z',
+          });
+        }
+        if (request.url.path == '/v1/redeem-codes/records') {
+          return _json([
+            {
+              'redeem_id': 'redeem_1',
+              'batch_id': 'batch_1',
+              'batch_no': 'RC001',
+              'code_preview': 'T2DDEMO****CODE',
+              'package_id': 'count_10',
+              'package_name': '10 次转换包',
+              'recharge_type': 'count',
+              'quantity': 10,
+              'status': 'redeemed',
+              'redeemed_recharge_id': 'recharge_1',
+              'redeemed_at': '2026-06-23T15:01:00Z',
+            },
+          ]);
+        }
+        return http.Response('not found', 404);
+      }),
+    );
+
+    final options = await client.redeemCodeOptions('demo-access');
+    expect(options.enabled, isTrue);
+    expect(options.packages.single.id, 'count_10');
+
+    final result = await client.redeemCode(
+      accessToken: 'demo-access',
+      code: 'T2D-DEMO-CODE',
+    );
+    expect(result.quantity, 10);
+    expect(result.countBalance, 12);
+
+    final records = await client.redeemCodeRecords('demo-access');
+    expect(records.single.codePreview, 'T2DDEMO****CODE');
+  });
 }
 
 http.Response _json(Object body) {

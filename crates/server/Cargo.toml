@@ -35,6 +35,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 mime         = "0.3"
 async-trait  = "0.1"
 zip          = { workspace = true }
+rand         = "0.8"
+sha2         = "0.10"
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["multipart", "rustls-tls", "json"] }

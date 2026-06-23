@@ -22,6 +22,13 @@ pub enum ServerError {
     #[error("{message}")]
     BadRequest { code: &'static str, message: String },
 
+    #[error("{message}")]
+    Coded {
+        status: StatusCode,
+        code: &'static str,
+        message: String,
+    },
+
     #[error("未认证：{0}")]
     Unauthorized(String),
 
@@ -46,6 +53,7 @@ impl IntoResponse for ServerError {
             ServerError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             ServerError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
             ServerError::BadRequest { code, .. } => (StatusCode::BAD_REQUEST, *code),
+            ServerError::Coded { status, code, .. } => (*status, *code),
             ServerError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
             ServerError::PaymentRequired(_) => (StatusCode::PAYMENT_REQUIRED, "quota_exceeded"),
             ServerError::Core(doc_core::CoreError::Parse(_))

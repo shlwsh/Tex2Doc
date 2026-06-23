@@ -9,7 +9,7 @@ import {
     ListView,
     Switch,
 } from "std-widgets.slint";
-import { PlanEntry, JobRow, ConversionMode } from "types.slint";
+import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode } from "types.slint";
 
 component NavButton inherits Rectangle {
     in property <string> label;
@@ -156,7 +156,10 @@ export component MainWindow inherits Window {
     in-out property <int> quota-total: 0;
     in-out property <string> billing-plan-id: "pro";
     in-out property <string> billing-status: "--";
+    in-out property <string> redeem-code: "";
     in-out property <[PlanEntry]> plan-catalog;
+    in-out property <[RechargeRow]> recharge-records;
+    in-out property <[CloudConversionRow]> cloud-conversion-records;
     in-out property <int> current-plan-index: 0;
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
@@ -308,10 +311,10 @@ export component MainWindow inherits Window {
     in-out property <string> t-account-signed-in-short: "Signed in";
     in-out property <string> t-account-status: "Status";
     in-out property <string> t-recharge-title: "Recharge";
-    in-out property <string> t-recharge-subtitle: "Mock payment packages aligned with the Flutter commercial desktop flow.";
-    in-out property <string> t-recharge-by-count: "Recharge by count";
-    in-out property <string> t-recharge-by-date: "Recharge by date";
-    in-out property <string> t-recharge-mock-pay: "Mock Pay";
+    in-out property <string> t-recharge-subtitle: "Enter a redeem code to add conversion credits immediately.";
+    in-out property <string> t-recharge-by-count: "Redeem code";
+    in-out property <string> t-recharge-by-date: "Redeemable packages";
+    in-out property <string> t-recharge-mock-pay: "Redeem";
     in-out property <string> t-records-conversion-title: "Conversion Records";
     in-out property <string> t-records-conversion-subtitle: "Recent local and cloud conversion jobs.";
     in-out property <string> t-records-recharge-title: "Recharge Records";
@@ -335,6 +338,9 @@ export component MainWindow inherits Window {
     callback show-plans-clicked(string);
     callback checkout-clicked(string, string);
     callback billing-portal-clicked(string);
+    callback redeem-code-clicked(string, string);
+    callback refresh-conversion-records-clicked(string);
+    callback refresh-recharge-records-clicked(string);
     callback change-plan-clicked(string);
     callback check-update-clicked(string, string);
     callback apply-appearance-clicked(string, string);
@@ -631,22 +637,21 @@ export component MainWindow inherits Window {
                                 Text { text: t-recharge-by-count; font-size: 16px; font-weight: 700; color: color-text-primary; }
                                 HorizontalBox {
                                     spacing: 10px;
-                                    Button { text: "100 conversions"; primary: billing-plan-id == "count-100"; clicked => { billing-plan-id = "count-100"; change-plan-clicked("count-100"); toast-message = "Selected 100 conversion package."; toast-level = "info"; toast-visible = true; } }
-                                    Button { text: "500 conversions"; primary: billing-plan-id == "count-500"; clicked => { billing-plan-id = "count-500"; change-plan-clicked("count-500"); toast-message = "Selected 500 conversion package."; toast-level = "info"; toast-visible = true; } }
-                                    Button { text: "2000 conversions"; primary: billing-plan-id == "count-2000"; clicked => { billing-plan-id = "count-2000"; change-plan-clicked("count-2000"); toast-message = "Selected 2000 conversion package."; toast-level = "info"; toast-visible = true; } }
+                                    LineEdit { placeholder-text: "T2D-XXXX-XXXX-XXXX-XX"; text <=> redeem-code; enabled: !is-billing-busy; horizontal-stretch: 1; }
+                                    Button { text: t-recharge-mock-pay; primary: true; enabled: api-base-url != "" && redeem-code != "" && !is-billing-busy; clicked => { is-billing-busy = true; billing-status = "Redeeming code..."; redeem-code-clicked(api-base-url, redeem-code); } }
                                 }
                                 Text { text: t-recharge-by-date; font-size: 16px; font-weight: 700; color: color-text-primary; }
                                 HorizontalBox {
                                     spacing: 10px;
-                                    Button { text: "30 days"; clicked => { billing-plan-id = "date-30"; change-plan-clicked("date-30"); } }
-                                    Button { text: "180 days"; clicked => { billing-plan-id = "date-180"; change-plan-clicked("date-180"); } }
-                                    Button { text: "365 days"; clicked => { billing-plan-id = "date-365"; change-plan-clicked("date-365"); } }
+                                    StatusPill { text: "count_3"; bg: #eff6ff; fg: color-accent; }
+                                    StatusPill { text: "count_10"; bg: #ecfdf5; fg: color-success; }
+                                    StatusPill { text: "count_30"; bg: #fffbeb; fg: color-warning; }
                                 }
                                 HorizontalBox {
                                     spacing: 10px;
                                     Button { text: t-billing-plans; enabled: api-base-url != ""; clicked => { is-billing-busy = true; show-plans-clicked(api-base-url); } }
-                                    Button { text: t-recharge-mock-pay; primary: true; enabled: api-base-url != "" && billing-plan-id != ""; clicked => { is-billing-busy = true; checkout-clicked(api-base-url, billing-plan-id); toast-message = "Mock payment submitted."; toast-level = "success"; toast-visible = true; } }
                                     Button { text: t-billing-portal; enabled: api-base-url != ""; clicked => { is-billing-busy = true; billing-portal-clicked(api-base-url); } }
+                                    Button { text: "Recharge Records"; enabled: is-signed-in && api-base-url != ""; clicked => { selected-page = 4; is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
                                 }
                                 Text { text: billing-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
                             }
@@ -740,9 +745,44 @@ export component MainWindow inherits Window {
                             VerticalBox {
                                 padding: 14px;
                                 spacing: 8px;
-                                if job-history.length == 0: Text { text: recent-jobs; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                                HorizontalBox {
+                                    spacing: 10px;
+                                    Button { text: "Query Cloud Records"; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-conversion-records-clicked(api-base-url); } }
+                                    Text { text: cloud-conversion-records.length > 0 ? "Cloud conversion records" : "Local conversion records"; font-size: 12px; color: color-text-muted; }
+                                }
+                                Rectangle {
+                                    height: 30px;
+                                    background: color-surface-alt;
+                                    HorizontalBox {
+                                        padding: 8px;
+                                        spacing: 10px;
+                                        Text { text: "Status"; width: 96px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Main/Input"; horizontal-stretch: 1; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Profile"; width: 110px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Updated"; width: 138px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Error"; width: 150px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                    }
+                                }
+                                if cloud-conversion-records.length == 0 && job-history.length == 0: Text { text: recent-jobs; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
                                 ListView {
-                                    visible: job-history.length > 0;
+                                    visible: cloud-conversion-records.length > 0;
+                                    height: 390px;
+                                    for row[idx] in cloud-conversion-records: Rectangle {
+                                        min-height: 42px;
+                                        background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
+                                        HorizontalBox {
+                                            padding: 8px;
+                                            spacing: 10px;
+                                            Text { text: row.status; width: 96px; font-size: 11px; color: row.status == "Completed" ? color-success : (row.status == "Failed" ? color-danger : color-accent); overflow: elide; }
+                                            Text { text: row.main-tex; horizontal-stretch: 1; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                            Text { text: row.profile; width: 110px; font-size: 11px; color: color-text-muted; overflow: elide; }
+                                            Text { text: row.updated-at; width: 138px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                            Text { text: row.error; width: 150px; font-size: 10px; color: row.error == "-" ? color-text-muted : color-danger; overflow: elide; }
+                                        }
+                                    }
+                                }
+                                ListView {
+                                    visible: cloud-conversion-records.length == 0 && job-history.length > 0;
                                     height: 390px;
                                     for row[idx] in job-history: Rectangle {
                                         min-height: 46px;
@@ -752,7 +792,9 @@ export component MainWindow inherits Window {
                                             spacing: 10px;
                                             Text { text: row.status; width: 96px; font-size: 11px; color: row.status == "Succeeded" ? color-success : (row.status == "Failed" ? color-danger : color-accent); }
                                             Text { text: row.input; horizontal-stretch: 1; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                            Text { text: row.kind; width: 110px; font-size: 11px; color: color-text-muted; overflow: elide; }
                                             Text { text: row.opened-at; width: 138px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                            Text { text: row.error == "" ? "-" : row.error; width: 150px; font-size: 10px; color: row.error == "" ? color-text-muted : color-danger; overflow: elide; }
                                             Button { text: "Remove"; clicked => { remove-job-clicked(row.id); } }
                                         }
                                     }
@@ -787,9 +829,42 @@ export component MainWindow inherits Window {
                                     StatusPill { text: billing-plan-id; bg: #eff6ff; fg: color-accent; }
                                     StatusPill { text: is-billing-busy ? "processing" : "idle"; bg: #ecfdf5; fg: color-success; }
                                     StatusPill { text: account-tier; bg: #fffbeb; fg: color-warning; }
+                                    Button { text: "Query Records"; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
                                 }
-                                Text { text: billing-status == "--" ? t-records-no-recharge : billing-status; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
-                                Text { text: "Last package: " + billing-plan-id + "\nAccount: " + account-display-name + "\nQuota: " + quota-remaining + " / " + quota-total; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
+                                Rectangle {
+                                    height: 30px;
+                                    background: color-surface-alt;
+                                    HorizontalBox {
+                                        padding: 8px;
+                                        spacing: 10px;
+                                        Text { text: "Type"; width: 90px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Package / Code"; horizontal-stretch: 1; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Qty"; width: 58px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Status"; width: 92px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Provider"; width: 118px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "Created"; width: 138px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                    }
+                                }
+                                if recharge-records.length == 0: Text { text: billing-status == "--" ? t-records-no-recharge : billing-status; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                ListView {
+                                    visible: recharge-records.length > 0;
+                                    height: 390px;
+                                    for row[idx] in recharge-records: Rectangle {
+                                        min-height: 42px;
+                                        background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
+                                        HorizontalBox {
+                                            padding: 8px;
+                                            spacing: 10px;
+                                            Text { text: row.kind; width: 90px; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                            Text { text: row.package; horizontal-stretch: 1; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                            Text { text: row.quantity; width: 58px; font-size: 11px; color: color-text-muted; overflow: elide; }
+                                            Text { text: row.status; width: 92px; font-size: 11px; color: row.status == "paid" || row.status == "redeemed" ? color-success : color-warning; overflow: elide; }
+                                            Text { text: row.provider; width: 118px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                            Text { text: row.created-at; width: 138px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                        }
+                                    }
+                                }
+                                Text { text: "Account: " + account-display-name + " | Quota: " + quota-remaining + " / " + quota-total; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
                                 Button { text: "Go to Recharge"; clicked => { selected-page = 1; } }
                             }
                         }

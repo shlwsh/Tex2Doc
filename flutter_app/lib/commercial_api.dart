@@ -123,6 +123,34 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Future<RedeemCodeOptions> redeemCodeOptions(String accessToken) async {
+    return RedeemCodeOptions.fromJson(
+      await _getJson('redeem-codes/options', accessToken: accessToken)
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<RedeemCodeResult> redeemCode({
+    required String accessToken,
+    required String code,
+  }) async {
+    return RedeemCodeResult.fromJson(
+      await _postJson('redeem-codes/redeem', {
+        'code': code,
+      }, accessToken: accessToken),
+    );
+  }
+
+  Future<List<RedeemCodeRecord>> redeemCodeRecords(String accessToken) async {
+    final value = await _getJson(
+      'redeem-codes/records',
+      accessToken: accessToken,
+    );
+    return (value as List<dynamic>)
+        .map((item) => RedeemCodeRecord.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
   Future<UploadResponse> uploadProjectZip({
     required String accessToken,
     required List<int> bytes,
@@ -469,6 +497,147 @@ class RechargeRecord {
 
   String get label =>
       '$packageId: $currency ${(amountCents / 100).toStringAsFixed(0)}, $status';
+}
+
+class RedeemCodeOptions {
+  final bool enabled;
+  final String provider;
+  final String codeFormatHint;
+  final String supportText;
+  final List<RedeemPackageSummary> packages;
+
+  RedeemCodeOptions({
+    required this.enabled,
+    required this.provider,
+    required this.codeFormatHint,
+    required this.supportText,
+    required this.packages,
+  });
+
+  factory RedeemCodeOptions.fromJson(Map<String, dynamic> json) {
+    return RedeemCodeOptions(
+      enabled: json['enabled'] as bool? ?? false,
+      provider: json['provider'] as String? ?? 'redeem-code',
+      codeFormatHint:
+          json['code_format_hint'] as String? ?? 'T2D-XXXX-XXXX-XXXX-XX',
+      supportText: json['support_text'] as String? ?? '',
+      packages: ((json['packages'] as List<dynamic>?) ?? const [])
+          .map(
+            (item) =>
+                RedeemPackageSummary.fromJson(item as Map<String, dynamic>),
+          )
+          .toList(growable: false),
+    );
+  }
+}
+
+class RedeemPackageSummary {
+  final String id;
+  final String name;
+  final String rechargeType;
+  final int quantity;
+
+  RedeemPackageSummary({
+    required this.id,
+    required this.name,
+    required this.rechargeType,
+    required this.quantity,
+  });
+
+  factory RedeemPackageSummary.fromJson(Map<String, dynamic> json) {
+    return RedeemPackageSummary(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      rechargeType: json['recharge_type'] as String? ?? 'count',
+      quantity: json['quantity'] as int,
+    );
+  }
+
+  String get label => '$name ($quantity conversions)';
+}
+
+class RedeemCodeResult {
+  final String redeemId;
+  final String rechargeId;
+  final String packageId;
+  final String packageName;
+  final String rechargeType;
+  final int quantity;
+  final int countBalance;
+  final String? dateValidUntil;
+  final String redeemedAt;
+
+  RedeemCodeResult({
+    required this.redeemId,
+    required this.rechargeId,
+    required this.packageId,
+    required this.packageName,
+    required this.rechargeType,
+    required this.quantity,
+    required this.countBalance,
+    required this.dateValidUntil,
+    required this.redeemedAt,
+  });
+
+  factory RedeemCodeResult.fromJson(Map<String, dynamic> json) {
+    return RedeemCodeResult(
+      redeemId: json['redeem_id'] as String,
+      rechargeId: json['recharge_id'] as String,
+      packageId: json['package_id'] as String,
+      packageName: json['package_name'] as String,
+      rechargeType: json['recharge_type'] as String,
+      quantity: json['quantity'] as int,
+      countBalance: json['count_balance'] as int,
+      dateValidUntil: json['date_valid_until'] as String?,
+      redeemedAt: json['redeemed_at'] as String,
+    );
+  }
+}
+
+class RedeemCodeRecord {
+  final String redeemId;
+  final String batchId;
+  final String batchNo;
+  final String codePreview;
+  final String packageId;
+  final String packageName;
+  final String rechargeType;
+  final int quantity;
+  final String status;
+  final String? redeemedRechargeId;
+  final String? redeemedAt;
+
+  RedeemCodeRecord({
+    required this.redeemId,
+    required this.batchId,
+    required this.batchNo,
+    required this.codePreview,
+    required this.packageId,
+    required this.packageName,
+    required this.rechargeType,
+    required this.quantity,
+    required this.status,
+    required this.redeemedRechargeId,
+    required this.redeemedAt,
+  });
+
+  factory RedeemCodeRecord.fromJson(Map<String, dynamic> json) {
+    return RedeemCodeRecord(
+      redeemId: json['redeem_id'] as String,
+      batchId: json['batch_id'] as String,
+      batchNo: json['batch_no'] as String,
+      codePreview: json['code_preview'] as String,
+      packageId: json['package_id'] as String,
+      packageName: json['package_name'] as String,
+      rechargeType: json['recharge_type'] as String,
+      quantity: json['quantity'] as int,
+      status: json['status'] as String,
+      redeemedRechargeId: json['redeemed_recharge_id'] as String?,
+      redeemedAt: json['redeemed_at'] as String?,
+    );
+  }
+
+  String get label => '$codePreview: $packageName, $status';
 }
 
 class BillingSession {

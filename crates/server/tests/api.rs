@@ -391,6 +391,95 @@ async fn p8_recharge_count_entitlement_is_consumed_before_preview_quota() {
 }
 
 #[tokio::test]
+async fn redeem_code_batch_exports_and_redeems_once() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+
+    let batch: serde_json::Value = client
+        .post(format!("http://{addr}/admin/v1/redeem-code-batches"))
+        .bearer_auth("demo-admin")
+        .json(&serde_json::json!({
+            "package_id": "count_10",
+            "quantity": 2,
+            "channel": "test",
+            "note": "integration"
+        }))
+        .send()
+        .await
+        .expect("send create redeem batch")
+        .json()
+        .await
+        .expect("batch json");
+    assert_eq!(batch["package_id"], "count_10");
+    assert_eq!(batch["generated_count"], 2);
+    let code = batch["codes"][0].as_str().unwrap().to_string();
+    let batch_id = batch["batch_id"].as_str().unwrap().to_string();
+
+    let export = client
+        .get(format!(
+            "http://{addr}/admin/v1/redeem-code-batches/{batch_id}/export.xlsx"
+        ))
+        .bearer_auth("demo-admin")
+        .send()
+        .await
+        .expect("send export redeem batch");
+    assert_eq!(export.status(), 200);
+    let export_bytes = export.bytes().await.expect("export bytes");
+    assert!(export_bytes.starts_with(b"PK\x03\x04"));
+
+    let redeemed: serde_json::Value = client
+        .post(format!("http://{addr}/v1/redeem-codes/redeem"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "code": code }))
+        .send()
+        .await
+        .expect("send redeem code")
+        .json()
+        .await
+        .expect("redeem json");
+    assert_eq!(redeemed["package_id"], "count_10");
+    assert_eq!(redeemed["quantity"], 10);
+    assert_eq!(redeemed["count_balance"], 10);
+
+    let usage: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage after redeem")
+        .json()
+        .await
+        .expect("usage after redeem json");
+    assert_eq!(usage["plan_id"], "count");
+    assert_eq!(usage["count_balance"], 10);
+
+    let duplicate = client
+        .post(format!("http://{addr}/v1/redeem-codes/redeem"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({ "code": batch["codes"][0] }))
+        .send()
+        .await
+        .expect("send duplicate redeem");
+    assert_eq!(duplicate.status(), 409);
+    let duplicate_body: serde_json::Value = duplicate.json().await.expect("duplicate json");
+    assert_eq!(duplicate_body["error"], "code_already_redeemed");
+
+    let records: serde_json::Value = client
+        .get(format!("http://{addr}/v1/redeem-codes/records"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send redeem records")
+        .json()
+        .await
+        .expect("redeem records json");
+    assert_eq!(records.as_array().unwrap().len(), 1);
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p7_cloud_worker_converts_uploaded_zip() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();

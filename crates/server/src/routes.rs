@@ -19,7 +19,8 @@ use crate::limits::{
     MAX_UPLOAD_ZIP_BYTES,
 };
 use crate::state::{
-    ConversionJobRecord, RechargeRecord, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
+    redeem_packages, ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
+    RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 use crate::worker_service;
 
@@ -55,6 +56,20 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route(
             "/api/v1/recharges",
             get(list_recharges).post(create_recharge),
+        )
+        .route("/v1/redeem-codes/options", get(redeem_code_options))
+        .route("/api/v1/redeem-codes/options", get(redeem_code_options))
+        .route("/v1/redeem-codes/redeem", post(redeem_code))
+        .route("/api/v1/redeem-codes/redeem", post(redeem_code))
+        .route("/v1/redeem-codes/records", get(list_redeem_records))
+        .route("/api/v1/redeem-codes/records", get(list_redeem_records))
+        .route(
+            "/admin/v1/redeem-code-batches",
+            post(admin_create_redeem_batch),
+        )
+        .route(
+            "/admin/v1/redeem-code-batches/:id/export.xlsx",
+            get(admin_export_redeem_batch),
         )
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/api/v1/billing/checkout", post(billing_checkout))
@@ -135,6 +150,20 @@ struct RechargeBody {
     recharge_type: Option<String>,
     package_id: Option<String>,
     quantity: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RedeemCodeBody {
+    code: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AdminRedeemBatchBody {
+    package_id: Option<String>,
+    quantity: Option<u64>,
+    channel: Option<String>,
+    note: Option<String>,
+    expires_at: Option<String>,
 }
 
 async fn auth_register(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
@@ -249,6 +278,100 @@ async fn recharge_options() -> Json<serde_json::Value> {
             ]
         }
     }))
+}
+
+async fn redeem_code_options(headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&headers)?;
+    Ok(Json(json!({
+        "enabled": true,
+        "provider": "redeem-code",
+        "code_format_hint": "T2D-XXXX-XXXX-XXXX-XX",
+        "support_text": "请输入购买或活动获得的兑换码",
+        "packages": redeem_packages().iter().map(|package| json!({
+            "id": package.id,
+            "name": package.name,
+            "recharge_type": package.package_type,
+            "quantity": package.quantity,
+        })).collect::<Vec<_>>(),
+    })))
+}
+
+async fn redeem_code(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<RedeemCodeBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let code = payload.code.unwrap_or_default();
+    let result = state
+        .redeem_code(session.user_id, code)
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(redeem_result_json(&result)))
+}
+
+async fn list_redeem_records(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let records = state.list_redeem_records(&session.user_id).await;
+    Ok(Json(json!(records
+        .iter()
+        .map(redeem_record_json)
+        .collect::<Vec<_>>())))
+}
+
+async fn admin_create_redeem_batch(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminRedeemBatchBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&headers)?;
+    let package_id = payload.package_id.unwrap_or_else(|| "count_10".to_string());
+    let quantity = payload.quantity.unwrap_or(100);
+    let batch = state
+        .create_redeem_batch(
+            &package_id,
+            quantity,
+            payload.channel,
+            payload.note,
+            payload.expires_at,
+            admin.user_id,
+        )
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(redeem_batch_json(&batch, true)))
+}
+
+async fn admin_export_redeem_batch(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let _admin = require_admin_session(&headers)?;
+    let batch = state
+        .get_redeem_batch(&id)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("redeem batch {id}")))?;
+    let body = build_redeem_codes_xlsx(&batch)?;
+    state.mark_redeem_batch_exported(&id).await;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!(
+                "attachment; filename=\"redeem-codes-{}.xlsx\"",
+                batch.batch_no
+            ),
+        )
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Io(e.to_string()))
 }
 
 async fn create_recharge(
@@ -511,6 +634,28 @@ fn require_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
     })
 }
 
+fn require_admin_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
+    let value = headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| ApiError::Unauthorized("missing admin bearer token".to_string()))?
+        .to_str()
+        .map_err(|_| ApiError::Unauthorized("invalid authorization header".to_string()))?;
+    let token = value
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| ApiError::Unauthorized("expected Bearer token".to_string()))?
+        .trim();
+    if token.starts_with("admin-") || token == "demo-admin" {
+        Ok(DemoSession {
+            user_id: "admin_demo".to_string(),
+            email: "admin@example.com".to_string(),
+        })
+    } else {
+        Err(ApiError::Unauthorized(
+            "unsupported admin token for preview server".to_string(),
+        ))
+    }
+}
+
 fn demo_user(email: &str, display_name: Option<String>) -> serde_json::Value {
     json!({
         "id": "user_demo",
@@ -580,6 +725,205 @@ fn recharge_json(record: &RechargeRecord) -> serde_json::Value {
         "provider_trade_id": record.provider_trade_id,
         "created_at": record.created_at,
     })
+}
+
+fn redeem_failure_to_error(error: RedeemFailure) -> ApiError {
+    match error {
+        RedeemFailure::InvalidCode => ApiError::Coded {
+            status: StatusCode::BAD_REQUEST,
+            code: "invalid_code",
+            message: "兑换码无效".to_string(),
+        },
+        RedeemFailure::AlreadyRedeemed => ApiError::Coded {
+            status: StatusCode::CONFLICT,
+            code: "code_already_redeemed",
+            message: "兑换码已被使用".to_string(),
+        },
+        RedeemFailure::Voided => ApiError::Coded {
+            status: StatusCode::CONFLICT,
+            code: "code_voided",
+            message: "兑换码已作废".to_string(),
+        },
+        RedeemFailure::Expired => ApiError::Coded {
+            status: StatusCode::GONE,
+            code: "code_expired",
+            message: "兑换码已过期".to_string(),
+        },
+    }
+}
+
+fn redeem_batch_json(batch: &RedeemCodeBatchRecord, include_codes: bool) -> serde_json::Value {
+    json!({
+        "batch_id": batch.batch_id,
+        "batch_no": batch.batch_no,
+        "package_id": batch.package_id,
+        "package_name": batch.package_name,
+        "recharge_type": batch.recharge_type,
+        "quantity": batch.quantity,
+        "generated_count": batch.generated_count,
+        "exported_count": batch.exported_count,
+        "status": batch.status,
+        "channel": batch.channel,
+        "note": batch.note,
+        "expires_at": batch.expires_at,
+        "created_at": batch.created_at,
+        "codes": if include_codes {
+            json!(batch.codes)
+        } else {
+            json!([])
+        },
+    })
+}
+
+fn redeem_result_json(result: &RedeemCodeResult) -> serde_json::Value {
+    json!({
+        "redeem_id": result.redeem_id,
+        "recharge_id": result.recharge_id,
+        "package_id": result.package_id,
+        "package_name": result.package_name,
+        "recharge_type": result.recharge_type,
+        "quantity": result.quantity,
+        "count_balance": result.count_balance,
+        "date_valid_until": result.date_valid_until,
+        "redeemed_at": result.redeemed_at,
+    })
+}
+
+fn redeem_record_json(record: &RedeemCodeRecord) -> serde_json::Value {
+    json!({
+        "redeem_id": record.code_id,
+        "batch_id": record.batch_id,
+        "batch_no": record.batch_no,
+        "code_preview": record.code_preview,
+        "package_id": record.package_id,
+        "package_name": record.package_name,
+        "recharge_type": record.recharge_type,
+        "quantity": record.quantity,
+        "status": record.status,
+        "redeemed_recharge_id": record.redeemed_recharge_id,
+        "redeemed_at": record.redeemed_at,
+    })
+}
+
+fn build_redeem_codes_xlsx(batch: &RedeemCodeBatchRecord) -> Result<Vec<u8>, ApiError> {
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let options = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        zip.start_file("[Content_Types].xml", options)
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut zip, content_types_xml().as_bytes())
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        zip.start_file("_rels/.rels", options)
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut zip, rels_xml().as_bytes())
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        zip.start_file("xl/workbook.xml", options)
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut zip, workbook_xml().as_bytes())
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        zip.start_file("xl/_rels/workbook.xml.rels", options)
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut zip, workbook_rels_xml().as_bytes())
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        zip.start_file("xl/worksheets/sheet1.xml", options)
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        std::io::Write::write_all(&mut zip, redeem_sheet_xml(batch).as_bytes())
+            .map_err(|e| ApiError::Io(e.to_string()))?;
+        zip.finish().map_err(|e| ApiError::Io(e.to_string()))?;
+    }
+    Ok(cursor.into_inner())
+}
+
+fn content_types_xml() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+<Default Extension="xml" ContentType="application/xml"/>
+<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+</Types>"#
+}
+
+fn rels_xml() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+</Relationships>"#
+}
+
+fn workbook_xml() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="redeem_codes" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#
+}
+
+fn workbook_rels_xml() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#
+}
+
+fn redeem_sheet_xml(batch: &RedeemCodeBatchRecord) -> String {
+    let headers = [
+        "批次号",
+        "兑换码",
+        "套餐 ID",
+        "套餐名称",
+        "转换次数",
+        "过期时间",
+        "状态",
+        "备注",
+    ];
+    let mut rows = String::new();
+    rows.push_str(&xlsx_row(1, &headers));
+    for (idx, code) in batch.codes.iter().enumerate() {
+        let note = batch.note.as_deref().unwrap_or_default();
+        let expires = batch.expires_at.as_deref().unwrap_or_default();
+        let quantity = batch.quantity.to_string();
+        let row = [
+            batch.batch_no.as_str(),
+            code.as_str(),
+            batch.package_id.as_str(),
+            batch.package_name.as_str(),
+            quantity.as_str(),
+            expires,
+            "unused",
+            note,
+        ];
+        rows.push_str(&xlsx_row((idx + 2) as u32, &row));
+    }
+    format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<sheetData>{rows}</sheetData>
+</worksheet>"#
+    )
+}
+
+fn xlsx_row(row_idx: u32, values: &[&str]) -> String {
+    let mut row = format!(r#"<row r="{row_idx}">"#);
+    for (idx, value) in values.iter().enumerate() {
+        let col = ((b'A' + idx as u8) as char).to_string();
+        row.push_str(&format!(
+            r#"<c r="{col}{row_idx}" t="inlineStr"><is><t>{}</t></is></c>"#,
+            xml_escape(value)
+        ));
+    }
+    row.push_str("</row>");
+    row
+}
+
+fn xml_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
 }
 
 fn job_json(job: &ConversionJobRecord) -> serde_json::Value {

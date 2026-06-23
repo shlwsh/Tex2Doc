@@ -109,6 +109,12 @@ pub struct UsageSummary {
     pub plan_id: String,
     pub cloud_conversions_used: u32,
     pub cloud_conversions_limit: u32,
+    #[serde(default)]
+    pub count_balance: u32,
+    #[serde(default)]
+    pub date_valid_until: Option<String>,
+    #[serde(default)]
+    pub entitlement_source_order_id: Option<String>,
     pub storage_bytes_used: u64,
     pub storage_bytes_limit: u64,
     pub period_start: String,
@@ -141,6 +147,71 @@ pub struct BillingPortalRequest {
 pub struct BillingSession {
     pub url: String,
     pub expires_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RechargeRecord {
+    pub recharge_id: String,
+    pub recharge_type: String,
+    pub package_id: String,
+    pub quantity: u32,
+    pub amount_cents: u32,
+    pub currency: String,
+    pub status: String,
+    pub provider: String,
+    pub provider_trade_id: String,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RedeemCodeOptions {
+    pub enabled: bool,
+    pub provider: String,
+    pub code_format_hint: String,
+    pub support_text: String,
+    #[serde(default)]
+    pub packages: Vec<RedeemPackageSummary>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RedeemPackageSummary {
+    pub id: String,
+    pub name: String,
+    pub recharge_type: String,
+    pub quantity: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RedeemCodeRequest {
+    pub code: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RedeemCodeResult {
+    pub redeem_id: String,
+    pub recharge_id: String,
+    pub package_id: String,
+    pub package_name: String,
+    pub recharge_type: String,
+    pub quantity: u32,
+    pub count_balance: u32,
+    pub date_valid_until: Option<String>,
+    pub redeemed_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct RedeemCodeRecord {
+    pub redeem_id: String,
+    pub batch_id: String,
+    pub batch_no: String,
+    pub code_preview: String,
+    pub package_id: String,
+    pub package_name: String,
+    pub recharge_type: String,
+    pub quantity: u32,
+    pub status: String,
+    pub redeemed_recharge_id: Option<String>,
+    pub redeemed_at: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

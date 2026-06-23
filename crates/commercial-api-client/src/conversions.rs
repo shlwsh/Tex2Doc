@@ -16,6 +16,10 @@ impl ApiClient {
         self.get(&format!("conversions/{job_id}")).await
     }
 
+    pub async fn conversions(&self) -> Result<Vec<ConversionJob>, ApiError> {
+        self.get("conversions").await
+    }
+
     pub async fn download_conversion_docx(&self, job_id: &str) -> Result<Vec<u8>, ApiError> {
         self.get_bytes(&format!("conversions/{job_id}/download/docx"))
             .await

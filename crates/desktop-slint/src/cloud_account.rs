@@ -7,7 +7,8 @@ use std::time::Duration;
 
 use doc_commercial_api_client::{
     ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession, CheckoutRequest,
-    ClientConfig, LoginRequest, PlanSummary, RefreshRequest, RegisterRequest, UsageSummary,
+    ClientConfig, ConversionJob, LoginRequest, PlanSummary, RechargeRecord, RedeemCodeRecord,
+    RedeemCodeRequest, RedeemCodeResult, RefreshRequest, RegisterRequest, UsageSummary,
     UserProfile,
 };
 use thiserror::Error;
@@ -195,13 +196,93 @@ pub fn create_billing_portal_blocking(
     })
 }
 
+pub fn redeem_code_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    code: &str,
+) -> Result<(RedeemCodeResult, UsageSummary)> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before redeeming a code".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let code = code.trim().to_string();
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let redeemed = client.redeem_code(&RedeemCodeRequest { code }).await?;
+        let usage = client.usage().await?;
+        Ok((redeemed, usage))
+    })
+}
+
+pub fn fetch_recharge_table_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+) -> Result<Vec<RechargeTableRow>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before querying recharge records".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let mut rows = Vec::new();
+        for record in client.recharge_records().await? {
+            rows.push(RechargeTableRow::from_recharge(record));
+        }
+        for record in client.redeem_code_records().await? {
+            rows.push(RechargeTableRow::from_redeem(record));
+        }
+        rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(rows)
+    })
+}
+
+pub fn fetch_conversion_table_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+) -> Result<Vec<ConversionTableRow>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before querying conversion records".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let mut rows = client
+            .conversions()
+            .await?
+            .into_iter()
+            .map(ConversionTableRow::from_conversion)
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| b.updated_at.cmp(&a.updated_at));
+        Ok(rows)
+    })
+}
+
 pub fn usage_line(usage: &UsageSummary) -> String {
     let remaining = usage
         .cloud_conversions_limit
         .saturating_sub(usage.cloud_conversions_used);
     format!(
-        "Plan: {} | Cloud conversions: {}/{} | Remaining: {}",
-        usage.plan_id, usage.cloud_conversions_used, usage.cloud_conversions_limit, remaining
+        "Plan: {} | Cloud conversions: {}/{} | Remaining: {} | Count balance: {}",
+        usage.plan_id,
+        usage.cloud_conversions_used,
+        usage.cloud_conversions_limit,
+        remaining,
+        usage.count_balance
     )
 }
 
@@ -271,6 +352,69 @@ fn authenticated_client(base_url: url::Url, access_token: &str) -> Result<ApiCli
     .map_err(CloudAccountError::from)
 }
 
+#[derive(Debug, Clone)]
+pub struct RechargeTableRow {
+    pub id: String,
+    pub kind: String,
+    pub package: String,
+    pub quantity: String,
+    pub status: String,
+    pub provider: String,
+    pub created_at: String,
+}
+
+impl RechargeTableRow {
+    fn from_recharge(record: RechargeRecord) -> Self {
+        Self {
+            id: record.recharge_id,
+            kind: record.recharge_type,
+            package: record.package_id,
+            quantity: record.quantity.to_string(),
+            status: record.status,
+            provider: record.provider,
+            created_at: record.created_at,
+        }
+    }
+
+    fn from_redeem(record: RedeemCodeRecord) -> Self {
+        Self {
+            id: record.redeem_id,
+            kind: "redeem-code".to_string(),
+            package: format!("{} / {}", record.package_id, record.code_preview),
+            quantity: record.quantity.to_string(),
+            status: record.status,
+            provider: record.batch_no,
+            created_at: record.redeemed_at.unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ConversionTableRow {
+    pub id: String,
+    pub main_tex: String,
+    pub profile: String,
+    pub status: String,
+    pub updated_at: String,
+    pub error: String,
+}
+
+impl ConversionTableRow {
+    fn from_conversion(record: ConversionJob) -> Self {
+        Self {
+            id: record.job_id,
+            main_tex: record.main_tex.unwrap_or_default(),
+            profile: record.profile.unwrap_or_default(),
+            status: format!("{:?}", record.status),
+            updated_at: record.updated_at,
+            error: record
+                .error_code
+                .or(record.error)
+                .unwrap_or_else(|| "-".to_string()),
+        }
+    }
+}
+
 fn parse_base_url(value: &str) -> Result<url::Url> {
     value
         .trim()
@@ -295,6 +439,9 @@ mod tests {
             plan_id: "preview".to_string(),
             cloud_conversions_used: 3,
             cloud_conversions_limit: 10,
+            count_balance: 0,
+            date_valid_until: None,
+            entitlement_source_order_id: None,
             storage_bytes_used: 0,
             storage_bytes_limit: 1024,
             period_start: "2026-06-01T00:00:00Z".to_string(),
@@ -303,7 +450,7 @@ mod tests {
 
         assert_eq!(
             usage_line(&usage),
-            "Plan: preview | Cloud conversions: 3/10 | Remaining: 7"
+            "Plan: preview | Cloud conversions: 3/10 | Remaining: 7 | Count balance: 0"
         );
     }
 
