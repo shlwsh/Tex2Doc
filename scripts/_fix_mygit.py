@@ -1,4 +1,6 @@
-﻿# scripts/mygit.ps1
+﻿#!/usr/bin/env python3
+"""Rewrite mygit.ps1 with clean UTF-8 BOM encoding."""
+content = r"""# scripts/mygit.ps1
 # ------------------------------------------------------------
 # Tex2Doc - mygit Windows (PowerShell) entry point.
 # Same args contract as mygit.sh: argv[1]=workspace, argv[2]=script_dir
@@ -164,3 +166,9 @@ Write-Host ""
 
 & $pyExe @pyArgs $pyFile $TargetDir $ScriptDir
 exit $LASTEXITCODE
+"""
+
+out_path = r"d:\work\Tex2Doc\scripts\mygit.ps1"
+with open(out_path, "w", encoding="utf-8-sig") as f:
+    f.write(content)
+print(f"Written OK: {out_path}  ({len(content)} chars)")
