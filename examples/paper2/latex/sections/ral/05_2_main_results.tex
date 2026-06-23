@@ -1,0 +1,28 @@
+\subsection{Main Results}
+\label{sec:main-results}
+
+\input{sections/table_ii}
+
+Table~\ref{tab:main-results} summarizes B0--B2 (mean $\pm$ std over three seeds; frame-level bootstrap 95\% CIs in caption).
+B2 improves M2 from 0.560 to 0.604 and lowers M1 p50 to 208.3\,ms versus B0; B1 keeps M2 at 0.560 because sub-threshold frames still reach the cloud without closed-loop resampling.
+B2 raises M3 to 0.440 because physical resampling consumes retry budget before upload.
+
+\input{sections/table_iii}
+
+Learned B3/B4 reach M2 $\approx 0.93$--$0.97$ with M1 p50 $\approx$340--350\,ms (Table~\ref{tab:learned-hybrid}); we report them as comparators, not the primary deployable path.
+Table~\ref{tab:stratified-m2} decomposes M2 by clear-source vs.\ blur-injected cohorts: B2 gains concentrate on blur-injected frames (0.373$\rightarrow$0.460) where resampling recovers quality before upload.
+
+\input{sections/table_stratified_m2}
+
+Fig.~\ref{fig:pareto-m2-m1} summarizes the M2--M1 trade-off across B0--B4.
+RTT CDFs and per-seed valid-rate plots are moved to the Supplementary Material; low variance (std $\leq$0.007) reflects deterministic test-set scores given a shared frame plan per seed.
+
+\begin{figure}[!t]
+  \centering
+  \includegraphics[width=\linewidth]{fig7_pareto_m2_m1.pdf}
+  \caption{M2 vs.\ simulated M1 p50 (mean over 3 seeds). B2 favors low RTT; B3/B4 favor high M2 at higher edge cost.}
+  \label{fig:pareto-m2-m1}
+\end{figure}
+
+\paragraph{Takeaway.}
+On a full public TCM test cohort, B2 with physical skill transforms and auditable LangGraph logs remains the primary deployable path; Hybrid B4 combines interpretable exposure gating with learned blur ranking when higher M2 justifies extra edge RTT.

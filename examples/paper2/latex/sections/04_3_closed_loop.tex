@@ -1,0 +1,33 @@
+% §4.3 Closed-Loop Protocol — draft (phase 3)
+\subsection{Closed-Loop Protocol and Logging}
+\label{sec:closed-loop}
+
+Each trial executes \texttt{capture} $\rightarrow$ \texttt{edge\_iqa} $\rightarrow$ \texttt{route} $\rightarrow$ action. Wall-clock segment timestamps and decisions are appended as one JSON object per line (JSONL) for supplementary reproducibility and auxiliary track (M6) trend analysis.
+
+\paragraph{JSONL schema.}
+Required fields: \texttt{trial\_id}, \texttt{image\_path} (relative), \texttt{q\_img}, \texttt{flags}, \texttt{retry\_count}, \texttt{route\_decision}, \texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route}, \texttt{latency\_ms}. Validation is automated via \texttt{scripts/validate\_jsonl.py}.
+
+\paragraph{Execution.}
+The driver \texttt{python -m langgraph\_router.run} scores frames via the edge gateway; \texttt{scripts/paper1\_closed\_loop.sh} wraps 10+ trials into \texttt{experiments/logs/run\_001.jsonl}.
+Main quantitative RTT (M1) is aggregated by \texttt{run\_matrix\_tcm.py} on ShezhenV3 test images; JSONL logs support protocol audit and M6 trend checks only.
+
+\paragraph{Privacy.}
+JSONL stores relative image paths only; supplementary samples use synthetic or de-identified frames without patient metadata.
+ShezhenV3 images are used offline for scoring; no raw patient data is uploaded in Paper~I experiments.
+
+\begin{table}[t]
+\centering
+\caption{Closed-loop JSONL fields (Paper~I).}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Field & Description \\
+\hline
+\texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route} & ISO~8601 UTC segment times \\
+\texttt{route\_decision} & \texttt{upload\_cloud} $|$ \texttt{resample\_edge} $|$ \texttt{fail\_safe} \\
+\texttt{latency\_ms} & End-to-end trial latency \\
+\hline
+\end{tabular}%
+}
+\end{table}

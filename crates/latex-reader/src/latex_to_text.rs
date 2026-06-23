@@ -220,7 +220,10 @@ fn bib_body_to_text(body: &str) -> String {
                 fields.push((current_key.take().unwrap(), val));
                 let mut j = i + 1;
                 while j < body.len()
-                    && (bytes[j] == b',' || bytes[j] == b' ' || bytes[j] == b'\n' || bytes[j] == b'\t')
+                    && (bytes[j] == b','
+                        || bytes[j] == b' '
+                        || bytes[j] == b'\n'
+                        || bytes[j] == b'\t')
                 {
                     j += 1;
                 }
@@ -236,7 +239,8 @@ fn bib_body_to_text(body: &str) -> String {
             {
                 current_key = Some(k.to_string());
                 let mut j = i + 1;
-                while j < body.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n') {
+                while j < body.len() && (bytes[j] == b' ' || bytes[j] == b'\t' || bytes[j] == b'\n')
+                {
                     j += 1;
                 }
                 if j < body.len() && bytes[j] == b'{' {
@@ -250,7 +254,10 @@ fn bib_body_to_text(body: &str) -> String {
                         fields.push((current_key.take().unwrap(), val));
                         let mut k = j + 2 + end;
                         while k < body.len()
-                            && (bytes[k] == b',' || bytes[k] == b' ' || bytes[k] == b'\n' || bytes[k] == b'\t')
+                            && (bytes[k] == b','
+                                || bytes[k] == b' '
+                                || bytes[k] == b'\n'
+                                || bytes[k] == b'\t')
                         {
                             k += 1;
                         }
@@ -279,7 +286,9 @@ fn bib_body_to_text(body: &str) -> String {
 
     let author_str = bib_author_to_text(&author);
     let title_clean = title.replace('{', "").replace('}', "");
-    let title_clean = title_clean.replace("``", "\u{201C}").replace("''", "\u{201D}");
+    let title_clean = title_clean
+        .replace("``", "\u{201C}")
+        .replace("''", "\u{201D}");
 
     let mut parts = Vec::new();
     if !author_str.is_empty() {
@@ -943,7 +952,9 @@ fn clean_bio_item(s: &str) -> String {
         crate::normalize::latex_to_text(&item_tex, &empty_cite, &empty_label).join_plain();
 
     text = text.replace('{', "").replace('}', "");
-    crate::normalize::collapse_whitespace_pub(&text).trim().to_string()
+    crate::normalize::collapse_whitespace_pub(&text)
+        .trim()
+        .to_string()
 }
 
 // ─── unit tests ─────────────────────────────────────────────────────────────

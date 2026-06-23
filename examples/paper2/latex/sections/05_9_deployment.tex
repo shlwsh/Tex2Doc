@@ -1,0 +1,50 @@
+% Extended deployment and reproducibility (Paper I)
+\subsection{Deployment Checklist and Operator Workflow}
+\label{sec:deploy-checklist}
+
+\paragraph{Pre-clinic calibration.}
+(1) Import ShezhenV3 or clinic-specific splits via \texttt{import\_shezhenv3.py}.
+(2) Run \texttt{calibrate\_tau\_tcm.py} with ROI enabled; store \texttt{recommended\_tau.json} on the edge gateway.
+(3) Optional: train B3 via \texttt{train\_b3\_mobilenet.py} when GPU/NN runtime is available.
+(4) Validate JSONL schema with \texttt{scripts/validate\_jsonl.py} before merging logs into analysis.
+
+\paragraph{Runtime parameters.}
+Key defaults: routing threshold $\tau$ from \texttt{recommended\_tau.json} (overridable via \texttt{PAPER1\_VISION\_THRESHOLD\_TAU}); \texttt{use\_roi=true} when bbox metadata exists; retry budget $K{=}2$; Edge-IQA resize fixed at $512$ pixels for stable latency.
+
+\paragraph{Operator-facing flags.}
+When \texttt{flags} contains \texttt{blur}, prompt the patient to hold still and re-open the mouth; \texttt{underexposed}/\texttt{overexposed} suggest ring-light adjustment before invoking FR3 motion skills.
+Logs retain \texttt{q\_img}, \texttt{route\_decision}, and \texttt{retry\_count} for audit without uploading rejected frames to cloud diagnosis services.
+
+\paragraph{Hardware tiers.}
+\textbf{Tier-A (CPU-only gateway):} B2 Edge-IQA + LangGraph; meets $\sim$10\,ms IQA p95 on laptop-class CPUs.
+\textbf{Tier-B (GPU edge):} optional B3 MobileNet; trade interpretability for tighter blur ranking.
+\textbf{Tier-C (Franka auxiliary):} M6 RTT track on fake/real hardware; not numerically compared to Table~II offline matrix.
+
+\paragraph{Version pinning.}
+Python dependencies for B3 live in \texttt{doctor/paper1/.venv} (PyTorch, torchvision); core Edge-IQA remains NumPy/PIL-only for minimal attack surface.
+Model checkpoint SHA256 should be recorded in experiment metadata when submitting reproducibility packages.
+
+\paragraph{Failure recovery.}
+If cloud upload fails after a valid routing decision, LangGraph enters \texttt{fail\_safe}; operators may manually retry via \texttt{/api/v1/motion/error\_recovery}.
+Edge-IQA scores are deterministic given fixed resize and ROI boxes, enabling bit-exact replay of routing decisions from archived frames.
+
+\paragraph{Multi-site rollout.}
+Each clinical site should re-calibrate $\tau$ on a local validation batch ($\geq 200$ clear/blur pairs) while keeping scorer code identical.
+Cross-site $\tau$ drift is expected when lighting rigs differ; report site-specific medians alongside global ShezhenV3 statistics.
+
+\paragraph{Security and privacy.}
+Images remain on the edge until \texttt{upload\_cloud}; API keys gate motion and vision endpoints.
+De-identified JSONL omits patient metadata; COCO boxes are geometry-only and contain no diagnostic labels in the IQA path.
+
+\paragraph{Integration with MoveIt skills.}
+Named poses (\texttt{tongue\_pose}, \texttt{face\_pose}) decouple acquisition geometry from IQA.
+Skills execute via \texttt{/api/v1/motion/skills/\{name\}} after optional quality pre-check at \texttt{face\_pose} before final tongue capture.
+
+\paragraph{Monitoring dashboard.}
+The bundled FastAPI static dashboard polls \texttt{/ws} for joint states; future work adds rolling histograms of $Q_{\mathrm{img}}$ and retry rates per session.
+
+\paragraph{Regression testing.}
+\texttt{edge\_iqa/tests/test\_scorer.py} asserts flag derivation; full matrix regression runs via \texttt{scripts/paper1\_run\_tcm\_full.sh} ($\approx$10--60\,min depending on B3 training).
+
+\paragraph{Documentation map.}
+English \texttt{docs/}, Chinese \texttt{docs/study/} (eight-chapter learning manual), and \texttt{REPRODUCE.md} form the onboarding path for new lab members.

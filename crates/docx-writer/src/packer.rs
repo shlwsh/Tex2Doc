@@ -10,6 +10,7 @@ use zip::write::SimpleFileOptions;
 use zip::CompressionMethod;
 
 use crate::page_setup::PageSetup;
+use crate::profile::ProfileStyleMap;
 use crate::serializer::{serialize_document, EmbeddedImage};
 use crate::styles::write_styles;
 use crate::template::{merge_styles, parse_template, TemplateStyles};
@@ -41,7 +42,10 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
     let text_width = ps.text_width_twips();
     let jos_mode = ps.even_header_text.is_some()
         || ps.first_footer_indent_twips.is_some()
-        || ps.header_text.as_ref().is_some_and(|t| !t.trim().is_empty());
+        || ps
+            .header_text
+            .as_ref()
+            .is_some_and(|t| !t.trim().is_empty());
 
     if !jos_mode {
         return HeaderFooterParts {
@@ -85,7 +89,7 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
     HeaderFooterParts {
         masthead_header_xml: Some(wrap_header(masthead_body(text_width))),
         default_header_xml: Some(wrap_header(header_line_body(running, text_width))),
-        even_header_xml: Some(wrap_header(header_line_body(even, text_width))),
+        even_header_xml: Some(wrap_header(even_header_line_body(even, text_width))),
         first_footer_xml: Some(wrap_footer(jos_first_footer_body(first_footer, indent))),
         default_footer_xml: Some(wrap_footer(empty_footer_body())),
         even_footer_xml: Some(wrap_footer(empty_footer_body())),
@@ -93,9 +97,8 @@ fn build_header_footer(ps: &PageSetup) -> HeaderFooterParts {
 }
 
 fn legacy_footer_body(template: &str) -> String {
-    let mut para = String::from(
-        r#"<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>"#,
-    );
+    let mut para =
+        String::from(r#"<w:p><w:pPr><w:pStyle w:val="Footer"/><w:jc w:val="center"/></w:pPr>"#);
     for (i, seg) in template.split('\n').enumerate() {
         if i > 0 {
             para.push_str(
@@ -136,6 +139,18 @@ fn header_line_body(text: &str, text_width: u32) -> String {
     para
 }
 
+fn even_header_line_body(text: &str, text_width: u32) -> String {
+    let clean = text.lines().next().unwrap_or(text).trim();
+    let mut para = format!(
+        r#"<w:p><w:pPr><w:pStyle w:val="JOSMasthead"/><w:tabs><w:tab w:val="right" w:pos="{text_width}"/></w:tabs></w:pPr>"#,
+    );
+    para.push_str(r#"<w:fldSimple w:instr=" PAGE "><w:r><w:t>1</w:t></w:r></w:fldSimple>"#);
+    para.push_str(r#"<w:r><w:tab/></w:r><w:r><w:t xml:space="preserve">"#);
+    para.push_str(&xml_escape_local(clean));
+    para.push_str("</w:t></w:r></w:p>");
+    para
+}
+
 fn masthead_body(text_width: u32) -> String {
     let rows = [
         (
@@ -146,10 +161,7 @@ fn masthead_body(text_width: u32) -> String {
             "Journal of Software, [doi: 10.13328/j.cnki.jos.000000]",
             "http://www.jos.org.cn",
         ),
-        (
-            "© 中国科学院软件研究所版权所有.",
-            "Tel: +86-10-62562563",
-        ),
+        ("© 中国科学院软件研究所版权所有.", "Tel: +86-10-62562563"),
     ];
     let mut out = String::new();
     for (left, right) in rows {
@@ -255,7 +267,7 @@ xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\">
 
 /// 序列化 + 打包（无模板、无图片）。
 pub fn pack(doc: &Document) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_page_setup(doc, None, None, None)
+    pack_with_page_setup(doc, None, None, None, None)
 }
 
 /// 序列化 + 打包 + 模板样式合并（无图片）。
@@ -263,7 +275,7 @@ pub fn pack_with_template(
     doc: &Document,
     template_bytes: Option<&[u8]>,
 ) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_page_setup(doc, template_bytes, None, None)
+    pack_with_page_setup(doc, template_bytes, None, None, None)
 }
 /// 序列化 + 打包 + 模板样式合并 + 图片嵌入。
 pub fn pack_with_assets(
@@ -271,18 +283,21 @@ pub fn pack_with_assets(
     template_bytes: Option<&[u8]>,
     image_assets: Option<&ImageAssets>,
 ) -> Result<Vec<u8>, DocxWriteError> {
-    pack_with_page_setup(doc, template_bytes, image_assets, None)
+    pack_with_page_setup(doc, template_bytes, image_assets, None, None)
 }
 
 /// V2 新增：序列化 + 打包 + 模板 + 图片 + 自定义页面设置。
 ///
 /// `page_setup`：Some → 写自定义 `pgSz / pgMar / cols`；None → fallback 到
 /// `PageSetup::default()`（12240×15840 twips + 1440/1800/1440/1440 margins + 1 col）。
+///
+/// `style_map`：Some → 使用 profile 风格映射；None → 使用 JOS 默认风格。
 pub fn pack_with_page_setup(
     doc: &Document,
     template_bytes: Option<&[u8]>,
     image_assets: Option<&ImageAssets>,
     page_setup: Option<&PageSetup>,
+    style_map: Option<&ProfileStyleMap>,
 ) -> Result<Vec<u8>, DocxWriteError> {
     // V2：先把 PageSetup 里的 header/footer 渲染成 part
     let parts = page_setup
@@ -306,7 +321,13 @@ pub fn pack_with_page_setup(
     // document.xml 内的 sectPr 必须在引用 rId 前知道，所以 document.xml
     // 改由 packer 内联拼接：先调 serialize_document 拿到 body，再 append sectPr。
     let mut embedded_images: Vec<EmbeddedImage> = Vec::new();
-    let body_xml = serialize_document(doc, image_assets, page_setup, &mut embedded_images);
+    let body_xml = serialize_document(
+        doc,
+        image_assets,
+        page_setup,
+        style_map,
+        &mut embedded_images,
+    );
     let body_xml = if has_any_hdr_ftr {
         inject_sectpr_refs(&body_xml, has_mh, has_h, has_eh, has_ff, has_f, has_ef)
     } else {
@@ -326,7 +347,15 @@ pub fn pack_with_page_setup(
     let opts = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
 
     // [Content_Types].xml：动态追加 header/footer Override
-    let content_types = build_content_types(has_mh, has_h, has_eh, has_ff, has_f, has_ef, has_any_hdr_ftr);
+    let content_types = build_content_types(
+        has_mh,
+        has_h,
+        has_eh,
+        has_ff,
+        has_f,
+        has_ef,
+        has_any_hdr_ftr,
+    );
     write_zip(
         &mut zip,
         "[Content_Types].xml",
@@ -335,7 +364,16 @@ pub fn pack_with_page_setup(
     )?;
     write_zip(&mut zip, "_rels/.rels", ROOT_RELS, opts)?;
     // document.xml.rels：动态追加 header/footer + 图片 relationship
-    let doc_rels = build_doc_rels(has_mh, has_h, has_eh, has_ff, has_f, has_ef, has_any_hdr_ftr, &embedded_images);
+    let doc_rels = build_doc_rels(
+        has_mh,
+        has_h,
+        has_eh,
+        has_ff,
+        has_f,
+        has_ef,
+        has_any_hdr_ftr,
+        &embedded_images,
+    );
     write_zip(
         &mut zip,
         "word/_rels/document.xml.rels",
@@ -645,7 +683,7 @@ mod tests {
             even_header_text: None,
             first_footer_indent_twips: Some(330),
         };
-        let bytes = pack_with_page_setup(&doc, None, None, Some(&ps)).unwrap();
+        let bytes = pack_with_page_setup(&doc, None, None, Some(&ps), None).unwrap();
         let mut r = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
         let names: Vec<String> = (0..r.len())
             .map(|i| r.by_index(i).unwrap().name().to_string())
@@ -681,6 +719,23 @@ mod tests {
         assert!(
             header1.contains(&format!(r#"<w:tab w:val="right" w:pos="{text_width}"/>"#)),
             "header1 tab pos should equal text_width {text_width}: {header1}"
+        );
+        let header2 = {
+            let mut h = r.by_name("word/header2.xml").unwrap();
+            let mut s = String::new();
+            std::io::Read::read_to_string(&mut h, &mut s).unwrap();
+            s
+        };
+        assert!(
+            header2.contains(PageSetup::JOS_EVEN_HEADER),
+            "header2.xml must contain even journal header: {header2}"
+        );
+        assert!(
+            header2
+                .find("PAGE")
+                .zip(header2.find(PageSetup::JOS_EVEN_HEADER))
+                .is_some_and(|(page, text)| page < text),
+            "header2.xml must put PAGE before even journal header: {header2}"
         );
         // 首页页脚
         let footer1 = {
@@ -731,14 +786,11 @@ mod tests {
             even_header_text: Some("Journal of Software 软件学报".to_string()),
             first_footer_indent_twips: Some(330),
         };
-        let bytes = pack_with_page_setup(&doc, None, None, Some(&ps)).unwrap();
+        let bytes = pack_with_page_setup(&doc, None, None, Some(&ps), None).unwrap();
         let mut r = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
         let mut doc_xml = String::new();
-        std::io::Read::read_to_string(
-            &mut r.by_name("word/document.xml").unwrap(),
-            &mut doc_xml,
-        )
-        .unwrap();
+        std::io::Read::read_to_string(&mut r.by_name("word/document.xml").unwrap(), &mut doc_xml)
+            .unwrap();
         // 必须 6 个 headerReference / footerReference + titlePg
         for typ in ["first", "default", "even"] {
             assert!(
@@ -750,7 +802,10 @@ mod tests {
                 "missing footerReference {typ} in sectPr: {doc_xml}"
             );
         }
-        assert!(doc_xml.contains("<w:titlePg/>"), "missing titlePg: {doc_xml}");
+        assert!(
+            doc_xml.contains("<w:titlePg/>"),
+            "missing titlePg: {doc_xml}"
+        );
         // rIdH0 / rIdH1 / rIdH2 必须是 first / default / even
         assert!(
             doc_xml.contains(r#"<w:headerReference w:type="first" r:id="rIdH0"/>"#),

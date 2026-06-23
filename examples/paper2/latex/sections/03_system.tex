@@ -1,0 +1,69 @@
+% §3 System Architecture — draft (Paper I, V19 phase 1)
+\section{System Architecture}
+\label{sec:system}
+
+We target a cloud--edge--device stack for robotic tongue-image acquisition in traditional Chinese medicine (TCM) tele-diagnosis.
+The design separates \emph{real-time} acquisition and quality control at the edge from \emph{offline} or high-latency cloud analytics, while keeping algorithm modules testable outside the robot operating system (ROS) runtime.
+
+\subsection{Device Layer}
+The device layer consists of a Franka Research 3 (FR3) manipulator, RGB imaging, and ROS~2-based motion execution.
+MoveIt provides point-to-point (PTP) joint-space motions.
+For Paper~I we expose two named \emph{skills}---\texttt{go\_to\_tongue\_pose} and \texttt{go\_to\_face\_pose}---stored as calibrated joint configurations in \texttt{poses.yaml} and invoked through the edge gateway.
+This avoids impedance or stiffness tuning interfaces in the paper experiments (\texttt{PAPER1\_MODE=1} disables those routes).
+Simulated and fake-hardware stacks (MoveIt fake controller, optional Gazebo camera) support reproducible auxiliary trials without a physical robot.
+
+\subsection{Edge Layer}
+The edge layer is the primary contribution surface for closed-loop acquisition.
+A FastAPI server (\texttt{franka\_api\_server}) acts as the edge gateway on port~8000, bridging HTTP clients to ROS~2 actions for motion and error recovery.
+\textbf{Edge-IQA} scores each captured frame with a lightweight quality index $Q_{\mathrm{img}}$ (sharpness and exposure fusion), executed in the \texttt{doctor/paper1} tree within the \texttt{franka\_ros2} monorepo and mounted at the gateway via subprocess in phase~2.
+\textbf{LangGraph} implements confidence-aware routing over a small state machine: \texttt{capture} $\rightarrow$ \texttt{edge\_iqa} $\rightarrow$ \texttt{route}, with branches \texttt{upload\_cloud}, \texttt{resample\_edge}, and \texttt{fail\_safe}.
+The HTTP client \texttt{sim/franka\_bridge} connects LangGraph nodes to gateway endpoints (\texttt{/vision/evaluate}, \texttt{/motion/skills/...}).
+Phase~1 uses a placeholder vision endpoint returning fixed $Q_{\mathrm{img}}$ for API contract validation.
+
+\subsection{Cloud Layer}
+The cloud layer hosts higher-level vision models and EMR integration (stub in Paper~I).
+Upload is triggered only when edge quality and routing policy accept the frame; otherwise the edge requests on-robot resampling within retry budget $K$.
+This division keeps the 1\,kHz ROS control loop free of learning-based perception.
+Edge-IQA never writes directly to the hardware loop; it selects among pre-calibrated skills or a fail-safe return path exposed by the gateway.
+Thus a perception fault degrades the acquisition workflow, not the low-level controller.
+
+\subsection{Data and Timing Artifacts}
+Each closed-loop trial logs ISO~8601 timestamps (\texttt{t\_capture}, \texttt{t\_iqa}, \texttt{t\_route}) and decisions to JSONL for supplementary reproducibility.
+Main quantitative results (RTT percentiles, valid-frame rate, retry rate) are produced \emph{offline} by \texttt{run\_matrix\_tcm.py} on ShezhenV3-COCO test images (baselines B0--B3); the franka auxiliary track (M6) reports trend-consistent RTT only, not primary table numbers.
+The same schema is used for offline replay and the auxiliary Franka track, so every uploaded, retried, or aborted frame can be traced to a score, flag set, retry count, and timestamp.
+
+\subsection{Threats to Validity}
+Offline RTT aggregates a documented latency model rather than live WAN traces; relative baseline ordering is the primary claim.
+ShezhenV3 blur labels are synthetically injected on validation/test frames to emulate motion defocus when human quality annotations are unavailable.
+Edge-IQA overlap between clear and blurred real cohorts (M5 $\rho{=}0.47$) motivates future ROI cropping; the routing policy remains interpretable and deployable on CPU gateways.
+
+\subsection{Implementation Mapping}
+Table~\ref{tab:impl-map} summarizes the mapping from architecture layers to repositories.
+
+\begin{table}[t]
+\centering
+\caption{Layer-to-repository mapping (Paper~I).}
+\label{tab:impl-map}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lll}
+\hline
+Layer & Component & Location \\
+\hline
+Device & MoveIt, skills & \texttt{franka\_ros2} \\
+Edge & FastAPI gateway & \texttt{franka\_api\_server} \\
+Edge & Edge-IQA, LangGraph & \texttt{doctor/paper1} \\
+Cloud & Vision stub & \texttt{doctor/paper1} (stub) \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\linewidth]{fig1_system_overview.pdf}
+  \caption{Cloud--edge--device stack for robotic tongue-image acquisition (Paper~I).}
+  \label{fig:system-overview}
+\end{figure*}
+
+Figure~\ref{fig:system-overview} shows the end-to-end information flow; device motions are commanded only through the edge gateway, and IQA code is not embedded inside ROS hardware plugins.

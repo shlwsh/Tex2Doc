@@ -1,0 +1,211 @@
+{
+  "profile": "ChineseAcademic",
+  "profile_spec": {
+    "id": "chinese-academic",
+    "display_name": "Chinese Academic Paper",
+    "document_classes": [
+      "ctexart",
+      "ctexrep",
+      "ctexbook",
+      "article"
+    ],
+    "default_page_setup": "a4",
+    "latin_main_font": "Times New Roman",
+    "cjk_main_font": "SimSun",
+    "math_font": "Cambria Math",
+    "figure_caption_prefix": "图",
+    "table_caption_prefix": "表",
+    "equation_caption_prefix": "式",
+    "citation_style": "numeric-compressed",
+    "bibliography_style": "gbt7714-like",
+    "reference_section_title": "参考文献"
+  },
+  "active_profile": {
+    "id": "springer",
+    "display_name": "Springer Journal Article",
+    "source": "explicit_id",
+    "confidence": null,
+    "document_classes": [
+      "springer"
+    ],
+    "backend_preferred": "luatex-node",
+    "quality": {
+      "min_compatibility_score": 70,
+      "max_raw_fallback_blocks": 10,
+      "require_reference_graph": true
+    },
+    "style_map": [
+      {
+        "semantic": "heading.level1",
+        "docx_style": "Heading1"
+      },
+      {
+        "semantic": "heading.level2",
+        "docx_style": "Heading2"
+      },
+      {
+        "semantic": "paragraph.body",
+        "docx_style": "BodyText"
+      },
+      {
+        "semantic": "caption.figure",
+        "docx_style": "Caption"
+      }
+    ]
+  },
+  "backend": {
+    "requested": "Auto",
+    "selected": "RuleBased",
+    "fallback_from": null,
+    "reason": "RuleBasedBackend: selected for profile 'unknown'; no XeTeX-only or LuaTeX-specific template feature detected; no runtime available (xelatex: xelatex not found on PATH, lualatex: lualatex not found on PATH)"
+  },
+  "compatibility": {
+    "score": 82,
+    "scanned_files": 85,
+    "document_classes": [
+      "IEEEtran",
+      "article"
+    ],
+    "packages": [
+      "algorithm",
+      "algorithmic",
+      "algpseudocode",
+      "amsfonts",
+      "amsmath",
+      "amssymb",
+      "array",
+      "booktabs",
+      "cite",
+      "ctex",
+      "fancyvrb",
+      "geometry",
+      "graphicx",
+      "hyperref",
+      "titlesec",
+      "url"
+    ],
+    "custom_macro_count": 0,
+    "unsupported": [],
+    "warnings": [
+      {
+        "code": "profile_document_class_mismatch",
+        "feature": "IEEEtran",
+        "message": "document class is outside the active profile and may need profile-specific lowering rules"
+      },
+      {
+        "code": "profile_document_class_mismatch",
+        "feature": "article",
+        "message": "document class is outside the active profile and may need profile-specific lowering rules"
+      },
+      {
+        "code": "limited_package",
+        "feature": "algpseudocode",
+        "message": "algorithm packages currently rely on generic block lowering and may lose fine-grained styling"
+      }
+    ]
+  },
+  "journal_detection": null,
+  "stages": [
+    {
+      "stage": "SourceMount",
+      "status": "Completed",
+      "message": "mounted 130 VFS entries"
+    },
+    {
+      "stage": "JournalDetect",
+      "status": "Completed",
+      "message": "profile 'springer' explicitly set (source: explicit_id)"
+    },
+    {
+      "stage": "CompatibilityAnalyze",
+      "status": "Completed",
+      "message": "compatibility score 82, unsupported 0, warnings 3"
+    },
+    {
+      "stage": "IncludeGraph",
+      "status": "Completed",
+      "message": "joined source stream has 77705 bytes"
+    },
+    {
+      "stage": "TexParse",
+      "status": "Completed",
+      "message": "parsed TeX stream with the current Logos/Rowan reader"
+    },
+    {
+      "stage": "SemanticCollect",
+      "status": "Completed",
+      "message": "collected 340 semantic blocks"
+    },
+    {
+      "stage": "DocumentGraph",
+      "status": "Completed",
+      "message": "document graph contains 340 block nodes"
+    },
+    {
+      "stage": "DocxRender",
+      "status": "Completed",
+      "message": "DOCX renderer packed document.xml, styles.xml, relationships and media (profile default page setup: a4)"
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "IEEEtran: document class is outside the active profile and may need profile-specific lowering rules"
+    },
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "article: document class is outside the active profile and may need profile-specific lowering rules"
+    },
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "algpseudocode: algorithm packages currently rely on generic block lowering and may lose fine-grained styling"
+    }
+  ],
+  "block_count": 340,
+  "image_asset_count": 1,
+  "semantic_event_count": 0,
+  "layout_node_count": 0,
+  "sidecar_count": 0,
+  "reference_label_count": 123,
+  "reference_edge_count": 153,
+  "citation_count": 80,
+  "unresolved_reference_count": 0,
+  "bookmark_count": 29,
+  "hyperlink_count": 26,
+  "omml_equation_count": 2,
+  "omml_equation_fallback_count": 0,
+  "docx_bytes": 39062,
+  "quality_gate": {
+    "status": "PassedWithWarnings",
+    "score": 82,
+    "total_checks": 8,
+    "passed_checks": 8,
+    "failed_checks": [],
+    "warnings": [
+      {
+        "name": "runtime_fallback",
+        "passed": false,
+        "severity": "Warning",
+        "message": "1 unknown macro(s) fell back to text"
+      },
+      {
+        "name": "backend_fallback",
+        "passed": false,
+        "severity": "Warning",
+        "message": "backend fell back from Auto to RuleBased"
+      }
+    ]
+  },
+  "rule_engine": {
+    "builtin_rules": 37,
+    "journal_rules": 5,
+    "profile_rules": 0,
+    "unknown_macro_count": 1,
+    "unknown_macros": [
+      "begin{abstract}"
+    ]
+  }
+}

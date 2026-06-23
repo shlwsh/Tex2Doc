@@ -1,0 +1,13 @@
+id = "generic-article-toml"
+display_name = "Generic Article (TOML)"
+
+document_classes = ["article", "report", "book"]
+
+[font_policy]
+latin_main = "Calibri"
+
+[caption_policy]
+figure_prefix = "Figure"
+table_prefix = "Table"
+equation_prefix = ""
+numbering = "arabic"

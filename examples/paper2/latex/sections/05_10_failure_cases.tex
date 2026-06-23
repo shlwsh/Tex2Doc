@@ -1,0 +1,46 @@
+% Failure modes and case analysis
+\subsection{Failure Modes and Representative Cases}
+\label{sec:failure-cases}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig_failure_modes_schematic.pdf}
+  \caption{Illustrative de-identified tongue ROI crops: clear capture (left) vs.\ synthetic blur injection (right), matching the validation protocol.}
+  \label{fig:failure-modes}
+\end{figure}
+
+\paragraph{Score overlap despite ROI.}
+Table~\ref{tab:roi-ablation} shows negative min-clear minus max-blur separation for both full-frame and ROI Edge-IQA.
+Representative failure: a sharp cheek margin in full-frame view yields high $S$ even when the tongue surface is soft; ROI mitigates but does not eliminate overlap because coating texture retains high Laplacian variance under mild defocus.
+
+\paragraph{B3 vs.\ B2 routing gap.}
+After training MobileNetV3-Small on ROI crops (validation accuracy $98.3\%$), the full matrix reports B3 M2 $=0.934$ vs.\ B2 M2 $=0.604$ at $\tau_{B2}$ (physical resampling, Table~\ref{tab:learned-hybrid}).
+The learned scorer ranks blur well in isolation but its probability scale is not aligned with the interpretable $Q_{\mathrm{img}}$ scale used to set $\tau$; re-calibrating $\tau$ on B3 validation pairs would narrow the gap at the cost of a second threshold artifact.
+We therefore keep B2 as the primary deployable path and report B3 as an optional learned comparator.
+
+\paragraph{Synthetic blur vs.\ clinical motion.}
+Validation blur is Gaussian with $r{\in}[2.5,5.0]$; real patient micro-motion produces directional smear not fully matched by isotropic kernels.
+Spearman $\rho{=}0.36$--$0.47$ across calibration runs reflects this domain gap; future work will augment with motion-blur kernels captured from FR3 auxiliary logs.
+
+\paragraph{Missing bounding boxes.}
+$190/5{,}594$ training images lack COCO annotations; ROI crop falls back to full frame for those entries.
+Import logs \texttt{n\_with\_bbox} in calibration metadata (571/572 on val).
+
+\paragraph{Latency outliers.}
+B3 inference on CPU adds tens of milliseconds per frame inside the simulated matrix; p95 RTT rises vs.\ B2 even when p50 improves (Table~\ref{tab:main-results}), consistent with heavier per-frame scoring.
+
+\paragraph{Operator mitigations.}
+When repeated \texttt{resample\_edge} decisions occur, inspect JSONL \texttt{flags}: combined \texttt{blur+poor\_exposure} suggests lighting adjustment before asking the patient to hold still again.
+
+\paragraph{Audit replay.}
+Because Edge-IQA is deterministic, any JSONL row can be replayed offline with \texttt{compute\_q(path, bboxes=..., use\_roi=True)} to verify routing decisions during incident review.
+
+\paragraph{Cross-dataset generalization.}
+ShezhenV3 labels describe tongue \emph{conditions}, not acquisition quality; we do not claim condition-aware IQA.
+External validity is supported by architecture-level metrics (B2 vs.\ B0/B1) rather than absolute $Q_{\mathrm{img}}$ portability.
+
+\paragraph{Security failures.}
+Without API key, motion endpoints reject requests; IQA-only evaluation remains available for calibration laptops disconnected from the robot cell.
+
+\paragraph{Summary.}
+ROI focuses scoring on anatomy; B3 demonstrates learnable blur ranking but requires separate $\tau$ calibration to match routing performance of interpretable B2; overlap and synthetic blur remain the dominant residual risks.

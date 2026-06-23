@@ -1,0 +1,38 @@
+\documentclass{ctexart}
+\usepackage{ctex}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\begin{document}
+\title{基于深度学习的中文语义分析研究}
+\author{张三}
+\keywords{深度学习；语义分析；自然语言处理}
+\begin{abstract}
+本文提出了一个基于深度学习的中文语义分析方法。实验结果表明，该方法在多个基准数据集上取得了显著的性能提升。
+\endabstract}
+
+\section{引言}
+近年来，深度学习技术在自然语言处理领域取得了重要进展~\citep{li2024example}。
+
+\section{相关工作}
+\begin{equation}
+  P(y|\mathbf{x}) = \frac{\exp(\mathbf{w}_y^\top \mathbf{x})}{\sum_{y'} \exp(\mathbf{w}_{y'}^\top \mathbf{x})} \label{eq:softmax}
+\end{equation}
+
+\section{方法}
+我们提出了一种新的注意力机制。
+
+\section{实验}
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.4\textwidth]{experiment.pdf}
+  \caption{实验结果对比。}
+  \label{fig:experiment}
+\end{figure}
+
+\section{结论}
+本文提出了一个最小化的中文学术论文模板，用于测试期刊 Profile 自动检测和 DOCX 生成。
+
+\begin{thebibliography}{99}
+  \bibitem{li2024example} 李明. 深度学习在中文语义分析中的应用. \textit{软件学报}, 2024.
+\end{thebibliography}
+\end{document}

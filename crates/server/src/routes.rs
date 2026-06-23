@@ -1,26 +1,70 @@
 //! HTTP 路由。
 
-use axum::http::{header, StatusCode};
+use axum::extract::{Path, State};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{extract::Request, Json, Router};
 use mime::Mime;
+use serde::Deserialize;
 use serde_json::json;
 
 use doc_core::{convert_zip, ConvertOptions};
 
 use crate::error::ApiError;
 use crate::limits::MAX_BODY;
+use crate::state::{ConversionJobRecord, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT};
+use crate::worker_service;
 
 /// 默认主 tex 路径（与 paper3 e2e 一致）。
 const DEFAULT_MAIN_TEX: &str = "main-jos.tex";
 
 /// 组装对外 router。
 pub fn router() -> Router {
+    router_with_state(worker_service::spawn_worker_state())
+}
+
+/// 组装带状态的 router，供测试或外部嵌入复用。
+pub fn router_with_state(state: ServerState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/version", get(version))
         .route("/api/v1/convert", post(convert))
+        .route("/v1/auth/register", post(auth_register))
+        .route("/api/v1/auth/register", post(auth_register))
+        .route("/v1/auth/login", post(auth_login))
+        .route("/api/v1/auth/login", post(auth_login))
+        .route("/v1/auth/refresh", post(auth_refresh))
+        .route("/api/v1/auth/refresh", post(auth_refresh))
+        .route("/v1/me", get(me))
+        .route("/api/v1/me", get(me))
+        .route("/v1/usage", get(usage))
+        .route("/api/v1/usage", get(usage))
+        .route("/v1/plans", get(plans))
+        .route("/api/v1/plans", get(plans))
+        .route("/v1/billing/checkout", post(billing_checkout))
+        .route("/api/v1/billing/checkout", post(billing_checkout))
+        .route("/v1/billing/portal", post(billing_portal))
+        .route("/api/v1/billing/portal", post(billing_portal))
+        .route("/v1/uploads", post(upload_project))
+        .route("/api/v1/uploads", post(upload_project))
+        .route("/v1/conversions", post(create_conversion))
+        .route("/api/v1/conversions", post(create_conversion))
+        .route("/v1/conversions/:id", get(get_conversion))
+        .route("/api/v1/conversions/:id", get(get_conversion))
+        .route(
+            "/v1/conversions/:id/download/docx",
+            get(download_conversion_docx),
+        )
+        .route(
+            "/api/v1/conversions/:id/download/docx",
+            get(download_conversion_docx),
+        )
+        .route("/v1/conversions/:id/report", get(get_conversion_report))
+        .route("/api/v1/conversions/:id/report", get(get_conversion_report))
+        .route("/v1/releases/:channel", get(release_manifest))
+        .route("/api/v1/releases/:channel", get(release_manifest))
+        .with_state(state)
         .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY))
 }
 
@@ -33,6 +77,339 @@ async fn version() -> Json<serde_json::Value> {
         "name": env!("CARGO_PKG_NAME"),
         "version": env!("CARGO_PKG_VERSION"),
     }))
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthRequest {
+    email: Option<String>,
+    display_name: Option<String>,
+    refresh_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckoutBody {
+    plan_id: Option<String>,
+    success_url: Option<String>,
+    cancel_url: Option<String>,
+    return_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ConversionBody {
+    upload_id: Option<String>,
+    main_tex: Option<String>,
+    profile: Option<String>,
+    quality: Option<String>,
+    engine: Option<String>,
+    backend: Option<String>,
+}
+
+async fn auth_register(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+    auth_response(
+        payload
+            .email
+            .unwrap_or_else(|| "demo@example.com".to_string()),
+        payload.display_name,
+    )
+}
+
+async fn auth_login(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+    auth_response(
+        payload
+            .email
+            .unwrap_or_else(|| "demo@example.com".to_string()),
+        payload.display_name,
+    )
+}
+
+async fn auth_refresh(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+    let suffix = payload.refresh_token.unwrap_or_else(|| "demo".to_string());
+    Json(json!({
+        "access_token": format!("demo-access-{suffix}"),
+        "refresh_token": format!("demo-refresh-{suffix}"),
+        "user": demo_user("demo@example.com", None),
+    }))
+}
+
+async fn me(headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    Ok(Json(demo_user(
+        &session.email,
+        Some("Demo User".to_string()),
+    )))
+}
+
+async fn usage(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let used = state.cloud_conversions_used(&session.user_id).await;
+    Ok(Json(json!({
+        "plan_id": "preview",
+        "cloud_conversions_used": used,
+        "cloud_conversions_limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
+        "storage_bytes_used": 0,
+        "storage_bytes_limit": 1_073_741_824_u64,
+        "period_start": "2026-06-01T00:00:00Z",
+        "period_end": "2026-07-01T00:00:00Z",
+    })))
+}
+
+async fn plans() -> Json<serde_json::Value> {
+    Json(json!([
+        {
+            "id": "preview",
+            "name": "Preview",
+            "price_cents": 0,
+            "currency": "USD",
+            "monthly_conversions": 100,
+            "features": ["local-convert", "cloud-preview", "quality-report"]
+        },
+        {
+            "id": "pro",
+            "name": "Pro",
+            "price_cents": 2900,
+            "currency": "USD",
+            "monthly_conversions": 1000,
+            "features": ["priority-worker", "journal-profiles", "desktop-sync"]
+        }
+    ]))
+}
+
+async fn billing_checkout(
+    headers: HeaderMap,
+    Json(payload): Json<CheckoutBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&headers)?;
+    let plan_id = payload.plan_id.unwrap_or_else(|| "pro".to_string());
+    let success_url = payload
+        .success_url
+        .unwrap_or_else(|| "https://tex2doc.cn/success".to_string());
+    let cancel_url = payload
+        .cancel_url
+        .unwrap_or_else(|| "https://tex2doc.cn/cancel".to_string());
+    Ok(Json(json!({
+        "url": format!("https://billing.tex2doc.cn/checkout?plan={plan_id}&success={success_url}&cancel={cancel_url}"),
+        "expires_at": "2026-06-21T23:59:59Z",
+    })))
+}
+
+async fn billing_portal(
+    headers: HeaderMap,
+    Json(payload): Json<CheckoutBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&headers)?;
+    let return_url = payload
+        .return_url
+        .unwrap_or_else(|| "https://tex2doc.cn/account".to_string());
+    Ok(Json(json!({
+        "url": format!("https://billing.tex2doc.cn/portal?return={return_url}"),
+        "expires_at": "2026-06-21T23:59:59Z",
+    })))
+}
+
+async fn upload_project(
+    State(state): State<ServerState>,
+    request: Request,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (parts, body) = request.into_parts();
+    let _session = require_session(&parts.headers)?;
+    let full_body = axum::body::to_bytes(body, MAX_BODY)
+        .await
+        .map_err(|e| ApiError::Io(format!("body read error: {e}")))?;
+    let file_part =
+        extract_multipart_field(&full_body, "file")?.ok_or(ApiError::MissingField("file"))?;
+    if file_part.is_empty() {
+        return Err(ApiError::MissingField("file"));
+    }
+    let record = state
+        .store_upload("project.zip".to_string(), file_part)
+        .await;
+    Ok(Json(json!({
+        "upload_id": record.upload_id,
+        "status": "stored",
+        "bytes": record.bytes.len() as u64,
+        "file_name": record.file_name,
+        "created_at": record.created_at,
+    })))
+}
+
+async fn create_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<ConversionBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&headers)?;
+    let upload_id = payload
+        .upload_id
+        .unwrap_or_else(|| "upload_demo".to_string());
+    if state.get_upload(&upload_id).await.is_none() {
+        return Err(ApiError::NotFound(format!("upload {upload_id}")));
+    }
+    let profile = payload.profile.unwrap_or_else(|| "auto".to_string());
+    let quality = payload.quality.unwrap_or_else(|| "standard".to_string());
+    let engine = payload
+        .engine
+        .or(payload.backend)
+        .unwrap_or_else(|| "semantic-engine".to_string());
+    let main_tex = payload
+        .main_tex
+        .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
+    state
+        .try_consume_cloud_conversion(&session.user_id)
+        .await
+        .map_err(|used| {
+            ApiError::PaymentRequired(format!(
+                "preview cloud conversion quota exceeded: used={used}, limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
+            ))
+        })?;
+    let job = state
+        .create_job(upload_id, main_tex, profile, quality, engine)
+        .await;
+    state
+        .enqueue_job(job.job_id.clone())
+        .await
+        .map_err(ApiError::Io)?;
+    Ok(Json(job_json(&job)))
+}
+
+async fn get_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&headers)?;
+    let job = state
+        .get_job(&id)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
+    Ok(Json(job_json(&job)))
+}
+
+async fn download_conversion_docx(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Response, ApiError> {
+    let _session = require_session(&headers)?;
+    let job = state
+        .get_job(&id)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
+    let body = job
+        .docx
+        .ok_or_else(|| ApiError::Conflict(format!("conversion {id} docx is not ready")))?;
+    let mime: Mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        .parse()
+        .expect("static mime is valid");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, mime.as_ref())
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"{id}.docx\""),
+        )
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Io(e.to_string()))
+}
+
+async fn get_conversion_report(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&headers)?;
+    let job = state
+        .get_job(&id)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
+    let report = job
+        .report
+        .ok_or_else(|| ApiError::Conflict(format!("conversion {id} report is not ready")))?;
+    Ok(Json(
+        serde_json::to_value(report).map_err(|e| ApiError::Io(e.to_string()))?,
+    ))
+}
+
+async fn release_manifest(Path(channel): Path<String>) -> Json<serde_json::Value> {
+    Json(json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "channel": channel,
+        "download_url": "https://releases.tex2doc.cn/desktop/latest",
+        "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "signature": "pending-p9-signature",
+        "release_notes": "P9 preview manifest. Installers and real signatures are pending platform release builds.",
+    }))
+}
+
+fn auth_response(email: String, display_name: Option<String>) -> Json<serde_json::Value> {
+    Json(json!({
+        "access_token": format!("demo-access-{}", email.replace('@', "_")),
+        "refresh_token": format!("demo-refresh-{}", email.replace('@', "_")),
+        "user": demo_user(&email, display_name),
+    }))
+}
+
+#[derive(Debug, Clone)]
+struct DemoSession {
+    user_id: String,
+    email: String,
+}
+
+fn require_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
+    let value = headers
+        .get(header::AUTHORIZATION)
+        .ok_or_else(|| ApiError::Unauthorized("missing bearer token".to_string()))?
+        .to_str()
+        .map_err(|_| ApiError::Unauthorized("invalid authorization header".to_string()))?;
+    let token = value
+        .strip_prefix("Bearer ")
+        .ok_or_else(|| ApiError::Unauthorized("expected Bearer token".to_string()))?
+        .trim();
+    if token.is_empty() {
+        return Err(ApiError::Unauthorized("empty bearer token".to_string()));
+    }
+    if !(token.starts_with("demo-access-") || token.starts_with("demo-refresh-")) {
+        return Err(ApiError::Unauthorized(
+            "unsupported bearer token for preview server".to_string(),
+        ));
+    }
+    let suffix = token
+        .strip_prefix("demo-access-")
+        .or_else(|| token.strip_prefix("demo-refresh-"))
+        .unwrap_or("demo");
+    Ok(DemoSession {
+        user_id: suffix.to_string(),
+        email: "demo@example.com".to_string(),
+    })
+}
+
+fn demo_user(email: &str, display_name: Option<String>) -> serde_json::Value {
+    json!({
+        "id": "user_demo",
+        "email": email,
+        "display_name": display_name,
+        "plan_id": "preview",
+    })
+}
+
+fn job_json(job: &ConversionJobRecord) -> serde_json::Value {
+    json!({
+        "job_id": job.job_id,
+        "upload_id": job.upload_id,
+        "main_tex": job.main_tex,
+        "profile": job.profile,
+        "quality": job.quality,
+        "engine": job.engine,
+        "status": job.status.as_str(),
+        "created_at": job.created_at,
+        "updated_at": job.updated_at,
+        "docx_ready": job.docx.is_some(),
+        "report_ready": job.report.is_some(),
+        "error": job.error,
+    })
 }
 
 /// 在 body 中找第一个 boundary 行。

@@ -1,0 +1,11 @@
+% 附录：经典 NR-IQA 基线（AP-005）
+\subsection{经典 NR-IQA 基线（BRISQUE / NIQE 风格）}
+\label{sec:nr-iqa-baselines-zh}
+
+为将路由策略与 Edge-IQA 特征设计解耦，我们在与 B2 \emph{相同} 的 LangGraph 重采与 $K$ 预算下增加 \textbf{Bbrisque}（OpenCV BRISQUE，舌区 ROI）与 \textbf{Bniqe}（NSS 马氏距离，NIQE 风格）。
+各评分器在验证集上独立标定 $\tau$（表~\ref{tab:nr-iqa-zh}）；边侧延迟均值见方法节对比表（约 85\,ms / 150\,ms，相对 Edge-IQA 约 9\,ms）。
+
+\input{sections/zh/table_nr_iqa}
+
+Bbrisque/Bniqe 在表~\ref{tab:nr-iqa-zh} 中 M2 高于 B2，但 M1 p50 显著更大，与图~\ref{fig:pareto-m2-m1-zh} 一致。
+复现命令：\texttt{calibrate\_tau\_nr.py} 与 \texttt{run\_matrix\_tcm.py --config experiments/configs/main\_exp\_nr.yaml --tag nr}。

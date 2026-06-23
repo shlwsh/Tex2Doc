@@ -1,0 +1,19 @@
+\subsection{Edge-IQA Validation}
+\label{sec:tcm-iqa}
+
+On the validation split ($n{=}572$ clear + synthetic blur pairs), Fig.~\ref{fig:iqa-hist} shows overlapping $Q_{\mathrm{img}}$ histograms.
+Table~\ref{tab:iqa-calibration} lists cohort medians ($0.516/0.414$), deployed $\tau_{B2}{=}0.465$, and negative separability ($-0.541$): some blurred validation crops score above the weakest clear crops, so $\tau$ is a cohort-median operating point rather than a hard separator.
+Spearman $\rho{\approx}0.36$--$0.47$ on real texture motivates pairing interpretable B2 with learned comparators (Table~\ref{tab:learned-hybrid}).
+
+\input{sections/table_dataset}
+
+Each test frame is scored by the same \texttt{scorer.py} invoked offline; latency components follow \S\ref{sec:setup}.
+This ensures Table~\ref{tab:main-results} reflects \emph{real} quality scores while preserving the reproducible closed-loop simulator for RTT aggregation.
+An auxiliary Franka track (M6, 50 trials on fake hardware) logs JSONL through the live gateway stack and confirms routing decisions are reproducible on the execution path; M6 RTT trends are reported in the online supplement and must not be merged into Table~\ref{tab:main-results}.
+
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{fig_iqa_hist.pdf}
+  \caption{Edge-IQA $Q_{\mathrm{img}}$ on ShezhenV3 validation: clear vs.\ synthetically blurred pairs ($n{=}1{,}144$). Overlap motivates cohort-median $\tau$ rather than hard separation.}
+  \label{fig:iqa-hist}
+\end{figure*}

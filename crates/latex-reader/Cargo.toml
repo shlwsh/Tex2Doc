@@ -10,11 +10,13 @@ description = "Doc-engine LaTeX 解析器：Logos + Rowan 双阶段 + include �
 [dependencies]
 doc-utils        = { workspace = true }
 doc-semantic-ast = { workspace = true }
+doc-tex-facade  = { workspace = true }
 
 logos = { workspace = true }
 rowan = { workspace = true }
 thiserror = { workspace = true }
 serde = { workspace = true }
+tracing = { workspace = true }
 
 [dev-dependencies]
 insta = { workspace = true }

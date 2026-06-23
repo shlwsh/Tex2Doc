@@ -1,0 +1,10 @@
+﻿[rule-engine] unknown macro: \begin{abstract} (arity=0) — using verbatim fallback
+[rule-engine] unknown macro: \begin{IEEEkeywords} (arity=0) — using verbatim fallback
+Quality gate: passed with 2 warning(s)
+docx: D:\work\Tex2Doc\examples\output\journal-profile-generalization\docx\paper2__cvpr__auto.docx
+profile: cvpr
+detected_profile: cvpr
+compatibility-score: 88
+backend: rule-based (requested: auto)
+quality-gate: PassedWithWarnings (8/8 checks passed)
+report: D:\work\Tex2Doc\examples\output\journal-profile-generalization\reports\paper2__cvpr__auto.report.json

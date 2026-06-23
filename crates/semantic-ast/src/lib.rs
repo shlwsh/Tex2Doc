@@ -256,6 +256,12 @@ pub enum Block {
         number: Option<String>,
         span: Span,
     },
+    /// 代码块：从 minted / listings / verbatim 环境提取的源代码。
+    CodeBlock {
+        language: Option<String>,
+        code: String,
+        span: Span,
+    },
     /// 错误降级：解析失败但仍保留原文
     RawFallback {
         text: String,

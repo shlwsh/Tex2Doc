@@ -1,0 +1,128 @@
+﻿[
+    {
+        "case":  "paper2__chinese-academic__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  3650490,
+        "elapsed_ms":  22685,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__chinese-academic__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__chinese-academic__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__cvpr__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  281809,
+        "elapsed_ms":  7072,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__cvpr__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__cvpr__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__generic__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  486628,
+        "elapsed_ms":  6481,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__generic__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__generic__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__jos-paper__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  352618,
+        "elapsed_ms":  6433,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__jos-paper__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__jos-paper__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__nature__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  485937,
+        "elapsed_ms":  6725,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__nature__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__nature__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__springer__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  486168,
+        "elapsed_ms":  6730,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__springer__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__springer__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper2__tacl__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  486628,
+        "elapsed_ms":  7026,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper2__tacl__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper2__tacl__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__chinese-academic__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  4591645,
+        "elapsed_ms":  9944,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__chinese-academic__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__chinese-academic__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__cvpr__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5097203,
+        "elapsed_ms":  10742,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__cvpr__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__cvpr__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__generic__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5097203,
+        "elapsed_ms":  11185,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__generic__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__generic__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__jos-paper__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5062174,
+        "elapsed_ms":  14615,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__jos-paper__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__jos-paper__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__nature__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5243217,
+        "elapsed_ms":  11454,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__nature__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__nature__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__springer__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5167901,
+        "elapsed_ms":  11432,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__springer__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__springer__auto.pdf using filter : writer_pdf_Export"
+    },
+    {
+        "case":  "paper3__tacl__auto",
+        "soffice_open":  true,
+        "exit_code":  0,
+        "pdf_exists":  true,
+        "pdf_bytes":  5097203,
+        "elapsed_ms":  9759,
+        "output":  "Could not find platform independent libraries \u003cprefix\u003e\nconvert D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\docx\\paper3__tacl__auto.docx as a Writer document -\u003e D:\\work\\Tex2Doc\\examples\\output\\journal-profile-generalization\\soffice-pdf\\paper3__tacl__auto.pdf using filter : writer_pdf_Export"
+    }
+]

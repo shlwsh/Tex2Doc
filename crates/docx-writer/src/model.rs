@@ -145,11 +145,8 @@ pub fn merge_adjacent_runs(runs: Vec<Run>) -> Vec<Run> {
                             .chars()
                             .last()
                             .map_or(false, |c| c.is_whitespace());
-                        let run_starts_with_space = run
-                            .text
-                            .chars()
-                            .next()
-                            .map_or(false, |c| c.is_whitespace());
+                        let run_starts_with_space =
+                            run.text.chars().next().map_or(false, |c| c.is_whitespace());
                         if !last_ends_with_space && !run_starts_with_space {
                             last.text.push(' ');
                         }
@@ -169,7 +166,9 @@ fn is_footnote_symbol(text: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    trimmed.chars().all(|c| matches!(c, '*' | '†' | '‡' | '§' | '¶' | '#'))
+    trimmed
+        .chars()
+        .all(|c| matches!(c, '*' | '†' | '‡' | '§' | '¶' | '#'))
 }
 
 #[cfg(test)]
@@ -179,10 +178,7 @@ mod tests {
 
     #[test]
     fn merge_adjacent_runs_joins_same_format() {
-        let runs = vec![
-            Run::plain("hello"),
-            Run::plain("world"),
-        ];
+        let runs = vec![Run::plain("hello"), Run::plain("world")];
         let out = merge_adjacent_runs(runs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "hello world");
@@ -250,11 +246,7 @@ mod tests {
 
     #[test]
     fn merge_adjacent_runs_three_same_format() {
-        let runs = vec![
-            Run::plain("a"),
-            Run::plain("b"),
-            Run::plain("c"),
-        ];
+        let runs = vec![Run::plain("a"), Run::plain("b"), Run::plain("c")];
         let out = merge_adjacent_runs(runs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "a b c");
@@ -262,10 +254,7 @@ mod tests {
 
     #[test]
     fn merge_adjacent_runs_drops_empty() {
-        let runs = vec![
-            Run::plain(""),
-            Run::plain("hello"),
-        ];
+        let runs = vec![Run::plain(""), Run::plain("hello")];
         let out = merge_adjacent_runs(runs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "hello");
@@ -274,10 +263,7 @@ mod tests {
     // v13.1 P2: footnote 标点 (* † ‡) 与前一 run 合并时不应插入空格
     #[test]
     fn merge_adjacent_runs_footnote_no_space() {
-        let runs = vec![
-            Run::plain("5.06e-03"),
-            Run::plain("*"),
-        ];
+        let runs = vec![Run::plain("5.06e-03"), Run::plain("*")];
         let out = merge_adjacent_runs(runs);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].text, "5.06e-03*");

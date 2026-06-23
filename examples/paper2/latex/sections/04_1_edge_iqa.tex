@@ -1,0 +1,59 @@
+% §4.1 Edge-IQA — draft (Paper I, V19 phase 2)
+\subsection{Edge Image Quality Assessment}
+\label{sec:edge-iqa}
+
+Before cloud upload, each captured frame is scored on the edge node by a lightweight \emph{Edge-IQA} module with complexity $O(HW)$ on a fixed $512\times512$ resize, suitable for CPU-only gateways.
+
+\paragraph{Quality index.}
+Let $I$ denote the grayscale image. We combine a Laplacian sharpness term $S=\mathrm{Var}(\nabla^2 I)$ normalized to $[0,1]$ and an exposure term $E$ peaked at mid-gray:
+\begin{equation}
+Q_{\mathrm{img}} = 0.65\, S + 0.35\, E .
+\end{equation}
+Binary \emph{flags} are raised for \texttt{blur} ($S<\tau_s$), \texttt{underexposed}, or \texttt{overexposed} means.
+
+\paragraph{Design rationale.}
+Robotic tongue capture fails mainly from motion blur and exposure drift rather than generic compression artifacts.
+Edge-IQA fuses sharpness and exposure in one $[0,1]$ score so a single threshold $\tau$ gates LangGraph routing; with COCO tongue ROI on ShezhenV3 validation, clear and blur cohort medians are $0.516$ and $0.414$ respectively ($\tau^\ast{=}0.465$).
+We prioritize deployability---CPU-only, interpretable flags, and the same \texttt{scorer.py} for offline calibration and online gateway calls---over MOS leaderboard accuracy.
+Baseline B3 (\S\ref{sec:b3-learned}) uses a MobileNetV3-Small~\cite{howard2019mobilenetv3} classifier trained on the ShezhenV3 train split; it is optional and the primary claim rests on interpretable B2.
+
+\begin{table}[t]
+\centering
+\caption{IQA approaches for edge acquisition gating (qualitative comparison).}
+\label{tab:iqa-compare}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lccccc}
+\hline
+Method & Lat. & GPU & Flags & $\tau$ & Scorer \\
+\hline
+Edge-IQA (ours) & $\sim$10\,ms & No & Yes & Yes & Yes \\
+Laplacian-only & $\sim$5\,ms & No & Part. & Yes & Yes \\
+NIQE / BRISQUE & 50--200\,ms & No & Lim. & Map & Wrap. \\
+Deep NR-IQA & 10--100+\,ms & Often & No & Map & Svc. \\
+B3 boost (learned) & 15--40\,ms & Opt. & No & Yes & Sep. \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Implementation pipeline.}
+\texttt{edge\_iqa/scorer.py} resizes RGB inputs to $512\times512$ (bilinear), converts to grayscale via ITU-R BT.601 weights, and computes a discrete Laplacian via vectorized neighbor shifts.
+Sharpness normalization uses $S = v/(v+0.002)$ with $v=\mathrm{Var}(\nabla^2 I)$ to stabilize scale across tongue images.
+Exposure uses mean gray deviation from $0.5$; flags apply thresholds $S<0.35$, mean $<0.25$ (under), mean $>0.85$ (over).
+The implementation uses OpenCV-style image operators. The FastAPI gateway (\texttt{franka\_api\_server/services/paper1\_iqa.py}) spawns \texttt{python -m edge\_iqa.cli --json} in a subprocess to avoid GIL contention with \texttt{rclpy}; offline ShezhenV3 calibration uses the identical code path via \texttt{calibrate\_tau\_tcm.py}.
+On 100 synthetic frames CPU p95 is 9.6\,ms (\texttt{latency\_benchmark.json}); full validation scoring 1{,}144 pairs completes in under two minutes on a commodity laptop without GPU acceleration.
+
+\paragraph{Threshold $\tau$.}
+On the validation split we set routing threshold $\tau$ to the midpoint between median $Q_{\mathrm{img}}$ of clear and blurred cohorts (clamped to $[0.45,0.65]$), stored in \texttt{recommended\_tau.json} for LangGraph nodes.
+
+\begin{algorithm}[t]
+\caption{Edge-IQA scoring}
+\begin{algorithmic}[1]
+\STATE Resize $I$ to $512\times512$, convert to grayscale
+\STATE $S \leftarrow \mathrm{normalize}(\mathrm{Var}(\nabla^2 I))$
+\STATE $E \leftarrow 1 - | \mathrm{mean}(I) - 0.5 | / 0.5$
+\STATE $Q_{\mathrm{img}} \leftarrow 0.65 S + 0.35 E$
+\STATE Derive flags from $(S,E)$; \RETURN $Q_{\mathrm{img}}$, flags
+\end{algorithmic}
+\end{algorithm}

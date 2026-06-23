@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="320" viewBox="0 0 820 320">
+  <style>
+    .box { fill:#f5f7fa; stroke:#334155; stroke-width:2; }
+    .title { font: bold 14px sans-serif; fill:#0f172a; }
+    .label { font: 12px sans-serif; fill:#1e293b; }
+    .arrow { stroke:#2563eb; stroke-width:2; fill:none; marker-end:url(#arr); }
+  </style>
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="#2563eb"/>
+    </marker>
+  </defs>
+  <rect class="box" x="20" y="40" width="220" height="240" rx="8"/>
+  <text class="title" x="40" y="68">Device</text>
+  <text class="label" x="40" y="100">FR3 + MoveIt</text>
+  <text class="label" x="40" y="124">Camera</text>
+  <text class="label" x="40" y="148">skills: tongue / face</text>
+
+  <rect class="box" x="280" y="40" width="260" height="240" rx="8"/>
+  <text class="title" x="300" y="68">Edge</text>
+  <text class="label" x="300" y="100">franka_api_server</text>
+  <text class="label" x="300" y="124">Edge-IQA (paper1)</text>
+  <text class="label" x="300" y="148">LangGraph router</text>
+  <text class="label" x="300" y="172">franka_bridge HTTP</text>
+
+  <rect class="box" x="580" y="40" width="220" height="240" rx="8"/>
+  <text class="title" x="600" y="68">Cloud</text>
+  <text class="label" x="600" y="100">Vision stub</text>
+  <text class="label" x="600" y="124">TCM inference (async)</text>
+
+  <line class="arrow" x1="240" y1="120" x2="280" y2="120"/>
+  <line class="arrow" x1="540" y1="120" x2="580" y2="120"/>
+  <line class="arrow" x1="410" y1="200" x2="130" y2="200"/>
+  <text class="label" x="330" y="218">resample_edge</text>
+</svg>

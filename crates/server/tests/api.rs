@@ -50,6 +50,23 @@ fn test_client() -> reqwest::Client {
         .expect("build reqwest client with timeout")
 }
 
+async fn register_preview_token(client: &reqwest::Client, addr: SocketAddr) -> String {
+    let auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/register"))
+        .json(&serde_json::json!({
+            "email": "demo@example.com",
+            "password": "secret",
+            "display_name": "Demo User"
+        }))
+        .send()
+        .await
+        .expect("send register")
+        .json()
+        .await
+        .expect("register json");
+    auth["access_token"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
 async fn health_returns_ok() {
     let (addr, shutdown) = spawn_test_server().await;
@@ -78,6 +95,261 @@ async fn version_returns_semver() {
     let body: serde_json::Value = resp.json().await.expect("json version");
     assert_eq!(body["name"], "doc-server");
     assert!(body["version"].as_str().unwrap().contains('.'));
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn p6_commercial_contract_endpoints_return_json() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+
+    let auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/register"))
+        .json(&serde_json::json!({
+            "email": "demo@example.com",
+            "password": "secret",
+            "display_name": "Demo User"
+        }))
+        .send()
+        .await
+        .expect("send register")
+        .json()
+        .await
+        .expect("register json");
+    assert!(auth["access_token"]
+        .as_str()
+        .unwrap()
+        .starts_with("demo-access-"));
+    assert_eq!(auth["user"]["plan_id"], "preview");
+    let token = auth["access_token"].as_str().unwrap().to_string();
+
+    let usage: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage")
+        .json()
+        .await
+        .expect("usage json");
+    assert_eq!(usage["plan_id"], "preview");
+    assert!(usage["cloud_conversions_limit"].as_u64().unwrap() > 0);
+
+    let plans: serde_json::Value = client
+        .get(format!("http://{addr}/v1/plans"))
+        .send()
+        .await
+        .expect("send plans")
+        .json()
+        .await
+        .expect("plans json");
+    assert!(plans.as_array().unwrap().iter().any(|p| p["id"] == "pro"));
+
+    let upload_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/uploads"))
+        .bearer_auth(&token)
+        .multipart(Form::new().part("file", Part::bytes(vec![1, 2, 3, 4]).file_name("demo.zip")))
+        .send()
+        .await
+        .expect("send upload")
+        .json()
+        .await
+        .expect("upload json");
+    let upload_id = upload_resp["upload_id"].as_str().unwrap().to_string();
+    assert!(upload_id.starts_with("upload_"));
+
+    let conversion: serde_json::Value = client
+        .post(format!("http://{addr}/v1/conversions"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "upload_id": upload_id,
+            "main_tex": "minimal.tex",
+            "profile": "generic",
+            "quality": "standard"
+        }))
+        .send()
+        .await
+        .expect("send conversion")
+        .json()
+        .await
+        .expect("conversion json");
+    let job_id = conversion["job_id"].as_str().unwrap().to_string();
+    assert!(job_id.starts_with("conv_"));
+    assert!(matches!(
+        conversion["status"].as_str().unwrap(),
+        "queued"
+            | "normalizing"
+            | "detecting"
+            | "analyzing"
+            | "compiling"
+            | "rendering"
+            | "verifying"
+    ));
+    assert_eq!(conversion["docx_ready"], false);
+    assert_eq!(conversion["engine"], "semantic-engine");
+
+    let usage_after: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage after conversion")
+        .json()
+        .await
+        .expect("usage after json");
+    assert_eq!(usage_after["cloud_conversions_used"], 1);
+
+    let release: serde_json::Value = client
+        .get(format!("http://{addr}/v1/releases/beta"))
+        .send()
+        .await
+        .expect("send release")
+        .json()
+        .await
+        .expect("release json");
+    assert_eq!(release["channel"], "beta");
+    assert_eq!(release["sha256"].as_str().unwrap().len(), 64);
+    assert!(release["download_url"]
+        .as_str()
+        .unwrap()
+        .starts_with("https://"));
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn p6_commercial_user_endpoints_require_bearer_token() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+
+    let usage = client
+        .get(format!("http://{addr}/v1/usage"))
+        .send()
+        .await
+        .expect("send usage without auth");
+    assert_eq!(usage.status(), 401);
+
+    let upload = client
+        .post(format!("http://{addr}/v1/uploads"))
+        .multipart(Form::new().part("file", Part::bytes(vec![1, 2, 3, 4]).file_name("demo.zip")))
+        .send()
+        .await
+        .expect("send upload without auth");
+    assert_eq!(upload.status(), 401);
+
+    let conversion = client
+        .post(format!("http://{addr}/v1/conversions"))
+        .json(&serde_json::json!({
+            "upload_id": "upload_demo",
+            "main_tex": "minimal.tex"
+        }))
+        .send()
+        .await
+        .expect("send conversion without auth");
+    assert_eq!(conversion.status(), 401);
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
+async fn p7_cloud_worker_converts_uploaded_zip() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+    let zip_bytes = std::fs::read(FIXTURE_ZIP).expect("paper3 upload.zip must exist");
+
+    let upload_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/uploads"))
+        .bearer_auth(&token)
+        .multipart(Form::new().part("file", Part::bytes(zip_bytes).file_name("paper3.zip")))
+        .send()
+        .await
+        .expect("send upload")
+        .json()
+        .await
+        .expect("upload json");
+    let upload_id = upload_resp["upload_id"].as_str().unwrap().to_string();
+
+    let conversion: serde_json::Value = client
+        .post(format!("http://{addr}/v1/conversions"))
+        .bearer_auth(&token)
+        .json(&serde_json::json!({
+            "upload_id": upload_id,
+            "main_tex": "main-jos.tex",
+            "profile": "jos-paper",
+            "quality": "standard",
+            "engine": "semantic-engine"
+        }))
+        .send()
+        .await
+        .expect("send conversion")
+        .json()
+        .await
+        .expect("conversion json");
+    let job_id = conversion["job_id"].as_str().unwrap().to_string();
+
+    let mut final_job = conversion;
+    for _ in 0..180 {
+        if matches!(
+            final_job["status"].as_str().unwrap(),
+            "completed" | "failed" | "expired"
+        ) {
+            break;
+        }
+        sleep(Duration::from_millis(500)).await;
+        final_job = client
+            .get(format!("http://{addr}/v1/conversions/{job_id}"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("poll conversion")
+            .json()
+            .await
+            .expect("conversion json");
+    }
+
+    assert_eq!(
+        final_job["status"], "completed",
+        "conversion should complete: {final_job:?}"
+    );
+    assert_eq!(final_job["docx_ready"], true);
+    assert_eq!(final_job["report_ready"], true);
+
+    let report: serde_json::Value = client
+        .get(format!("http://{addr}/v1/conversions/{job_id}/report"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send conversion report")
+        .json()
+        .await
+        .expect("report json");
+    assert_eq!(report["job_id"], job_id);
+    assert!(matches!(
+        report["profile"].as_str().unwrap(),
+        "jos-paper" | "jos-paper-toml"
+    ));
+    assert_eq!(report["executor"], "semantic-engine");
+    assert!(report["backend"].as_str().unwrap().len() > 0);
+    assert!(report["quality_score"].as_u64().is_some());
+    assert!(report["quality_status"].as_str().unwrap().len() > 0);
+    assert!(report["compatibility_score"].as_u64().is_some());
+    assert!(report["docx_bytes"].as_u64().unwrap() > 4 * 1024);
+
+    let docx = client
+        .get(format!(
+            "http://{addr}/v1/conversions/{job_id}/download/docx"
+        ))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send docx")
+        .bytes()
+        .await
+        .expect("docx bytes");
+    assert_eq!(&docx[..4], b"PK\x03\x04");
+    assert!(docx.len() > 4 * 1024, "docx too small: {}", docx.len());
+
     let _ = shutdown.send(());
 }
 

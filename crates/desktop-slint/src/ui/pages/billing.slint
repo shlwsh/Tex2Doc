@@ -1,0 +1,110 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, GroupBox, ListView } from "std-widgets.slint";
+import { PlanEntry } from "../types.slint";
+
+export component BillingTab inherits Rectangle {
+    in-out property <string> api-base-url;
+    in-out property <string> billing-plan-id: "pro";
+    in-out property <string> billing-status: "--";
+    in-out property <[PlanEntry]> plan-catalog;
+    in-out property <int> current-plan-index: 0;
+
+    callback show-plans-clicked(string);
+    callback checkout-clicked(string, string);
+    callback billing-portal-clicked(string);
+    callback change-plan-clicked(string);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        GroupBox {
+            title: "Plans (Phase D.2)";
+
+            VerticalBox {
+                spacing: 6px;
+
+                for plan[idx] in plan-catalog: Rectangle {
+                    background: idx == current-plan-index ? #e8f0ff : #f8f8f8;
+                    border-radius: 4px;
+                    HorizontalBox {
+                        padding: 8px;
+                        spacing: 12px;
+                        VerticalBox {
+                            Text { text: plan.name; font-size: 14px; font-weight: 700; }
+                            Text { text: plan.id; font-size: 10px; color: #666; }
+                        }
+                        VerticalBox {
+                            Text { text: plan.price; font-size: 13px; font-weight: 600; }
+                            Text { text: plan.quota + " / month"; font-size: 11px; color: #666; }
+                        }
+                        Text {
+                            text: plan.features;
+                            font-size: 11px;
+                            color: #444;
+                            horizontal-alignment: left;
+                            vertical-alignment: center;
+                            wrap: word-wrap;
+                        }
+                        Button {
+                            text: idx == current-plan-index ? "Current" : "Choose";
+                            enabled: idx != current-plan-index;
+                            clicked => {
+                                root.change-plan-clicked(plan.id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Plan";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Plan ID";
+                        text <=> billing-plan-id;
+                    }
+
+                    Button {
+                        text: "Plans";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.billing-status = "Loading plans...";
+                            root.show-plans-clicked(api-base-url);
+                        }
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Checkout";
+                        enabled: api-base-url != "" && billing-plan-id != "";
+                        clicked => {
+                            root.billing-status = "Creating checkout session...";
+                            root.checkout-clicked(api-base-url, billing-plan-id);
+                        }
+                    }
+
+                    Button {
+                        text: "Portal";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.billing-status = "Opening billing portal...";
+                            root.billing-portal-clicked(api-base-url);
+                        }
+                    }
+                }
+
+                Text { text: billing-status; font-size: 12px; }
+            }
+        }
+    }
+}

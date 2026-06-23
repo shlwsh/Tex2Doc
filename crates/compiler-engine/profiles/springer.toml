@@ -1,0 +1,134 @@
+id = "springer"
+display_name = "Springer Journal Article"
+
+document_classes = ["springer"]
+aliases = ["svjour3", "llncs", "sn-jnl", "springer-journal"]
+
+[page_setup]
+kind = "a4"
+margin_top_mm = 25.0
+margin_bottom_mm = 25.0
+margin_left_mm = 22.0
+margin_right_mm = 22.0
+
+[font_policy]
+latin_main = "Times New Roman"
+cjk_main = ""
+math = "Times New Roman"
+notes = "Springer LNCS/SVJour journal format"
+
+[caption_policy]
+figure_prefix = "Fig."
+table_prefix = "Table"
+equation_prefix = ""
+numbering = "arabic"
+
+[citation_policy]
+style = "numeric"
+bibliography_style = "springer-spcjour"
+reference_section_title = "References"
+
+[detection]
+min_confidence = 0.75
+fallback_profile = "generic"
+
+[[detection.signals]]
+kind = "documentclass"
+value = "springer"
+weight = 0.70
+
+[[detection.signals]]
+kind = "macro"
+value = "institute"
+weight = 0.10
+
+[[detection.signals]]
+kind = "macro"
+value = "titlerunning"
+weight = 0.05
+
+[[detection.signals]]
+kind = "macro"
+value = "authorrunning"
+weight = 0.05
+
+# Also support svjour3 and llncs classes for future expansion
+[[detection.signals]]
+kind = "documentclass"
+value = "svjour3"
+weight = 0.70
+
+[[detection.signals]]
+kind = "documentclass"
+value = "llncs"
+weight = 0.70
+
+[backend]
+preferred = "luatex-node"
+fallback = ["xelatex-hook", "rule-based"]
+requires_xetex = false
+prefers_luatex = true
+
+[semantic_policy]
+unknown_macro = "rule-engine"
+preserve_raw_fallback = true
+collect_runtime_events = true
+collect_layout_graph = true
+
+# Springer-specific macro rules
+[[macro_rules]]
+name = "institute"
+semantic = "affiliation"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "titlerunning"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "authorrunning"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "email"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "orcidID"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "keywords"
+semantic = "keyword"
+args = 1
+style = ""
+
+[[style_map]]
+semantic = "heading.level1"
+docx_style = "Heading1"
+
+[[style_map]]
+semantic = "heading.level2"
+docx_style = "Heading2"
+
+[[style_map]]
+semantic = "paragraph.body"
+docx_style = "BodyText"
+
+[[style_map]]
+semantic = "caption.figure"
+docx_style = "Caption"
+
+[quality]
+min_compatibility_score = 70
+max_raw_fallback_blocks = 10
+require_reference_graph = true

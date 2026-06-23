@@ -10,3 +10,5 @@ description = "XDV/DVI bytecode parser for XeLaTeX layout extraction"
 [dependencies]
 thiserror = { workspace = true }
 serde     = { workspace = true }
+serde_json = "1.0"
+doc-semantic-collector = { workspace = true }

@@ -1,0 +1,29 @@
+id = "chinese-academic-toml"
+display_name = "Chinese Academic Paper"
+
+document_classes = ["ctexart", "article"]
+
+[page_setup]
+kind = "a4"
+width_mm = 210.0
+height_mm = 297.0
+margin_top_mm = 25.0
+margin_bottom_mm = 25.0
+margin_left_mm = 30.0
+margin_right_mm = 30.0
+
+[font_policy]
+latin_main = "Times New Roman"
+cjk_main = "宋体"
+math = "Cambria Math"
+
+[caption_policy]
+figure_prefix = "图"
+table_prefix = "表"
+equation_prefix = "式"
+numbering = "arabic"
+
+[citation_policy]
+style = "gbt7714"
+bibliography_style = "gbt7714"
+reference_section_title = "参考文献"

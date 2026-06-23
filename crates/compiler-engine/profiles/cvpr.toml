@@ -1,0 +1,131 @@
+id = "cvpr"
+display_name = "CVPR/ICCV Paper"
+
+document_classes = ["IEEEtran"]
+aliases = ["cvpr-paper", "iccv"]
+
+[page_setup]
+kind = "letter"
+columns = 1
+
+[font_policy]
+latin_main = "Times New Roman"
+cjk_main = ""
+math = "Cambria Math"
+notes = "IEEE CVPR conference paper format"
+
+[caption_policy]
+figure_prefix = "Fig."
+table_prefix = "Table"
+equation_prefix = ""
+numbering = "arabic"
+
+[citation_policy]
+style = "numeric-compressed"
+bibliography_style = "ieee"
+reference_section_title = "References"
+
+[detection]
+min_confidence = 0.75
+fallback_profile = "generic"
+
+[[detection.signals]]
+kind = "documentclass"
+value = "IEEEtran"
+weight = 0.70
+
+[[detection.signals]]
+kind = "documentclass_option"
+value = "conference"
+weight = 0.20
+
+[[detection.signals]]
+kind = "macro"
+value = "cvprfinalcopy"
+weight = 0.10
+
+[[detection.signals]]
+kind = "macro"
+value = "iccvfinalcopy"
+weight = 0.10
+
+[[detection.signals]]
+kind = "macro"
+value = "cvprPaperID"
+weight = 0.05
+
+[backend]
+preferred = "luatex-node"
+fallback = ["xelatex-hook", "rule-based"]
+requires_xetex = false
+prefers_luatex = true
+
+[semantic_policy]
+unknown_macro = "rule-engine"
+preserve_raw_fallback = true
+collect_runtime_events = true
+collect_layout_graph = true
+
+# CVPR/ICCV-specific macro rules
+[[macro_rules]]
+name = "cvprfinalcopy"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "iccvfinalcopy"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "cvprPaperID"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "confName"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "confYear"
+semantic = "metadata"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "author"
+semantic = "author"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "affiliation"
+semantic = "affiliation"
+args = 1
+style = ""
+
+[[style_map]]
+semantic = "heading.level1"
+docx_style = "Heading1"
+
+[[style_map]]
+semantic = "heading.level2"
+docx_style = "Heading2"
+
+[[style_map]]
+semantic = "paragraph.body"
+docx_style = "BodyText"
+
+[[style_map]]
+semantic = "caption.figure"
+docx_style = "Caption"
+
+[quality]
+min_compatibility_score = 75
+max_raw_fallback_blocks = 10
+require_reference_graph = true

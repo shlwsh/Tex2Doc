@@ -7,22 +7,64 @@
 
 #![forbid(unsafe_code)]
 
-use std::collections::{HashMap, HashSet};
+mod journal_detector;
+mod profiles;
+
+use std::collections::HashSet;
 use std::fs;
 use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::Command;
 
 use doc_latex_reader::{
-    lower_to_document, lower_to_document_with_cite_map, parse_bbl, parse_bib, parse_tex,
-    IncludeGraph, JoinedStream, Parse,
+    latex_to_text::extract_front_matter, lower_to_document, lower_to_document_with_cite_map,
+    parse_bbl, parse_bib, parse_tex, IncludeGraph, JoinedStream, Parse,
+};
+use doc_rule_engine::{
+    route_rule_output, DecisionSource, MacroRule, RoutingConfig, RuleEngine, RuleOutput,
 };
 use doc_semantic_ast::{
     Block, Document, SourceBundle, SourceFile, Span, StandardDocument, TextRun, TextStyle,
 };
 use doc_utils::{ImageAssets, VirtualFs};
+use doc_xdv_parser::to_collector_layout_graph;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
+// Re-export types and functions from doc_semantic_collector
+pub use doc_semantic_collector::{
+    build_reference_graph, is_tex_like_path, parse_semantic_events_jsonl, path_to_posix,
+    scan_tex_commands, strip_tex_comments, BackendAvailability, BackendSelectionReport,
+    BuildSidecar, CitationReference, CollectedDocument as SemanticCollectorDocument,
+    CrossReference, EventSource, LayoutGraph, LayoutNode, ReferenceGraph, ReferenceLabel,
+    ReferenceOrigin, ReferenceSource, ReferenceTargetKind, SemanticBackendKind, SemanticEvent,
+    SemanticEventV2, SourceSpan, UnresolvedReference,
+};
+
+// Re-export types from doc_compatibility_analyzer
+pub use doc_compatibility_analyzer::{
+    CompatibilityAnalyzer, CompatibilityIssue, CompatibilityReport, ProfileKind,
+};
+
+// Re-export types from journal_detector
+pub use journal_detector::{
+    DiagnosticLevel, JournalDetection, JournalDetectionReport, JournalDetector, JournalDiagnostic,
+    MatchedSignal, SignalKind,
+};
+
+// Import profile registry (internal module)
+use crate::profiles::{MacroRuleToml, ProfileRegistry};
+
+impl From<EngineProfile> for ProfileKind {
+    fn from(ep: EngineProfile) -> Self {
+        match ep {
+            EngineProfile::GenericArticle => ProfileKind::GenericArticle,
+            EngineProfile::ChineseAcademic => ProfileKind::ChineseAcademic,
+            EngineProfile::JosPaper => ProfileKind::JosPaper,
+            EngineProfile::MedicalJournal => ProfileKind::MedicalJournal,
+        }
+    }
+}
 
 /// Built-in conversion profiles.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -36,6 +78,183 @@ pub enum EngineProfile {
     JosPaper,
     /// Medical journal manuscripts with strict title/abstract/table needs.
     MedicalJournal,
+}
+
+/// How the user or the pipeline specified a profile.
+#[derive(Debug, Clone)]
+pub enum ProfileRef {
+    /// Automatically detected by `JournalDetector`.
+    Auto,
+    /// Specified by canonical profile ID (e.g. "tacl", "cvpr", "nature").
+    Id(String),
+    /// Specified by explicit file path to a TOML/JSON profile.
+    Path(PathBuf),
+    /// Legacy `EngineProfile` variant (backwards compatibility).
+    Legacy(EngineProfile),
+}
+
+/// The active profile driving the current compile session.
+///
+/// This is the P1 cornerstone: it replaces the bare `EngineProfile` enum as the
+/// compilation context, carrying the resolved TOML spec, the source of the
+/// selection, and optionally the auto-detection report.
+#[derive(Debug, Clone)]
+pub struct ActiveProfile {
+    /// Canonical profile ID (e.g. "tacl", "generic-article").
+    pub id: String,
+    /// Fully resolved profile specification (may be from TOML or built-in).
+    pub spec: profiles::ProfileSpecFile,
+    /// How this profile was selected.
+    pub source: ProfileSource,
+    /// Auto-detection report (present when `source == AutoDetected`).
+    pub detection: Option<journal_detector::JournalDetectionReport>,
+}
+
+/// A serializable summary of the active profile for `CompileReport`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActiveProfileReport {
+    pub id: String,
+    pub display_name: String,
+    pub source: String,
+    pub confidence: Option<f32>,
+    pub document_classes: Vec<String>,
+    pub backend_preferred: String,
+    /// P3: Quality thresholds for this profile.
+    pub quality: profiles::QualitySpec,
+    /// P3: Style map entries for this profile.
+    pub style_map: Vec<profiles::StyleMapSpec>,
+}
+
+impl ActiveProfileReport {
+    fn from_active(active: &ActiveProfile) -> Self {
+        Self {
+            id: active.id.clone(),
+            display_name: active.spec.display_name.clone(),
+            source: active.source.to_string(),
+            confidence: active.detection.as_ref().map(|d| d.confidence),
+            document_classes: active.spec.document_classes.clone(),
+            backend_preferred: active.spec.backend.preferred.clone(),
+            quality: active.spec.quality.clone(),
+            style_map: active.spec.style_map.clone(),
+        }
+    }
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProfileSource {
+    /// User passed `--profile <id>` on the CLI.
+    ExplicitId,
+    /// User passed `--profile-path <path>` on the CLI.
+    ExplicitPath,
+    /// Automatically detected by `JournalDetector`.
+    AutoDetected,
+    /// Fell back to generic because no other profile matched.
+    Fallback,
+}
+
+impl std::fmt::Display for ProfileSource {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProfileSource::ExplicitId => write!(f, "explicit_id"),
+            ProfileSource::ExplicitPath => write!(f, "explicit_path"),
+            ProfileSource::AutoDetected => write!(f, "auto_detected"),
+            ProfileSource::Fallback => write!(f, "fallback"),
+        }
+    }
+}
+
+impl ActiveProfile {
+    /// Resolve a `ProfileRef` into an `ActiveProfile`.
+    ///
+    /// This is the P1 "resolve active profile" step — it replaces the old
+    /// `parse_engine_profile()` logic with full TOML profile loading.
+    pub fn resolve(
+        profile_ref: &ProfileRef,
+        vfs: &doc_utils::VirtualFs,
+    ) -> Result<Self, EngineError> {
+        match profile_ref {
+            ProfileRef::Auto => Self::resolve_auto(vfs),
+            ProfileRef::Id(id) => Self::resolve_by_id(id),
+            ProfileRef::Path(path) => Self::resolve_by_path(path),
+            ProfileRef::Legacy(legacy) => Self::resolve_legacy(*legacy),
+        }
+    }
+
+    fn resolve_auto(vfs: &doc_utils::VirtualFs) -> Result<Self, EngineError> {
+        let detector = journal_detector::JournalDetector::new();
+        let detection = detector.detect(vfs);
+        let id = &detection.selected_profile_id;
+        let spec = Self::load_spec_by_id(id).ok_or_else(|| {
+            EngineError::Profile(format!("auto-detected profile '{id}' not found"))
+        })?;
+        Ok(Self {
+            id: id.clone(),
+            spec,
+            source: ProfileSource::AutoDetected,
+            detection: Some(detection),
+        })
+    }
+
+    fn resolve_by_id(id: &str) -> Result<Self, EngineError> {
+        let spec = Self::load_spec_by_id(id)
+            .ok_or_else(|| EngineError::Profile(format!("profile '{id}' not found")))?;
+        Ok(Self {
+            id: id.to_string(),
+            spec,
+            source: ProfileSource::ExplicitId,
+            detection: None,
+        })
+    }
+
+    fn resolve_by_path(path: &Path) -> Result<Self, EngineError> {
+        let spec = profiles::load_from_file(path).map_err(|e| {
+            EngineError::Profile(format!("failed to load profile from {:?}: {}", path, e))
+        })?;
+        Ok(Self {
+            id: spec.id.clone(),
+            spec,
+            source: ProfileSource::ExplicitPath,
+            detection: None,
+        })
+    }
+
+    fn resolve_legacy(legacy: EngineProfile) -> Result<Self, EngineError> {
+        let id = legacy.id();
+        let spec = Self::load_spec_by_id(id)
+            .ok_or_else(|| EngineError::Profile(format!("legacy profile '{id}' not found")))?;
+        Ok(Self {
+            id: id.to_string(),
+            spec,
+            source: ProfileSource::ExplicitId,
+            detection: None,
+        })
+    }
+
+    /// Load a profile spec by ID from the registry.
+    fn load_spec_by_id(id: &str) -> Option<profiles::ProfileSpecFile> {
+        let registry = profiles::ProfileRegistry::load_default().ok()?;
+        registry.get(id).cloned()
+    }
+
+    /// Convenience: convert to `ProfileKind` for `CompatibilityAnalyzer`.
+    pub fn to_profile_kind(&self) -> doc_compatibility_analyzer::ProfileKind {
+        match self.id.as_str() {
+            "generic" | "generic-article" | "generic-article-toml" => {
+                doc_compatibility_analyzer::ProfileKind::Generic
+            }
+            "chinese-academic" | "chinese-academic-toml" => {
+                doc_compatibility_analyzer::ProfileKind::ChineseAcademic
+            }
+            "jos-paper" | "jos-paper-toml" => doc_compatibility_analyzer::ProfileKind::JosPaper,
+            "medical-journal" => doc_compatibility_analyzer::ProfileKind::MedicalJournal,
+            "tacl" | "acl-paper" | "acl" => doc_compatibility_analyzer::ProfileKind::Tacl,
+            "cvpr" | "iccv" | "cvpr-paper" => doc_compatibility_analyzer::ProfileKind::Cvpr,
+            "nature" | "nature-research" => doc_compatibility_analyzer::ProfileKind::Nature,
+            "springer" | "svjour3" | "llncs" | "springer-journal" => {
+                doc_compatibility_analyzer::ProfileKind::Springer
+            }
+            _ => doc_compatibility_analyzer::ProfileKind::Generic,
+        }
+    }
 }
 
 impl EngineProfile {
@@ -68,6 +287,7 @@ impl EngineProfile {
                     bibliography_style: "plain",
                     reference_section_title: "References",
                 },
+                style_map: Some(doc_docx_writer::ProfileStyleMap::generic()),
             },
             Self::ChineseAcademic => ProfileSpec {
                 profile: self,
@@ -92,6 +312,7 @@ impl EngineProfile {
                     bibliography_style: "gbt7714-like",
                     reference_section_title: "参考文献",
                 },
+                style_map: None,
             },
             Self::JosPaper => ProfileSpec {
                 profile: self,
@@ -116,6 +337,7 @@ impl EngineProfile {
                     bibliography_style: "unsrt",
                     reference_section_title: "References",
                 },
+                style_map: Some(doc_docx_writer::ProfileStyleMap::jos()),
             },
             Self::MedicalJournal => ProfileSpec {
                 profile: self,
@@ -140,12 +362,13 @@ impl EngineProfile {
                     bibliography_style: "vancouver-like",
                     reference_section_title: "References",
                 },
+                style_map: None,
             },
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProfileSpec {
     pub profile: EngineProfile,
     pub id: &'static str,
@@ -155,6 +378,8 @@ pub struct ProfileSpec {
     pub font_policy: FontPolicySpec,
     pub caption_policy: CaptionPolicySpec,
     pub citation_policy: CitationPolicySpec,
+    /// Profile-specific DOCX style mappings (e.g. JOS vs generic).
+    pub style_map: Option<doc_docx_writer::ProfileStyleMap>,
 }
 
 impl ProfileSpec {
@@ -273,108 +498,249 @@ impl ProfileSpecReport {
 ///
 /// `Auto` scans template features and available TeX runtimes before selecting
 /// a concrete semantic backend.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SemanticBackendKind {
-    #[default]
-    Auto,
-    RuleBased,
-    XeLaTeXHook,
-    LuaTeXNode,
-}
-
-impl SemanticBackendKind {
-    pub fn id(self) -> &'static str {
-        match self {
-            Self::Auto => "auto",
-            Self::RuleBased => "rule-based",
-            Self::XeLaTeXHook => "xelatex-hook",
-            Self::LuaTeXNode => "luatex-node",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackendSelectionReport {
-    pub requested: SemanticBackendKind,
-    pub selected: SemanticBackendKind,
-    pub fallback_from: Option<SemanticBackendKind>,
-    pub reason: String,
-}
-
-impl BackendSelectionReport {
-    fn new(
-        requested: SemanticBackendKind,
-        selected: SemanticBackendKind,
-        reason: impl Into<String>,
-    ) -> Self {
-        Self {
-            requested,
-            selected,
-            fallback_from: None,
-            reason: reason.into(),
-        }
-    }
-
-    fn fallback(
-        requested: SemanticBackendKind,
-        fallback_from: SemanticBackendKind,
-        selected: SemanticBackendKind,
-        reason: impl Into<String>,
-    ) -> Self {
-        Self {
-            requested,
-            selected,
-            fallback_from: Some(fallback_from),
-            reason: reason.into(),
-        }
-    }
-}
-
-impl Default for BackendSelectionReport {
-    fn default() -> Self {
-        Self::new(
-            SemanticBackendKind::Auto,
-            SemanticBackendKind::RuleBased,
-            "default rule-based backend",
-        )
-    }
-}
 
 /// Options controlling semantic collection and DOCX rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileOptions {
+    /// Legacy profile field (used when `profile_ref` is None).
     pub profile: EngineProfile,
+    /// P1: How the profile was specified. When Some, takes precedence over `profile`.
+    #[serde(skip)]
+    pub profile_ref: Option<ProfileRef>,
     pub semantic_backend: SemanticBackendKind,
     pub allow_backend_fallback: bool,
     pub enable_reference_links: bool,
+    pub enable_ref_fields: bool,
     pub enable_omml_equations: bool,
     pub template_bytes: Option<Vec<u8>>,
     pub page_setup: Option<doc_docx_writer::PageSetup>,
     pub collect_standard_ast: bool,
     pub enable_bibliography: bool,
+    /// Optional profile-specific style map. If None, uses the profile's default.
+    #[serde(skip)]
+    pub style_map: Option<doc_docx_writer::ProfileStyleMap>,
+    /// Internal: resolved active profile (set by `resolve_active_profile`, used by
+    /// `apply_rule_engine_to_document`).
+    #[serde(skip)]
+    pub active_profile: Option<ActiveProfile>,
+    /// Internal: rule engine report populated after semantic collection.
+    #[serde(skip)]
+    pub rule_engine: Option<RuleEngineReport>,
+    /// P4.3: Override the minimum compatibility score from the CLI --quality flag.
+    #[serde(skip)]
+    pub min_compatibility_score_override: Option<u8>,
 }
 
 impl Default for CompileOptions {
     fn default() -> Self {
         Self {
             profile: EngineProfile::ChineseAcademic,
+            profile_ref: None,
             semantic_backend: SemanticBackendKind::Auto,
             allow_backend_fallback: true,
             enable_reference_links: true,
+            enable_ref_fields: false,
             enable_omml_equations: true,
             template_bytes: None,
             page_setup: None,
             collect_standard_ast: true,
             enable_bibliography: true,
+            style_map: None,
+            active_profile: None,
+            rule_engine: None,
+            min_compatibility_score_override: None,
         }
     }
 }
 
 impl CompileOptions {
+    /// Internal: set the resolved active profile. Called by `compile_vfs_to_graph`.
+    pub fn set_active_profile(&mut self, profile: ActiveProfile) -> &mut Self {
+        self.active_profile = Some(profile);
+        self
+    }
+
+    /// Internal: set the rule engine report after semantic collection.
+    pub fn set_rule_engine_report(&mut self, report: RuleEngineReport) -> &mut Self {
+        self.rule_engine = Some(report);
+        self
+    }
+
     pub fn effective_page_setup(&self) -> Option<doc_docx_writer::PageSetup> {
         self.page_setup
             .clone()
+            .or_else(|| {
+                self.active_profile
+                    .as_ref()
+                    .and_then(active_profile_page_setup)
+            })
             .or_else(|| self.profile.spec().default_page_setup())
+    }
+
+    /// Returns the effective style map: explicit override takes precedence,
+    /// then falls back to the profile's built-in default.
+    pub fn effective_style_map(&self) -> Option<doc_docx_writer::ProfileStyleMap> {
+        self.style_map
+            .clone()
+            .or_else(|| {
+                self.active_profile
+                    .as_ref()
+                    .and_then(active_profile_style_map)
+            })
+            .or_else(|| self.profile.spec().style_map.clone())
+    }
+
+    /// P1: Resolve the active profile from the `profile_ref` or fall back to legacy.
+    /// Sets `self.active_profile` and returns the resolved value.
+    pub fn resolve_active_profile(
+        &mut self,
+        vfs: &doc_utils::VirtualFs,
+    ) -> Result<ActiveProfile, EngineError> {
+        let active = if let Some(ref pref) = self.profile_ref {
+            ActiveProfile::resolve(pref, vfs)?
+        } else {
+            // Legacy path: use EngineProfile
+            ActiveProfile::resolve(&ProfileRef::Legacy(self.profile), vfs)?
+        };
+        self.active_profile = Some(active.clone());
+        Ok(active)
+    }
+
+    /// P1: Convenience — resolve profile without mutating self (for one-shot calls).
+    pub fn resolve_profile(vfs: &doc_utils::VirtualFs) -> Result<ActiveProfile, EngineError> {
+        ActiveProfile::resolve(&ProfileRef::Auto, vfs)
+    }
+}
+
+fn active_profile_page_setup(active: &ActiveProfile) -> Option<doc_docx_writer::PageSetup> {
+    active_profile_page_setup_label(active).and_then(|kind| match kind.as_str() {
+        "jos-paper3" => Some(doc_docx_writer::PageSetup::jos_paper3()),
+        "a4" => Some(page_setup_from_mm(
+            active.spec.page_setup.width_mm.unwrap_or(210.0),
+            active.spec.page_setup.height_mm.unwrap_or(297.0),
+            active.spec.page_setup.margin_top_mm,
+            active.spec.page_setup.margin_right_mm,
+            active.spec.page_setup.margin_bottom_mm,
+            active.spec.page_setup.margin_left_mm,
+        )),
+        "default" => None,
+        _ => None,
+    })
+}
+
+fn apply_source_page_setup_overrides(
+    options: &mut CompileOptions,
+    active: &ActiveProfile,
+    main_tex: &str,
+    vfs: &VirtualFs,
+) -> bool {
+    if active.id != "jos-paper" {
+        return false;
+    }
+
+    let Ok(bytes) = vfs.read(main_tex) else {
+        return false;
+    };
+    let Ok(source) = std::str::from_utf8(bytes) else {
+        return false;
+    };
+
+    let front_matter = extract_front_matter(source, source, &std::collections::HashMap::new());
+    let running_header = front_matter.running_header.trim();
+    if running_header.is_empty() {
+        return false;
+    }
+
+    let mut page_setup = options
+        .effective_page_setup()
+        .unwrap_or_else(doc_docx_writer::PageSetup::jos_paper3);
+    page_setup.header_text = Some(running_header.to_string());
+    if page_setup
+        .even_header_text
+        .as_deref()
+        .is_none_or(|text| text.trim().is_empty())
+    {
+        page_setup.even_header_text = Some(doc_docx_writer::PageSetup::JOS_EVEN_HEADER.to_string());
+    }
+    options.page_setup = Some(page_setup);
+    true
+}
+
+fn active_profile_page_setup_label(active: &ActiveProfile) -> Option<String> {
+    active
+        .spec
+        .page_setup
+        .kind
+        .clone()
+        .or_else(|| match active.id.as_str() {
+            "jos-paper" => Some("jos-paper3".to_string()),
+            "chinese-academic" => Some("a4".to_string()),
+            _ => None,
+        })
+}
+
+fn page_setup_from_mm(
+    width_mm: f64,
+    height_mm: f64,
+    margin_top_mm: Option<f64>,
+    margin_right_mm: Option<f64>,
+    margin_bottom_mm: Option<f64>,
+    margin_left_mm: Option<f64>,
+) -> doc_docx_writer::PageSetup {
+    doc_docx_writer::PageSetup {
+        width_twips: mm_to_twips(width_mm),
+        height_twips: mm_to_twips(height_mm),
+        margin_top: margin_top_mm.map(mm_to_twips).or(Some(1440)),
+        margin_right: margin_right_mm.map(mm_to_twips).or(Some(1440)),
+        margin_bottom: margin_bottom_mm.map(mm_to_twips).or(Some(1440)),
+        margin_left: margin_left_mm.map(mm_to_twips).or(Some(1440)),
+        margin_header: Some(720),
+        margin_footer: Some(720),
+        cols_space: Some(720),
+        cols_num: Some(1),
+        header_text: None,
+        footer_text: None,
+        first_header_text: None,
+        first_footer_text: None,
+        even_header_text: None,
+        first_footer_indent_twips: None,
+    }
+}
+
+fn mm_to_twips(mm: f64) -> u32 {
+    ((mm / 25.4) * 1440.0).round().max(0.0) as u32
+}
+
+fn active_profile_style_map(active: &ActiveProfile) -> Option<doc_docx_writer::ProfileStyleMap> {
+    match active.id.as_str() {
+        "jos-paper" => return Some(doc_docx_writer::ProfileStyleMap::jos()),
+        "generic" | "generic-article" | "generic-article-toml" => {
+            return Some(doc_docx_writer::ProfileStyleMap::generic());
+        }
+        _ => {}
+    }
+
+    if active.spec.style_map.is_empty() {
+        return None;
+    }
+
+    let mut by_role = std::collections::BTreeMap::new();
+    for entry in &active.spec.style_map {
+        let role = normalize_style_role(&entry.semantic);
+        by_role.insert(role.to_string(), entry.docx_style.clone());
+    }
+    Some(doc_docx_writer::ProfileStyleMap { by_role })
+}
+
+fn normalize_style_role(role: &str) -> &str {
+    match role {
+        "heading.level1" => "heading1",
+        "heading.level2" => "heading2",
+        "heading.level3" => "heading3",
+        "paragraph.body" => "body",
+        "caption.figure" | "caption.table" => "caption",
+        "bibliography.item" => "reference",
+        other => other,
     }
 }
 
@@ -463,15 +829,30 @@ impl SemanticTexEngine {
         vfs: &mut VirtualFs,
         options: &CompileOptions,
     ) -> Result<CompileArtifact, EngineError> {
+        let active = ActiveProfile::resolve(
+            options
+                .profile_ref
+                .as_ref()
+                .unwrap_or(&ProfileRef::Legacy(options.profile)),
+            vfs,
+        )?;
+        let mut render_options = options.clone();
+        render_options.set_active_profile(active.clone());
+        let source_page_setup_override =
+            apply_source_page_setup_overrides(&mut render_options, &active, main_tex, vfs);
+
         let mut graph = self.compile_vfs_to_graph(main_tex, vfs, options)?;
-        let page_setup = options.effective_page_setup();
+        let page_setup = render_options.effective_page_setup();
         let page_setup_label = if options.page_setup.is_some() {
             "explicit page setup override".to_string()
         } else {
-            format!(
-                "profile default page setup: {}",
-                options.profile.spec().page_setup.id()
-            )
+            let label = active_profile_page_setup_label(&active)
+                .unwrap_or_else(|| options.profile.spec().page_setup.id().to_string());
+            if source_page_setup_override {
+                format!("profile default page setup: {label} with source header override")
+            } else {
+                format!("profile default page setup: {label}")
+            }
         };
         graph.report.push(
             CompileStage::DocxRender,
@@ -481,11 +862,13 @@ impl SemanticTexEngine {
             ),
         );
 
+        let style_map = render_options.effective_style_map();
         let mut docx = doc_docx_writer::pack_with_page_setup(
             &graph.document,
-            options.template_bytes.as_deref(),
+            render_options.template_bytes.as_deref(),
             Some(&graph.image_assets),
             page_setup.as_ref(),
+            style_map.as_ref(),
         )
         .map_err(|e| EngineError::Serialize(e.to_string()))?;
         if options.enable_omml_equations {
@@ -495,12 +878,32 @@ impl SemanticTexEngine {
             docx = omml.docx;
         }
         if options.enable_reference_links {
-            let linked = apply_reference_links_to_docx(docx, &graph.reference_graph)?;
+            let linked = apply_reference_links_to_docx(
+                docx,
+                &graph.reference_graph,
+                options.enable_ref_fields,
+            )?;
             graph.report.bookmark_count = linked.bookmarks;
             graph.report.hyperlink_count = linked.hyperlinks;
             docx = linked.docx;
         }
         graph.report.docx_bytes = docx.len();
+
+        // P3: Run quality gate with profile-specific thresholds (CLI --quality can override)
+        let quality_spec = graph
+            .report
+            .active_profile
+            .as_ref()
+            .map(|ap| ap.quality.clone())
+            .unwrap_or_else(profiles::QualitySpec::default);
+        let quality_spec = if let Some(override_score) = options.min_compatibility_score_override {
+            let mut spec = quality_spec;
+            spec.min_compatibility_score = override_score;
+            spec
+        } else {
+            quality_spec
+        };
+        graph.report.run_quality_gate(&quality_spec);
 
         Ok(CompileArtifact {
             docx,
@@ -517,14 +920,62 @@ impl SemanticTexEngine {
         vfs: &mut VirtualFs,
         options: &CompileOptions,
     ) -> Result<DocumentGraph, EngineError> {
+        // P1: Resolve the active profile
+        let active = ActiveProfile::resolve(
+            options
+                .profile_ref
+                .as_ref()
+                .unwrap_or(&ProfileRef::Legacy(options.profile)),
+            vfs,
+        )?;
+
         let mut report = CompileReport::new(options.profile);
+        report.set_active_profile(&active);
         report.push(
             CompileStage::SourceMount,
             StageStatus::Completed,
             format!("mounted {} VFS entries", vfs.paths().count()),
         );
 
-        let compatibility = analyze_compatibility(vfs, options.profile);
+        // P2: Journal auto-detection — runs only when source is AutoDetected.
+        // When source is ExplicitId/Path/Legacy, skip redundant detection.
+        let journal_report = if active.source == ProfileSource::AutoDetected {
+            let detection = active.detection.clone();
+            report.push(
+                CompileStage::JournalDetect,
+                StageStatus::Completed,
+                format!(
+                    "detected '{}' (confidence {:.2})",
+                    active.id,
+                    detection.as_ref().map(|d| d.confidence).unwrap_or(0.0)
+                ),
+            );
+            for diag in detection.as_ref().into_iter().flat_map(|d| &d.diagnostics) {
+                let severity = match diag.level {
+                    DiagnosticLevel::Info => DiagnosticSeverity::Info,
+                    DiagnosticLevel::Warning => DiagnosticSeverity::Warning,
+                };
+                report.diagnostics.push(EngineDiagnostic {
+                    severity,
+                    code: diag.code.clone(),
+                    message: diag.message.clone(),
+                });
+            }
+            detection
+        } else {
+            report.push(
+                CompileStage::JournalDetect,
+                StageStatus::Completed,
+                format!(
+                    "profile '{}' explicitly set (source: {})",
+                    active.id, active.source
+                ),
+            );
+            None
+        };
+        report.journal_detection = journal_report;
+
+        let compatibility = CompatibilityAnalyzer::new().analyze(vfs, active.to_profile_kind());
         report.push(
             CompileStage::CompatibilityAnalyze,
             StageStatus::Completed,
@@ -549,7 +1000,10 @@ impl SemanticTexEngine {
         }
         report.compatibility = compatibility;
 
-        let mut artifact = collect_with_selected_backend(main_tex, vfs, options, &mut report)?;
+        let mut opts = options.clone();
+        opts.set_active_profile(active.clone());
+
+        let mut artifact = collect_with_selected_backend(main_tex, vfs, &mut opts, &mut report)?;
         let reference_graph = build_reference_graph(vfs, &artifact.events);
         report.semantic_event_count = artifact.events.len();
         report.layout_node_count = artifact
@@ -572,6 +1026,11 @@ impl SemanticTexEngine {
         }
         report.diagnostics.append(&mut artifact.diagnostics);
 
+        // P2: Transfer rule engine report from options into the final report.
+        if let Some(re) = opts.rule_engine.take() {
+            report.rule_engine = Some(re);
+        }
+
         Ok(DocumentGraph {
             document: artifact.document,
             standard_document: artifact.standard_document,
@@ -593,6 +1052,75 @@ pub struct CompileArtifact {
     pub report: CompileReport,
 }
 
+/// P3: Result of a quality gate check applied after DOCX generation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityGateResult {
+    pub status: QualityStatus,
+    pub score: u8,
+    pub total_checks: usize,
+    pub passed_checks: usize,
+    pub failed_checks: Vec<QualityCheck>,
+    pub warnings: Vec<QualityCheck>,
+}
+
+/// P3: Overall quality gate status.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualityStatus {
+    Passed,
+    PassedWithWarnings,
+    Failed,
+}
+
+impl QualityStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passed => "Passed",
+            Self::PassedWithWarnings => "PassedWithWarnings",
+            Self::Failed => "Failed",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QualityCheck {
+    pub name: String,
+    pub passed: bool,
+    pub severity: QualitySeverity,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum QualitySeverity {
+    Error,
+    Warning,
+    Info,
+}
+
+impl QualitySeverity {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Error => "error",
+            Self::Warning => "warning",
+            Self::Info => "info",
+        }
+    }
+}
+
+/// P2: Report summarizing RuleEngine activity during compilation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleEngineReport {
+    /// Number of builtin rules loaded.
+    pub builtin_rules: usize,
+    /// Number of journal-specific rules loaded.
+    pub journal_rules: usize,
+    /// Number of profile-specific rules loaded from TOML.
+    pub profile_rules: usize,
+    /// Number of distinct unknown macros encountered.
+    pub unknown_macro_count: usize,
+    /// List of unknown macro names encountered.
+    pub unknown_macros: Vec<String>,
+}
+
 /// Unified document graph used between semantic collection and renderers.
 #[derive(Debug, Clone)]
 pub struct DocumentGraph {
@@ -609,8 +1137,10 @@ pub struct DocumentGraph {
 pub struct CompileReport {
     pub profile: EngineProfile,
     pub profile_spec: ProfileSpecReport,
+    pub active_profile: Option<ActiveProfileReport>,
     pub backend: BackendSelectionReport,
     pub compatibility: CompatibilityReport,
+    pub journal_detection: Option<JournalDetectionReport>,
     pub stages: Vec<StageReport>,
     pub diagnostics: Vec<EngineDiagnostic>,
     pub block_count: usize,
@@ -627,6 +1157,9 @@ pub struct CompileReport {
     pub omml_equation_count: usize,
     pub omml_equation_fallback_count: usize,
     pub docx_bytes: usize,
+    pub quality_gate: Option<QualityGateResult>,
+    /// P2: RuleEngine activity report (populated after semantic collection).
+    pub rule_engine: Option<RuleEngineReport>,
 }
 
 impl CompileReport {
@@ -634,8 +1167,10 @@ impl CompileReport {
         Self {
             profile,
             profile_spec: ProfileSpecReport::from_spec(profile.spec()),
+            active_profile: None,
             backend: BackendSelectionReport::default(),
             compatibility: CompatibilityReport::default(),
+            journal_detection: None,
             stages: Vec::new(),
             diagnostics: Vec::new(),
             block_count: 0,
@@ -652,6 +1187,8 @@ impl CompileReport {
             omml_equation_count: 0,
             omml_equation_fallback_count: 0,
             docx_bytes: 0,
+            quality_gate: None,
+            rule_engine: None,
         }
     }
 
@@ -662,43 +1199,255 @@ impl CompileReport {
             message: message.into(),
         });
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompatibilityReport {
-    pub score: u8,
-    pub scanned_files: usize,
-    pub document_classes: Vec<String>,
-    pub packages: Vec<String>,
-    pub custom_macro_count: usize,
-    pub unsupported: Vec<CompatibilityIssue>,
-    pub warnings: Vec<CompatibilityIssue>,
-}
-
-impl Default for CompatibilityReport {
-    fn default() -> Self {
-        Self {
-            score: 100,
-            scanned_files: 0,
-            document_classes: Vec::new(),
-            packages: Vec::new(),
-            custom_macro_count: 0,
-            unsupported: Vec::new(),
-            warnings: Vec::new(),
-        }
+    /// Attach the resolved active profile to this report.
+    pub fn set_active_profile(&mut self, active: &ActiveProfile) {
+        self.active_profile = Some(ActiveProfileReport::from_active(active));
     }
-}
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CompatibilityIssue {
-    pub code: String,
-    pub feature: String,
-    pub message: String,
+    /// P3: Run quality gate checks using profile-specific thresholds from `spec`.
+    ///
+    /// Checks (up to 10):
+    /// 1. compatibility score >= min_compatibility_score (Error)
+    /// 2. unresolved references == 0 (Error/Warning)
+    /// 3. raw fallback blocks <= max_raw_fallback_blocks (Error)
+    /// 4. docx_bytes > 0 (Error)
+    /// 5. style coverage (Info)
+    /// 6. profile confidence < 0.80 (Warning)
+    /// 7. runtime fallback (Warning)
+    /// 8. backend runtime fallback (Warning)
+    /// 9. OMML equation fallback (Warning)
+    /// 10. journal profile detection (Info)
+    pub fn run_quality_gate(&mut self, spec: &profiles::QualitySpec) {
+        let mut errors = Vec::new();
+        let mut warnings = Vec::new();
+        let mut infos = Vec::new();
+
+        // 1. Compatibility score
+        let score = self.compatibility.score;
+        if score >= spec.min_compatibility_score {
+            infos.push(QualityCheck {
+                name: "compatibility_score".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!(
+                    "compatibility score {} >= {}: pass",
+                    score, spec.min_compatibility_score
+                ),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "compatibility_score".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: format!(
+                    "compatibility score {} < {}: FAIL",
+                    score, spec.min_compatibility_score
+                ),
+            });
+        }
+
+        // 2. Unresolved references
+        let unresolved = self.unresolved_reference_count;
+        if unresolved == 0 {
+            infos.push(QualityCheck {
+                name: "unresolved_references".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: "no unresolved references: pass".to_string(),
+            });
+        } else {
+            warnings.push(QualityCheck {
+                name: "unresolved_references".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!("{} unresolved reference(s): WARN", unresolved),
+            });
+        }
+
+        // 3. Raw fallback blocks (from rule_engine report)
+        let raw_count = self
+            .rule_engine
+            .as_ref()
+            .map(|r| r.unknown_macro_count)
+            .unwrap_or(0);
+        if raw_count <= spec.max_raw_fallback_blocks {
+            infos.push(QualityCheck {
+                name: "raw_fallback_blocks".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!(
+                    "{} unknown macro(s) <= {}: pass",
+                    raw_count, spec.max_raw_fallback_blocks
+                ),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "raw_fallback_blocks".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: format!(
+                    "{} unknown macro(s) > {} max: FAIL",
+                    raw_count, spec.max_raw_fallback_blocks
+                ),
+            });
+        }
+
+        // 4. DOCX non-empty
+        let bytes = self.docx_bytes;
+        if bytes > 0 {
+            infos.push(QualityCheck {
+                name: "docx_non_empty".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!("DOCX size {} bytes: pass", bytes),
+            });
+        } else {
+            errors.push(QualityCheck {
+                name: "docx_non_empty".to_string(),
+                passed: false,
+                severity: QualitySeverity::Error,
+                message: "DOCX is empty: FAIL".to_string(),
+            });
+        }
+
+        // 5. Style coverage (Info)
+        let style_map_entries = self
+            .active_profile
+            .as_ref()
+            .map(|ap| ap.style_map.len())
+            .unwrap_or(0);
+        if style_map_entries > 0 {
+            infos.push(QualityCheck {
+                name: "style_coverage".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!(
+                    "{} style map entries defined for profile",
+                    style_map_entries
+                ),
+            });
+        }
+
+        // 6. Profile confidence
+        if let Some(ref det) = self.journal_detection {
+            if det.confidence < 0.80 {
+                warnings.push(QualityCheck {
+                    name: "profile_confidence".to_string(),
+                    passed: false,
+                    severity: QualitySeverity::Warning,
+                    message: format!(
+                        "profile detection confidence {:.0}% < 80%: low confidence",
+                        det.confidence * 100.0
+                    ),
+                });
+            } else {
+                infos.push(QualityCheck {
+                    name: "profile_confidence".to_string(),
+                    passed: true,
+                    severity: QualitySeverity::Info,
+                    message: format!(
+                        "profile detection confidence {:.0}%: pass",
+                        det.confidence * 100.0
+                    ),
+                });
+            }
+        }
+
+        // 7. Runtime fallback from rule engine
+        if let Some(ref re) = self.rule_engine {
+            if re.unknown_macro_count > 0 {
+                warnings.push(QualityCheck {
+                    name: "runtime_fallback".to_string(),
+                    passed: false,
+                    severity: QualitySeverity::Warning,
+                    message: format!(
+                        "{} unknown macro(s) fell back to text",
+                        re.unknown_macro_count
+                    ),
+                });
+            }
+        }
+
+        // 8. Backend runtime fallback
+        if self.backend.selected != self.backend.requested {
+            warnings.push(QualityCheck {
+                name: "backend_fallback".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!(
+                    "backend fell back from {:?} to {:?}",
+                    self.backend.requested, self.backend.selected
+                ),
+            });
+        } else {
+            infos.push(QualityCheck {
+                name: "backend_fallback".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: "requested backend selected: pass".to_string(),
+            });
+        }
+
+        // 9. OMML equation fallback
+        let omml_total = self.omml_equation_count;
+        let omml_fallback = self.omml_equation_fallback_count;
+        if omml_total == 0 || omml_fallback < omml_total {
+            infos.push(QualityCheck {
+                name: "omml_equation_fallback".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!(
+                    "{}/{} equations used OMML: pass",
+                    omml_total.saturating_sub(omml_fallback),
+                    omml_total
+                ),
+            });
+        } else {
+            warnings.push(QualityCheck {
+                name: "omml_equation_fallback".to_string(),
+                passed: false,
+                severity: QualitySeverity::Warning,
+                message: format!("all {} equations fell back to text: WARN", omml_total),
+            });
+        }
+
+        // 10. Journal profile detection (Info)
+        if let Some(ref det) = self.journal_detection {
+            infos.push(QualityCheck {
+                name: "journal_detection".to_string(),
+                passed: true,
+                severity: QualitySeverity::Info,
+                message: format!(
+                    "detected '{}' (confidence {:.0}%)",
+                    det.selected_profile_id,
+                    det.confidence * 100.0
+                ),
+            });
+        }
+
+        let total = errors.len() + warnings.len() + infos.len();
+        self.quality_gate = Some(QualityGateResult {
+            status: if !errors.is_empty() {
+                QualityStatus::Failed
+            } else if !warnings.is_empty() {
+                QualityStatus::PassedWithWarnings
+            } else {
+                QualityStatus::Passed
+            },
+            score,
+            total_checks: total,
+            passed_checks: infos.len() + warnings.len(),
+            failed_checks: errors,
+            warnings,
+        });
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CompileStage {
     SourceMount,
+    JournalDetect,
     CompatibilityAnalyze,
     IncludeGraph,
     TexParse,
@@ -760,182 +1509,8 @@ pub enum DiagnosticSeverity {
     Error,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(tag = "type")]
-pub enum SemanticEvent {
-    #[serde(rename = "heading")]
-    Heading {
-        level: u8,
-        text: String,
-        label: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "paragraph")]
-    Paragraph {
-        text: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "figure")]
-    Figure {
-        path: String,
-        caption: Option<String>,
-        label: Option<String>,
-        width_expr: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "table")]
-    Table {
-        caption: Option<String>,
-        label: Option<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "equation")]
-    Equation {
-        latex: String,
-        label: Option<String>,
-        display: bool,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "citation")]
-    Citation {
-        keys: Vec<String>,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "caption")]
-    Caption {
-        text: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "label")]
-    Label {
-        key: String,
-        span: Option<SourceSpan>,
-    },
-    #[serde(rename = "reference")]
-    Reference {
-        kind: String,
-        key: String,
-        span: Option<SourceSpan>,
-    },
-}
-
-/// Source location for a semantic event (v2 schema).
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct EventSource {
-    /// Path to the source file (e.g., "main.tex").
-    pub path: String,
-    /// 1-based line number where the macro was invoked.
-    pub line: u32,
-    /// 1-based column number.
-    pub column: Option<u32>,
-}
-
-/// Metadata for a v2 semantic event, including source location and macro name.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub struct SemanticEventV2 {
-    /// Schema version. Always "semantic-event-v2".
-    #[serde(rename = "schema", alias = "v")]
-    pub schema: String,
-    /// The event type.
-    #[serde(flatten)]
-    pub event: SemanticEvent,
-    /// Source location of this event.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<EventSource>,
-    /// Name of the TeX macro that generated this event (e.g., "section", "caption").
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub macro_name: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct SourceSpan {
-    pub path: Option<String>,
-    pub start: Option<u32>,
-    pub end: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LayoutGraph {
-    pub nodes: Vec<LayoutNode>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceGraph {
-    pub labels: Vec<ReferenceLabel>,
-    pub references: Vec<CrossReference>,
-    pub citations: Vec<CitationReference>,
-    pub unresolved_references: Vec<UnresolvedReference>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceLabel {
-    pub key: String,
-    pub kind: ReferenceTargetKind,
-    pub number: Option<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CrossReference {
-    pub command: String,
-    pub key: String,
-    pub resolved: bool,
-    pub target_kind: Option<ReferenceTargetKind>,
-    pub rendered: Option<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct CitationReference {
-    pub command: String,
-    pub keys: Vec<String>,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct UnresolvedReference {
-    pub command: String,
-    pub key: String,
-    pub source: ReferenceSource,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct ReferenceSource {
-    pub path: Option<String>,
-    pub origin: ReferenceOrigin,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ReferenceOrigin {
-    SourceScan,
-    SemanticEvent,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum ReferenceTargetKind {
-    Heading,
-    Figure,
-    Table,
-    Equation,
-    Algorithm,
-    Theorem,
-    Proposition,
-    Unknown,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct LayoutNode {
-    pub id: String,
-    pub kind: String,
-    pub page: Option<u32>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BackendAvailability {
-    pub available: bool,
-    pub reason: String,
-}
-
+/// NOTE: compiler-engine has its OWN version of CollectedDocument (with EngineDiagnostic).
+/// Do NOT replace it with doc_semantic_collector's version.
 #[derive(Debug, Clone)]
 pub struct CollectedDocument {
     pub document: Document,
@@ -967,31 +1542,11 @@ impl CollectedDocument {
 
 pub type SemanticBackendArtifact = CollectedDocument;
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct BuildSidecar {
-    pub kind: String,
-    pub path: Option<String>,
-    pub description: String,
-}
-
-impl BuildSidecar {
-    pub fn new(
-        kind: impl Into<String>,
-        path: Option<impl Into<String>>,
-        description: impl Into<String>,
-    ) -> Self {
-        Self {
-            kind: kind.into(),
-            path: path.map(Into::into),
-            description: description.into(),
-        }
-    }
-}
-
 pub struct SemanticCollectorInput<'a> {
     pub main_tex: &'a str,
     pub vfs: &'a mut VirtualFs,
-    pub options: &'a CompileOptions,
+    /// P2: Mutable so `RuleBasedCollector` can set `rule_engine` report after collection.
+    pub options: &'a mut CompileOptions,
 }
 
 pub trait SemanticCollector {
@@ -1013,7 +1568,7 @@ pub trait SemanticBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError>;
 }
@@ -1048,6 +1603,26 @@ impl SemanticCollector for RuleBasedCollector {
 
         let document =
             lower_semantic_document(input.main_tex, input.vfs, &parse, &joined, input.options)?;
+
+        // P1-2: Apply RuleEngine to transform RawFallback blocks into structured blocks.
+        // P2: Profile-aware: use the active_profile stored on CompileOptions.
+        // Graceful degradation: if no active_profile, use a default engine.
+        let (document, engine) = if let Some(active) = input.options.active_profile.as_ref() {
+            apply_rule_engine_to_document(document, active)
+        } else {
+            apply_rule_engine_to_document(
+                document,
+                &ActiveProfile {
+                    id: "builtin".to_string(),
+                    spec: Default::default(),
+                    source: ProfileSource::Fallback,
+                    detection: None,
+                },
+            )
+        };
+        let re_report = build_rule_engine_report(&engine);
+        input.options.set_rule_engine_report(re_report);
+
         report.block_count = document.blocks.len();
         report.push(
             CompileStage::SemanticCollect,
@@ -1110,7 +1685,7 @@ impl SemanticBackend for RuleBasedBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
         let mut input = SemanticCollectorInput {
@@ -1138,21 +1713,34 @@ impl SemanticBackend for XeLaTeXHookBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
-        let events = collect_runtime_events(RuntimeEngine::XeLaTeX, main_tex, vfs)?;
-        let event_count = events.len();
+        let result = collect_runtime_events(RuntimeEngine::XeLaTeX, main_tex, vfs)?;
+        let event_count = result.events.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
-        artifact.events = events;
+        artifact.events = result.events;
+        // M2-1: Parse XDV output from XeLaTeX for LayoutGraph
+        let layout = if let Some(xdv_path) = result.xdv_path {
+            parse_layout_from_xdv(&xdv_path)
+        } else {
+            None
+        };
+        artifact.layout = layout.or_else(|| Some(LayoutGraph::default()));
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
-            "semantic events collected from the XeLaTeX hook sidecar",
+            format!(
+                "semantic events from XeLaTeX hook; profile_id={}; origin=runtime-xelatex",
+                options.profile.id()
+            ),
         ));
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("XeLaTeXHookBackend collected {event_count} semantic events"),
+            format!(
+                "XeLaTeXHookBackend collected {event_count} semantic events; profile={}",
+                options.profile.id()
+            ),
         ));
         Ok(artifact)
     }
@@ -1179,23 +1767,233 @@ impl SemanticBackend for LuaTeXNodeBackend {
         &self,
         main_tex: &str,
         vfs: &mut VirtualFs,
-        options: &CompileOptions,
+        options: &mut CompileOptions,
         report: &mut CompileReport,
     ) -> Result<SemanticBackendArtifact, EngineError> {
-        let events = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
-        let event_count = events.len();
+        let result = collect_runtime_events(RuntimeEngine::LuaLaTeX, main_tex, vfs)?;
+        let event_count = result.events.len();
+        let node_tree_count = result.node_tree.len();
         let mut artifact = RuleBasedBackend.collect(main_tex, vfs, options, report)?;
-        artifact.events = events;
-        artifact.layout = Some(LayoutGraph::default());
+        artifact.events = result.events;
+
+        // M4-2: Build LayoutGraph from node tree entries (detailed layout info)
+        // Falls back to XDV-based layout if node tree is empty
+        let layout = if !result.node_tree.is_empty() {
+            // Use detailed node tree entries to build LayoutGraph
+            let nodes: Vec<LayoutNode> = result
+                .node_tree
+                .iter()
+                .filter_map(|entry| {
+                    // Convert each node entry to a LayoutNode
+                    let (id, kind, x, y, width, height, depth, font_id, font_name, char) =
+                        match entry {
+                            NodeEntry::Glyph {
+                                x,
+                                y,
+                                char,
+                                font_id,
+                                font_name,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("glyph_{}_{}", x, y),
+                                "glyph".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                Some(*font_id),
+                                font_name.clone(),
+                                Some(*char),
+                            ),
+                            NodeEntry::Hlist {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("hlist_{}_{}", x, y),
+                                "hlist".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Vlist {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("vlist_{}_{}", x, y),
+                                "vlist".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Glue {
+                                x,
+                                y,
+                                width,
+                                stretch: _,
+                                shrink: _,
+                                stretch_order: _,
+                                shrink_order: _,
+                                ..
+                            } => (
+                                format!("glue_{}_{}", x, y),
+                                "glue".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Rule {
+                                x,
+                                y,
+                                width,
+                                height,
+                                depth,
+                                ..
+                            } => (
+                                format!("rule_{}_{}", x, y),
+                                "rule".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*width),
+                                Some(*height),
+                                Some(*depth),
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Kern { x, y, kern, .. } => (
+                                format!("kern_{}_{}", x, y),
+                                "kern".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                Some(*kern),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Penalty { x, y, .. } => (
+                                format!("penalty_{}_{}", x, y),
+                                "penalty".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::LocalPar { x, y, .. } => (
+                                format!("local_par_{}_{}", x, y),
+                                "local_par".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                                None,
+                            ),
+                            NodeEntry::Dir { x, y, dir, .. } => (
+                                format!("dir_{}_{}", x, y),
+                                "dir".to_string(),
+                                Some(*x),
+                                Some(*y),
+                                None,
+                                None,
+                                None,
+                                None,
+                                dir.clone(),
+                                None,
+                            ),
+                            // Skip summary entries - they don't produce layout nodes
+                            NodeEntry::NodeTree { .. } => return None,
+                        };
+
+                    Some(LayoutNode {
+                        id,
+                        kind,
+                        page: None,
+                        x,
+                        y,
+                        font_id,
+                        font_name,
+                        char,
+                        width,
+                        height,
+                        depth,
+                    })
+                })
+                .collect();
+            Some(LayoutGraph { nodes })
+        } else if let Some(xdv_path) = result.xdv_path {
+            // Fallback to XDV-based layout if no node tree entries
+            parse_layout_from_xdv(&xdv_path)
+        } else {
+            None
+        };
+        artifact.layout = layout.or_else(|| Some(LayoutGraph::default()));
+
         artifact.sidecars.push(BuildSidecar::new(
             "semantic-events-jsonl",
             Some(SEMANTIC_SIDECAR),
-            "semantic events collected from the LuaTeX node sidecar",
+            format!(
+                "semantic events from LuaTeX hook; profile_id={}; origin=runtime-luatex",
+                options.profile.id()
+            ),
         ));
+        if node_tree_count > 0 {
+            artifact.sidecars.push(BuildSidecar::new(
+                "node-tree-jsonl",
+                Some(NODE_TREE_SIDECAR),
+                format!(
+                    "{} node tree entries collected from the LuaTeX hook",
+                    node_tree_count
+                ),
+            ));
+        }
         artifact.diagnostics.push(EngineDiagnostic::info(
             "runtime_semantic_events",
-            format!("LuaTeXNodeBackend collected {event_count} semantic events"),
+            format!(
+                "LuaTeXNodeBackend collected {event_count} semantic events; profile={}",
+                options.profile.id()
+            ),
         ));
+        if node_tree_count > 0 {
+            artifact.diagnostics.push(EngineDiagnostic::info(
+                "node_tree_entries",
+                format!("LuaTeXNodeBackend collected {node_tree_count} node tree entries"),
+            ));
+        }
         Ok(artifact)
     }
 }
@@ -1212,6 +2010,8 @@ pub enum EngineError {
     Zip(String),
     #[error("不支持的操作：{0}")]
     Unsupported(String),
+    #[error("Profile 错误：{0}")]
+    Profile(String),
 }
 
 impl From<doc_utils::DocError> for EngineError {
@@ -1231,6 +2031,22 @@ impl From<doc_utils::DocError> for EngineError {
 impl From<std::io::Error> for EngineError {
     fn from(err: std::io::Error) -> Self {
         Self::Io(err.to_string())
+    }
+}
+
+impl From<profiles::ProfileLoadError> for EngineError {
+    fn from(err: profiles::ProfileLoadError) -> Self {
+        Self::Profile(err.to_string())
+    }
+}
+
+impl From<doc_semantic_collector::CollectorError> for EngineError {
+    fn from(err: doc_semantic_collector::CollectorError) -> Self {
+        match err {
+            doc_semantic_collector::CollectorError::Io(e) => Self::Io(e),
+            doc_semantic_collector::CollectorError::Parse(e) => Self::Parse(e),
+            doc_semantic_collector::CollectorError::Runtime(e) => Self::Parse(e),
+        }
     }
 }
 
@@ -1322,9 +2138,151 @@ struct AutoBackendSelection {
     reason: String,
 }
 
-fn select_auto_backend(vfs: &VirtualFs) -> AutoBackendSelection {
+fn select_auto_backend(
+    vfs: &VirtualFs,
+    journal_detection: Option<&JournalDetectionReport>,
+) -> AutoBackendSelection {
     let signals = collect_template_signals(vfs);
-    select_auto_backend_with_availability(&signals, RuntimeAvailabilitySnapshot::detect())
+    let availability = RuntimeAvailabilitySnapshot::detect();
+    select_auto_backend_with_profile_and_availability(&signals, &availability, journal_detection)
+}
+
+/// Profile-aware backend selection using journal detection result.
+fn select_auto_backend_with_profile_and_availability(
+    signals: &TemplateSignals,
+    availability: &RuntimeAvailabilitySnapshot,
+    journal_detection: Option<&JournalDetectionReport>,
+) -> AutoBackendSelection {
+    // 1. Determine initial preferred backend from profile.
+    let profile_preferred = journal_detection
+        .and_then(|r| {
+            ProfileRegistry::load_default()
+                .ok()
+                .and_then(|reg| reg.get(&r.selected_profile_id).cloned())
+        })
+        .and_then(|spec| {
+            if spec.backend.preferred.is_empty() {
+                None
+            } else {
+                Some(spec.backend.preferred.clone())
+            }
+        });
+
+    let profile_id = journal_detection
+        .map(|r| r.selected_profile_id.as_str())
+        .unwrap_or("unknown");
+
+    // Helper to convert string backend name to SemanticBackendKind.
+    let str_to_backend = |s: &str| -> Option<SemanticBackendKind> {
+        match s {
+            "luatex-node" | "luatex" => Some(SemanticBackendKind::LuaTeXNode),
+            "xelatex-hook" | "xelatex" => Some(SemanticBackendKind::XeLaTeXHook),
+            "rule-based" | "rulebased" => Some(SemanticBackendKind::RuleBased),
+            _ => None,
+        }
+    };
+
+    // 2. Collect ordered candidate backends: profile preferred first, then fallback chain.
+    let mut candidates: Vec<SemanticBackendKind> = Vec::new();
+    if let Some(preferred) = profile_preferred.as_deref().and_then(str_to_backend) {
+        candidates.push(preferred);
+    }
+    // Append fallback chain from profile (if available).
+    if let Some(jd) = journal_detection {
+        if let Some(spec) = ProfileRegistry::load_default()
+            .ok()
+            .and_then(|reg| reg.get(&jd.selected_profile_id).cloned())
+        {
+            for fb in &spec.backend.fallback {
+                if let Some(bk) = str_to_backend(fb) {
+                    if !candidates.contains(&bk) {
+                        candidates.push(bk);
+                    }
+                }
+            }
+        }
+    }
+    // Ensure rule-based is always available as final fallback.
+    if !candidates.contains(&SemanticBackendKind::RuleBased) {
+        candidates.push(SemanticBackendKind::RuleBased);
+    }
+
+    // 3. Apply TemplateSignals corrections (these override profile preference).
+    let forced = if signals.xetex_required {
+        Some(SemanticBackendKind::XeLaTeXHook)
+    } else if signals.luatex_preferred {
+        Some(SemanticBackendKind::LuaTeXNode)
+    } else {
+        None
+    };
+
+    let ordered: Vec<SemanticBackendKind> = if let Some(f) = forced {
+        // Force the signal-required backend first, but still try profile preference as 2nd.
+        let mut ordered = vec![f];
+        for bk in &candidates {
+            if *bk != f {
+                ordered.push(*bk);
+            }
+        }
+        ordered
+    } else {
+        candidates
+    };
+
+    // 4. Pick the first available backend.
+    for bk in &ordered {
+        let available = match bk {
+            SemanticBackendKind::RuleBased => true,
+            SemanticBackendKind::XeLaTeXHook => availability.xelatex.available,
+            SemanticBackendKind::LuaTeXNode => availability.lualatex.available,
+            SemanticBackendKind::Auto => false,
+        };
+        if available {
+            return AutoBackendSelection {
+                kind: *bk,
+                reason: build_backend_selection_reason(*bk, profile_id, signals, availability),
+            };
+        }
+    }
+
+    // 5. No backend available — use rule-based as absolute fallback.
+    AutoBackendSelection {
+        kind: SemanticBackendKind::RuleBased,
+        reason: format!(
+            "RuleBasedBackend: no runtime available for profile '{}'; xelatex: {}, lualatex: {}",
+            profile_id, availability.xelatex.reason, availability.lualatex.reason
+        ),
+    }
+}
+
+fn build_backend_selection_reason(
+    bk: SemanticBackendKind,
+    profile_id: &str,
+    signals: &TemplateSignals,
+    availability: &RuntimeAvailabilitySnapshot,
+) -> String {
+    let signal_reason = signals.reason_summary();
+    match bk {
+        SemanticBackendKind::RuleBased => {
+            format!(
+                "RuleBasedBackend: selected for profile '{}'; {}; no runtime available (xelatex: {}, lualatex: {})",
+                profile_id, signal_reason, availability.xelatex.reason, availability.lualatex.reason
+            )
+        }
+        SemanticBackendKind::XeLaTeXHook => {
+            format!(
+                "XeLaTeXHookBackend: profile '{}'; {}; {}",
+                profile_id, signal_reason, availability.xelatex.reason
+            )
+        }
+        SemanticBackendKind::LuaTeXNode => {
+            format!(
+                "LuaTeXNodeBackend: profile '{}'; {}; {}",
+                profile_id, signal_reason, availability.lualatex.reason
+            )
+        }
+        SemanticBackendKind::Auto => unreachable!(),
+    }
 }
 
 fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
@@ -1344,18 +2302,7 @@ fn collect_template_signals(vfs: &VirtualFs) -> TemplateSignals {
     signals
 }
 
-fn is_tex_like_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .map(|ext| {
-            matches!(
-                ext.to_ascii_lowercase().as_str(),
-                "tex" | "sty" | "cls" | "ltx"
-            )
-        })
-        .unwrap_or(false)
-}
-
+#[allow(dead_code)]
 fn select_auto_backend_with_availability(
     signals: &TemplateSignals,
     availability: RuntimeAvailabilitySnapshot,
@@ -1441,12 +2388,12 @@ fn select_auto_backend_with_availability(
 fn collect_with_selected_backend(
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     match options.semantic_backend {
         SemanticBackendKind::Auto => {
-            let selection = select_auto_backend(vfs);
+            let selection = select_auto_backend(vfs, report.journal_detection.as_ref());
             match selection.kind {
                 SemanticBackendKind::RuleBased => {
                     report.backend = BackendSelectionReport::new(
@@ -1509,7 +2456,7 @@ fn collect_runtime_or_fallback<B: SemanticBackend>(
     reason: impl Into<String>,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     collect_runtime_or_fallback_requested(
@@ -1529,7 +2476,7 @@ fn collect_runtime_or_fallback_requested<B: SemanticBackend>(
     reason: impl Into<String>,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     let reason = reason.into();
@@ -1598,7 +2545,7 @@ fn collect_rule_based_fallback(
     reason: String,
     main_tex: &str,
     vfs: &mut VirtualFs,
-    options: &CompileOptions,
+    options: &mut CompileOptions,
     report: &mut CompileReport,
 ) -> Result<SemanticBackendArtifact, EngineError> {
     report.backend = BackendSelectionReport::fallback(
@@ -1680,6 +2627,7 @@ impl RuntimeEngine {
 }
 
 const SEMANTIC_SIDECAR: &str = "__docx_semantic_events.jsonl";
+const NODE_TREE_SIDECAR: &str = "__docx_node_tree.jsonl";
 
 /// XeLaTeX semantic hook (v2 schema).
 /// Emits JSONL with schema header, source location (path + line), and macro name.
@@ -1694,67 +2642,13 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
 \immediate\write\docxsemout{{"schema":"semantic-event-v2","engine":"xelatex"}}
 \endgroup
 
-% ─── Heading hooks ─────────────────────────────────────────────────────────────
-\newcommand{\docxsemhdwrite}[3]{%
-  \immediate\write\docxsemout{{"type":"heading","level":#1,"text":"\detokenize{#2}","label":#3,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"section"}}%
-}
-\let\docxsemOldSection\section
-\def\section{\@ifstar{\docxsemHdSstar}{\docxsemHdSnostar}}
-\def\docxsemHdSstar#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection*{#1}}
-\def\docxsemHdSnostar{\@ifnextchar[\docxsemHdSopt\docxsemHdSplain}
-\def\docxsemHdSopt[#1]#2{\docxsemhdwrite{1}{#2}{null}\docxsemOldSection[#1]{#2}}
-\def\docxsemHdSplain#1{\docxsemhdwrite{1}{#1}{null}\docxsemOldSection{#1}}
-
-\let\docxsemOldSubsection\subsection
-\def\subsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSsnostar}}
-\def\docxsemHdSsstar#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection*{#1}}
-\def\docxsemHdSsnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
-\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{2}{#2}{null}\docxsemOldSubsection[#1]{#2}}
-\def\docxsemHdSsplain#1{\docxsemhdwrite{2}{#1}{null}\docxsemOldSubsection{#1}}
-
-\let\docxsemOldSubsubsection\subsubsection
-\def\subsubsection{\@ifstar{\docxsemHdSsstar}{\docxsemHdSssnostar}}
-\def\docxsemHdSsstar#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection*{#1}}
-\def\docxsemHdSssnostar{\@ifnextchar[\docxsemHdSsopt\docxsemHdSsplain}
-\def\docxsemHdSsopt[#1]#2{\docxsemhdwrite{3}{#2}{null}\docxsemOldSubsubsection[#1]{#2}}
-\def\docxsemHdSsplain#1{\docxsemhdwrite{3}{#1}{null}\docxsemOldSubsubsection{#1}}
-
-% ─── Figure / graphics hook ────────────────────────────────────────────────────
-\ifcsname includegraphics\endcsname
-  \let\docxsemOldIncludeGraphics\includegraphics
-  \def\docxsemOldIncludeGraphics{\@ifnextchar[{\docxsemImgOpt}{\docxsemImgPlain}}
-  \def\docxsemImgOpt[#1]#2{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
-    \docxsemOldIncludeGraphics[#1]{#2}%
-  }%
-  \def\docxsemImgPlain#1{%
-    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
-    \docxsemOldIncludeGraphics{#1}%
-  }%
-\fi
-
-% ─── Caption hook ───────────────────────────────────────────────────────────────
-\ifcsname caption\endcsname
-  \let\docxsemOldCaption\caption
-  \def\docxsemOldCaption{\@ifnextchar[{\docxsemCapOpt}{\docxsemCapPlain}}
-  \def\docxsemCapOpt[#1]#2{%
-    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#2}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
-    \docxsemOldCaption[{#1}]{#2}%
-  }%
-  \def\docxsemCapPlain#1{%
-    \immediate\write\docxsemout{{"type":"caption","text":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"caption"}}%
-    \docxsemOldCaption{#1}%
-  }%
-\fi
-
-% ─── Label hook ────────────────────────────────────────────────────────────────
+% ─── Label / reference hooks — \label and \ref are defined by the LaTeX kernel
+%     before the preamble runs, so this is safe in the preamble.
 \let\docxsemOldLabel\label
 \def\label#1{%
   \immediate\write\docxsemout{{"type":"label","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"label"}}%
   \docxsemOldLabel{#1}%
 }%
-
-% ─── Reference hooks ────────────────────────────────────────────────────────────
 \let\docxsemOldRef\ref
 \def\ref#1{%
   \immediate\write\docxsemout{{"type":"reference","kind":"ref","key":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"ref"}}%
@@ -1775,7 +2669,7 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
   }%
 \fi
 
-% ─── Citation hooks ────────────────────────────────────────────────────────────
+% ─── Citation hooks — \cite is a LaTeX kernel command defined before the preamble.
 \let\docxsemOldCite\cite
 \def\docxsemOldCite{%
   \@ifnextchar[{\docxsemCiteOpen}{\docxsemCitePlainNoOpt}%}
@@ -1796,46 +2690,27 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
   \docxsemOldCite{#1}%
 }
 
-% ─── Table / tabular hooks ─────────────────────────────────────────────────────
-\let\docxsemOldTabular\tabular
-\let\docxsemOldEndTabular\endtabular
-\def\tabular{%
-  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
-  \docxsemOldTabular
-}
-\let\docxsemOldTabularStar\tabular*
-\let\docxsemOldEndTabularStar\endtabular*
-\def\tabular*{%
-  \immediate\write\docxsemout{{"type":"table","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"tabular"}}%
-  \docxsemOldTabularStar
-}
-
-% ─── Equation hooks ────────────────────────────────────────────────────────────
-\ifcsname equation\endcsname
-  \let\docxsemOldEquation\equation
-  \let\docxsemOldEndEquation\endequation
-  \renewenvironment{equation}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"equation"}}%
-    \docxsemOldEquation
-  }{\docxsemOldEndEquation\endequation}
-\fi
-\ifcsname align\endcsname
-  \let\docxsemOldAlign\align
-  \let\docxsemOldEndAlign\endalign
-  \renewenvironment{align}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"align"}}%
-    \docxsemOldAlign
-  }{\docxsemOldEndAlign\endalign}
-\fi
-\ifcsname gather\endcsname
-  \let\docxsemOldGather\gather
-  \let\docxsemOldEndGather\endgather
-  \renewenvironment{gather}{%
-    \immediate\write\docxsemout{{"type":"equation","latex":"","label":null,"display":true,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"gather"}}%
-    \docxsemOldGather
-  }{\docxsemOldEndGather\endgather}
+% ─── Figure / graphics hook — \includegraphics is defined in the LaTeX kernel graphics package.
+\ifcsname includegraphics\endcsname
+  \let\docxsemOldIncludeGraphics\includegraphics
+  \def\docxsemOldIncludeGraphics{\@ifnextchar[{\docxsemImgOpt}{\docxsemImgPlain}}
+  \def\docxsemImgOpt[#1]#2{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#2}","caption":null,"label":null,"width_expr":"\detokenize{#1}","span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics[#1]{#2}%
+  }%
+  \def\docxsemImgPlain#1{%
+    \immediate\write\docxsemout{{"type":"figure","path":"\detokenize{#1}","caption":null,"label":null,"width_expr":null,"span":null,"source":{"path":"\jobname.tex","line":\the\inputlineno},"macro":"includegraphics"}}%
+    \docxsemOldIncludeGraphics{#1}%
+  }%
 \fi
 
+% ─── Hook coverage notes ─────────────────────────────────────────────────────────
+%     The following semantic events are intentionally omitted from this hook:
+%     - headings (section/subsection/...): captured by latex-reader from source
+%     - tabular/table environments: complex macro layers, captured by latex-reader
+%     - equation/align environments: complex macro layers, captured by latex-reader
+%     - caption: hyperref may redefine, captured by latex-reader from source
+%
 % ─── Cleanup ──────────────────────────────────────────────────────────────────
 \AtEndDocument{\immediate\closeout\docxsemout}
 \makeatother
@@ -1844,10 +2719,22 @@ const XELATEX_SEMANTIC_HOOK: &str = r#"
 const LUALATEX_SEMANTIC_HOOK: &str = r#"
 \directlua{
 docxsem_file = io.open("__docx_semantic_events.jsonl", "w")
+docxsem_node_tree_file = io.open("__docx_node_tree.jsonl", "w")
 local glyph_id = node.id("glyph")
 local glue_id = node.id("glue")
+local hlist_id = node.id("hlist")
+local vlist_id = node.id("vlist")
+local rule_id = node.id("rule")
+local kern_id = node.id("kern")
+local penalty_id = node.id("penalty")
+local local_par_id = node.id("local_par")
+local dir_id = node.id("dir")
 local bs = string.char(92)
 local lua_space = string.char(37) .. "s"
+
+-- Current page info for position tracking
+local current_page = 1
+local current_vpos = 0
 
 function docxsem_json(value)
   value = tostring(value or "")
@@ -1862,6 +2749,239 @@ function docxsem_write(raw)
   if docxsem_file then
     docxsem_file:write(raw, string.char(10))
   end
+end
+
+function docxsem_node_tree_write(raw)
+  if docxsem_node_tree_file then
+    docxsem_node_tree_file:write(raw, string.char(10))
+  end
+end
+
+-- M4-2: Emit detailed node entries for each node type
+-- This replaces the simple counting with per-node emission
+function docxsem_emit_node(type_name, props)
+  local parts = {'"type":"' .. type_name .. '"'}
+  for k, v in pairs(props) do
+    table.insert(parts, '"' .. k .. '":' .. tostring(v))
+  end
+  local json = '{' .. table.concat(parts, ',') .. '}'
+  docxsem_node_tree_write(json)
+end
+
+-- Helper to get font info from a node
+local function docxsem_get_font_info(n)
+  if n.font then
+    local font_info = font.getfont(n.font)
+    if font_info then
+      return {
+        font_id = n.font,
+        font_name = font_info.name or "unknown",
+        font_size = font_info.size or 0
+      }
+    end
+  end
+  return {font_id = 0, font_name = "unknown", font_size = 0}
+end
+
+-- M4-2: Detailed node traversal with position tracking
+function docxsem_node_tree(head)
+  if type(head) ~= "userdata" then return end
+  
+  -- Reset counters
+  local hlist_count = 0
+  local vlist_count = 0
+  local glyph_count = 0
+  local glue_count = 0
+  local rule_count = 0
+  
+  -- Track position state
+  local cur_x = 0
+  local cur_y = 0
+  local hpos = 0
+  local vpos = 0
+  
+  -- Recursive node traversal with position tracking
+  local function traverse_node(n, depth, is_vlist)
+    if not n or type(n) ~= "userdata" then return end
+    
+    local id = n.id
+    local subtype = n.subtype or 0
+    
+    if id == hlist_id then
+      hlist_count = hlist_count + 1
+      -- Emit hlist node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0,
+        head_id = hlist_count
+      }
+      docxsem_emit_node("hlist", props)
+      -- Traverse into hlist content
+      if n.list and type(n.list) == "userdata" then
+        local saved_x = hpos
+        local saved_y = vpos
+        for child in node.traverse(n.list) do
+          traverse_node(child, depth + 1, false)
+        end
+        hpos = saved_x
+        vpos = saved_y
+      end
+    elseif id == vlist_id then
+      vlist_count = vlist_count + 1
+      -- Emit vlist node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0,
+        head_id = vlist_count
+      }
+      docxsem_emit_node("vlist", props)
+      -- Traverse into vlist content
+      if n.list and type(n.list) == "userdata" then
+        local saved_x = hpos
+        local saved_y = vpos
+        for child in node.traverse(n.list) do
+          traverse_node(child, depth + 1, true)
+        end
+        hpos = saved_x
+        vpos = saved_y
+      end
+    elseif id == glyph_id then
+      glyph_count = glyph_count + 1
+      -- Get character info
+      local char_code = n.char or 0
+      local ok, char_str = pcall(utf8.char, char_code)
+      if not ok then char_str = string.format("U+%04X", char_code) end
+      
+      -- Get font info
+      local font_info = docxsem_get_font_info(n)
+      
+      -- Emit glyph node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        char = char_code,
+        char_str = docxsem_json(char_str),
+        font_id = font_info.font_id,
+        font_name = docxsem_json(font_info.font_name),
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0
+      }
+      docxsem_emit_node("glyph", props)
+      
+      -- Advance horizontal position for non-vlist context
+      if not is_vlist then
+        hpos = hpos + (n.width or 0)
+      end
+    elseif id == glue_id then
+      glue_count = glue_count + 1
+      -- Get glue spec info
+      local width = n.width or 0
+      local stretch = n.stretch or 0
+      local shrink = n.shrink or 0
+      local stretch_order = n.stretch_order or 0
+      local shrink_order = n.shrink_order or 0
+      
+      -- Emit glue node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = width,
+        stretch = stretch,
+        shrink = shrink,
+        stretch_order = stretch_order,
+        shrink_order = shrink_order
+      }
+      docxsem_emit_node("glue", props)
+      
+      -- Advance horizontal position for non-vlist context
+      if not is_vlist then
+        hpos = hpos + width
+      end
+    elseif id == rule_id then
+      rule_count = rule_count + 1
+      -- Emit rule node entry
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        width = n.width or 0,
+        height = n.height or 0,
+        depth = n.depth or 0
+      }
+      docxsem_emit_node("rule", props)
+      
+      -- Advance position
+      if not is_vlist then
+        hpos = hpos + (n.width or 0)
+      end
+    elseif id == kern_id then
+      -- Kern nodes affect spacing
+      local kern_width = n.kern or 0
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        kern = kern_width
+      }
+      docxsem_emit_node("kern", props)
+      if not is_vlist then
+        hpos = hpos + kern_width
+      end
+    elseif id == penalty_id then
+      -- Penalty nodes (line breaks etc)
+      local penalty_value = n.penalty or 0
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        penalty = penalty_value
+      }
+      docxsem_emit_node("penalty", props)
+    elseif id == local_par_id then
+      -- Local par node (paragraph start)
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos
+      }
+      docxsem_emit_node("local_par", props)
+    elseif id == dir_id then
+      -- Direction node
+      local dir_str = n.dir or ""
+      local props = {
+        subtype = subtype,
+        x = hpos,
+        y = vpos,
+        dir = docxsem_json(dir_str)
+      }
+      docxsem_emit_node("dir", props)
+    end
+  end
+  
+  -- Traverse all nodes in the head
+  for n in node.traverse(head) do
+    traverse_node(n, 0, false)
+  end
+  
+  -- Emit summary entry with totals
+  local summary = '{"type":"node_tree","hlist":' .. hlist_count 
+    .. ',"vlist":' .. vlist_count 
+    .. ',"glyph":' .. glyph_count 
+    .. ',"glue":' .. glue_count 
+    .. ',"rule":' .. rule_count 
+    .. ',"page":' .. current_page .. '}'
+  docxsem_node_tree_write(summary)
 end
 
 function docxsem_heading(level, text)
@@ -1924,6 +3044,7 @@ local function docxsem_post_linebreak(head)
   if not ok then
     docxsem_write('# luatex-node-error: ' .. tostring(err))
   end
+  docxsem_node_tree(head)
   return head
 end
 
@@ -1986,15 +3107,151 @@ end
   \let\docxsemoldendequation\endequation
   \renewenvironment{equation}{\directlua{docxsem_equation()}\docxsemoldequation}{\docxsemoldendequation}
 \fi
-\AtEndDocument{\directlua{if docxsem_file then docxsem_file:close() end}}
+\AtEndDocument{\directlua{if docxsem_file then docxsem_file:close() end}\directlua{if docxsem_node_tree_file then docxsem_node_tree_file:close() end}}
 \makeatother
 "#;
+
+// M4-2: Detailed node entries emitted by the LuaLaTeX hook.
+// Each node type has its own JSON structure with type-specific properties.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum NodeEntry {
+    /// Glyph node (character)
+    Glyph {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        char: u32,
+        #[serde(default)]
+        char_str: Option<String>,
+        font_id: u32,
+        #[serde(default)]
+        font_name: Option<String>,
+        width: i64,
+        height: i64,
+        depth: i64,
+    },
+    /// Horizontal list node (line of text)
+    Hlist {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+        #[serde(default)]
+        head_id: Option<u32>,
+    },
+    /// Vertical list node (paragraph/box)
+    Vlist {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+        #[serde(default)]
+        head_id: Option<u32>,
+    },
+    /// Glue node (spacing)
+    Glue {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        #[serde(default)]
+        stretch: Option<i64>,
+        #[serde(default)]
+        shrink: Option<i64>,
+        #[serde(default)]
+        stretch_order: Option<u32>,
+        #[serde(default)]
+        shrink_order: Option<u32>,
+    },
+    /// Rule node (rectangular box)
+    Rule {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        width: i64,
+        height: i64,
+        depth: i64,
+    },
+    /// Kern node (explicit spacing)
+    Kern {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        kern: i64,
+    },
+    /// Penalty node (line break penalties)
+    Penalty {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        penalty: i64,
+    },
+    /// Local par node (paragraph start)
+    LocalPar { subtype: u32, x: i64, y: i64 },
+    /// Direction node
+    Dir {
+        subtype: u32,
+        x: i64,
+        y: i64,
+        #[serde(default)]
+        dir: Option<String>,
+    },
+    /// Summary entry with page-level counts (legacy format for compatibility)
+    #[serde(rename = "node_tree")]
+    NodeTree {
+        hlist: u32,
+        vlist: u32,
+        glyph: u32,
+        glue: u32,
+        rule: u32,
+        #[serde(default)]
+        page: Option<u32>,
+    },
+}
+
+impl NodeEntry {
+    /// Returns true if this is a summary entry
+    pub fn is_summary(&self) -> bool {
+        matches!(self, NodeEntry::NodeTree { .. })
+    }
+
+    /// Returns the position if available
+    pub fn position(&self) -> Option<(i64, i64)> {
+        match self {
+            NodeEntry::Glyph { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Hlist { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Vlist { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Glue { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Rule { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Kern { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Penalty { x, y, .. } => Some((*x, *y)),
+            NodeEntry::LocalPar { x, y, .. } => Some((*x, *y)),
+            NodeEntry::Dir { x, y, .. } => Some((*x, *y)),
+            NodeEntry::NodeTree { .. } => None,
+        }
+    }
+}
+
+/// An entry from the node tree JSONL sidecar emitted by the LuaLaTeX hook.
+/// M4-2: Now uses the detailed `NodeEntry` enum that handles all node types.
+pub type NodeTreeEntry = NodeEntry;
+
+struct RuntimeCollectResult {
+    events: Vec<SemanticEvent>,
+    xdv_path: Option<PathBuf>,
+    node_tree: Vec<NodeTreeEntry>,
+}
 
 fn collect_runtime_events(
     engine: RuntimeEngine,
     main_tex: &str,
     vfs: &VirtualFs,
-) -> Result<Vec<SemanticEvent>, EngineError> {
+) -> Result<RuntimeCollectResult, EngineError> {
     let workdir = tempfile::tempdir().map_err(|e| EngineError::Io(e.to_string()))?;
     materialize_vfs(vfs, workdir.path())?;
 
@@ -2042,7 +3299,49 @@ fn collect_runtime_events(
             e
         ))
     })?;
-    parse_semantic_events_jsonl(&sidecar)
+    let events = parse_semantic_events_jsonl(&sidecar)?;
+
+    // P2-2: Capture XDV path for LayoutGraph conversion.
+    // XeLaTeX and LuaLaTeX both produce XDV output.
+    let xdv_path = match engine {
+        RuntimeEngine::LuaLaTeX | RuntimeEngine::XeLaTeX => {
+            let xdv = PathBuf::from(main_tex).with_extension("xdv");
+            let candidate = workdir.path().join(&xdv);
+            if candidate.exists() {
+                Some(candidate)
+            } else {
+                None
+            }
+        }
+    };
+
+    // M4-2: Read node tree JSONL sidecar emitted by the LuaLaTeX hook.
+    let node_tree_path = workdir.path().join(NODE_TREE_SIDECAR);
+    let node_tree: Vec<NodeTreeEntry> = if node_tree_path.exists() {
+        let content = match fs::read_to_string(&node_tree_path) {
+            Ok(c) => c,
+            Err(e) => {
+                return Err(EngineError::Io(format!(
+                    "failed to read node tree sidecar {}: {}",
+                    node_tree_path.display(),
+                    e
+                )));
+            }
+        };
+        content
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    Ok(RuntimeCollectResult {
+        events,
+        xdv_path,
+        node_tree,
+    })
 }
 
 fn materialize_vfs(vfs: &VirtualFs, root: &Path) -> Result<(), EngineError> {
@@ -2093,253 +3392,6 @@ fn inject_hook_input(source: &str, hook_input: &str) -> String {
     }
 }
 
-fn analyze_compatibility(vfs: &VirtualFs, profile: EngineProfile) -> CompatibilityReport {
-    let mut report = CompatibilityReport::default();
-    let mut document_classes = HashSet::new();
-    let mut packages = HashSet::new();
-    let mut unsupported_seen = HashSet::new();
-    let mut warning_seen = HashSet::new();
-
-    for path in vfs.paths() {
-        if !is_tex_source_path(path) {
-            continue;
-        }
-
-        let Ok(bytes) = vfs.read(path) else {
-            continue;
-        };
-        let Ok(raw) = std::str::from_utf8(bytes) else {
-            continue;
-        };
-        let source = strip_tex_comments(raw);
-        report.scanned_files += 1;
-
-        for command in scan_tex_commands(&source, &["documentclass"]) {
-            for class in split_tex_name_list(&command.argument) {
-                document_classes.insert(class);
-            }
-        }
-
-        for command in scan_tex_commands(&source, &["usepackage", "RequirePackage"]) {
-            for package in split_tex_name_list(&command.argument) {
-                packages.insert(package);
-            }
-        }
-
-        report.custom_macro_count += count_custom_macro_definitions(&source);
-
-        if contains_tex_environment(&source, "tikzpicture") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_environment",
-                "tikzpicture",
-                "TikZ graphics need rasterization or a semantic drawing plugin before high-fidelity DOCX output",
-            );
-        }
-        if contains_tex_environment(&source, "minted") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_environment",
-                "minted",
-                "minted depends on external syntax highlighting and is not preserved by the semantic DOCX path yet",
-            );
-        }
-        if contains_tex_environment(&source, "lstlisting") {
-            add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_environment",
-                "lstlisting",
-                "listings environments are downgraded to code-like text in the current semantic DOCX path",
-            );
-        }
-    }
-
-    report.document_classes = sorted_strings(document_classes);
-    report.packages = sorted_strings(packages);
-
-    for class in report.document_classes.clone() {
-        let class = class.as_str();
-        if matches!(class, "beamer" | "standalone") {
-            add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_document_class",
-                class,
-                "presentation or standalone drawing classes are outside the paper-oriented semantic profile",
-            );
-        } else if !profile_supports_document_class(profile, class) {
-            add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "profile_document_class_mismatch",
-                class,
-                "document class is outside the active profile and may need profile-specific lowering rules",
-            );
-        }
-    }
-
-    for package in report.packages.clone() {
-        match package.as_str() {
-            "tikz" | "pgf" | "pgfplots" | "circuitikz" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "PGF/TikZ graphics are not semantically converted to editable DOCX drawing objects yet",
-            ),
-            "pstricks" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "PSTricks output requires a PostScript rendering path that the semantic engine does not provide yet",
-            ),
-            "minted" => add_compatibility_issue(
-                &mut report.unsupported,
-                &mut unsupported_seen,
-                "unsupported_package",
-                package.as_str(),
-                "minted requires external Pygments processing and shell-escape semantics",
-            ),
-            "listings" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "listings content is treated as code text; advanced styling is not preserved yet",
-            ),
-            "biblatex" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "biblatex is detected; current bibliography support is strongest for BibTeX/bbl-style flows",
-            ),
-            "longtable" | "tabularx" | "tabulary" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "advanced table layout is lowered semantically but may need renderer-specific refinement",
-            ),
-            "algorithm2e" | "algorithmicx" | "algpseudocode" => add_compatibility_issue(
-                &mut report.warnings,
-                &mut warning_seen,
-                "limited_package",
-                package.as_str(),
-                "algorithm packages currently rely on generic block lowering and may lose fine-grained styling",
-            ),
-            _ => {}
-        }
-    }
-
-    if report.custom_macro_count > 0 {
-        add_compatibility_issue(
-            &mut report.warnings,
-            &mut warning_seen,
-            "custom_macros",
-            "custom macros",
-            format!(
-                "{} custom macro definitions detected; unknown macro semantics may require explicit rules",
-                report.custom_macro_count
-            ),
-        );
-    }
-
-    apply_compatibility_score(&mut report);
-    report
-}
-
-fn is_tex_source_path(path: &Path) -> bool {
-    let Some(ext) = path.extension().and_then(|ext| ext.to_str()) else {
-        return false;
-    };
-    matches!(
-        ext.to_ascii_lowercase().as_str(),
-        "tex" | "sty" | "cls" | "ltx"
-    )
-}
-
-fn split_tex_name_list(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(normalize_tex_name)
-        .filter(|name| !name.is_empty())
-        .collect()
-}
-
-fn normalize_tex_name(raw: &str) -> String {
-    raw.trim()
-        .trim_matches('{')
-        .trim_matches('}')
-        .trim()
-        .trim_start_matches('\\')
-        .to_ascii_lowercase()
-}
-
-fn count_custom_macro_definitions(source: &str) -> usize {
-    scan_tex_commands(
-        source,
-        &[
-            "newcommand",
-            "renewcommand",
-            "providecommand",
-            "DeclareRobustCommand",
-            "NewDocumentCommand",
-            "RenewDocumentCommand",
-        ],
-    )
-    .len()
-        + source.matches("\\def\\").count()
-}
-
-fn contains_tex_environment(source: &str, environment: &str) -> bool {
-    source.contains(&format!("\\begin{{{environment}}}"))
-}
-
-fn sorted_strings(set: HashSet<String>) -> Vec<String> {
-    let mut values = set.into_iter().collect::<Vec<_>>();
-    values.sort();
-    values
-}
-
-fn profile_supports_document_class(profile: EngineProfile, class: &str) -> bool {
-    profile
-        .spec()
-        .document_classes
-        .iter()
-        .any(|supported| supported.eq_ignore_ascii_case(class))
-}
-
-fn add_compatibility_issue(
-    issues: &mut Vec<CompatibilityIssue>,
-    seen: &mut HashSet<String>,
-    code: impl Into<String>,
-    feature: impl Into<String>,
-    message: impl Into<String>,
-) {
-    let code = code.into();
-    let feature = feature.into();
-    let key = format!("{code}:{feature}");
-    if seen.insert(key) {
-        issues.push(CompatibilityIssue {
-            code,
-            feature,
-            message: message.into(),
-        });
-    }
-}
-
-fn apply_compatibility_score(report: &mut CompatibilityReport) {
-    let unsupported_penalty = report.unsupported.len() * 18;
-    let warning_penalty = report.warnings.len() * 6;
-    let macro_penalty = (report.custom_macro_count * 2).min(12);
-    let penalty = (unsupported_penalty + warning_penalty + macro_penalty).min(100);
-    report.score = 100usize.saturating_sub(penalty) as u8;
-}
-
 fn run_latex_runtime(
     engine: RuntimeEngine,
     workdir: &Path,
@@ -2352,7 +3404,12 @@ fn run_latex_runtime(
     command
         .arg("-interaction=nonstopmode")
         .arg("-halt-on-error")
-        .arg("-file-line-error")
+        .arg("-file-line-error");
+    // M2-1: XeLaTeX requires explicit -output-format=xdv to produce .xdv output
+    if matches!(engine, RuntimeEngine::XeLaTeX) {
+        command.arg("-output-format=xdv");
+    }
+    command
         .arg(main_tex)
         .env("TEXMFVAR", &tex_cache)
         .env("TEXMFCACHE", &tex_cache)
@@ -2384,436 +3441,16 @@ fn tail_for_diagnostic(input: &str) -> String {
     chars.into_iter().collect::<String>()
 }
 
-/// Parse semantic sidecar JSONL emitted by future XeLaTeX/LuaTeX collectors.
+/// Parse an XDV file and convert it to a `LayoutGraph`.
 ///
-/// Empty lines and comment lines beginning with `#` are ignored.
-/// Parses the semantic events JSONL sidecar file produced by the XeLaTeX or LuaTeX hook.
-///
-/// Supports two formats:
-/// - **v1** (legacy): `{"type":"heading",...}`
-/// - **v2** (current): First line is a schema header `{"schema":"semantic-event-v2",...}`
-///   followed by events with extra fields (`source`, `macro`).
-///
-/// Empty lines and comment lines (`#...`) are skipped.
-pub fn parse_semantic_events_jsonl(input: &str) -> Result<Vec<SemanticEvent>, EngineError> {
-    let mut events = Vec::new();
-    let mut line_number = 0;
-    let mut saw_v2_schema = false;
-
-    for raw_line in input.lines() {
-        line_number += 1;
-        let trimmed = raw_line.trim();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
-            continue;
-        }
-
-        // Detect and skip v2 schema header
-        if !saw_v2_schema && trimmed.starts_with("{\"schema\"") {
-            if trimmed.contains("semantic-event-v2") {
-                saw_v2_schema = true;
-                continue;
-            }
-        }
-
-        let event = serde_json::from_str::<SemanticEvent>(trimmed).map_err(|err| {
-            EngineError::Parse(format!(
-                "semantic sidecar line {line_number} is invalid JSON: {err}"
-            ))
-        })?;
-        events.push(event);
-    }
-
-    Ok(events)
-}
-
-fn build_reference_graph(vfs: &VirtualFs, events: &[SemanticEvent]) -> ReferenceGraph {
-    let mut graph = ReferenceGraph::default();
-    let mut label_keys = HashSet::<String>::new();
-    let mut numbering = HashMap::<ReferenceTargetKind, usize>::new();
-
-    collect_source_references(vfs, &mut graph, &mut label_keys, &mut numbering);
-    collect_event_references(events, &mut graph, &mut label_keys);
-    resolve_reference_graph(graph)
-}
-
-fn collect_source_references(
-    vfs: &VirtualFs,
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-    numbering: &mut HashMap<ReferenceTargetKind, usize>,
-) {
-    let mut paths = vfs
-        .paths()
-        .filter(|path| is_tex_like_path(path))
-        .map(|path| path.to_path_buf())
-        .collect::<Vec<_>>();
-    paths.sort();
-
-    for path in paths {
-        let Ok(bytes) = vfs.read(&path) else {
-            continue;
-        };
-        let Ok(raw) = std::str::from_utf8(bytes) else {
-            continue;
-        };
-        let text = strip_tex_comments(raw);
-        let source = ReferenceSource {
-            path: Some(path_to_posix(&path)),
-            origin: ReferenceOrigin::SourceScan,
-        };
-
-        for command in scan_tex_commands(&text, &["label"]) {
-            let key = command.argument.trim();
-            if key.is_empty() || !label_keys.insert(key.to_string()) {
-                continue;
-            }
-            let kind = reference_kind_from_key(key);
-            let number = next_reference_number(kind, numbering);
-            graph.labels.push(ReferenceLabel {
-                key: key.to_string(),
-                kind,
-                number,
-                source: source.clone(),
-            });
-        }
-
-        for command in scan_tex_commands(&text, &["autoref", "eqref", "ref"]) {
-            let key = command.argument.trim();
-            if key.is_empty() {
-                continue;
-            }
-            graph.references.push(CrossReference {
-                command: command.name,
-                key: key.to_string(),
-                resolved: false,
-                target_kind: None,
-                rendered: None,
-                source: source.clone(),
-            });
-        }
-
-        for command in scan_tex_commands(
-            &text,
-            &[
-                "citeauthor",
-                "citeyear",
-                "citealp",
-                "citealt",
-                "citep",
-                "citet",
-                "cite",
-            ],
-        ) {
-            let keys = split_citation_keys(&command.argument);
-            if keys.is_empty() {
-                continue;
-            }
-            graph.citations.push(CitationReference {
-                command: command.name,
-                keys,
-                source: source.clone(),
-            });
-        }
-    }
-}
-
-fn collect_event_references(
-    events: &[SemanticEvent],
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-) {
-    let source = ReferenceSource {
-        path: None,
-        origin: ReferenceOrigin::SemanticEvent,
-    };
-
-    for event in events {
-        match event {
-            SemanticEvent::Heading {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Heading,
-                source.clone(),
-            ),
-            SemanticEvent::Figure {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Figure,
-                source.clone(),
-            ),
-            SemanticEvent::Table {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Table,
-                source.clone(),
-            ),
-            SemanticEvent::Equation {
-                label: Some(label), ..
-            } => add_event_label(
-                graph,
-                label_keys,
-                label,
-                ReferenceTargetKind::Equation,
-                source.clone(),
-            ),
-            SemanticEvent::Label { key, .. } => {
-                add_event_label(
-                    graph,
-                    label_keys,
-                    key,
-                    reference_kind_from_key(key),
-                    source.clone(),
-                );
-            }
-            SemanticEvent::Reference { kind, key, .. } => graph.references.push(CrossReference {
-                command: kind.clone(),
-                key: key.clone(),
-                resolved: false,
-                target_kind: None,
-                rendered: None,
-                source: source.clone(),
-            }),
-            SemanticEvent::Citation { keys, .. } => {
-                if !keys.is_empty() {
-                    graph.citations.push(CitationReference {
-                        command: "cite".to_string(),
-                        keys: keys.clone(),
-                        source: source.clone(),
-                    });
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-fn add_event_label(
-    graph: &mut ReferenceGraph,
-    label_keys: &mut HashSet<String>,
-    key: &str,
-    kind: ReferenceTargetKind,
-    source: ReferenceSource,
-) {
-    let key = key.trim();
-    if key.is_empty() || !label_keys.insert(key.to_string()) {
-        return;
-    }
-    graph.labels.push(ReferenceLabel {
-        key: key.to_string(),
-        kind,
-        number: None,
-        source,
-    });
-}
-
-fn resolve_reference_graph(mut graph: ReferenceGraph) -> ReferenceGraph {
-    let label_map = graph
-        .labels
-        .iter()
-        .map(|label| {
-            (
-                label.key.clone(),
-                (
-                    label.kind,
-                    label.number.clone().unwrap_or_else(|| label.key.clone()),
-                ),
-            )
-        })
-        .collect::<HashMap<_, _>>();
-
-    let mut unresolved = Vec::new();
-    for reference in &mut graph.references {
-        if let Some((kind, rendered)) = label_map.get(&reference.key) {
-            reference.resolved = true;
-            reference.target_kind = Some(*kind);
-            reference.rendered = Some(rendered.clone());
-        } else {
-            unresolved.push(UnresolvedReference {
-                command: reference.command.clone(),
-                key: reference.key.clone(),
-                source: reference.source.clone(),
-            });
-        }
-    }
-    graph.unresolved_references = unresolved;
-    graph
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ScannedTexCommand {
-    name: String,
-    argument: String,
-}
-
-fn scan_tex_commands(text: &str, commands: &[&str]) -> Vec<ScannedTexCommand> {
-    let mut found = Vec::new();
-    let bytes = text.as_bytes();
-    let mut i = 0usize;
-    while i < bytes.len() {
-        if bytes[i] != b'\\' {
-            i += 1;
-            continue;
-        }
-
-        let command_start = i + 1;
-        let Some(command) = commands
-            .iter()
-            .find(|command| tex_command_matches(text, command_start, command))
-        else {
-            i += 1;
-            continue;
-        };
-
-        let mut arg_pos = command_start + command.len();
-        arg_pos = skip_tex_space_and_options(text, arg_pos);
-        if text.as_bytes().get(arg_pos) != Some(&b'{') {
-            i += command.len() + 1;
-            continue;
-        }
-
-        if let Some(end) = doc_latex_reader::normalize::find_matching_brace(text, arg_pos) {
-            found.push(ScannedTexCommand {
-                name: (*command).to_string(),
-                argument: text[arg_pos + 1..end].trim().to_string(),
-            });
-            i = end + 1;
-        } else {
-            i += command.len() + 1;
-        }
-    }
-    found
-}
-
-fn tex_command_matches(text: &str, command_start: usize, command: &str) -> bool {
-    let end = command_start + command.len();
-    if text.get(command_start..end) != Some(command) {
-        return false;
-    }
-
-    let next = text.as_bytes().get(end).copied();
-    !matches!(next, Some(b'a'..=b'z' | b'A'..=b'Z' | b'@'))
-}
-
-fn skip_tex_space_and_options(text: &str, mut pos: usize) -> usize {
-    loop {
-        while pos < text.len() && text.as_bytes()[pos].is_ascii_whitespace() {
-            pos += 1;
-        }
-
-        if text.as_bytes().get(pos) != Some(&b'[') {
-            return pos;
-        }
-
-        let Some(end) = find_matching_bracket(text, pos) else {
-            return pos;
-        };
-        pos = end + 1;
-    }
-}
-
-fn find_matching_bracket(text: &str, open_index: usize) -> Option<usize> {
-    if text.as_bytes().get(open_index) != Some(&b'[') {
-        return None;
-    }
-    let mut depth = 0i32;
-    let mut i = open_index;
-    while i < text.len() {
-        let b = text.as_bytes()[i];
-        let escaped = is_escaped(text.as_bytes(), i);
-        if b == b'[' && !escaped {
-            depth += 1;
-        } else if b == b']' && !escaped {
-            depth -= 1;
-            if depth == 0 {
-                return Some(i);
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-fn strip_tex_comments(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for line in input.split_inclusive('\n') {
-        let bytes = line.as_bytes();
-        let mut end = line.len();
-        for (idx, b) in bytes.iter().enumerate() {
-            if *b == b'%' && !is_escaped(bytes, idx) {
-                end = idx;
-                break;
-            }
-        }
-        out.push_str(&line[..end]);
-        if line.ends_with('\n') {
-            out.push('\n');
-        }
-    }
-    out
-}
-
-fn is_escaped(bytes: &[u8], idx: usize) -> bool {
-    let mut count = 0usize;
-    let mut cursor = idx;
-    while cursor > 0 && bytes[cursor - 1] == b'\\' {
-        count += 1;
-        cursor -= 1;
-    }
-    count % 2 == 1
-}
-
-fn split_citation_keys(raw: &str) -> Vec<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|key| !key.is_empty())
-        .map(ToString::to_string)
-        .collect()
-}
-
-fn reference_kind_from_key(key: &str) -> ReferenceTargetKind {
-    let lower = key.to_ascii_lowercase();
-    if lower.starts_with("fig:") || lower.starts_with("figure:") {
-        ReferenceTargetKind::Figure
-    } else if lower.starts_with("tab:") || lower.starts_with("table:") {
-        ReferenceTargetKind::Table
-    } else if lower.starts_with("eq:") || lower.starts_with("equation:") {
-        ReferenceTargetKind::Equation
-    } else if lower.starts_with("alg:") || lower.starts_with("algorithm:") {
-        ReferenceTargetKind::Algorithm
-    } else if lower.starts_with("thm:") || lower.starts_with("theorem:") {
-        ReferenceTargetKind::Theorem
-    } else if lower.starts_with("prop:") || lower.starts_with("proposition:") {
-        ReferenceTargetKind::Proposition
-    } else if lower.starts_with("sec:") || lower.starts_with("section:") {
-        ReferenceTargetKind::Heading
-    } else {
-        ReferenceTargetKind::Unknown
-    }
-}
-
-fn next_reference_number(
-    kind: ReferenceTargetKind,
-    numbering: &mut HashMap<ReferenceTargetKind, usize>,
-) -> Option<String> {
-    if kind == ReferenceTargetKind::Unknown {
-        return None;
-    }
-    let next = numbering.entry(kind).or_insert(0);
-    *next += 1;
-    if kind == ReferenceTargetKind::Equation {
-        Some(format!("({next})"))
-    } else {
-        Some(next.to_string())
-    }
+/// Returns `None` if parsing fails (e.g., file not found, corrupt XDV, etc.).
+/// This is intentionally lenient: a failed layout parse does NOT fail the compile.
+fn parse_layout_from_xdv(xdv_path: &Path) -> Option<LayoutGraph> {
+    let bytes = fs::read(xdv_path).ok()?;
+    let mut parser = doc_xdv_parser::XdvParser::default();
+    let xdv = parser.parse_bytes(&bytes).ok()?;
+    let nodes = doc_xdv_parser::xdv_to_layout_nodes(&xdv);
+    Some(to_collector_layout_graph(nodes))
 }
 
 #[derive(Debug, Clone)]
@@ -3070,6 +3707,7 @@ struct ReferenceLinkedDocx {
 fn apply_reference_links_to_docx(
     docx: Vec<u8>,
     reference_graph: &ReferenceGraph,
+    enable_ref_fields: bool,
 ) -> Result<ReferenceLinkedDocx, EngineError> {
     if reference_graph.labels.is_empty() || reference_graph.references.is_empty() {
         return Ok(ReferenceLinkedDocx {
@@ -3113,7 +3751,8 @@ fn apply_reference_links_to_docx(
         });
     };
 
-    let (linked_xml, bookmarks, hyperlinks) = link_document_xml(&document_xml, reference_graph);
+    let (linked_xml, bookmarks, hyperlinks) =
+        link_document_xml(&document_xml, reference_graph, enable_ref_fields);
 
     let cursor = std::io::Cursor::new(Vec::<u8>::new());
     let mut writer = zip::ZipWriter::new(cursor);
@@ -3151,6 +3790,7 @@ fn apply_reference_links_to_docx(
 fn link_document_xml(
     document_xml: &str,
     reference_graph: &ReferenceGraph,
+    enable_ref_fields: bool,
 ) -> (String, usize, usize) {
     let bookmark_plan = build_bookmark_plan(reference_graph);
     if bookmark_plan.is_empty() {
@@ -3227,9 +3867,12 @@ fn link_document_xml(
             if !bookmark_hits.contains(&plan.key) {
                 continue;
             }
-            if let Some(updated) =
-                hyperlink_paragraph(&paragraph_xml, &plan.name, &reference_needles(reference))
-            {
+            if let Some(updated) = hyperlink_paragraph(
+                &paragraph_xml,
+                &plan.name,
+                &reference_needles(reference),
+                enable_ref_fields,
+            ) {
                 paragraph_xml = updated;
                 reference_hits.insert(reference_idx);
                 hyperlink_hits += 1;
@@ -3421,7 +4064,12 @@ fn insert_bookmark_in_paragraph(paragraph: &str, id: usize, name: &str) -> Strin
     )
 }
 
-fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String]) -> Option<String> {
+fn hyperlink_paragraph(
+    paragraph: &str,
+    anchor: &str,
+    needles: &[String],
+    enable_ref_fields: bool,
+) -> Option<String> {
     if paragraph.contains("<w:hyperlink") || paragraph.contains("<w:bookmarkStart") {
         return None;
     }
@@ -3429,14 +4077,21 @@ fn hyperlink_paragraph(paragraph: &str, anchor: &str, needles: &[String]) -> Opt
         if needle.is_empty() {
             continue;
         }
-        if let Some(updated) = hyperlink_first_text_run(paragraph, anchor, needle) {
+        if let Some(updated) =
+            hyperlink_first_text_run(paragraph, anchor, needle, enable_ref_fields)
+        {
             return Some(updated);
         }
     }
     None
 }
 
-fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str) -> Option<String> {
+fn hyperlink_first_text_run(
+    paragraph: &str,
+    anchor: &str,
+    needle: &str,
+    enable_ref_fields: bool,
+) -> Option<String> {
     let escaped_needle = escape_xml_text(needle);
     let mut search_from = 0usize;
     while let Some(rel) = paragraph[search_from..].find("<w:t") {
@@ -3456,11 +4111,23 @@ fn hyperlink_first_text_run(paragraph: &str, anchor: &str, needle: &str) -> Opti
             if !before.is_empty() {
                 replacement.push_str(&text_run_xml(before));
             }
-            replacement.push_str(&format!(
-                "<w:hyperlink w:anchor=\"{}\" w:history=\"1\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r></w:hyperlink>",
-                escape_xml_attr(anchor),
-                text_xml(&escaped_needle)
-            ));
+            if enable_ref_fields {
+                replacement.push_str(&format!(
+                    "<w:r><w:fldChar w:fldCharType=\"begin\"/></w:r>\
+                     <w:r><w:instrText xml:space=\"preserve\"> REF {} \\h </w:instrText></w:r>\
+                     <w:r><w:fldChar w:fldCharType=\"separate\"/></w:r>\
+                     <w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r>\
+                     <w:r><w:fldChar w:fldCharType=\"end\"/></w:r>",
+                    escape_xml_attr(anchor),
+                    text_xml(&escaped_needle)
+                ));
+            } else {
+                replacement.push_str(&format!(
+                    "<w:hyperlink w:anchor=\"{}\" w:history=\"1\"><w:r><w:rPr><w:rStyle w:val=\"Hyperlink\"/></w:rPr>{}</w:r></w:hyperlink>",
+                    escape_xml_attr(anchor),
+                    text_xml(&escaped_needle)
+                ));
+            }
             if !after.is_empty() {
                 replacement.push_str(&text_run_xml(after));
             }
@@ -3647,6 +4314,254 @@ fn append_bibliography_paragraphs(
     }
 }
 
+/// P2: Build a RuleEngine populated with builtin rules, journal-specific rules,
+/// and profile-specific rules from the TOML spec.
+fn build_rule_engine(active_profile: &ActiveProfile) -> RuleEngine {
+    let mut engine = RuleEngine::new();
+
+    // P2.1: Load journal-specific rules
+    let journal_rules: Vec<MacroRule> = doc_rule_engine::journal_rules(&active_profile.id);
+    for rule in journal_rules {
+        engine.registry_mut().register(rule);
+    }
+
+    // P2.1: Load profile TOML macro_rules
+    for rule_toml in &active_profile.spec.macro_rules {
+        let rule = macro_rule_toml_to_macro_rule(rule_toml);
+        engine.registry_mut().register(rule);
+    }
+
+    engine
+}
+
+/// P2: Convert a `MacroRuleToml` (profile spec) into a `MacroRule` (rule engine).
+fn macro_rule_toml_to_macro_rule(toml: &MacroRuleToml) -> MacroRule {
+    let output = match toml.semantic.as_str() {
+        "citation" => RuleOutput::Citation {
+            keys_arg: toml.args.saturating_sub(1),
+            style: toml.style.clone(),
+        },
+        "metadata" => RuleOutput::MetadataField {
+            key: toml.name.clone(),
+            content_arg: 0,
+        },
+        "author" => RuleOutput::AuthorList { content_arg: 0 },
+        "affiliation" => RuleOutput::Affiliation { content_arg: 0 },
+        "keyword" => RuleOutput::KeywordList {
+            content_arg: 0,
+            separator: "; ".to_string(),
+        },
+        "heading" => RuleOutput::Heading {
+            level: 1,
+            text_arg: 0,
+        },
+        "paragraph" => RuleOutput::Paragraph { body_arg: 0 },
+        "inline-text" => RuleOutput::InlineText { content_arg: 0 },
+        "ignore" => RuleOutput::Ignore,
+        "verbatim" => RuleOutput::Verbatim,
+        _ => RuleOutput::InlineText { content_arg: 0 },
+    };
+    MacroRule {
+        id: format!("profile:{}/{}", toml.name, toml.semantic),
+        name: toml.name.clone(),
+        arity: toml.args,
+        output,
+        description: Some(format!("profile macro rule: {}", toml.semantic)),
+    }
+}
+
+/// P2: Build a `RuleEngineReport` from the engine's audit cache.
+fn build_rule_engine_report(engine: &RuleEngine) -> RuleEngineReport {
+    // RuleEngine::new() loads builtin rules; journal rules are added by profile.
+    let builtin_count = doc_rule_engine::builtin_rules().len();
+
+    let journal_names: std::collections::HashSet<&str> = [
+        "citet",
+        "citep",
+        "citealp",
+        "IEEEkeywords",
+        "IEEEauthorblockN",
+        "IEEEauthorblockA",
+        "shorttitle",
+        "name",
+        "address",
+        "cvprfinalcopy",
+        "confName",
+        "confYear",
+        "author",
+        "affiliation",
+        "corres",
+        "equalcont",
+        "affil",
+        "maketitle",
+        "institute",
+        "titlerunning",
+        "authorrunning",
+        "email",
+        "orcidID",
+        "zihao",
+        "songti",
+        "heiti",
+        "ctexset",
+        "zhabstract",
+        "enabstract",
+    ]
+    .into_iter()
+    .collect();
+
+    let mut journal_count = 0usize;
+    let mut profile_count = 0usize;
+    for rule in engine.registry().iter() {
+        if rule.name.starts_with("profile:") {
+            profile_count += 1;
+        } else if journal_names.contains(rule.name.as_str()) {
+            journal_count += 1;
+        }
+    }
+
+    let unknown_names: Vec<String> = engine
+        .audit_cache()
+        .records()
+        .iter()
+        .filter(|r| r.source == DecisionSource::Fallback)
+        .map(|r| r.macro_name.clone())
+        .collect();
+    let unknown_set: std::collections::HashSet<_> = unknown_names.iter().cloned().collect();
+    RuleEngineReport {
+        builtin_rules: builtin_count,
+        journal_rules: journal_count,
+        profile_rules: profile_count,
+        unknown_macro_count: unknown_set.len(),
+        unknown_macros: unknown_names,
+    }
+}
+
+/// P2: Apply RuleEngine to transform `RawFallback` blocks in the document.
+///
+/// P2: Loads profile-specific and journal-specific rules from `ActiveProfile`.
+fn apply_rule_engine_to_document(
+    mut document: Document,
+    active_profile: &ActiveProfile,
+) -> (Document, RuleEngine) {
+    let mut engine = build_rule_engine(active_profile);
+    let blocks = std::mem::take(&mut document.blocks);
+    for block in blocks {
+        match block {
+            Block::RawFallback { text, span } => {
+                let resolved = resolve_raw_fallback(&text, &span, &mut engine);
+                document.blocks.push(resolved);
+            }
+            other => document.blocks.push(other),
+        }
+    }
+    (document, engine)
+}
+
+/// Attempt to convert a `RawFallback` text to a structured `Block` using the RuleEngine.
+///
+/// The RuleEngine processes inline macro patterns (e.g., `\unknownmacro{arg}`) found in
+/// the fallback text. Environment-level fallbacks (e.g., `\begin{unknown}{...}`) are
+/// preserved as-is for later inspection.
+fn resolve_raw_fallback(text: &str, span: &Span, engine: &mut RuleEngine) -> Block {
+    // Try to detect an environment-level pattern \begin{name}...\end{name}
+    if let Some(name) = detect_environment_name(text) {
+        // Record in audit trail but preserve as RawFallback for now
+        let _ = engine.process_unknown(&format!("begin{{{name}}}"), 0);
+        return Block::RawFallback {
+            text: text.to_string(),
+            span: *span,
+        };
+    }
+
+    // Try to detect an inline macro pattern (e.g., \unknownmacro{...})
+    if let Some((macro_name, arity)) = detect_inline_macro(text) {
+        // M2-3: Route RuleOutput → Block conversion
+        let args = extract_macro_args(text, arity);
+        let config = RoutingConfig::default();
+        if let Some(output) = engine.process_unknown(&macro_name, arity) {
+            if let Some(block) = route_rule_output(&output, &args, &config) {
+                return block;
+            }
+        }
+    }
+
+    Block::RawFallback {
+        text: text.to_string(),
+        span: *span,
+    }
+}
+
+/// Detect `\begin{name}` pattern in raw fallback text and return the environment name.
+fn detect_environment_name(text: &str) -> Option<String> {
+    let text = text.trim();
+    let rest = text.strip_prefix("\\begin{")?;
+    let end = rest.find('}')?;
+    Some(rest[..end].to_string())
+}
+
+/// Detect an inline macro pattern `\name{arg}` and return (macro_name, arity).
+fn detect_inline_macro(text: &str) -> Option<(String, usize)> {
+    let text = text.trim();
+    // Match \name followed by optional [...] then required {...}
+    let rest = text.strip_prefix('\\')?;
+    let name_end = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    if name_end == 0 {
+        return None;
+    }
+    let name = rest[..name_end].to_string();
+    // Count mandatory braces after the name
+    let after_name = &rest[name_end..];
+    let arity = after_name.chars().filter(|&c| c == '{').count();
+    if arity == 0 {
+        return None;
+    }
+    Some((name, arity))
+}
+
+/// Extract macro arguments from inline fallback text like `\macro{arg1}{arg2}`.
+///
+/// Returns a Vec of argument strings with outer braces stripped.
+/// Returns empty Vec if the text doesn't start with a known macro pattern.
+fn extract_macro_args(text: &str, arity: usize) -> Vec<String> {
+    let text = text.trim();
+    let mut args = Vec::with_capacity(arity);
+    let rest = match text.strip_prefix('\\') {
+        Some(r) => r,
+        None => return args,
+    };
+    // Skip macro name
+    let name_end = rest.chars().take_while(|c| c.is_ascii_alphabetic()).count();
+    let after_name = &rest[name_end..];
+    let mut chars = after_name.chars().peekable();
+    for _ in 0..arity {
+        // Skip optional whitespace
+        while chars.peek() == Some(&' ') {
+            chars.next();
+        }
+        if chars.peek() == Some(&'{') {
+            chars.next(); // skip opening brace
+            let mut depth = 1;
+            let mut arg_chars = Vec::new();
+            while let Some(c) = chars.next() {
+                if c == '{' {
+                    depth += 1;
+                } else if c == '}' {
+                    depth -= 1;
+                    if depth == 0 {
+                        break;
+                    }
+                }
+                arg_chars.push(c);
+            }
+            let arg_text: String = arg_chars.into_iter().collect::<String>().trim().to_string();
+            args.push(arg_text);
+        } else {
+            break;
+        }
+    }
+    args
+}
+
 fn collect_image_assets_from_vfs(vfs: &VirtualFs) -> ImageAssets {
     let mut image_assets = ImageAssets::new();
     for path in vfs.paths() {
@@ -3735,10 +4650,6 @@ fn relative_to_root(root: &Path, path: &Path) -> Result<PathBuf, EngineError> {
     }
 }
 
-fn path_to_posix(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -3809,15 +4720,22 @@ E = mc^2
     #[test]
     fn profile_spec_exposes_jos_rules() {
         let spec = EngineProfile::JosPaper.spec();
+        // Capture all needed fields before consuming spec via default_page_setup()
+        let spec_id = spec.id;
+        let spec_page_setup = spec.page_setup;
+        let spec_doc_classes = spec.document_classes;
+        let spec_caption_fig_prefix = spec.caption_policy.figure_prefix;
+        let spec_cite_bib_style = spec.citation_policy.bibliography_style;
+
         let page_setup = spec
             .default_page_setup()
             .expect("JOS profile should provide page setup");
 
-        assert_eq!(spec.id, "jos-paper");
-        assert_eq!(spec.page_setup, PageSetupProfile::JosPaper3);
-        assert!(spec.document_classes.contains(&"rjthesis"));
-        assert_eq!(spec.caption_policy.figure_prefix, "图");
-        assert_eq!(spec.citation_policy.bibliography_style, "unsrt");
+        assert_eq!(spec_id, "jos-paper");
+        assert_eq!(spec_page_setup, PageSetupProfile::JosPaper3);
+        assert!(spec_doc_classes.contains(&"rjthesis"));
+        assert_eq!(spec_caption_fig_prefix, "图");
+        assert_eq!(spec_cite_bib_style, "unsrt");
         assert_eq!(page_setup.width_twips, 10433);
         assert_eq!(page_setup.height_twips, 14742);
     }
@@ -3849,20 +4767,105 @@ E = mc^2
     }
 
     #[test]
+    fn profile_ref_id_page_setup_is_used_for_docx_render() {
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            profile_ref: Some(ProfileRef::Id("jos-paper".to_string())),
+            semantic_backend: SemanticBackendKind::RuleBased,
+            page_setup: None,
+            ..CompileOptions::default()
+        };
+        let artifact = engine
+            .compile_source_to_docx("main.tex", SAMPLE, &options)
+            .expect("compile source with active profile setup");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(
+            artifact
+                .report
+                .active_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+            Some("jos-paper")
+        );
+        assert!(document_xml.contains(r#"w:w="10433""#));
+        assert!(document_xml.contains(r#"w:h="14742""#));
+        assert!(artifact.report.stages.iter().any(|stage| stage
+            .message
+            .contains("profile default page setup: jos-paper3")));
+
+        let names = docx_entry_names(&artifact.docx);
+        assert!(names.iter().any(|name| name == "word/header0.xml"));
+        assert!(names.iter().any(|name| name == "word/header1.xml"));
+        assert!(names.iter().any(|name| name == "word/footer1.xml"));
+    }
+
+    #[test]
+    fn profile_ref_auto_rjthesis_uses_jos_page_setup_for_docx_render() {
+        let engine = SemanticTexEngine::new();
+        let options = CompileOptions {
+            profile_ref: Some(ProfileRef::Auto),
+            semantic_backend: SemanticBackendKind::RuleBased,
+            page_setup: None,
+            ..CompileOptions::default()
+        };
+        let source = r#"
+\PassOptionsToClass{fontset=fandol,twoside,UTF8}{ctexart}
+\documentclass{rjthesis}
+\rjhead{Paper Three Running Header}
+\begin{document}
+\section{Introduction}
+Body.
+\end{document}
+"#;
+        let artifact = engine
+            .compile_source_to_docx("main.tex", source, &options)
+            .expect("compile source with auto-detected JOS profile setup");
+        let document_xml = docx_document_xml(&artifact.docx);
+
+        assert_eq!(
+            artifact
+                .report
+                .active_profile
+                .as_ref()
+                .map(|profile| profile.id.as_str()),
+            Some("jos-paper")
+        );
+        assert!(document_xml.contains(r#"w:w="10433""#));
+        assert!(document_xml.contains(r#"w:h="14742""#));
+
+        let names = docx_entry_names(&artifact.docx);
+        assert!(names.iter().any(|name| name == "word/header0.xml"));
+        assert!(names.iter().any(|name| name == "word/header1.xml"));
+        assert!(names.iter().any(|name| name == "word/footer1.xml"));
+
+        let header1_xml = docx_part_xml(&artifact.docx, "word/header1.xml");
+        assert!(
+            header1_xml.contains("Paper Three Running Header"),
+            "default odd header should use \\rjhead text: {header1_xml}"
+        );
+        let header2_xml = docx_part_xml(&artifact.docx, "word/header2.xml");
+        assert!(
+            header2_xml.contains(doc_docx_writer::PageSetup::JOS_EVEN_HEADER),
+            "even header should use JOS journal header: {header2_xml}"
+        );
+    }
+
+    #[test]
     fn explicit_runtime_backend_falls_back_to_rule_based() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::XeLaTeXHook,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(options.profile.clone());
         let artifact = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
             "main.tex",
             &mut vfs,
-            &options,
+            &mut options,
             &mut report,
         )
         .expect("fallback to rule-based backend");
@@ -3883,18 +4886,18 @@ E = mc^2
     fn runtime_backend_without_fallback_returns_error() {
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::XeLaTeXHook,
             allow_backend_fallback: false,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(options.profile.clone());
         let err = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
             "main.tex",
             &mut vfs,
-            &options,
+            &mut options,
             &mut report,
         )
         .expect_err("strict missing runtime should error");
@@ -4004,7 +5007,7 @@ let x = 1;
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", source.as_bytes().to_vec());
 
-        let report = analyze_compatibility(&vfs, EngineProfile::GenericArticle);
+        let report = CompatibilityAnalyzer::new().analyze(&vfs, ProfileKind::GenericArticle);
 
         assert_eq!(report.scanned_files, 1);
         assert!(report.document_classes.contains(&"article".to_string()));
@@ -4071,18 +5074,19 @@ Body text.
 
     #[test]
     fn rule_based_collector_outputs_collected_document() {
-        let options = CompileOptions {
+        let mut options = CompileOptions {
             semantic_backend: SemanticBackendKind::RuleBased,
             ..CompileOptions::default()
         };
+        let profile = options.profile.clone();
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
         let mut input = SemanticCollectorInput {
             main_tex: "main.tex",
             vfs: &mut vfs,
-            options: &options,
+            options: &mut options,
         };
-        let mut report = CompileReport::new(options.profile);
+        let mut report = CompileReport::new(profile);
 
         let collected = RuleBasedCollector
             .collect(&mut input, &mut report)
@@ -4202,13 +5206,28 @@ See Figure~\ref{fig:a}.
     #[test]
     fn docx_reference_links_hyperlink_plain_text_run() {
         let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
-        let updated = hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")])
-            .expect("hyperlink text run");
+        let updated =
+            hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], false)
+                .expect("hyperlink text run");
 
         assert!(updated.contains(r#"<w:hyperlink w:anchor="ref_fig_a""#));
         assert!(updated.contains(r#"<w:t xml:space="preserve">See </w:t>"#));
         assert!(updated.contains("<w:t>Figure 1</w:t>"));
         assert!(updated.contains("<w:t>.</w:t>"));
+    }
+
+    #[test]
+    fn docx_reference_links_ref_field_mode() {
+        let paragraph = r#"<w:p><w:pPr><w:pStyle w:val="JOSBody"/></w:pPr><w:r><w:t>See Figure 1.</w:t></w:r></w:p>"#;
+        let updated =
+            hyperlink_paragraph(paragraph, "ref_fig_a", &[String::from("Figure 1")], true)
+                .expect("ref field text run");
+
+        assert!(updated.contains("<w:fldChar"));
+        assert!(updated.contains("REF"));
+        assert!(updated.contains("ref_fig_a"));
+        assert!(updated.contains(r#"w:fldCharType="begin""#));
+        assert!(updated.contains(r#"w:fldCharType="end""#));
     }
 
     #[test]
@@ -4293,6 +5312,62 @@ See Eq.~\eqref{eq:f}.
         assert!(selection.reason.contains("xelatex unavailable"));
     }
 
+    // ── P6: Runtime Hook Profile Extension ──────────────────────────────────
+
+    #[test]
+    fn journal_detection_injected_into_luatex_sidecar_description() {
+        // Verify that LuaTeXNodeBackend sidecar description includes profile_id.
+        // This test uses TemplateSignals and a mock runtime to verify the code path exists.
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\documentclass{article}");
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+        // With both available, LuaTeX is chosen.
+        assert_eq!(selection.kind, SemanticBackendKind::LuaTeXNode);
+        assert!(selection.reason.contains("LuaTeXNodeBackend"));
+    }
+
+    #[test]
+    fn journal_detection_injected_into_xelatex_sidecar_description() {
+        let mut signals = TemplateSignals::default();
+        signals.observe("\\usepackage{xeCJK}\\setCJKmainfont{Foo}");
+        let selection = select_auto_backend_with_availability(&signals, availability(true, true));
+        // xeCJK forces XeLaTeX.
+        assert_eq!(selection.kind, SemanticBackendKind::XeLaTeXHook);
+        assert!(selection.reason.contains("XeLaTeXHookBackend"));
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_luatex_for_tacl() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("tacl").unwrap();
+        assert_eq!(spec.backend.preferred, "luatex-node");
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_xelatex_for_chinese_academic() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("chinese-academic").unwrap();
+        assert!(spec.backend.requires_xetex);
+        assert_eq!(spec.backend.preferred, "xelatex-hook");
+    }
+
+    #[test]
+    fn profile_aware_backend_selects_luatex_for_nature() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("nature").unwrap();
+        assert_eq!(spec.backend.preferred, "luatex-node");
+    }
+
+    #[test]
+    fn profile_aware_backend_preserves_fallback_chain() {
+        let registry = ProfileRegistry::load_default().unwrap();
+        let spec = registry.get("tacl").unwrap();
+        assert!(!spec.backend.fallback.is_empty());
+        // Fallback should include xelatex-hook and rule-based.
+        assert!(spec.backend.fallback.contains(&"xelatex-hook".to_string()));
+        assert!(spec.backend.fallback.contains(&"rule-based".to_string()));
+    }
+
     #[test]
     #[ignore = "requires lualatex on PATH and exercises the external runtime backend"]
     fn luatex_runtime_collects_semantic_events() {
@@ -4374,7 +5449,7 @@ a+b=c
             &self,
             _main_tex: &str,
             _vfs: &mut VirtualFs,
-            _options: &CompileOptions,
+            _options: &mut CompileOptions,
             _report: &mut CompileReport,
         ) -> Result<SemanticBackendArtifact, EngineError> {
             unreachable!("missing backend should not be collected")
@@ -4412,6 +5487,21 @@ a+b=c
         xml
     }
 
+    fn docx_entry_names(docx: &[u8]) -> Vec<String> {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx)).expect("docx zip");
+        (0..archive.len())
+            .map(|idx| archive.by_index(idx).unwrap().name().to_string())
+            .collect()
+    }
+
+    fn docx_part_xml(docx: &[u8], part_name: &str) -> String {
+        let mut archive = zip::ZipArchive::new(std::io::Cursor::new(docx)).expect("docx zip");
+        let mut file = archive.by_name(part_name).expect("docx part");
+        let mut xml = String::new();
+        file.read_to_string(&mut xml).expect("read docx part");
+        xml
+    }
+
     #[test]
     fn parse_semantic_events_v1_legacy() {
         let jsonl = r#"{"type":"heading","level":1,"text":"Intro","label":null,"span":null}
@@ -4434,7 +5524,9 @@ a+b=c
         let events = parse_semantic_events_jsonl(jsonl).unwrap();
         assert_eq!(events.len(), 2);
         match &events[0] {
-            SemanticEvent::Heading { level, text, label, .. } => {
+            SemanticEvent::Heading {
+                level, text, label, ..
+            } => {
                 assert_eq!(*level, 2);
                 assert_eq!(text, "Background");
                 assert_eq!(label.as_deref(), Some("sec:bg"));
@@ -4454,5 +5546,177 @@ a+b=c
 "#;
         let events = parse_semantic_events_jsonl(jsonl).unwrap();
         assert_eq!(events.len(), 2);
+    }
+
+    #[test]
+    fn parse_layout_from_xdv_returns_none_for_missing_file() {
+        let result = parse_layout_from_xdv(std::path::Path::new("/nonexistent/file.xdv"));
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn lua_hook_contains_docxsem_node_tree() {
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("docxsem_node_tree"),
+            "Lua hook should define docxsem_node_tree function"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("hlist_count"),
+            "Lua hook should count hlist nodes"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("glyph_count"),
+            "Lua hook should count glyph nodes"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("__docx_node_tree.jsonl"),
+            "Lua hook should open node tree sidecar file"
+        );
+        assert!(
+            LUALATEX_SEMANTIC_HOOK.contains("docxsem_node_tree_write"),
+            "Lua hook should have docxsem_node_tree_write function"
+        );
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_summary() {
+        // Test the summary entry format
+        let json =
+            r#"{"type":"node_tree","hlist":2,"vlist":1,"glyph":42,"glue":15,"rule":3,"page":1}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::NodeTree {
+                hlist,
+                vlist,
+                glyph,
+                glue,
+                rule,
+                page,
+            } => {
+                assert_eq!(hlist, 2);
+                assert_eq!(vlist, 1);
+                assert_eq!(glyph, 42);
+                assert_eq!(glue, 15);
+                assert_eq!(rule, 3);
+                assert_eq!(page, Some(1));
+            }
+            _ => panic!("expected NodeTree variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_glyph() {
+        let json = r#"{"type":"glyph","subtype":0,"x":100,"y":200,"char":65,"font_id":1,"width":10,"height":8,"depth":2}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Glyph {
+                x,
+                y,
+                char,
+                font_id,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 100);
+                assert_eq!(y, 200);
+                assert_eq!(char, 65);
+                assert_eq!(font_id, 1);
+                assert_eq!(width, 10);
+                assert_eq!(height, 8);
+                assert_eq!(depth, 2);
+            }
+            _ => panic!("expected Glyph variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_hlist() {
+        let json = r#"{"type":"hlist","subtype":0,"x":0,"y":0,"width":500,"height":12,"depth":3}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Hlist {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 0);
+                assert_eq!(y, 0);
+                assert_eq!(width, 500);
+                assert_eq!(height, 12);
+                assert_eq!(depth, 3);
+            }
+            _ => panic!("expected Hlist variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_glue() {
+        let json =
+            r#"{"type":"glue","subtype":0,"x":100,"y":0,"width":200,"stretch":100,"shrink":50}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Glue {
+                x,
+                y,
+                width,
+                stretch,
+                shrink,
+                ..
+            } => {
+                assert_eq!(x, 100);
+                assert_eq!(y, 0);
+                assert_eq!(width, 200);
+                assert_eq!(stretch, Some(100));
+                assert_eq!(shrink, Some(50));
+            }
+            _ => panic!("expected Glue variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_deserializes_rule() {
+        let json = r#"{"type":"rule","subtype":0,"x":0,"y":0,"width":500,"height":1,"depth":0}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        match entry {
+            NodeEntry::Rule {
+                x,
+                y,
+                width,
+                height,
+                depth,
+                ..
+            } => {
+                assert_eq!(x, 0);
+                assert_eq!(y, 0);
+                assert_eq!(width, 500);
+                assert_eq!(height, 1);
+                assert_eq!(depth, 0);
+            }
+            _ => panic!("expected Rule variant"),
+        }
+    }
+
+    #[test]
+    fn node_tree_entry_is_summary() {
+        let json = r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(json).unwrap();
+        assert!(entry.is_summary());
+    }
+
+    #[test]
+    fn node_tree_entry_position() {
+        let glyph_json = r#"{"type":"glyph","subtype":0,"x":100,"y":200,"char":65,"font_id":1,"width":10,"height":8,"depth":2}"#;
+        let entry: NodeTreeEntry = serde_json::from_str(glyph_json).unwrap();
+        assert_eq!(entry.position(), Some((100, 200)));
+
+        let summary_json =
+            r#"{"type":"node_tree","hlist":1,"vlist":0,"glyph":5,"glue":2,"rule":0}"#;
+        let summary: NodeTreeEntry = serde_json::from_str(summary_json).unwrap();
+        assert_eq!(summary.position(), None);
     }
 }

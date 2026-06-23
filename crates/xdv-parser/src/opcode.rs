@@ -153,30 +153,10 @@ impl DviOpcode {
             Self::Set4 => 4,
             Self::Set5 => 5,
             Self::SetRule | Self::PutRule => 8,
-            Self::Right1
-            | Self::W1
-            | Self::X1
-            | Self::Down1
-            | Self::Y1
-            | Self::Z1 => 1,
-            Self::Right2
-            | Self::W2
-            | Self::X2
-            | Self::Down2
-            | Self::Y2
-            | Self::Z2 => 2,
-            Self::Right3
-            | Self::W3
-            | Self::X3
-            | Self::Down3
-            | Self::Y3
-            | Self::Z3 => 3,
-            Self::Right4
-            | Self::W4
-            | Self::X4
-            | Self::Down4
-            | Self::Y4
-            | Self::Z4 => 4,
+            Self::Right1 | Self::W1 | Self::X1 | Self::Down1 | Self::Y1 | Self::Z1 => 1,
+            Self::Right2 | Self::W2 | Self::X2 | Self::Down2 | Self::Y2 | Self::Z2 => 2,
+            Self::Right3 | Self::W3 | Self::X3 | Self::Down3 | Self::Y3 | Self::Z3 => 3,
+            Self::Right4 | Self::W4 | Self::X4 | Self::Down4 | Self::Y4 | Self::Z4 => 4,
             Self::Xxx1 | Self::XeTeXChar => 1,
             Self::Xxx2 | Self::XeTeXExt1 => 2,
             Self::Xxx3 => 3,

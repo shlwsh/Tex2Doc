@@ -1,0 +1,214 @@
+{
+  "profile": "ChineseAcademic",
+  "profile_spec": {
+    "id": "chinese-academic",
+    "display_name": "Chinese Academic Paper",
+    "document_classes": [
+      "ctexart",
+      "ctexrep",
+      "ctexbook",
+      "article"
+    ],
+    "default_page_setup": "a4",
+    "latin_main_font": "Times New Roman",
+    "cjk_main_font": "SimSun",
+    "math_font": "Cambria Math",
+    "figure_caption_prefix": "图",
+    "table_caption_prefix": "表",
+    "equation_caption_prefix": "式",
+    "citation_style": "numeric-compressed",
+    "bibliography_style": "gbt7714-like",
+    "reference_section_title": "参考文献"
+  },
+  "active_profile": {
+    "id": "cvpr",
+    "display_name": "CVPR/ICCV Paper",
+    "source": "explicit_id",
+    "confidence": null,
+    "document_classes": [
+      "IEEEtran"
+    ],
+    "backend_preferred": "luatex-node",
+    "quality": {
+      "min_compatibility_score": 75,
+      "max_raw_fallback_blocks": 10,
+      "require_reference_graph": true
+    },
+    "style_map": [
+      {
+        "semantic": "heading.level1",
+        "docx_style": "Heading1"
+      },
+      {
+        "semantic": "heading.level2",
+        "docx_style": "Heading2"
+      },
+      {
+        "semantic": "paragraph.body",
+        "docx_style": "BodyText"
+      },
+      {
+        "semantic": "caption.figure",
+        "docx_style": "Caption"
+      }
+    ]
+  },
+  "backend": {
+    "requested": "Auto",
+    "selected": "RuleBased",
+    "fallback_from": null,
+    "reason": "RuleBasedBackend: selected for profile 'unknown'; detected ctex class/package, xeCJK package; no runtime available (xelatex: xelatex not found on PATH, lualatex: lualatex not found on PATH)"
+  },
+  "compatibility": {
+    "score": 64,
+    "scanned_files": 11,
+    "document_classes": [
+      "ctexart",
+      "rjthesis"
+    ],
+    "packages": [
+      "CJKnumb",
+      "algorithm2e",
+      "amsmath",
+      "amsthm",
+      "bookmark",
+      "booktabs",
+      "caption",
+      "enumitem",
+      "fancyhdr",
+      "float",
+      "geometry",
+      "graphicx",
+      "hyperref",
+      "ifthen",
+      "natbib",
+      "titlesec",
+      "xeCJK"
+    ],
+    "custom_macro_count": 34,
+    "unsupported": [],
+    "warnings": [
+      {
+        "code": "profile_document_class_mismatch",
+        "feature": "ctexart",
+        "message": "document class is outside the active profile and may need profile-specific lowering rules"
+      },
+      {
+        "code": "profile_document_class_mismatch",
+        "feature": "rjthesis",
+        "message": "document class is outside the active profile and may need profile-specific lowering rules"
+      },
+      {
+        "code": "limited_package",
+        "feature": "algorithm2e",
+        "message": "algorithm packages currently rely on generic block lowering and may lose fine-grained styling"
+      },
+      {
+        "code": "custom_macros",
+        "feature": "custom macros",
+        "message": "34 custom macro definitions detected; unknown macro semantics may require explicit rules"
+      }
+    ]
+  },
+  "journal_detection": null,
+  "stages": [
+    {
+      "stage": "SourceMount",
+      "status": "Completed",
+      "message": "mounted 34 VFS entries"
+    },
+    {
+      "stage": "JournalDetect",
+      "status": "Completed",
+      "message": "profile 'cvpr' explicitly set (source: explicit_id)"
+    },
+    {
+      "stage": "CompatibilityAnalyze",
+      "status": "Completed",
+      "message": "compatibility score 64, unsupported 0, warnings 4"
+    },
+    {
+      "stage": "IncludeGraph",
+      "status": "Completed",
+      "message": "joined source stream has 80328 bytes"
+    },
+    {
+      "stage": "TexParse",
+      "status": "Completed",
+      "message": "parsed TeX stream with the current Logos/Rowan reader"
+    },
+    {
+      "stage": "SemanticCollect",
+      "status": "Completed",
+      "message": "collected 250 semantic blocks"
+    },
+    {
+      "stage": "DocumentGraph",
+      "status": "Completed",
+      "message": "document graph contains 250 block nodes"
+    },
+    {
+      "stage": "DocxRender",
+      "status": "Completed",
+      "message": "DOCX renderer packed document.xml, styles.xml, relationships and media (profile default page setup: letter)"
+    }
+  ],
+  "diagnostics": [
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "ctexart: document class is outside the active profile and may need profile-specific lowering rules"
+    },
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "rjthesis: document class is outside the active profile and may need profile-specific lowering rules"
+    },
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "algorithm2e: algorithm packages currently rely on generic block lowering and may lose fine-grained styling"
+    },
+    {
+      "severity": "Warning",
+      "code": "compatibility_warning",
+      "message": "custom macros: 34 custom macro definitions detected; unknown macro semantics may require explicit rules"
+    }
+  ],
+  "block_count": 250,
+  "image_asset_count": 10,
+  "semantic_event_count": 0,
+  "layout_node_count": 0,
+  "sidecar_count": 0,
+  "reference_label_count": 35,
+  "reference_edge_count": 46,
+  "citation_count": 36,
+  "unresolved_reference_count": 0,
+  "bookmark_count": 25,
+  "hyperlink_count": 35,
+  "omml_equation_count": 4,
+  "omml_equation_fallback_count": 0,
+  "docx_bytes": 3054778,
+  "quality_gate": {
+    "status": "PassedWithWarnings",
+    "score": 64,
+    "total_checks": 7,
+    "passed_checks": 7,
+    "failed_checks": [],
+    "warnings": [
+      {
+        "name": "backend_fallback",
+        "passed": false,
+        "severity": "Warning",
+        "message": "backend fell back from Auto to RuleBased"
+      }
+    ]
+  },
+  "rule_engine": {
+    "builtin_rules": 37,
+    "journal_rules": 5,
+    "profile_rules": 0,
+    "unknown_macro_count": 0,
+    "unknown_macros": []
+  }
+}

@@ -46,10 +46,12 @@ fn page_content<'a>(page: &'a doc_xdv_parser::XdvPage) -> Vec<&'a XdvCommand> {
 
 #[test]
 fn fixture_preamble_dvi_format() {
-    let doc = XdvParser::new().parse_bytes(&build_doc(
-        &preamble_bytes(247, 25400000, 473628672, 1000),
-        &[],
-    )).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(
+            &preamble_bytes(247, 25400000, 473628672, 1000),
+            &[],
+        ))
+        .unwrap();
 
     let pre = doc.preamble.as_ref().unwrap();
     assert_eq!(pre.id, 247);
@@ -100,15 +102,17 @@ fn fixture_font_def_and_select() {
     let mut page = Vec::new();
     // font_def1: font 0 = CMR10
     page.push(235); // font_def1
-    page.push(0);   // font number 0
-    page.extend_from_slice(&0u32.to_be_bytes());       // checksum
+    page.push(0); // font number 0
+    page.extend_from_slice(&0u32.to_be_bytes()); // checksum
     page.extend_from_slice(&1048576i32.to_be_bytes()); // scale
     page.extend_from_slice(&1048576i32.to_be_bytes()); // design size
-    page.push(0);                                  // area len
-    page.extend_from_slice(&[5u8]);                // name len
+    page.push(0); // area len
+    page.extend_from_slice(&[5u8]); // name len
     page.extend_from_slice(b"CMR10");
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     assert_eq!(doc.font_count(), 1);
     assert_eq!(doc.fonts[0].name, "CMR10");
     assert_eq!(doc.fonts[0].id, 0);
@@ -124,7 +128,9 @@ fn fixture_glyph_sequence() {
         67,  // set_char_67 ('C')
     ]);
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     let glyphs: Vec<_> = page_content(&doc.pages[0])
         .iter()
         .filter_map(|c| match c {
@@ -139,12 +145,14 @@ fn fixture_glyph_sequence() {
 fn fixture_set_char_long_form() {
     let pre = preamble_bytes(247, 25400000, 473628672, 1000);
     let page = page_bytes(&[
-        172,  // fnt_num_0
-        128,  // set1
-        200,  // char code 200
+        172, // fnt_num_0
+        128, // set1
+        200, // char code 200
     ]);
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     let glyphs: Vec<_> = page_content(&doc.pages[0])
         .iter()
         .filter_map(|c| match c {
@@ -167,7 +175,9 @@ fn fixture_push_pop_stack() {
         66,  // set_char B
     ]);
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     let kinds: Vec<_> = page_content(&doc.pages[0])
         .iter()
         .map(|c| match c {
@@ -185,15 +195,17 @@ fn fixture_push_pop_stack() {
 fn fixture_movement_right_down() {
     let pre = preamble_bytes(247, 25400000, 473628672, 1000);
     let page = page_bytes(&[
-        140,        // right1
-        50,         // +50 DVI units
-        156,        // down1
-        100,        // +100 DVI units
-        142,        // right3
-        0, 1, 0,    // +256 DVI units (big-endian 3-byte)
+        140, // right1
+        50,  // +50 DVI units
+        156, // down1
+        100, // +100 DVI units
+        142, // right3
+        0, 1, 0, // +256 DVI units (big-endian 3-byte)
     ]);
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     let movements: Vec<_> = page_content(&doc.pages[0])
         .iter()
         .filter_map(|c| match c {
@@ -230,12 +242,14 @@ fn fixture_special_parsed() {
     // Use page_bytes to properly delimit the page.
     let pre = preamble_bytes(247, 25400000, 473628672, 1000);
     let page = page_bytes(&[
-        244,       // xxx1
-        4,         // length (fits in 1 byte)
+        244, // xxx1
+        4,   // length (fits in 1 byte)
         b'p', b'd', b'f', b'x', // 4 bytes of payload
     ]);
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     let specials: Vec<_> = page_content(&doc.pages[0])
         .iter()
         .filter_map(|c| match c {
@@ -255,11 +269,16 @@ fn fixture_unknown_opcode_tolerated() {
     data.push(250); // undefined/reserved opcode
 
     let doc = XdvParser::new().parse_bytes(&data).unwrap();
-    let unknowns: Vec<_> = doc.commands
+    let unknowns: Vec<_> = doc
+        .commands
         .iter()
         .filter(|c| matches!(c, XdvCommand::Unknown { .. }))
         .collect();
-    assert_eq!(unknowns.len(), 1, "top-level unknown opcode should be recorded");
+    assert_eq!(
+        unknowns.len(),
+        1,
+        "top-level unknown opcode should be recorded"
+    );
 }
 
 #[test]
@@ -267,7 +286,9 @@ fn fixture_opcode_count_tracked() {
     let pre = preamble_bytes(247, 25400000, 473628672, 1000);
     let page = page_bytes(&[65, 66, 67]); // 3 set_char
 
-    let doc = XdvParser::new().parse_bytes(&build_doc(&pre, &page)).unwrap();
+    let doc = XdvParser::new()
+        .parse_bytes(&build_doc(&pre, &page))
+        .unwrap();
     // Count: preamble(1) + bop(1) + 3 chars + eop(1) = 6
     assert!(doc.opcode_count >= 5, "should track at least 5 opcodes");
 }

@@ -1,0 +1,37 @@
+﻿  List item 0 docx_runs: 2
+  List item 1 docx_runs: 2
+  List item 2 docx_runs: 4
+  List item 3 docx_runs: 2
+  List item 4 docx_runs: 2
+BODY BLOCK List with Freq item
+BODY BLOCK TheoremLike body: theorem 对任意 URL 模式 u 和时间 t，Score(u,t)∈[0,1]。 theorem theorem proof 四个因子 Freq、Err、Delay、Trend 的值域均为 [0,1]（Trend 经 sigmoid 映射后属于 (0,1)⊂[0,1]）。权重系数满足 α,β,gamma,delta≥ 0 且 α+β+gamma+delta=1。由凸组合性质，Score=α f1+β f2+gamma f3+delta f4∈[0,1]。 proposition 当 delta=0（无趋势因子）且 lambda=0（无时间衰减）时，DASM 退化为静态加权 Top-K。 proposition
+  List item 0 docx_runs: 2
+  List item 1 docx_runs: 2
+  List item 2 docx_runs: 2
+  List item 3 docx_runs: 2
+  List item 4 docx_runs: 2
+  List item 5 docx_runs: 2
+  List item 6 docx_runs: 2
+  List item 7 docx_runs: 2
+  List item 8 docx_runs: 2
+  List item 9 docx_runs: 2
+  List item 10 docx_runs: 2
+  List item 11 docx_runs: 2
+  List item 12 docx_runs: 2
+  List item 13 docx_runs: 2
+  List item 14 docx_runs: 2
+  List item 15 docx_runs: 2
+  List item 16 docx_runs: 2
+  List item 17 docx_runs: 2
+  List item 18 docx_runs: 2
+  List item 19 docx_runs: 2
+  List item 20 docx_runs: 2
+F16 skip entire bio list (2) items
+Quality gate: passed with 1 warning(s)
+docx: D:\work\Tex2Doc\examples\output\journal-profile-generalization\docx\paper3__jos-paper__auto.docx
+profile: jos-paper
+detected_profile: jos-paper
+compatibility-score: 64
+backend: rule-based (requested: auto)
+quality-gate: PassedWithWarnings (6/6 checks passed)
+report: D:\work\Tex2Doc\examples\output\journal-profile-generalization\reports\paper3__jos-paper__auto.report.json

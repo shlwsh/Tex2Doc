@@ -1,0 +1,36 @@
+\documentclass{article}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\begin{document}
+\title{A Realistic Generic Article on Semantic Conversion}
+\author{Example Author}
+\maketitle
+\begin{abstract}
+This fixture exercises a generic article with sections, equations, tables, figures, and references.
+\end{abstract}
+\section{Introduction}
+Generic manuscripts often mix prose, mathematical notation, and cross references. Figure~\ref{fig:generic-pipeline} and Equation~\ref{eq:generic-score} provide representative anchors.
+\section{Method}
+\begin{equation}
+  s(d) = \alpha q(d) + (1-\alpha)c(d) \label{eq:generic-score}
+\end{equation}
+\begin{table}[ht]
+  \centering
+  \begin{tabular}{lrr}
+  Method & Score & Time\\
+  Baseline & 71.2 & 3.4\\
+  Proposed & 84.6 & 2.8\\
+  \end{tabular}
+  \caption{Generic evaluation summary.}
+\end{table}
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=.5\textwidth]{generic-pipeline.png}
+  \caption{Generic conversion pipeline.}
+  \label{fig:generic-pipeline}
+\end{figure}
+\section{Conclusion}
+This document is intentionally compact but closer to a real article than the minimal smoke fixture.
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}

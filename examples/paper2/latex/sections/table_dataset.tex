@@ -1,0 +1,42 @@
+% Table: ShezhenV3-COCO — auto-generated
+\begin{table}[t]
+\centering
+\caption{ShezhenV3-COCO tongue dataset splits used in Paper~I.}
+\label{tab:dataset}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrr}
+\hline
+Split & Images & Purpose \\
+\hline
+Train & 5594 & held out (future fine-tuning) \\
+Validation & 572 & Edge-IQA $\tau$ calibration \\
+Test & 553 & main matrix (B0--B3) \\
+\hline
+Total & 6719 & COCO-format bounding boxes \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+
+\begin{table}[t]
+\centering
+\caption{Edge-IQA calibration on ShezhenV3 validation split ($n=572$ clear + $n=572$ synthetic blur).}
+\label{tab:iqa-calibration}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcc}
+\hline
+Metric & Clear cohort & Blur cohort \\
+\hline
+Median $Q_{\mathrm{img}}$ & 0.516 & 0.414 \\
+Mean $Q_{\mathrm{img}}$ & 0.519 & 0.414 \\
+Std & 0.116 & 0.102 \\
+\hline
+Routing threshold $\tau$ & \multicolumn{2}{c}{0.465} \\
+Spearman $\rho$ (M5) & \multicolumn{2}{c}{0.335 ($n=1144$)} \\
+\hline
+\end{tabular}%
+}
+\end{table}

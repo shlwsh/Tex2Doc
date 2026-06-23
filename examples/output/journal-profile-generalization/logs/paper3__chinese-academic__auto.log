@@ -1,0 +1,16 @@
+﻿[rule-engine] unknown macro: \begin{abstract} (arity=0) — using verbatim fallback
+  List item 0 docx_runs: 2
+  List item 1 docx_runs: 2
+  List item 2 docx_runs: 4
+  List item 3 docx_runs: 2
+  List item 4 docx_runs: 2
+BODY BLOCK List with Freq item
+BODY BLOCK TheoremLike body: theorem 对任意 URL 模式 u 和时间 t，Score(u,t)∈[0,1]。 theorem theorem proof 四个因子 Freq、Err、Delay、Trend 的值域均为 [0,1]（Trend 经 sigmoid 映射后属于 (0,1)⊂[0,1]）。权重系数满足 α,β,gamma,delta≥ 0 且 α+β+gamma+delta=1。由凸组合性质，Score=α f1+β f2+gamma f3+delta f4∈[0,1]。 proposition 当 delta=0（无趋势因子）且 lambda=0（无时间衰减）时，DASM 退化为静态加权 Top-K。 proposition
+Quality gate: passed with 2 warning(s)
+docx: D:\work\Tex2Doc\examples\output\journal-profile-generalization\docx\paper3__chinese-academic__auto.docx
+profile: chinese-academic
+detected_profile: chinese-academic
+compatibility-score: 70
+backend: rule-based (requested: auto)
+quality-gate: PassedWithWarnings (8/8 checks passed)
+report: D:\work\Tex2Doc\examples\output\journal-profile-generalization\reports\paper3__chinese-academic__auto.report.json

@@ -1,0 +1,27 @@
+[package]
+name = "doc-rule-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Rule engine for Tex2Doc: macro rule registry, audit cache, and optional AI inference"
+
+[features]
+default = []
+ai-fallback = ["reqwest/blocking", "reqwest/json", "reqwest/rustls-tls", "sha2"]
+
+[dependencies]
+doc-utils              = { workspace = true }
+doc-semantic-collector = { workspace = true }
+doc-semantic-ast       = { workspace = true }
+
+thiserror = { workspace = true }
+serde     = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+sha2    = { version = "0.10", optional = true }
+
+[dev-dependencies]
+doc-utils = { workspace = true }

@@ -1,0 +1,24 @@
+[package]
+name = "doc-desktop-slint"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+slint = "1"
+doc-core = { path = "../core" }
+doc-compiler-engine = { path = "../compiler-engine" }
+doc-commercial-api-client = { path = "../commercial-api-client" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+directories = "5"
+tokio = { version = "1", features = ["net", "rt", "sync", "time"] }
+log = "0.4"
+env_logger = "0.11"
+thiserror = "2"
+sha2 = "0.10"
+url = "2"
+zip = { version = "2.2", default-features = false, features = ["deflate"] }
+
+[build-dependencies]
+slint-build = "1"

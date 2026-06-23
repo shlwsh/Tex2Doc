@@ -1,0 +1,37 @@
+\subsection{Ablation and Cross-Cohort Analysis}
+\label{sec:ablation}
+
+\paragraph{Algorithm extensions (quick ablation).}
+Table~\ref{tab:algo-ablation} compares fixed-threshold B2 against dynamic $\tau_t$ (B2d), multi-frame EMA (B2m), and utility routing (B2u) on 60 ShezhenV3 test frames (seed~0, physical resample).
+B2m and B2u raise M2 from 0.60 to 0.65 at the cost of extra edge compute (B2m) or stricter upload utility (B2u); B2d is slightly more conservative under simulated packet loss.
+Full 3-seed sweeps and network perturbation curves are in the supplementary track.
+
+\begin{table}[t]
+\centering
+\caption{Quick ablation of routing extensions (seed~0, $n{=}60$, physical resample).}
+\label{tab:algo-ablation}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lrrr}
+\hline
+Baseline & M1 p50 (ms) & M2 & M3 \\
+\hline
+B2 (fixed $\tau$) & 211.3 & 0.600 & 0.417 \\
+B2d (dynamic $\tau_t$) & 209.0 & 0.550 & 0.467 \\
+B2m (EMA fusion) & 280.4 & \textbf{0.650} & 0.417 \\
+B2u (utility $U$) & 205.4 & \textbf{0.650} & 0.367 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Threshold $\tau$ (M4).}
+We sweep five values of $\tau$ for baseline B2 (500 frames, seed~0) using real Edge-IQA scores from the ShezhenV3 test plan.
+Figure~\ref{fig:ablation-tau} shows the M4 trade-off between valid-frame rate and RTT; the deployed main matrix uses $\tau_{B2}{=}0.465$ from ROI validation (Table~\ref{tab:iqa-calibration}), while $\tau_{\mathrm{full}}{=}0.498$ appears in the full-frame ROI ablation row.
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig7_ablation_tau.pdf}
+  \caption{Ablation over routing threshold $\tau$ (M4): valid rate and RTT p50 for B2 on TCM test frames.}
+  \label{fig:ablation-tau}
+\end{figure}

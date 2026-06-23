@@ -1,0 +1,17 @@
+[package]
+name = "doc-semantic-collector"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+description = "Semantic document collector types and traits for Tex2Doc"
+
+[dependencies]
+doc-utils        = { workspace = true }
+doc-semantic-ast = { workspace = true }
+doc-latex-reader = { workspace = true }
+
+thiserror = { workspace = true }
+serde     = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }

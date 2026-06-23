@@ -38,6 +38,7 @@ pub trait Visitor {
             | Block::TheoremLike { .. }
             | Block::Bibliography { .. }
             | Block::Algorithm { .. }
+            | Block::CodeBlock { .. }
             | Block::RawFallback { .. } => {}
         }
     }

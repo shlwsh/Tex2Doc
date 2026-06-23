@@ -1,0 +1,22 @@
+\subsection{Extended Analysis on ShezhenV3}
+\label{sec:extended-analysis}
+
+\paragraph{Calibration cohort statistics.}
+On 572 clear validation images, $Q_{\mathrm{img}}$ mean is 0.519 (std 0.116); on 572 synthetically blurred pairs, mean is 0.414 (std 0.102).
+Flag prevalence on the validation CSV: \texttt{blur}=797, \texttt{underexposed}=12.
+Blur flags dominate degraded cohort rows as expected; exposure flags appear on both cohorts owing to clinic lighting diversity in ShezhenV3.
+
+\paragraph{B2 RTT by injection type (seed 0).}
+Among B2 trials on the test plan, clear-source frames ($n=263$) exhibit RTT p50 225.2\,ms versus blurred-source frames ($n=237$) at p50 202.2\,ms, confirming that recovery retries concentrate on initially degraded captures.
+
+\paragraph{Seed stability.}
+Three independent seeds reuse the same frame plan per seed but draw independent cloud/resampling latencies; M2 for B2 remains at 1.000 across seeds with low variance on M1 p50 (341--348\,ms), indicating routing outcomes are dominated by deterministic Edge-IQA scores rather than stochastic latency draws.
+
+\paragraph{Reproducibility checklist.}
+\begin{enumerate}
+  \item Import splits: \texttt{python3 scripts/import\_shezhenv3.py}
+  \item Calibrate $\tau$: \texttt{python3 experiments/edge\_iqa/calibrate\_tau\_tcm.py}
+  \item Main matrix: \texttt{python3 experiments/run\_matrix\_tcm.py}
+  \item One-shot: \texttt{bash scripts/paper1\_run\_tcm\_full.sh}
+\end{enumerate}
+All scripts read \texttt{experiments/configs/tcm\_paths.yaml}; override \texttt{dataset\_root} when the Windows path \texttt{D:\\textbackslash BaiduNetdiskDownload\\textbackslash shezhenv3-coco} is mounted elsewhere in WSL.

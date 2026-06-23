@@ -1,0 +1,81 @@
+\section{实现细节}
+\label{sec:implementation-zh}
+
+本节记录边侧网关接口与 ShezhenV3 全量验证的离线实验驱动，便于第三方在不通读整个 monorepo 的情况下复现结果。
+
+\subsection{边侧网关 API}
+表~\ref{tab:api-endpoints-zh} 列出 \texttt{franka\_api\_server} 的 Paper~I HTTP 端点；启用认证时需携带 \texttt{X-API-Key} 请求头。
+
+\begin{table}[t]
+\centering
+\caption{边侧网关端点（Paper~I）。}
+\label{tab:api-endpoints-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llp{0.38\linewidth}}
+\hline
+方法 & 路径 & 用途 \\
+\hline
+POST & \texttt{/api/v1/vision/evaluate} & 上传图像并执行 Edge-IQA \\
+POST & \texttt{/api/v1/motion/skills/go\_to\_tongue\_pose} & 舌位 skill \\
+POST & \texttt{/api/v1/motion/skills/go\_to\_face\_pose} & 面位 skill \\
+POST & \texttt{/api/v1/motion/move\_joints} & 关节 PTP \\
+GET & \texttt{/api/v1/status/joints} & 关节状态快照 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Vision 接口契约。}
+网关以子进程调用 \texttt{edge\_iqa.cli}，\texttt{PYTHONPATH} 指向 \texttt{doctor/paper1}。
+响应包含 \texttt{q\_img}、\texttt{flags}、\texttt{t\_iqa\_ms}，以及 \texttt{recommended\_tau.json} 中的 \texttt{threshold\_tau}。
+子进程隔离可避免 NumPy/PIL 阻塞 \texttt{rclpy} 执行器。
+
+\subsection{环境与配置}
+表~\ref{tab:env-vars-zh} 为常用环境变量；Paper~I 实验设 \texttt{PAPER1\_MODE=1}，以禁用与采集无关的阻抗/碰撞路由。
+
+\begin{table}[t]
+\centering
+\caption{环境变量（\texttt{franka\_api\_server}）。}
+\label{tab:env-vars-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llp{0.36\linewidth}}
+\hline
+变量 & 默认 & 作用 \\
+\hline
+\texttt{PAPER1\_ROOT} & \texttt{doctor/paper1} & IQA 与 LangGraph 根路径 \\
+\texttt{PAPER1\_MODE} & \texttt{false} & 禁用 controller 路由 \\
+\texttt{PAPER1\_IQA\_SUBPROCESS} & \texttt{true} & 子进程调用 scorer \\
+\texttt{PAPER1\_VISION\_THRESHOLD\_TAU} & 0.55 & JSON 缺失时的回退 $\tau$ \\
+\texttt{FRANKA\_API\_PORT} & 8000 & 监听端口 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\subsection{离线实验驱动}
+ShezhenV3 验证的推荐顺序为：
+(1) \texttt{import\_shezhenv3.py}（写入 \texttt{bboxes}）；
+(2) 可选 \texttt{train\_b3\_mobilenet.py}；
+(3) \texttt{calibrate\_tau\_tcm.py}（ROI）；
+(4) \texttt{roi\_ablation.py}；
+(5) \texttt{run\_matrix\_tcm.py}（B2 Edge-IQA + B3 学习分数）；
+(6) 图表与 \LaTeX{} 生成。
+一键脚本 \texttt{paper1\_run\_tcm\_full.sh} 链式调用上述步骤并编译 PDF。
+
+\subsection{ROI 与 B3 模块}
+\texttt{coco\_roi.py} 实现并集框 + padding 裁剪；\texttt{scorer.py} 与 \texttt{learned\_b3.py} 共用 ROI 逻辑。
+B3 权重为 \texttt{b3\_mobilenet.pt}，验证准确率 98.34\%（1144 对）。
+
+\paragraph{矩阵打分。}
+每测试帧预计算 \texttt{q\_b2} 与 \texttt{q\_b3}；B0--B2 使用 Edge-IQA 分数，B3 使用学习概率，避免重采 uplift 被重复计入。
+
+\paragraph{目录与 CI。}
+主要目录：\texttt{edge\_iqa/}、\texttt{langgraph\_router/}、\texttt{experiments/splits|results|edge\_iqa/}、\texttt{latex/}、\texttt{franka\_api\_server/}。
+CI 运行单元测试；全量 ShezhenV3 验证为本地文稿目标，步骤见 \texttt{REPRODUCE.md}。
+修改 ROI padding 或 Edge-IQA 权重后，须重跑 orchestrator 再更新表 II。
+
+\paragraph{数据集路径。}
+Windows 路径 \texttt{D:\textbackslash ...\textbackslash shezhenv3-coco} 在 WSL 下映射为 \texttt{/mnt/d/...}，仅需修改 \texttt{tcm\_paths.yaml} 中的 \texttt{dataset\_root}。
+\texttt{test\_scorer.py}、\texttt{test\_routing.py} 可在无 TCM 数据挂载的 CI 环境运行。

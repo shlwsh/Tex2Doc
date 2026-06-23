@@ -1,0 +1,101 @@
+\section{Implementation Details}
+\label{sec:implementation}
+
+This section documents the edge gateway surface and offline experiment drivers used for ShezhenV3 full validation, enabling third-party replication without reading the entire monorepo.
+
+\subsection{Edge Gateway API}
+Table~\ref{tab:api-endpoints} lists Paper~I HTTP endpoints implemented in \texttt{franka\_api\_server}; all require header \texttt{X-API-Key} when authentication is enabled.
+
+\begin{table}[t]
+\centering
+\caption{Edge gateway endpoints (Paper~I).}
+\label{tab:api-endpoints}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llp{0.36\linewidth}}
+\hline
+Method & Path & Purpose \\
+\hline
+POST & \texttt{/api/v1/vision/evaluate} & Edge-IQA on upload \\
+POST & \texttt{/api/v1/motion/skills/go\_to\_tongue\_pose} & Tongue skill \\
+POST & \texttt{/api/v1/motion/skills/go\_to\_face\_pose} & Face skill \\
+POST & \texttt{/api/v1/motion/move\_joints} & Joint PTP \\
+GET & \texttt{/api/v1/status/joints} & Joint snapshot \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\paragraph{Vision evaluate contract.}
+The gateway forwards uploads to \texttt{python -m edge\_iqa.cli --json} with \texttt{PYTHONPATH} pointing to \texttt{doctor/paper1}.
+Response fields include \texttt{q\_img}, \texttt{flags}, \texttt{t\_iqa\_ms}, and \texttt{threshold\_tau} loaded from \texttt{recommended\_tau.json} when present.
+Subprocess isolation prevents NumPy/PIL work from blocking the \texttt{rclpy} executor thread.
+
+\subsection{Environment and Configuration}
+Table~\ref{tab:env-vars} summarizes environment variables; Paper~I experiments set \texttt{PAPER1\_MODE=1} to disable impedance/collision routes unrelated to acquisition.
+
+\begin{table}[t]
+\centering
+\caption{Selected environment variables (\texttt{franka\_api\_server}).}
+\label{tab:env-vars}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llp{0.34\linewidth}}
+\hline
+Variable & Default & Role \\
+\hline
+\texttt{PAPER1\_ROOT} & \texttt{doctor/paper1} & IQA + LangGraph \\
+\texttt{PAPER1\_MODE} & \texttt{false} & Disable controller \\
+\texttt{PAPER1\_IQA\_SUBPROCESS} & \texttt{true} & Subprocess scorer \\
+\texttt{PAPER1\_VISION\_THRESHOLD\_TAU} & 0.55 & Fallback $\tau$ \\
+\texttt{FRANKA\_API\_PORT} & 8000 & Listen port \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Offline Experiment Drivers}
+ShezhenV3 validation executes in order: (1)~\texttt{import\_shezhenv3.py} writes \texttt{experiments/splits/tcm\_\{train,val,test\}.json} with \texttt{bboxes} per image; (2)~\texttt{train\_b3\_mobilenet.py} (optional, PyTorch in \texttt{.venv}) writes \texttt{b3\_mobilenet.pt}; (3)~\texttt{calibrate\_tau\_tcm.py} scores ROI validation pairs; (4)~\texttt{roi\_ablation.py} compares full vs.\ ROI; (5)~\texttt{run\_matrix\_tcm.py} replays test frames for B0--B3 using Edge-IQA (B2) and \texttt{learned\_b3.py} (B3); (6) figure/table builders regenerate \LaTeX{} snippets.
+The orchestrator \texttt{scripts/paper1\_run\_tcm\_full.sh} chains these steps and invokes \texttt{paper1\_build\_draft.sh}.
+
+\subsection{ROI and B3 Modules}
+\texttt{edge\_iqa/coco\_roi.py} implements union-box crop with fractional padding.
+\texttt{scorer.py} accepts \texttt{bboxes}, \texttt{use\_roi}, and \texttt{roi\_padding} kwargs shared by calibration and gateway subprocess calls.
+\texttt{learned\_b3.py} loads \texttt{b3\_mobilenet.pt}, applies the same ROI crop, and returns $P(\mathrm{clear})$ as $Q_{\mathrm{img}}$ for B3 matrix rows.
+
+\paragraph{Import pipeline details.}
+COCO \texttt{train.json}/\texttt{val.json}/\texttt{test.json} annotations are grouped by \texttt{image\_id}; each split entry stores absolute \texttt{path}, relative \texttt{rel\_path}, and a list of \texttt{bboxes}.
+Images without annotations still import but ROI falls back to full frame.
+
+\paragraph{B3 training runtime.}
+Full train (5594 images, 5 epochs, batch 64) completes in approximately 45 minutes on a laptop CPU reading from WSL-mounted storage; validation accuracy 98.34\% on 1144 ROI pairs.
+GPU acceleration is optional when CUDA drivers match the installed PyTorch build.
+
+\paragraph{Matrix scoring split.}
+For each test frame, \texttt{run\_matrix\_tcm.py} precomputes both \texttt{q\_b2} (Edge-IQA) and \texttt{q\_b3} (learned) once per frame plan, then simulates baselines B0--B1 with B2 scores, B2 with B2 scores, and B3 with B3 scores---avoiding double-counting resampling uplift across baselines.
+
+\paragraph{Repository layout (Paper~I relevant).}
+\begin{verbatim}
+doctor/paper1/
+  edge_iqa/          scorer, coco_roi, learned_b3, cli
+  langgraph_router/  route(), graph nodes
+  experiments/
+    splits/          tcm_*.json
+    results/         tau, tables, b3 checkpoint
+    edge_iqa/        calibrate, train, roi_ablation
+  latex/             main.tex, sections/
+franka_api_server/   FastAPI gateway
+\end{verbatim}
+
+\paragraph{Continuous integration scope.}
+CI runs unit tests without the multi-gigabyte TCM mount; full ShezhenV3 validation remains a local manuscript target documented in \texttt{REPRODUCE.md}.
+
+\paragraph{Versioning checklist.}
+When updating ROI padding or Edge-IQA weights, bump a \texttt{calibration\_version} field in \texttt{recommended\_tau.json} (manual) and re-run the full orchestrator before updating Table~\ref{tab:main-results}.
+
+\paragraph{Dataset path mapping.}
+Windows path \texttt{D:\textbackslash BaiduNetdiskDownload\textbackslash shezhenv3-coco\textbackslash shezhenv3-coco} maps to WSL \texttt{/mnt/d/BaiduNetdiskDownload/shezhenv3-coco/shezhenv3-coco} in \texttt{tcm\_paths.yaml}; other mount points only require updating \texttt{dataset\_root}.
+
+\paragraph{Unit tests.}
+\texttt{edge\_iqa/tests/test\_scorer.py} checks clear/blur separation on synthetic images; \texttt{tests/test\_routing.py} covers all routing branches.
+Continuous integration can run these without the multi-gigabyte TCM mount, while full validation remains an optional local target for manuscript updates.

@@ -1,0 +1,119 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, ComboBox, GroupBox } from "std-widgets.slint";
+
+export component SettingsTab inherits Rectangle {
+    in-out property <string> detected-profile: "auto";
+    in-out property <string> quality-level: "standard";
+    in-out property <string> output-path;
+    in-out property <string> update-channel: "stable";
+    in-out property <string> update-status: "--";
+    in-out property <string> api-base-url;
+    in-out property <bool> is-converting: false;
+    in-out property <bool> settings-dirty: false;
+    in-out property <string> settings-saved-at: "";
+    in-out property <string> settings-panel-state: "idle";
+
+    callback choose-output-clicked(string);
+    callback check-update-clicked(string, string);
+    callback save-settings-clicked();
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        GroupBox {
+            title: "Engine Profile";
+
+            VerticalBox {
+                spacing: 6px;
+
+                Text { text: "Profile"; font-size: 12px; }
+                ComboBox {
+                    current-value: detected-profile;
+                    model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                }
+
+                Text { text: "Quality"; font-size: 12px; }
+                ComboBox {
+                    current-value: quality-level;
+                    model: ["preview", "standard", "strict"];
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Output Strategy";
+
+            VerticalBox {
+                spacing: 6px;
+
+                Text { text: "Default output path"; font-size: 12px; }
+                LineEdit {
+                    placeholder-text: "Output DOCX path...";
+                    text <=> output-path;
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+                    Button {
+                        text: "Save As";
+                        enabled: !is-converting;
+                        clicked => { root.choose-output-clicked(output-path); }
+                    }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Updates";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Release channel";
+                        text <=> update-channel;
+                    }
+
+                    Button {
+                        text: "Check";
+                        enabled: api-base-url != "";
+                        clicked => {
+                            root.update-status = "Checking for updates...";
+                            root.check-update-clicked(api-base-url, update-channel);
+                        }
+                    }
+                }
+
+                Text { text: update-status; font-size: 12px; }
+            }
+        }
+
+        GroupBox {
+            title: "Persistence (Phase D.4)";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 12px;
+                    Button {
+                        primary: true;
+                        text: "Save Settings";
+                        enabled: settings-dirty && settings-panel-state != "saving";
+                        clicked => { root.save-settings-clicked(); }
+                    }
+                    Text {
+                        text: settings-panel-state == "saving" ? "Saving..." : (settings-dirty ? "Unsaved changes" : "All settings saved");
+                        color: settings-dirty ? #a06000 : #207020;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                }
+                Text { text: settings-saved-at != "" ? "Last saved: " + settings-saved-at : "Not yet saved."; font-size: 11px; color: #888; }
+            }
+        }
+    }
+}

@@ -1,0 +1,25 @@
+% Moved from main Experiments section (P0 structure trim)
+\section{Extended Experiments and Operations}
+\label{sec:app-experiments}
+
+\paragraph{Cross-cohort correlation (M5).}
+On the full ShezhenV3 validation split ($n{=}1{,}144$ clear/blur pairs), Spearman correlation between $Q_{\mathrm{img}}$ and binary labels is $\rho{=}0.363$ (\texttt{cross\_tcm\_fd.csv}).
+This is lower than the synthetic phase-2 cohort ($\rho{\approx}0.75$) but confirms monotonic separation on average; absolute $\tau$ calibration uses cohort medians rather than assuming disjoint score ranges.
+
+\paragraph{Auxiliary Franka track (M6).}
+Fifty closed-loop trials on the execution stack produce Fig.~S1; local loop latency does not include simulated cloud upload and must not be compared numerically to Table~\ref{tab:main-results}.
+
+\paragraph{Reproducibility.}
+Dataset import, $\tau$ calibration, matrix replay, and figure generation are orchestrated by \texttt{scripts/paper1\_run\_tcm\_full.sh} with paths configured in \texttt{experiments/configs/tcm\_paths.yaml}.
+
+\input{sections/05_nr_iqa_baselines}
+\input{sections/05_4_tcm_analysis}
+\input{sections/05_b3_learned}
+\input{sections/05_6_extended_analysis}
+\input{sections/05_7_implementation}
+\input{sections/05_8_artifacts}
+\input{sections/05_9_deployment}
+\input{sections/05_10_failure_cases}
+
+\paragraph{Online worked example.}
+The step-by-step B2 walkthrough formerly in the print appendix is published at \texttt{supplementary/online\_walkthrough.md} to save RA-L page budget.

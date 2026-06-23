@@ -1,0 +1,39 @@
+{
+  "id": "jos-paper",
+  "display_name": "Journal of Software Paper",
+  "document_classes": [
+    "rjthesis",
+    "ctexart"
+  ],
+  "page_setup": {
+    "kind": "jos-paper3"
+  },
+  "detection": {
+    "min_confidence": 0.75,
+    "fallback_profile": "generic",
+    "signals": [
+      {
+        "kind": "documentclass",
+        "value": "rjthesis",
+        "weight": 0.80
+      }
+    ]
+  },
+  "font_policy": {
+    "latin_main": "Times New Roman",
+    "cjk_main": "SimSun/FangSong/KaiTi",
+    "math": "Cambria Math",
+    "notes": "JOS paper3 profile; CTeX/XeCJK templates prefer XeLaTeX"
+  },
+  "caption_policy": {
+    "figure_prefix": "图",
+    "table_prefix": "表",
+    "equation_prefix": "式",
+    "numbering": "section-scoped"
+  },
+  "citation_policy": {
+    "style": "numeric-super-compressed",
+    "bibliography_style": "unsrt",
+    "reference_section_title": "References"
+  }
+}

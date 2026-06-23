@@ -1,0 +1,30 @@
+\subsection{Discussion}
+\label{sec:discussion}
+
+Table~\ref{tab:main-results} reports \emph{relative} baseline comparison under the documented simulated latency model (\S\ref{sec:setup}); absolute RTT values are not live hospital traces.
+B2 reduces M1 p50 from 374.0\,ms (B0) to 208.3\,ms and raises M2 from 0.560 to 0.604 on ShezhenV3 test frames with physical resampling and ROI Edge-IQA ($\tau_{B2}{=}0.465$).
+B1 keeps M2 at 0.560 because sub-threshold frames still reach the cloud without closed-loop resampling.
+Learned B3/B4 reach M2 $\approx 0.93$--$0.97$ at recalibrated thresholds (Table~\ref{tab:learned-hybrid}; appendix Table~\ref{tab:nr-iqa} for BRISQUE/NIQE-style) with higher edge RTT; the auxiliary Franka track (M6) confirms routing trends without altering Table~\ref{tab:main-results}.
+We report descriptive statistics (mean $\pm$ std) over three random seeds; all seeds show B2 outperforming B0 on M1 and M2, while B3/B4 trade higher M1 for higher M2.
+Low variance (M2 std $\leq$ 0.007) reflects deterministic test-set scores given a shared frame plan; remaining randomness comes from the latency model and frame-plan shuffling.
+
+COCO tongue ROI (8\% padded union box) aligns scoring with downstream anatomy but does not eliminate clear/blur overlap on Laplacian features (Table~\ref{tab:roi-ablation}, Table~\ref{tab:iqa-calibration}).
+Full-frame calibration yields $\tau_{\mathrm{full}}{=}0.498$; the deployed main matrix uses ROI medians $0.516/0.414$, $\tau_{B2}{=}0.465$, and a negative min-clear vs.\ max-blur gap ($-0.541$).
+Because ShezhenV3 lacks human blur labels, we inject Gaussian defocus on half of the test frames, mirroring validation calibration; M5 Spearman $\rho{\approx}0.36$--$0.47$ reflects residual overlap under real texture.
+B3 (MobileNetV3-Small, 98.3\% val accuracy) achieves M2$=0.934$ at $\tau_{B2}$ versus B2 M2$=0.604$; we retain B2 as the primary deployable path for lowest M1 p50 and auditable \texttt{flags}, while B3/B4 suit higher valid-rate targets with extra edge compute and separate $\tau_{B3}$ calibration.
+
+Edge-IQA and LangGraph are hardware-agnostic: any edge gateway exposing HTTP \texttt{/vision/evaluate} and skill endpoints can replay the same JSONL protocol.
+Manual operator retakes resemble \texttt{resample\_edge} but lack consistent $Q_{\mathrm{img}}$ thresholds; Edge-IQA standardizes the decision and exports machine-readable reasons.
+Pilot deployment should log JSONL for 50+ sessions, re-calibrate $\tau_{B2}$ locally, and compare cloud classifier confidence before/after routing---without changing downstream diagnosis models in Paper~I scope.
+Synthetic blur labels and overlapping score ranges on min-max metrics limit direct clinical claims; see \S\ref{sec:failure-cases} for failure modes and B3/$\tau$ scale coupling.
+All scoring runs offline on a public research corpus; no patient identifiers are written to JSONL logs.
+Splits and scripts are in the repository; implementations live in \texttt{doctor/paper1/edge\_iqa/}, \texttt{langgraph\_router/}, and \texttt{franka\_api\_server/}.
+Paper~I argues for a \emph{routing architecture} validated on real TCM imagery, not for a new SOTA IQA regressor.
+
+The results form a deployment trade-off.
+B0 spends cloud RTT on frames that could have been repaired locally, whereas B1 saves some upload time but cannot improve frame validity without a physical recovery action.
+B2 is the smallest policy that changes both latency and input quality; B3/B4 quantify the additional valid-frame rate available when a site accepts learned-model maintenance and higher edge RTT.
+
+M2 (valid-frame rate) is an internal metric: it measures the proportion of frames passing the Edge-IQA or learned threshold, not an independent quality annotation.
+We report M2 as a proxy for the routing policy's discrimination ability rather than a direct measure of clinical image quality; future work should correlate M2 with downstream classifier confidence on accepted vs.\ rejected frames.
+A larger seed budget or bootstrap confidence intervals would strengthen formal inference beyond the consistent descriptive trends shown here.

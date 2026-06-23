@@ -1,0 +1,44 @@
+% §5.2 Main Results — ShezhenV3 full validation
+\subsection{Main Results}
+\label{sec:main-results}
+
+\input{sections/table_ii}
+
+Table~\ref{tab:main-results} summarizes primary baselines B0--B2 on ShezhenV3-COCO (physical resample, $\tau_{B2}$, 3 seeds).
+Table~\ref{tab:learned-hybrid} reports learned MobileNet (B3 at $\tau_{B2}$ vs.\ $\tau_{B3}$) and Hybrid B4.
+
+\input{sections/table_iii}
+
+Compared with naive cloud upload (B0), B2 improves M2 from 0.560 to 0.604 and lowers M1 p50 to 208.3\,ms under physical resampling (Table~\ref{tab:main-results} reports mean $\pm$ std over three seeds, with frame-level bootstrap CIs in the caption); learned B3/B4 reach M2 $\approx 0.93$ with higher RTT (Table~\ref{tab:learned-hybrid}).
+Table~\ref{tab:stratified-m2} decomposes M2 by clear-source vs.\ blur-injected cohorts on the shared frame plan.
+
+Figure~\ref{fig:pareto-m2-m1} summarizes the M2--M1 p50 trade-off across B0--B4; Fig.~\ref{fig:rtt-cdf} shows the RTT cumulative distribution where B2 shifts mass left relative to B0.
+Figure~\ref{fig:valid-rate} reports M2 across seeds; variance is low because real test scores are deterministic given the shared frame plan per seed.
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig5_rtt_cdf.pdf}
+  \caption{End-to-end RTT CDF under the \emph{simulated} latency model (\S\ref{sec:setup}; ShezhenV3 test, real Edge-IQA scores, 3 seeds).}
+  \label{fig:rtt-cdf}
+\end{figure*}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.65\linewidth]{fig6_valid_rate.pdf}
+  \caption{Valid frame rate (M2) per baseline under the simulated latency model; error bars = std over seeds.}
+  \label{fig:valid-rate}
+\end{figure*}
+
+\begin{figure}[t]
+  \centering
+  \includegraphics[width=0.92\linewidth]{fig7_pareto_m2_m1.pdf}
+  \caption{M2 vs.\ simulated M1 p50 (mean over 3 seeds). B2 favors low RTT; B3/B4 favor high M2 at higher edge cost.}
+  \label{fig:pareto-m2-m1}
+\end{figure}
+
+\input{sections/table_stratified_m2}
+
+\paragraph{Discussion.}
+The absolute RTT numbers depend on the documented latency model (\S\ref{sec:setup}); the \emph{relative} ordering reflects reduced wasted cloud work when physical resampling recovers valid frames before upload.
+
+\textbf{Takeaway.} On a full public TCM test cohort, B2 with physical skill transforms and auditable LangGraph logs remains the primary deployable path; Hybrid B4 combines interpretable exposure gating with learned blur ranking.

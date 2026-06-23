@@ -1,0 +1,17 @@
+% NR-IQA appendix table — auto-generated
+\begin{table}[t]
+\centering
+\caption{Classical NR-IQA baselines with the same LangGraph resampling shell as B2 (ShezhenV3 test, 500 frames $\times$ 3 seeds; $\tau$ from validation medians). Scores use validation-calibrated OpenCV BRISQUE (Bbrisque) and NSS Mahalanobis distance (Bniqe, NIQE-style) on tongue ROI crops.}
+\label{tab:nr-iqa}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lccc}
+\hline
+Baseline & M1 p50 (ms) & M2 & M3 retry \\
+\hline
+Bbrisque & 468.9 $\pm$ 12.5 & 0.889 $\pm$ 0.003 & 0.512 $\pm$ 0.007 \\
+Bniqe & 545.6 $\pm$ 8.5 & 0.969 $\pm$ 0.004 & 0.408 $\pm$ 0.011 \\
+\hline
+\end{tabular}%
+}
+\end{table}

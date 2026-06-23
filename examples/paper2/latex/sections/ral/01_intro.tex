@@ -1,0 +1,28 @@
+\section{Introduction}
+\label{sec:intro}
+
+Tele-diagnosis for traditional Chinese medicine (TCM) tongue inspection needs repeatable, high-quality images before cloud analytics and electronic medical records integration~\cite{zhang2020tongue,qi2016tongue}.
+Clinical diagnosis relies on color, texture, coating, and shape cues that degrade under motion blur, uneven lighting, and incorrect working distance.
+Naive pipelines upload every frame, wasting bandwidth on blurred or poorly exposed captures and inflating round-trip time (RTT) on slow links.
+\emph{Garbage-in garbage-out} effects are acute: a single blurred upload triggers wasted RTT and may propagate low-confidence features into downstream classifiers.
+For RA-L, the robotics question is whether a manipulator-mounted camera can decide \emph{during acquisition} which frames merit upload while preserving a safe control boundary.
+Edge-side gating must therefore be (i)~fast for closed-loop capture, (ii)~interpretable for audit, and (iii)~calibratable on real tongue corpora rather than synthetic placeholders alone.
+
+We study a \textbf{cloud--edge--device} stack for a Franka Research~3 (FR3) platform with ROS~2 and MoveIt~\cite{moore2021ros2,chitta2009moveit}.
+Perception and routing live in a Python edge gateway (\texttt{franka\_api\_server}) and companion edge modules (\texttt{edge\_iqa}, \texttt{langgraph\_router})---not inside hardware plugins---so algorithms remain testable without a robot.
+A lightweight \emph{Edge-IQA} fuses Laplacian sharpness and exposure into $Q_{\mathrm{img}}\in[0,1]$ on COCO tongue ROI crops; a LangGraph router decides \texttt{upload\_cloud}, \texttt{resample\_edge}, or \texttt{fail\_safe} under retry budget $K{=}2$.
+An optional learned baseline B3 fine-tunes MobileNetV3-Small on the training split for comparison.
+
+The novelty is the acquisition-time coupling of these pieces, not a standalone IQA score.
+Generic NR-IQA predicts perceptual quality after an image exists; generic edge offloading decides where inference runs.
+Here the decision changes the robot acquisition loop itself: a rejected tongue ROI triggers a bounded physical resampling action, an accepted ROI avoids unnecessary retries, and an exhausted retry budget enters a fail-safe branch rather than silently uploading poor evidence.
+This makes quality assessment an auditable robot policy with timing, safety, and clinical-data boundaries.
+
+We validate on public \textbf{ShezhenV3-COCO} (6{,}719 images with bounding boxes): $\tau$ is calibrated on 572 validation pairs (clear + synthetic blur) with ROI enabled, and the main matrix replays 500 test frames per seed with real Edge-IQA and B3 scores from 553 held-out images.
+
+\textbf{Contributions:} (1)~a robot-acquisition stack that keeps IQA/routing outside the 1\,kHz control loop while exposing HTTP skills for reproducible FR3 capture and recovery;
+(2)~a tongue-ROI Edge-IQA gate with $O(HW)$ CPU scoring, interpretable blur/exposure flags, $\tau_{B2}{=}0.465$, and p95 below 10\,ms;
+(3)~an auditable LangGraph policy that turns quality scores into bounded upload/resample/fail-safe actions, reducing M1 p50 from 374.0 to 208.3\,ms and raising M2 from 0.560 to 0.604 versus naive upload;
+(4)~RA-L-oriented evidence: ShezhenV3 3-seed evaluation, learned B3/B4 alternatives that expose the latency--validity frontier, auxiliary Franka closed-loop trials, and anonymized code/data/video materials.
+
+Section~\ref{sec:related} reviews related work; \S\ref{sec:method}--\ref{sec:experiments} present the method and ShezhenV3 evaluation; \S\ref{sec:conclusion} concludes.

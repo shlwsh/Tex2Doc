@@ -1,0 +1,56 @@
+% §5.1 Experimental Setup — Paper I (ShezhenV3 full validation)
+\subsection{Experimental Setup}
+\label{sec:setup}
+
+We evaluate offline baselines B0--B4 on the \textbf{ShezhenV3-COCO} test split~\cite{zhang2020tongue}.
+The main matrix uses COCO tongue ROI scoring with routing threshold $\tau_{B2}{=}0.465$ from validation calibration (\S\ref{sec:tcm-iqa}, Table~\ref{tab:iqa-calibration}); full-frame calibration yields $\tau_{\mathrm{full}}{=}0.498$ (ROI ablation only).
+Retry budget $K{=}2$.
+
+\paragraph{Dataset.}
+ShezhenV3-COCO provides 6{,}719 RGB tongue images with COCO-format bounding boxes and ten condition labels (e.g., healthy, red, purple tongue).
+Table~\ref{tab:tongue-conditions} summarizes annotation counts; conditions describe diagnostic morphology rather than capture quality, motivating our separate Edge-IQA blur/exposure axis.
+\input{sections/table_tongue_conditions}
+We hold out the official test split ($n{=}553$) for the main matrix; validation ($n{=}572$) is used only for $\tau$ calibration.
+Train images ($n{=}5{,}594$) train the optional MobileNet B3 comparator (\S\ref{sec:b3-learned}).
+
+\paragraph{Baselines.}
+\begin{itemize}
+  \item \textbf{B0}: cloud upload only; no edge quality gate or intelligent routing.
+  \item \textbf{B1}: Edge-IQA before every cloud upload; no LangGraph routing (no resampling).
+  \item \textbf{B2}: Edge-IQA + LangGraph router with physical edge resampling (proposed system).
+  \item \textbf{B3/B3t/B4}: learned MobileNet IQA and hybrid gates (Table~\ref{tab:learned-hybrid}); reported separately from the primary B0--B2 table.
+\end{itemize}
+
+\paragraph{Quality injection.}
+For each test frame we sample a held-out image; with probability $0.5$ we use the original capture (clear cohort) and otherwise apply Gaussian blur ($r\in[2.5,5.0]$\,px) before scoring---mirroring the validation calibration protocol.
+Each frame's $Q_{\mathrm{img}}$ is computed by \texttt{edge\_iqa/scorer.py}; RTT components follow the latency model below.
+
+\textbf{Latency model.} End-to-end RTT aggregates capture (5\,ms), edge IQA ($\mathcal{N}(9,2^2)$\,ms), routing (1.5\,ms), optional \emph{edge re-capture} resampling (log-normal, p50$\approx$50\,ms), and cloud upload (uniform 50--550\,ms). Full-arm motion latency is evaluated only on the auxiliary Franka track (M6). See \texttt{sim/NETEM.md}.
+
+\textbf{Protocol.} For each baseline we simulate 500 frames per random seed ($\{0,1,2\}$), yielding Table~\ref{tab:main-results} metrics M1 (RTT p50/p95), M2 (valid frame rate), and M3 (retry rate).
+All main-text numbers are produced by \texttt{experiments/run\_matrix\_tcm.py} reading \texttt{recommended\_tau.json}; auxiliary Franka closed-loop trials (M6) are reported separately in Fig.~S1 and must not be merged into Table~\ref{tab:main-results}.
+
+\paragraph{Hyperparameters.}
+Table~\ref{tab:hyperparams} lists constants for the ShezhenV3 main matrix; they match \texttt{scorer.py} defaults unless noted.
+
+\begin{table}[t]
+\centering
+\caption{Key hyperparameters (Paper~I, ShezhenV3 main matrix).}
+\label{tab:hyperparams}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lll}
+\hline
+Symbol & Value & Role \\
+\hline
+$\tau_{B2}$ (ROI) & 0.465 & routing threshold (main Table II) \\
+$\tau_{\mathrm{full}}$ & 0.498 & full-frame calibration (ablation only) \\
+$K$ & 2 & max edge resamples \\
+$w_s, w_e$ & 0.65, 0.35 & sharpness / exposure weights \\
+resize & $512^2$ & Edge-IQA input \\
+blur $r$ & 2.5--5.0 px & synthetic defocus on val/test \\
+$\tau_{B3}$ & 0.5 & learned IQA (Table III) \\
+\hline
+\end{tabular}%
+}
+\end{table}

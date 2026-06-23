@@ -117,6 +117,7 @@ pub fn convert_sync(
         options.template_bytes.as_deref(),
         None,
         options.page_setup.as_ref(),
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -216,6 +217,7 @@ pub fn convert_dir(
         options.template_bytes.as_deref(),
         Some(&image_assets),
         ps_ref,
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {
@@ -330,6 +332,7 @@ pub fn convert_zip(
                 doc_semantic_ast::Block::TheoremLike { .. } => "M",
                 doc_semantic_ast::Block::Bibliography { .. } => "B",
                 doc_semantic_ast::Block::Algorithm { .. } => "A",
+                doc_semantic_ast::Block::CodeBlock { .. } => "C",
                 doc_semantic_ast::Block::RawFallback { .. } => "R",
             })
             .collect::<Vec<_>>()
@@ -378,6 +381,7 @@ pub fn convert_zip(
         options.template_bytes.as_deref(),
         Some(&image_assets),
         ps_ref,
+        None,
     )
     .map_err(|e| CoreError::Serialize(e.0))?;
     Ok(ConvertResult {

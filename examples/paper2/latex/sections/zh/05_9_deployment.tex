@@ -1,0 +1,36 @@
+% 部署与复现扩展（中文）
+\subsection{部署清单与操作流程}
+\label{sec:deploy-checklist-zh}
+
+\paragraph{诊前标定。}
+(1) 通过 \texttt{import\_shezhenv3.py} 导入 ShezhenV3 或本地划分；
+(2) 启用 ROI 运行 \texttt{calibrate\_tau\_tcm.py}，将 \texttt{recommended\_tau.json} 部署至边缘网关；
+(3) 可选：在具备 GPU/NN 运行时的节点上训练 B3；
+(4) 合并日志前，用 \texttt{validate\_jsonl.py} 校验 JSONL 模式。
+
+\paragraph{运行时参数。}
+环境变量 \texttt{PAPER1\_VISION\_THRESHOLD\_TAU} 可覆盖 JSON 中的 $\tau$；\texttt{use\_roi} 默认为 true；重采预算 $K{=}2$；Edge-IQA 固定 $512$ 缩放以保证延迟稳定。
+
+\paragraph{操作员可读标志。}
+\texttt{blur} 提示患者保持静止并重新张口；\texttt{underexposed}/\texttt{overexposed} 建议调整环光后再调用 FR3 技能。
+日志保留 \texttt{q\_img}、路由决策与重试次数；拒帧不必上传云端。
+
+\paragraph{硬件分级。}
+\textbf{A 级（纯 CPU 网关）：}B2 + LangGraph，IQA p95 约 10\,ms。
+\textbf{B 级（GPU 边缘）：}可选 B3，以部分可解释性换取更强的模糊排序。
+\textbf{C 级（Franka 辅轨）：}M6 RTT，不与表 II 的离线矩阵直接数值对比。
+
+\paragraph{多中心部署。}
+各中心应在本地验证批（$\geq 200$ 清晰/模糊对）上重标定 $\tau$，且 scorer 代码须与主仓保持一致。
+光照差异会导致 $\tau$ 漂移；报告应同时给出本地与 ShezhenV3 全局中位数。
+
+\paragraph{安全与隐私。}
+图像在 \texttt{upload\_cloud} 之前留于边缘；API Key 保护运动与视觉接口。
+去标识 JSONL 不含患者元数据；IQA 路径仅使用几何框，不使用诊断标签。
+
+\paragraph{与 MoveIt 技能集成。}
+具名位姿（\texttt{tongue\_pose}、\texttt{face\_pose}）将采集几何与 IQA 解耦；可在最终舌采前于 \texttt{face\_pose} 做预检。
+
+\paragraph{回归测试与文档。}
+单元测试覆盖 flags 推导；全矩阵回归见 \texttt{paper1\_run\_tcm\_full.sh}（含 B3 训练时约 10--60 分钟）。
+英文文档 \texttt{docs/}、中文学习手册 \texttt{docs/study/}（八章）与 \texttt{REPRODUCE.md} 构成新人上手路径。

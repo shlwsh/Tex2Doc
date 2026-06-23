@@ -1,0 +1,137 @@
+import { Button, VerticalBox, HorizontalBox, LineEdit, GroupBox } from "std-widgets.slint";
+
+export component AccountTab inherits Rectangle {
+    in-out property <string> api-base-url;
+    in-out property <string> login-email;
+    in-out property <string> login-password;
+    in-out property <string> account-status: "Not signed in.";
+    in-out property <string> usage-status: "--";
+    in-out property <bool> is-signed-in: false;
+    in-out property <string> account-display-name: "Guest";
+    in-out property <int> quota-remaining: 0;
+    in-out property <int> quota-total: 0;
+    in-out property <string> account-tier: "free";
+
+    callback login-clicked(string, string, string);
+    callback register-clicked(string, string, string);
+    callback refresh-login-clicked(string);
+    callback logout-clicked();
+    callback refresh-usage-clicked(string);
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 12px;
+
+        GroupBox {
+            title: "Account (Phase D.1)";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 16px;
+                    VerticalBox {
+                        Text { text: "Display Name"; font-size: 11px; color: #666; }
+                        Text { text: account-display-name; font-size: 14px; font-weight: 600; }
+                    }
+                    VerticalBox {
+                        Text { text: "Tier"; font-size: 11px; color: #666; }
+                        Text { text: account-tier; font-size: 14px; font-weight: 600; }
+                    }
+                    VerticalBox {
+                        Text { text: "Quota"; font-size: 11px; color: #666; }
+                        Text { text: quota-remaining + " / " + quota-total; font-size: 14px; font-weight: 600; }
+                    }
+                }
+            }
+        }
+
+        GroupBox {
+            title: "Sign In";
+
+            VerticalBox {
+                spacing: 6px;
+
+                LineEdit {
+                    placeholder-text: "API base URL";
+                    text <=> api-base-url;
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    LineEdit {
+                        placeholder-text: "Email";
+                        text <=> login-email;
+                    }
+
+                    LineEdit {
+                        placeholder-text: "Password";
+                        text <=> login-password;
+                    }
+                }
+
+                HorizontalBox {
+                    spacing: 8px;
+
+                    Button {
+                        text: "Login";
+                        enabled: api-base-url != "" && login-email != "";
+                        clicked => {
+                            root.account-status = "Signing in...";
+                            root.login-clicked(api-base-url, login-email, login-password);
+                        }
+                    }
+
+                    Button {
+                        text: "Register";
+                        enabled: api-base-url != "" && login-email != "";
+                        clicked => {
+                            root.account-status = "Registering...";
+                            root.register-clicked(api-base-url, login-email, login-password);
+                        }
+                    }
+
+                    Button {
+                        text: "Refresh";
+                        enabled: api-base-url != "" && is-signed-in;
+                        clicked => {
+                            root.account-status = "Refreshing login...";
+                            root.refresh-login-clicked(api-base-url);
+                        }
+                    }
+
+                    Button {
+                        text: "Logout";
+                        enabled: is-signed-in;
+                        clicked => { root.logout-clicked(); }
+                    }
+                }
+
+                Text { text: account-status; font-size: 12px; }
+            }
+        }
+
+        GroupBox {
+            title: "Account";
+
+            VerticalBox {
+                spacing: 6px;
+
+                HorizontalBox {
+                    spacing: 8px;
+                    Button {
+                        text: "Usage";
+                        enabled: api-base-url != "" && is-signed-in;
+                        clicked => {
+                            root.usage-status = "Refreshing usage...";
+                            root.refresh-usage-clicked(api-base-url);
+                        }
+                    }
+                }
+
+                Text { text: usage-status; font-size: 12px; }
+            }
+        }
+    }
+}

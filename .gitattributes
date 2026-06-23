@@ -1,0 +1,19 @@
+# Force consistent line endings across all platforms.
+# text=auto makes git auto-detect, but eol=lf forces LF for all text files.
+* text=auto eol=lf
+
+# Keep binary files untouched
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.mp4 binary
+*.mp3 binary
+*.doc binary
+*.docx binary

@@ -1,0 +1,35 @@
+\section{Introduction}
+\label{sec:intro}
+
+Tele-diagnosis for tongue inspection in traditional Chinese medicine (TCM) needs repeatable, high-quality images from a manipulator-mounted camera before cloud analytics and electronic medical records (EMR) integration~\cite{zhang2020tongue,qi2016tongue}.
+Clinical tongue diagnosis relies on color, texture, coating, and shape cues that degrade under motion blur, uneven lighting, and incorrect working distance~\cite{zhang2020tongue}.
+Naive pipelines upload every frame to the cloud, wasting bandwidth on blurred or poorly exposed captures and inflating end-to-end latency when the link is slow.
+
+\paragraph{Motivation.}
+Cloud--edge collaborative robotics promises to offload heavy vision models while keeping acquisition loops responsive.
+However, \emph{garbage-in garbage-out} (GIGO) effects are acute in TCM imaging: a single blurred upload triggers wasted round-trip time (RTT) and may propagate low-confidence features into downstream classifiers.
+Edge-side quality gating must therefore be (i)~fast enough for closed-loop capture, (ii)~interpretable for audit, and (iii)~calibratable on real tongue corpora rather than synthetic placeholders alone.
+ShezhenV3-COCO further supplies tongue bounding boxes, enabling region-of-interest (ROI) scoring that aligns quality assessment with the anatomical target of downstream classifiers.
+
+\paragraph{Approach.}
+We study a \textbf{cloud--edge--device} architecture for a Franka Research~3 (FR3) platform with ROS~2 and MoveIt motion execution.
+Perception and routing policies live in a Python edge gateway (\texttt{franka\_api\_server}) and in the \texttt{doctor/paper1} research tree---not inside hardware plugins---so algorithms remain testable without a robot.
+A lightweight \emph{Edge-IQA} module fuses Laplacian sharpness and exposure into $Q_{\mathrm{img}}\in[0,1]$ on COCO tongue ROI crops; a LangGraph router decides \texttt{upload\_cloud}, \texttt{resample\_edge}, or \texttt{fail\_safe} under retry budget $K$.
+An optional learned baseline B3 fine-tunes MobileNetV3-Small on the training split for comparison.
+The novelty is the acquisition-time coupling: a rejected tongue ROI triggers bounded physical resampling, an accepted ROI avoids unnecessary retries, and an exhausted retry budget enters a fail-safe branch rather than silently uploading poor evidence.
+
+\paragraph{Full-dataset evaluation.}
+We validate on the public \textbf{ShezhenV3-COCO} dataset (6{,}719 images): $\tau$ is calibrated on 572 validation pairs (clear + synthetic blur) with ROI enabled, and the main matrix replays 500 test frames per seed with real Edge-IQA and learned B3 scores from 553 held-out images.
+
+\paragraph{Contributions.}
+\begin{enumerate}
+  \item \textbf{Edge-IQA with tongue ROI:} a lightweight, interpretable quality gate fusing Laplacian sharpness and exposure on COCO tongue crops, calibrated on ShezhenV3 validation with CPU p95 below 10\,ms.
+  \item \textbf{Confidence-aware LangGraph routing:} a three-branch upload/resample/fail-safe policy with retry budget, logged as JSONL for clinical auditability.
+  \item \textbf{Dual-track evaluation on public data:} offline baselines B0--B4 on 553 ShezhenV3-COCO test images (3 seeds) with a separate Franka closed-loop track confirming execution-stack feasibility and a video/code package documenting robot invocation.
+\end{enumerate}
+
+\paragraph{Paper organization.}
+Section~\ref{sec:related} reviews medical robotics, IQA, and edge orchestration.
+Section~\ref{sec:method} presents the system architecture, Edge-IQA, ROI cropping, routing, and closed-loop protocol.
+Section~\ref{sec:experiments} describes the ShezhenV3 cohort, main matrix, and ablations.
+Section~\ref{sec:conclusion} concludes with limitations and future work.

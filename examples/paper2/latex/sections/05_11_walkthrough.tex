@@ -1,0 +1,105 @@
+% Walkthrough — single frame through B2 routing
+\subsection{Worked Example: One Test Frame Through B2}
+\label{sec:walkthrough}
+
+Consider test image \texttt{test/images/A (42).jpg} (ShezhenV3 test split) with COCO box $[120, 80, 400, 320]$.
+After ROI crop (8\% padding) and $512$ resize, Edge-IQA yields $S{=}0.48$, $E{=}0.62$, $Q_{\mathrm{img}}{=}0.53$, flags empty.
+With $\tau{=}0.465$ the frame passes on first scoring attempt.
+
+\paragraph{Simulated degraded twin.}
+The same raw bytes blurred with $r{=}3.2$ produce $Q_{\mathrm{img}}{=}0.38$, flag \texttt{blur}.
+LangGraph selects \texttt{resample\_edge}; after physical skill transforms and a second score draw, $Q_{\mathrm{img}}$ crosses $\tau$ within $K{=}2$ for a majority of trials---consistent with aggregate B2 M2$=0.604$.
+
+\paragraph{Latency stack (one successful upload after one resample).}
+Capture 5\,ms + IQA 9\,ms + route 1.5\,ms + resample $\approx$50\,ms + second IQA 9\,ms + route 1.5\,ms + cloud 200--400\,ms $\Rightarrow$ RTT $\approx$280--480\,ms, matching simulated matrix p50 band.
+
+\paragraph{B3 on the same bytes.}
+Learned scorer outputs $P(\mathrm{clear}){=}0.91$ on clear ROI and $0.42$ on blurred ROI (illustrative).
+At $\tau{=}0.465$ the blurred frame may still fail routing without resampling uplift tuned for B3 probabilities---explaining lower B3 M2 in Table~\ref{tab:main-results}.
+
+\paragraph{JSONL excerpt (illustrative).}
+\begin{verbatim}
+{"frame_id":17,"q_img":0.53,"flags":[],
+ "route_decision":"upload_cloud","retry_count":0,
+ "baseline":"B2","degraded":false}
+{"frame_id":18,"q_img":0.41,"flags":["blur"],
+ "route_decision":"resample_edge","retry_count":1,
+ "baseline":"B2","degraded":true}
+\end{verbatim}
+
+\paragraph{Audit questions answered.}
+\textit{Why upload?} $Q_{\mathrm{img}}\geq\tau$ and no blocking flags.
+\textit{Why resample?} $Q_{\mathrm{img}}<\tau$ with retries remaining.
+\textit{Why fail\_safe?} Retries exhausted (not shown in passing example).
+
+\paragraph{Comparison to B0 on same frame.}
+B0 uploads blurred twin immediately, incurring cloud RTT without local recovery; valid bit 0 when $Q_{\mathrm{img}}<\tau$, contributing to B0 M2$=0.56$.
+
+\paragraph{Operator-facing message.}
+Dashboard could map \texttt{flags=["blur"]} to a patient-facing prompt such as ``Please hold still; the system will re-capture automatically'' without exposing $Q_{\mathrm{img}}$ numerics.
+
+\paragraph{Extension to multi-frame sessions.}
+Sessions concatenate JSONL rows; aggregate M2 is the fraction with final \texttt{upload\_cloud} and valid$=1$ after at most $K$ resamples.
+
+\paragraph{Numerical sensitivity.}
+If $\tau{=}0.50$ instead of 0.465, clear cohort pass rate drops $\approx$8\% on validation medians; \texttt{run\_ablation\_tau.py} quantifies this sweep.
+
+\paragraph{Takeaway.}
+The worked example connects micro-level scores to macro Table~\ref{tab:main-results} entries without requiring robot hardware.
+
+\onecolumn
+\section{Single-Column Reference Tables}
+\label{sec:onecol-tables}
+
+\begin{table}[h]
+\centering
+\caption{Complete per-seed Table II breakdown (ShezhenV3 test, ROI Edge-IQA, $\tau{=}0.465$).}
+\label{tab:seed-breakdown}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{clcccc}
+\hline
+Seed & Baseline & M1 p50 & M1 p95 & M2 & M3 \\
+\hline
+0 & B0 & 364.9 & 659.8 & 0.568 & 0.000 \\
+0 & B1 & 339.1 & 535.4 & 0.568 & 0.000 \\
+0 & B2 & 211.1 & 527.0 & 0.610 & 0.432 \\
+0 & B3 & 336.7 & 609.6 & 0.944 & 0.474 \\
+1 & B0 & 378.0 & 656.8 & 0.556 & 0.000 \\
+1 & B1 & 308.0 & 532.9 & 0.556 & 0.000 \\
+1 & B2 & 205.6 & 524.6 & 0.602 & 0.444 \\
+1 & B3 & 347.6 & 601.0 & 0.938 & 0.480 \\
+2 & B0 & 379.1 & 654.0 & 0.556 & 0.000 \\
+2 & B1 & 321.0 & 534.0 & 0.556 & 0.000 \\
+2 & B2 & 208.3 & 529.1 & 0.600 & 0.444 \\
+2 & B3 & 352.6 & 609.8 & 0.920 & 0.488 \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{Edge-IQA and B3 artifact paths.}
+\label{tab:artifact-paths}
+\small
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+Artifact & Path \\
+\hline
+Train split & \texttt{experiments/splits/tcm\_train.json} \\
+Val split & \texttt{experiments/splits/tcm\_val.json} \\
+Test split & \texttt{experiments/splits/tcm\_test.json} \\
+$\tau$ JSON & \texttt{experiments/results/recommended\_tau.json} \\
+ROI ablation & \texttt{experiments/results/roi\_ablation.json} \\
+B3 checkpoint & \texttt{experiments/results/b3\_mobilenet.pt} \\
+B3 meta & \texttt{experiments/results/b3\_training\_meta.json} \\
+Table II JSON & \texttt{experiments/results/table\_ii.json} \\
+Calibration CSV & \texttt{experiments/results/calibration\_val.csv} \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\twocolumn

@@ -18,7 +18,7 @@ use doc_semantic_ast::{
 };
 use std::collections::HashMap;
 
-use crate::expand::{expand_macros_in, expand_macros_with_input, MacroMap};
+use crate::expand::{expand_macros_in, MacroMap};
 use crate::include::JoinedStream;
 use crate::parser::Parse;
 
@@ -249,8 +249,8 @@ fn lower_with_macros_numbering_and_cites(
     let default_span = Span::default();
     let mut pos: usize = 0;
     let bytes = text.as_bytes();
-    let len = bytes.len();    // Citation number tracking across the document. When `.bbl` is available,
-    // seed this map with BibTeX order; otherwise fallback remains first-use order.
+    let len = bytes.len(); // Citation number tracking across the document. When `.bbl` is available,
+                           // seed this map with BibTeX order; otherwise fallback remains first-use order.
     let mut cite_numbers: HashMap<String, usize> =
         initial_cite_numbers.cloned().unwrap_or_default();
 
@@ -274,6 +274,22 @@ fn lower_with_macros_numbering_and_cites(
         }
 
         // 环境优先
+        // 代码类环境（minted / lstlisting / listings）优先检测，提取语言信息后走专用路径
+        if let Some((env_name, language, body, end)) = scan_code_environment(&text, pos) {
+            flush_paragraph(
+                &mut doc,
+                &mut buffer,
+                &mut buffer_start,
+                default_span,
+                macros,
+                &label_map,
+            );
+            let blk =
+                lower_code_environment(env_name, language.as_deref(), body, default_span, macros);
+            doc.push(blk);
+            pos = end;
+            continue;
+        }
         if let Some((name, body, end)) = scan_environment(&text, pos) {
             let body_resolved = replace_refs_in_latex(body, &label_map);
             let body_for_lower = body_resolved.as_str();
@@ -657,38 +673,77 @@ fn split_inline_math(text: &str) -> Vec<RunPart<'_>> {
     let len = bytes.len();
     let mut i = 0;
     while i < len {
+        // ── $ delimiter ────────────────────────────────────────────────
         if bytes[i] == b'$' {
-            // Check it's $...$ (not $$ which is block)
+            // Check for $$...$$ block math
             if i + 1 < len && bytes[i + 1] == b'$' {
-                // Double $$ = block math delimiter - treat as literal text
-                let mut j = i + 1;
-                while j < len && bytes[j] == b'$' {
+                // Greedy: find the matching $$
+                let mut j = i + 2;
+                while j + 1 < len && !(bytes[j] == b'$' && bytes[j + 1] == b'$') {
                     j += 1;
                 }
-                parts.push(RunPart::Text(&text[i..j]));
-                i = j;
+                if j + 1 < len && bytes[j] == b'$' && bytes[j + 1] == b'$' {
+                    // Found closing $$ → push whole block as text (block math)
+                    parts.push(RunPart::Text(&text[i..j + 2]));
+                    i = j + 2;
+                } else {
+                    // No closing $$ → treat opening $$ as plain text
+                    parts.push(RunPart::Text("$$"));
+                    i += 2;
+                }
                 continue;
             }
-            // Single $ - find closing $
+            // Single $ → inline math
             let mut j = i + 1;
             while j < len && bytes[j] != b'$' {
                 j += 1;
             }
-            let math = &text[i + 1..j];
-            if !math.is_empty() {
-                parts.push(RunPart::InlineMath(math));
+            if j < len {
+                let math = &text[i + 1..j];
+                if !math.is_empty() {
+                    parts.push(RunPart::InlineMath(math));
+                }
+                i = j + 1;
+            } else {
+                parts.push(RunPart::Text(&text[i..]));
+                break;
             }
-            i = j + 1;
-        } else {
-            let mut j = i + 1;
-            while j < len && bytes[j] != b'$' {
-                j += 1;
-            }
-            if j > i {
-                parts.push(RunPart::Text(&text[i..j]));
-            }
-            i = j;
+            continue;
         }
+        // ── \( inline math ─────────────────────────────────────────────
+        if bytes[i] == b'\\' && i + 1 < len && bytes[i + 1] == b'(' {
+            let remaining = &text[i + 2..];
+            if let Some(end) = remaining.find(r"\)") {
+                let math = &remaining[..end];
+                if !math.is_empty() {
+                    parts.push(RunPart::InlineMath(math));
+                }
+                i = i + 2 + end + r"\)".len();
+            } else {
+                // No closing \) → treat as plain text
+                let mut j = i + 1;
+                while j < len && bytes[j] != b'$' {
+                    j += 1;
+                }
+                if j > i {
+                    parts.push(RunPart::Text(&text[i..j]));
+                }
+                i = j;
+            }
+            continue;
+        }
+        // ── Plain text ───────────────────────────────────────────────
+        let mut j = i + 1;
+        while j < len
+            && bytes[j] != b'$'
+            && !(bytes[j] == b'\\' && j + 1 < len && bytes[j + 1] == b'(')
+        {
+            j += 1;
+        }
+        if j > i {
+            parts.push(RunPart::Text(&text[i..j]));
+        }
+        i = j; // let the $ handler take the $
     }
     parts
 }
@@ -884,26 +939,44 @@ fn flush_paragraph(
     }
     let body = buffer.trim().to_string();
     let s = *start;
+    let span_len = buffer.len() as u32;
 
-    // V2 接入：把 LaTeX 段落走过 `latex_to_text` normalizer，
-    // 输出多 run（plain / italic / bold / sup / sub）。
-    // 注意：inline math ($...$) 不再单独提取为 Block::Equation，
-    // 直接作为 TextStyle::MathInline 留在段落中（适合中文学术文档）。
-    let cite_map: HashMap<String, usize> = HashMap::new();
-    let normalized = crate::normalize::latex_to_text(&body, &cite_map, &label_map);
-    let runs: Vec<TextRun> = normalized
-        .runs
-        .into_iter()
-        .map(|r| TextRun {
-            text: r.text,
-            style: r.style,
-            span: Span::new(s, s + buffer.len() as u32, span.source),
-        })
-        .collect();
+    // M3-1: Detect $...$ and \(...\) inline math BEFORE latex_to_text normalizer.
+    // Math parts get TextStyle::MathInline (OMML in Word); plain text continues through normalizer.
+    let parts = split_inline_math(&body);
+    let mut runs: Vec<TextRun> = Vec::new();
+
+    for part in parts {
+        match part {
+            RunPart::InlineMath(math_content) => {
+                // Preserve raw LaTeX — do NOT normalize math content to Unicode.
+                // The serializer will emit OMML <m:oMath> around this text.
+                runs.push(TextRun {
+                    text: math_content.to_string(),
+                    style: TextStyle::MathInline,
+                    span: Span::new(s, s + span_len, span.source),
+                });
+            }
+            RunPart::Text(text_content) => {
+                // Normalize remaining text through latex_to_text (handles \textit, \ref, etc.)
+                let cite_map: HashMap<String, usize> = HashMap::new();
+                let normalized =
+                    crate::normalize::latex_to_text(&text_content, &cite_map, label_map);
+                for r in normalized.runs {
+                    runs.push(TextRun {
+                        text: r.text,
+                        style: r.style,
+                        span: Span::new(s, s + span_len, span.source),
+                    });
+                }
+            }
+        }
+    }
+
     if !runs.is_empty() {
         doc.push(Block::Paragraph {
             runs,
-            span: Span::new(s, s + buffer.len() as u32, span.source),
+            span: Span::new(s, s + span_len, span.source),
         });
     }
     buffer.clear();
@@ -1144,10 +1217,161 @@ fn scan_environment(text: &str, pos: usize) -> Option<(&str, &str, usize)> {
     Some((name, body, after_end))
 }
 
+/// 专门解析代码类环境（minted / lstlisting / listings / minted* / lstlisting*），
+/// 从 `\begin{name}[options]{lang}` 或 `\begin{name}[lang]` 中提取语言和正文内容。
+///
+/// 对于 `minted`：跳过 `[options]`，再从第二个 `{...}` 取语言，第三个 `{...}` 开始是 body。
+/// 对于 `lstlisting`/`listings`：第一个 `[lang]` 或 `{lang}` 是语言，其余是 body。
+/// 对于 `minted*`：同 minted，但 body 保留逃逸。
+///
+/// 返回 `(Name, language, body, after_end)`；解析失败返回 None。
+fn scan_code_environment(text: &str, pos: usize) -> Option<(&str, Option<String>, &str, usize)> {
+    let bytes = text.as_bytes();
+    if pos >= bytes.len() || bytes[pos] != b'\\' {
+        return None;
+    }
+    if !text[pos..].starts_with("\\begin{") {
+        return None;
+    }
+    let after_begin = pos + "\\begin{".len();
+    let name_end = text[after_begin..].find('}')? + after_begin;
+    let name = &text[after_begin..name_end];
+
+    let code_envs = ["minted", "minted*", "lstlisting", "listings"];
+    if !code_envs.contains(&name) {
+        return None;
+    }
+
+    let mut p = name_end + 1;
+
+    // 提取语言标识符（从 [...] 或 {...}）
+    let language = extract_language_from_env(text, &mut p)?;
+
+    // 从当前位置开始找 \end{name}
+    let end_pat = format!("\\end{{{name}}}");
+    let body_end = text[p..]
+        .find(&end_pat)
+        .map(|off| p + off)
+        .unwrap_or(text.len());
+    let body = &text[p..body_end];
+    let after_end = (body_end + end_pat.len()).min(text.len());
+
+    Some((name, language, body, after_end))
+}
+
+/// 从 `\begin{...}[...]{...}` 的位置 `p` 开始提取语言标识符。
+/// 支持两种形式：
+///   - `minted` / `minted*`：`[options]` 然后 `{lang}` → 语言 = 第二个 {..} 内容
+///   - `lstlisting` / `listings`：`[lang]` 或 `{lang}` → 语言 = 第一个参数内容
+///
+/// 成功时推进 `p` 到 body 起始位置，返回语言字符串（可能为空串）。
+fn extract_language_from_env(text: &str, p: &mut usize) -> Option<Option<String>> {
+    let bytes = text.as_bytes();
+    let mut depth = 0;
+    let mut brace_start = 0;
+    let mut brace_count = 0;
+
+    // 跳过开头的空白
+    while *p < bytes.len() && (bytes[*p] == b' ' || bytes[*p] == b'\t') {
+        *p += 1;
+    }
+    if *p >= bytes.len() {
+        return Some(None);
+    }
+
+    // 检测是 minted 风格（必有 {lang}）还是 lstlisting 风格（可选 [lang]）
+    let is_minted_style = text[*p..].starts_with('[') || text[*p..].starts_with('{');
+
+    if !is_minted_style {
+        return Some(None);
+    }
+
+    // 策略：收集所有 {...} 的内容，语言 = 第二个 {..} 的内容
+    // （minted: [options] {lang} {...body...}，第二个 {..} 是语言）
+    // 扫描到第二个闭合 } 为止
+    let start = *p;
+    while *p < bytes.len() {
+        match bytes[*p] {
+            b'{' => {
+                if depth == 0 {
+                    brace_start = *p;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    brace_count += 1;
+                    if brace_count == 2 {
+                        // 第二个 {..} 的内容 = 语言
+                        let lang = text[brace_start + 1..*p].trim();
+                        // body 从 } 后开始
+                        *p += 1;
+                        return Some(Some(lang.to_string()));
+                    }
+                }
+            }
+            b'[' => {
+                // [options] — 跳过整个 [...] 块（支持嵌套）
+                let mut i = *p + 1;
+                let mut d = 1;
+                while i < bytes.len() && d > 0 {
+                    match bytes[i] {
+                        b'[' => d += 1,
+                        b']' => d -= 1,
+                        b'{' => {
+                            let _ = find_matching_brace(text, i);
+                        }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+                *p = i;
+            }
+            _ => {}
+        }
+        *p += 1;
+    }
+
+    // 兜底：没有找到足够的 {...}，尝试把第一个 {..} 内容当作语言（lstlisting 的 {lang} 形式）
+    // 回溯重扫
+    *p = start;
+    let mut first_brace_lang: Option<String> = None;
+    depth = 0;
+    for i in (*p)..bytes.len() {
+        match bytes[i] {
+            b'{' => {
+                if depth == 0 {
+                    brace_start = i;
+                }
+                depth += 1;
+            }
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    brace_count += 1;
+                    let lang = text[brace_start + 1..i].trim();
+                    if first_brace_lang.is_none() && !lang.is_empty() {
+                        first_brace_lang = Some(lang.to_string());
+                    }
+                    if brace_count == 2 {
+                        *p = i + 1;
+                        return Some(first_brace_lang);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    Some(None)
+}
+
 /// 检测当前行是否是 paper3 模板里的"附中文参考文献"或"作者简介"section 标签。
 ///
 /// 形式为 `\noindent{\xiaowuhao\hei 附中文参考文献:}` 或带 `\textbf`。
 /// 返回 Some("附中文参考文献") 或 Some("作者简介") 或 None。
+#[allow(dead_code)]
 fn detect_section_label(s: &str) -> Option<&'static str> {
     const LABELS: &[&str] = &["附中文参考文献", "作者简介"];
     let line_end = s.find('\n').unwrap_or(s.len());
@@ -1241,18 +1465,44 @@ fn lower_environment(
             span,
         },
         // v12 规则回迁：algorithm2e 走算法路径
-        "algorithm2e" => lower_algorithm_env_inline(
-            name,
-            body,
-            span,
-            numbering,
-            cite_numbers,
-            label_map,
-        ),
+        "algorithm2e" => {
+            lower_algorithm_env_inline(name, body, span, numbering, cite_numbers, label_map)
+        }
         _ => Block::RawFallback {
             text: format!("\\begin{{{name}}}…\\end{{{name}}}"),
             span,
         },
+    }
+}
+
+fn clean_code_body(body: &str) -> String {
+    let trimmed = body.trim();
+    // 移除 minted 逃逸前缀 `+` 和每行首的 `  ` 双空格
+    let lines: Vec<&str> = trimmed
+        .lines()
+        .map(|l| {
+            let s = l.strip_prefix(' ').unwrap_or(l);
+            let s = s.strip_prefix(' ').unwrap_or(s);
+            let s = s.strip_prefix('+').unwrap_or(s);
+            s
+        })
+        .collect::<Vec<_>>();
+    lines.join("\n")
+}
+
+fn lower_code_environment(
+    _name: &str,
+    language: Option<&str>,
+    body: &str,
+    span: Span,
+    _macros: &mut MacroMap,
+) -> Block {
+    let lang = language.filter(|l| !l.is_empty()).map(|s| s.to_string());
+    let cleaned = clean_code_body(body);
+    Block::CodeBlock {
+        language: lang,
+        code: cleaned,
+        span,
     }
 }
 
@@ -1320,6 +1570,7 @@ fn lower_paragraph_container(
 ///   \begin{flushleft}\xiaowuhao {\hei 摘\hspace{2em}要:} \kai} <body> {\end{flushleft}\xiaowuhao}
 /// 因此 \begin{rjabstract} 内部已经包含 "摘 要" 标签 + 正文 + 后续 flushleft 收尾。
 /// 本函数只负责把 body 降级，返回第一个非空 Paragraph（与原 lower_abstract_paragraph 一致）。
+#[allow(dead_code)]
 fn lower_abstract_paragraph(
     body: &str,
     span: Span,
@@ -1387,7 +1638,12 @@ fn lower_list(
                 // v13.2.2 R2.1: 空行 = 段落边界
                 if let Some(buf) = current.take() {
                     items.push(lower_item_body(
-                        buf, span, macros, numbering, cite_numbers, label_map,
+                        buf,
+                        span,
+                        macros,
+                        numbering,
+                        cite_numbers,
+                        label_map,
                     ));
                 }
                 continue;
@@ -1425,9 +1681,8 @@ fn lower_list(
 ///   这部分参数被 main loop 当段文本推到 buffer，最终 flush_paragraph 后
 ///   输出 `indent=-2em ...` 等字面到 docx。
 /// 这里显式砍掉第一个 `\item` 之前的所有非空非注释行（保留空行因为是段落边界）。
+#[allow(dead_code)]
 fn strip_list_param_lines(body: &str) -> String {
-    let mut prefix_end = 0usize;
-    let mut found = false;
     let bytes = body.as_bytes();
     let len = bytes.len();
     let mut i = 0;
@@ -1657,12 +1912,12 @@ fn lower_description_with_label(
                     //   v13.2 F15b: 用 sentinel `\u{0002}/\u{0003}` 包裹 label_clean，
                     //   防止后续 `flush_paragraph` 调 latex_to_text 的 `split_runs_with_sup_sub`
                     //   把 `[N]` 误判为 citation 上标（JOS 段是编号标签，**不是**上标）。
-                    let label_wrapped = if label_clean.starts_with('[') && label_clean.ends_with(']')
-                    {
-                        format!("\u{0002}{label_clean}\u{0003}")
-                    } else {
-                        label_clean.clone()
-                    };
+                    let label_wrapped =
+                        if label_clean.starts_with('[') && label_clean.ends_with(']') {
+                            format!("\u{0002}{label_clean}\u{0003}")
+                        } else {
+                            label_clean.clone()
+                        };
                     let item_text = if label_clean.is_empty() {
                         rest.to_string()
                     } else if rest.is_empty() {
@@ -1985,11 +2240,7 @@ fn lower_item_body(
         // v13.2 F12: fallback 路径走 latex_to_text 二次切分，
         //   让 inline math 内的 _t 切成 sub run（之前是单 Plain TextRun，
         //   sub/sup 信息丢失导致 docx 渲染为 "Freq t" 而非下标）。
-        let normalized = crate::normalize::latex_to_text(
-            stripped.trim(),
-            cite_numbers,
-            label_map,
-        );
+        let normalized = crate::normalize::latex_to_text(stripped.trim(), cite_numbers, label_map);
         let runs: Vec<TextRun> = normalized
             .runs
             .into_iter()
@@ -1999,10 +2250,7 @@ fn lower_item_body(
                 span,
             })
             .collect();
-        out.push(Block::Paragraph {
-            runs,
-            span,
-        });
+        out.push(Block::Paragraph { runs, span });
     }
     out
 }
@@ -2507,14 +2755,7 @@ fn lower_captioned_env(
 
     // v12 规则回迁：algorithm2e 兼容
     if name == "algorithm2e" {
-        return lower_algorithm_env_inline(
-            name,
-            body,
-            span,
-            numbering,
-            cite_numbers,
-            label_map,
-        );
+        return lower_algorithm_env_inline(name, body, span, numbering, cite_numbers, label_map);
     }
 
     let (img, caption) = extract_includegraphics_and_caption(body);
@@ -2617,7 +2858,9 @@ struct IncludeGraphicsInfo {
     sizing: Option<FigureSizing>,
 }
 
-fn extract_includegraphics_and_caption(body: &str) -> (Option<IncludeGraphicsInfo>, Option<String>) {
+fn extract_includegraphics_and_caption(
+    body: &str,
+) -> (Option<IncludeGraphicsInfo>, Option<String>) {
     let img = find_includegraphics(body);
     let caption: Option<String> =
         find_command_with_brace(body, "caption").map(|args| args.to_string());
@@ -2650,7 +2893,11 @@ fn find_includegraphics(body: &str) -> Option<IncludeGraphicsInfo> {
     let start = i + 1;
     let off = find_matching_brace(body, i)?;
     let path = body[start..start + off].trim().to_string();
-    let source_options = if options.is_empty() { None } else { Some(options.join(",")) };
+    let source_options = if options.is_empty() {
+        None
+    } else {
+        Some(options.join(","))
+    };
     Some(IncludeGraphicsInfo {
         path,
         sizing: FigureSizing::from_options(source_options),
@@ -2786,6 +3033,19 @@ fn strip_inline(
                 }
                 out.push('\n');
                 i = j + 1;
+                continue;
+            }
+            // \(...\) inline math: skip the whole segment so it passes through
+            // to flush_paragraph → split_inline_math for OMML rendering.
+            if j < bytes.len() && bytes[j] == b'(' {
+                i += 2; // skip \(
+                while i < bytes.len() {
+                    if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1] == b')' {
+                        i += 2; // skip \)
+                        break;
+                    }
+                    i += 1;
+                }
                 continue;
             }
             // 命令名：alpha / @ / 单字符转义（\% \$ \& \# \_ \{ \} \,）
@@ -3488,7 +3748,13 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         match &doc.blocks[0] {
-            Block::Figure { path, caption, scale, sizing, .. } => {
+            Block::Figure {
+                path,
+                caption,
+                scale,
+                sizing,
+                ..
+            } => {
                 assert_eq!(path, "a.png");
                 assert_eq!(caption.as_deref(), Some("Demo"));
                 assert_eq!(*scale, 0.7);
@@ -4067,7 +4333,10 @@ mod tests {
         let abstract_text = doc.metadata.abstract_text.unwrap_or_default();
         assert!(abstract_text.contains("±"), "got: {abstract_text}");
         // v13.2 F12: \gamma / \delta 在 clean_math 后保留 Roman
-        assert!(abstract_text.contains("gamma+delta"), "got: {abstract_text}");
+        assert!(
+            abstract_text.contains("gamma+delta"),
+            "got: {abstract_text}"
+        );
         assert!(!abstract_text.contains("\\pm"), "got: {abstract_text}");
         assert!(!abstract_text.contains("\\gamma"), "got: {abstract_text}");
     }
@@ -4472,8 +4741,16 @@ mod tests {
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         // 期望：2 个 Heading + 2 个 Paragraph
-        let headings = doc.blocks.iter().filter(|b| matches!(b, Block::Heading { .. })).count();
-        let paragraphs = doc.blocks.iter().filter(|b| matches!(b, Block::Paragraph { .. })).count();
+        let headings = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Heading { .. }))
+            .count();
+        let paragraphs = doc
+            .blocks
+            .iter()
+            .filter(|b| matches!(b, Block::Paragraph { .. }))
+            .count();
         assert_eq!(headings, 2, "应当有 2 个 Heading");
         // v11 行为：每个空行触发一次 flush_paragraph；v12 折叠后行为更稳
         // 此测试重点验证 lowering 仍能跑通，段数因 flush 触发次数而异
@@ -4496,12 +4773,16 @@ mod tests {
         let src = "\\begin{algorithm2e}[H]\n\\KwIn{logs}\n\\KwOut{filt}\n\\For{$l \\in L$}{\\If{$l.status = 5xx$}{keep($l$)\\;}}\n\\Return{filt}\n\\caption{filter}\\label{alg:filt}\n\\end{algorithm2e}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
-        assert!(matches!(doc.blocks[0], Block::Algorithm { .. }), "期望 Algorithm 块");
+        assert!(
+            matches!(doc.blocks[0], Block::Algorithm { .. }),
+            "期望 Algorithm 块"
+        );
     }
 
     #[test]
     fn algorithm2e_extracts_io() {
-        let src = "\\begin{algorithm2e}\n\\KwIn{logs}\n\\KwOut{filt}\n\\Return{filt}\n\\end{algorithm2e}";
+        let src =
+            "\\begin{algorithm2e}\n\\KwIn{logs}\n\\KwOut{filt}\n\\Return{filt}\n\\end{algorithm2e}";
         let p = parse(src);
         let doc = lower_to_document(&p, None);
         if let Block::Algorithm { io, lines, .. } = &doc.blocks[0] {

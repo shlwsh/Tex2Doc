@@ -532,6 +532,32 @@ impl BlockNode {
                 metadata: NodeMetadata::from_rule("algorithm2e.algorithm"),
                 children: vec![],
             },
+            Block::CodeBlock {
+                language,
+                code,
+                span,
+            } => Self {
+                id,
+                kind: BlockKind::CodeBlock(CodeBlockNode {
+                    language: language.clone(),
+                    code: code.clone(),
+                    source: CodeBlockSource::Verbatim,
+                }),
+                source_span: Some(*span),
+                label: None,
+                number: None,
+                style_intent: StyleIntent::profile("JOSCode"),
+                layout: LayoutHints {
+                    keep_next: true,
+                    keep_lines: true,
+                    allow_split: false,
+                    width: None,
+                    alignment: None,
+                    spacing: None,
+                },
+                metadata: NodeMetadata::from_rule("tex.code_block"),
+                children: vec![],
+            },
             Block::RawFallback { text, span } => Self {
                 id,
                 kind: BlockKind::RawFallback {
@@ -562,6 +588,7 @@ impl BlockNode {
             BlockKind::List(_) => "list",
             BlockKind::Bibliography(_) => "bibliography",
             BlockKind::AuthorBio(_) => "author_bio",
+            BlockKind::CodeBlock(_) => "code_block",
             BlockKind::RawFallback { .. } => "raw_fallback",
         }
     }
@@ -580,6 +607,7 @@ pub enum BlockKind {
     List(ListNode),
     Bibliography(BibliographyNode),
     AuthorBio(Vec<InlineNode>),
+    CodeBlock(CodeBlockNode),
     RawFallback { raw: String, reason: String },
 }
 
@@ -627,6 +655,32 @@ pub struct ListNode {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct BibliographyNode {
     pub entries: Vec<BibEntry>,
+}
+
+/// A code block from minted or listings environments.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CodeBlockNode {
+    /// Programming language hint (e.g., "python", "rust", "c++").
+    pub language: Option<String>,
+    /// The raw source code content.
+    pub code: String,
+    /// Which environment or command produced this block.
+    pub source: CodeBlockSource,
+}
+
+/// Source of a code block.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum CodeBlockSource {
+    /// From a minted LaTeX environment.
+    Minted,
+    /// From a listings environment.
+    Listlings,
+    /// From a verbatim environment.
+    Verbatim,
+    /// From an lstlisting environment.
+    Lstlisting,
+    /// From a CodeBlock Markdown fence.
+    MarkdownFence,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -848,6 +902,15 @@ fn write_block_markdown(out: &mut String, block: &BlockNode) {
                 escape_md(reason),
                 escape_md(raw)
             ));
+        }
+        BlockKind::CodeBlock(node) => {
+            let lang = node.language.as_deref().unwrap_or("text");
+            out.push_str(&format!("**Code block** — `{lang}`\n\n"));
+            out.push_str("```");
+            out.push_str(lang);
+            out.push('\n');
+            out.push_str(&escape_md(&node.code));
+            out.push_str("\n```\n");
         }
         BlockKind::FrontMatter(_) | BlockKind::AuthorBio(_) => {}
     }

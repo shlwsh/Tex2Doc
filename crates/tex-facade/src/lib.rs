@@ -13,6 +13,7 @@ mod error;
 mod extract;
 mod facade;
 pub mod latexmk;
+pub mod rasterize;
 pub mod tectonic;
 pub mod xelatex;
 
@@ -21,6 +22,7 @@ pub use cache::{compute_key, referenced_tex_files, Cache, CacheKey};
 pub use error::{TexError, TexResult};
 pub use extract::{detect_extractor, extract_text};
 pub use facade::TexFacade;
+pub use rasterize::rasterize_tikz_to_png;
 
 /// 当前 crate 版本（与 `Cargo.toml` 一致）。
 pub fn version() -> &'static str {

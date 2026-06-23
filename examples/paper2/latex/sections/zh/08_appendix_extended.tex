@@ -1,0 +1,76 @@
+% 附录 B — 扩展算法与表格（中文）
+\section{扩展算法与表格}
+\label{sec:app-extended-zh}
+
+\begin{algorithm}[t]
+\caption{COCO ROI 裁剪（并集 + padding）}
+\begin{algorithmic}[1]
+\STATE \textbf{输入：} 图像 $I$，框集合 $\{b_j=[x,y,w,h]\}$，padding $p$
+\STATE $B \leftarrow$ 所有框的并集
+\STATE 各边按 $p$ 比例外扩并裁剪至图像边界
+\RETURN $\mathrm{crop}(I, B)$
+\end{algorithmic}
+\end{algorithm}
+
+\begin{table}[h]
+\centering
+\caption{B3 训练超参数（ShezhenV3 train）。}
+\label{tab:b3-hparams-zh}
+\small
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{ll}
+\hline
+超参数 & 取值 \\
+\hline
+结构 & MobileNetV3-Small（ImageNet 初始化） \\
+输入 & $224\times224$ \\
+优化器 & AdamW，$10^{-3}$，wd $10^{-4}$ \\
+Batch & 64 \\
+Epoch & 5 \\
+训练对 & 11{,}188 \\
+验证准确率 & 98.34\% \\
+\hline
+\end{tabular}%
+}
+\end{table}
+
+\begin{table}[h]
+\centering
+\caption{延迟模型分量（毫秒）。}
+\label{tab:latency-model-zh}
+\small
+\begin{tabular}{ll}
+\hline
+分量 & 取值 \\
+\hline
+采集 & 5.0 \\
+Edge-IQA & $\mathcal{N}(9,2^2)$ \\
+路由 & 1.5 \\
+重采 & p50 $\approx$50 \\
+上云 & $\mathcal{U}(50,550)$ \\
+B3 额外 & +15--40（CPU 量级） \\
+\hline
+\end{tabular}
+\end{table}
+
+\paragraph{多种子分解与数据统计。}
+Seed 0--2 上，B2 的 M2 为 0.60--0.61；B3 为 0.92--0.94（物理重采，见表~\ref{tab:seed-breakdown-zh}）。
+划分规模：train 5594 / val 572 / test 553；其中 5404 张训练图含框。
+
+\paragraph{术语与文档。}
+M1：端到端 RTT；M2：有效上传率；M3：重采率；M5：Spearman 相关。
+网关环境变量见 \texttt{docs-zh/paper1/V19/ENV.md}。
+学习手册 \texttt{docs/study/}（八章）与 \texttt{REPRODUCE.md} 提供复现步骤。
+
+\paragraph{版本、校验与伦理。}
+2026-05-30：ROI + 真实 B3 纳入附录与正文。
+提交前应对 \texttt{b3\_mobilenet.pt} 记录 SHA256。
+LangGraph 三分支与正文 Algorithm~2 一致；JSONL 字段见补充材料。
+公开数据集仅离线使用；不写入患者标识。
+
+\paragraph{性能与故障排查。}
+全矩阵在 CPU 上约 10 分钟（不含 B3 训练）；B3 训练约 45 分钟。
+缺权重时检查 \texttt{b3\_use\_learned} 与 \texttt{.venv} 中的 PyTorch 安装。
+
+\paragraph{附录说明。}
+本附录支撑审稿人快速核对超参与延迟假设，无需通读全部源码。

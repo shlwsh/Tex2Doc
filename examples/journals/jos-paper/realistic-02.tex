@@ -1,0 +1,25 @@
+\documentclass[journal]{IEEEtran}
+\usepackage{amsmath}
+\begin{document}
+\title{Directed Document Conversion for Journal Submission}
+\author{\IEEEauthorblockN{Second Author}\IEEEauthorblockA{Example Lab}}
+\maketitle
+\section{Motivation}
+Journal submissions often combine equations, references, tables, and author metadata.
+\section{Approach}
+\begin{equation}
+  L(\theta)=\frac{1}{m}\sum_{j=1}^{m}\ell_j(\theta)
+\end{equation}
+\section{Ablation}
+\begin{table}[ht]
+\centering
+\begin{tabular}{lrr}
+Variant & Quality & Runtime\\
+base & 72 & 1.0\\
+profile & 88 & 1.2\\
+\end{tabular}
+\caption{JOS ablation table.}
+\end{table}
+\section{Conclusion}
+This fixture helps detect regressions in IEEE/JOS-like manuscripts.
+\end{document}

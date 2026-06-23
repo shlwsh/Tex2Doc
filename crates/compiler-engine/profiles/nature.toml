@@ -1,0 +1,102 @@
+id = "nature"
+display_name = "Nature Research Article"
+
+document_classes = ["nature"]
+aliases = ["nature-research"]
+
+[page_setup]
+kind = "a4"
+margin_top_mm = 25.0
+margin_bottom_mm = 25.0
+margin_left_mm = 20.0
+margin_right_mm = 20.0
+
+[font_policy]
+latin_main = "Arial"
+cjk_main = ""
+math = "Arial"
+notes = "Nature research article format"
+
+[caption_policy]
+figure_prefix = "Fig."
+table_prefix = "Table"
+equation_prefix = ""
+numbering = "arabic"
+
+[citation_policy]
+style = "numeric-superscript"
+bibliography_style = "naturemag"
+reference_section_title = "References"
+
+[detection]
+min_confidence = 0.75
+fallback_profile = "generic"
+
+[[detection.signals]]
+kind = "documentclass"
+value = "nature"
+weight = 0.70
+
+[[detection.signals]]
+kind = "bibliographystyle"
+value = "naturemag"
+weight = 0.15
+
+[[detection.signals]]
+kind = "macro"
+value = "corres"
+weight = 0.10
+
+[backend]
+preferred = "luatex-node"
+fallback = ["xelatex-hook", "rule-based"]
+requires_xetex = false
+prefers_luatex = true
+
+[semantic_policy]
+unknown_macro = "rule-engine"
+preserve_raw_fallback = true
+collect_runtime_events = true
+collect_layout_graph = true
+
+# Nature-specific macro rules
+[[macro_rules]]
+name = "corres"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "equalcont"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[macro_rules]]
+name = "affil"
+semantic = "affiliation"
+args = 1
+style = ""
+
+[[macro_rules]]
+name = "maketitle"
+semantic = "metadata"
+args = 0
+style = ""
+
+[[style_map]]
+semantic = "heading.level1"
+docx_style = "Heading1"
+
+[[style_map]]
+semantic = "paragraph.body"
+docx_style = "BodyText"
+
+[[style_map]]
+semantic = "caption.figure"
+docx_style = "Caption"
+
+[quality]
+min_compatibility_score = 70
+max_raw_fallback_blocks = 8
+require_reference_graph = true

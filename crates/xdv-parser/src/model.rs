@@ -13,8 +13,11 @@ pub struct XdvDocument {
     /// All pages in the document, in order.
     pub pages: Vec<XdvPage>,
 
-    /// All font definitions encountered in the document.
+    /// Standard DVI font definitions.
     pub fonts: Vec<FontDef>,
+
+    /// XeTeX extended font definitions (native/OpenType fonts).
+    pub ext_fonts: Vec<FontDefExt>,
 
     /// Top-level commands that are not part of any page
     /// (e.g., font defs that appear between postamble sections).
@@ -100,10 +103,7 @@ pub enum XdvCommand {
     },
 
     /// A rule was placed without advancing cursor.
-    PutRule {
-        height: i32,
-        width: i32,
-    },
+    PutRule { height: i32, width: i32 },
 
     /// Push current position/state onto the stack.
     Push,

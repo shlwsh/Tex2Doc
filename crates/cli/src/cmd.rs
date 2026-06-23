@@ -221,7 +221,10 @@ pub fn run_build(a: BuildArgs) -> Result<()> {
     rt.block_on(docx2pdf::run(d2p))?;
     let produced_pdf = a.outdir.join(format!(
         "{}.pdf",
-        rust_docx.file_stem().and_then(|s| s.to_str()).unwrap_or("doc")
+        rust_docx
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("doc")
     ));
     if produced_pdf != rust_pdf && produced_pdf.exists() {
         std::fs::rename(&produced_pdf, &rust_pdf).ok();

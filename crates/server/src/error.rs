@@ -13,6 +13,18 @@ pub enum ServerError {
     #[error("multipart 字段缺失：{0}")]
     MissingField(&'static str),
 
+    #[error("资源不存在：{0}")]
+    NotFound(String),
+
+    #[error("资源状态冲突：{0}")]
+    Conflict(String),
+
+    #[error("未认证：{0}")]
+    Unauthorized(String),
+
+    #[error("额度不足：{0}")]
+    PaymentRequired(String),
+
     #[error("核心转换失败：{0}")]
     Core(#[from] doc_core::CoreError),
 }
@@ -28,6 +40,10 @@ impl IntoResponse for ServerError {
         let (status, code) = match &self {
             ServerError::Io(_) => (StatusCode::BAD_REQUEST, "io"),
             ServerError::MissingField(_) => (StatusCode::BAD_REQUEST, "missing_field"),
+            ServerError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
+            ServerError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
+            ServerError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
+            ServerError::PaymentRequired(_) => (StatusCode::PAYMENT_REQUIRED, "quota_exceeded"),
             ServerError::Core(doc_core::CoreError::Parse(_))
             | ServerError::Core(doc_core::CoreError::Io(_)) => (StatusCode::BAD_REQUEST, "parse"),
             ServerError::Core(doc_core::CoreError::Unsupported(_)) => {

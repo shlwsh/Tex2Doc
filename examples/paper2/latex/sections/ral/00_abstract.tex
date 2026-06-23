@@ -1,0 +1,8 @@
+\begin{abstract}
+Robotic tongue-image acquisition for traditional Chinese medicine (TCM) tele-diagnosis needs a fast decision on whether to upload, retry, or abort a frame before low-quality images enter cloud analytics.
+We present a cloud--edge--device stack in which perception remains outside the 1\,kHz robot control loop: a lightweight \emph{Edge-IQA} scores each tongue ROI on the edge gateway, and a \emph{LangGraph} policy routes the frame to cloud upload, edge resampling, or fail-safe abort under retry budget $K$.
+On ShezhenV3-COCO (553 held-out images, 500 frames $\times$ 3 seeds, baselines B0--B4), the proposed B2 policy reduces median RTT (M1 p50) from 374.0\,ms to 208.3\,ms versus naive upload (B0), while increasing valid-frame rate (M2) from 0.560 to 0.604 under a documented latency model.
+Edge-IQA is calibrated on 572 validation pairs ($\tau_{B2}{=}0.465$) and runs on CPU with p95 latency of about 9.6\,ms.
+Learned B3/B4 comparators reach M2 $\approx 0.93$ at higher edge RTT, showing the trade-off between auditability, latency, and valid-frame rate.
+An auxiliary Franka closed-loop track (50 trials), supplementary tables, NR-IQA baselines, code/data instructions, and a robot demonstration video plan support reproducibility without replacing the main evidence.
+\end{abstract}

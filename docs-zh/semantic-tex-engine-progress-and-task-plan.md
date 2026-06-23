@@ -33,6 +33,48 @@
 > 详细进展报告：[Semantic TeX Engine 详细进展报告（20260620-193855）](./semantic-tex-engine-detailed-progress-report-20260620-193855.md)
 >
 > 待完成内容技术实现设计方案：[Semantic TeX Engine 待完成内容技术实现设计方案（20260620-193855）](./semantic-tex-engine-remaining-implementation-design-20260620-193855.md)
+>
+> P5-P6 商业化开发进展：[Semantic TeX Engine P5-P6 开发进展报告（20260621-232121）](./semantic-tex-engine-p5-p6-development-progress-20260621-232121.md)
+>
+> P7 云端转换 Worker 开发进展：[Semantic TeX Engine P7 Worker 开发进展报告（20260621-233323）](./semantic-tex-engine-p7-worker-progress-20260621-233323.md)
+>
+> P7 Semantic Worker 开发进展：[Semantic TeX Engine P7 Semantic Worker 开发进展报告（20260622-002137）](./semantic-tex-engine-p7-semantic-worker-progress-20260622-002137.md)
+>
+> P8-P9 回归与升级开发进展：[Semantic TeX Engine P8-P9 开发进展报告（20260621-235726）](./semantic-tex-engine-p8-p9-progress-20260621-235726.md)
+>
+> P8 Word-open 回归验证进展：[Semantic TeX Engine P8 Word-open 回归验证进展报告（20260622-004126）](./semantic-tex-engine-p8-word-open-regression-progress-20260622-004126.md)
+>
+> 商业化差距评估与实施方案：[Semantic TeX Engine 商业化差距评估与实施方案（20260622-002323）](./semantic-tex-engine-commercialization-gap-implementation-plan-20260622-002323.md)
+>
+> 商业化就绪度评估与实施方案：[Semantic TeX Engine 商业化就绪度评估与实施方案（20260622-005850）](./semantic-tex-engine-commercialization-readiness-implementation-plan-20260622-005850.md)
+>
+> P5-P7 最新开发进展：[Semantic TeX Engine P5-P7 开发进展报告（20260622-010501）](./semantic-tex-engine-p5-p7-progress-20260622-010501.md)
+>
+> P5 桌面端账号/用量接入进展：[Semantic TeX Engine P5 Desktop Cloud Account 开发进展报告（20260622-011315）](./semantic-tex-engine-p5-desktop-cloud-account-progress-20260622-011315.md)
+>
+> P5 桌面端云端转换接入进展：[Semantic TeX Engine P5 Desktop Cloud Convert 开发进展报告（20260622-011837）](./semantic-tex-engine-p5-desktop-cloud-convert-progress-20260622-011837.md)
+>
+> P5 桌面端路径选择器进展：[Semantic TeX Engine P5 Desktop File Picker 开发进展报告（20260622-013102）](./semantic-tex-engine-p5-desktop-file-picker-progress-20260622-013102.md)
+>
+> P5/P6 桌面端账号账单进展：[Semantic TeX Engine P5/P6 Desktop Account Billing 开发进展报告（20260622-013938）](./semantic-tex-engine-p5-p6-desktop-account-billing-progress-20260622-013938.md)
+>
+> P5 桌面端安全 Token 存储进展：[Semantic TeX Engine P5 Desktop Secure Token 开发进展报告（20260622-014516）](./semantic-tex-engine-p5-desktop-secure-token-progress-20260622-014516.md)
+>
+> P5/P9 桌面端更新检查进展：[Semantic TeX Engine P5/P9 Desktop Update 开发进展报告（20260622-015611）](./semantic-tex-engine-p5-p9-desktop-update-progress-20260622-015611.md)
+>
+> P5 桌面端最近任务持久化进展：[Semantic TeX Engine P5 Desktop Recent Jobs 开发进展报告（20260622-020230）](./semantic-tex-engine-p5-desktop-recent-jobs-progress-20260622-020230.md)
+>
+> P5 桌面端诊断包导出进展：[Semantic TeX Engine P5 Desktop Diagnostics 开发进展报告（20260622-020908）](./semantic-tex-engine-p5-desktop-diagnostics-progress-20260622-020908.md)
+>
+> 商业化 GA 差距评估与实施方案：[Semantic TeX Engine 商业化差距评估与 GA 实施方案（20260622-012427）](./semantic-tex-engine-commercialization-ga-gap-and-implementation-plan-20260622-012427.md)
+>
+> 商业化差距评估与实施路线图：[Semantic TeX Engine 商业化差距评估与实施路线图（20260622-014918）](./semantic-tex-engine-commercialization-roadmap-20260622-014918.md)
+>
+> 商业化发布差距评估与实施设计方案：[Semantic TeX Engine 商业化发布差距评估与实施设计方案（20260622-021418）](./semantic-tex-engine-commercialization-release-gap-design-20260622-021418.md)
+>
+> 当前开发进展报告：[Semantic TeX Engine 当前开发进展报告（20260622-022137）](./semantic-tex-engine-current-progress-report-20260622-022137.md)
+>
+> 整体开发进展报告：[Semantic TeX Engine 整体开发进展报告（20260622-064213）](./semantic-tex-engine-overall-progress-report-20260622-064213.md)
 
 ## 1. 当前结论
 

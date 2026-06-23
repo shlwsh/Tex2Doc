@@ -1,0 +1,29 @@
+{
+  "id": "medical-journal",
+  "display_name": "Medical Journal Manuscript",
+  "document_classes": [
+    "article",
+    "elsarticle",
+    "wlscirep"
+  ],
+  "page_setup": {
+    "kind": "a4"
+  },
+  "font_policy": {
+    "latin_main": "Times New Roman",
+    "cjk_main": "SimSun",
+    "math": "Cambria Math",
+    "notes": "Medical manuscript profile with restrained Word defaults"
+  },
+  "caption_policy": {
+    "figure_prefix": "Fig.",
+    "table_prefix": "Table",
+    "equation_prefix": "Equation",
+    "numbering": "arabic"
+  },
+  "citation_policy": {
+    "style": "numeric",
+    "bibliography_style": "vancouver-like",
+    "reference_section_title": "References"
+  }
+}

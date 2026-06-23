@@ -1,0 +1,26 @@
+% §5.4 真实 TCM 数据集 Edge-IQA 验证
+\subsection{ShezhenV3-COCO 上的 Edge-IQA 验证}
+\label{sec:tcm-iqa-zh}
+
+本文以公开 \textbf{ShezhenV3-COCO} 舌象数据集（6{,}719 张，COCO 框标注，十种舌象类别）替代阶段 2 的合成队列。
+验证集（$n{=}572$）作为\emph{清晰}组；对每张图施加高斯模糊（半径 $2.5$--$5.0$\,px）以模拟机器人微动失焦，构成成对模糊标签，用于阈值标定而无需人工质量标注。
+
+\input{sections/zh/table_dataset}
+
+图~\ref{fig:iqa-hist-zh} 为验证集 $Q_{\mathrm{img}}$ 的直方图。
+启用 COCO 舌区 ROI 时，清晰/模糊中位数为 $0.516$/$0.414$，部署阈值 $\tau_{B2}{=}0.465$（表~\ref{tab:iqa-calibration-zh}，源自 \texttt{recommended\_tau.json}）。
+同一标定文件给出 $\min Q_{\mathrm{clear}}-\max Q_{\mathrm{blur}}{=}{-}0.541$：部分模糊验证样本在 Laplacian--曝光特征上高于最弱清晰样本，故 $\tau$ 为队列中位数工作点而非硬分界。
+全图模式下中位数为 $0.564$/$0.431$，$\tau_{\mathrm{full}}{=}0.498$（表~\ref{tab:roi-ablation-zh}）。
+图~\ref{fig:iqa-hist-zh} 展示重叠直方图；因此除 $\tau$ 标定外还报告 Spearman 相关（M5：$\rho{\approx}0.36$--$0.47$）及学习对照 B3/B4（\S\ref{sec:main-results-zh}），而不声称完全可分。
+主矩阵（\texttt{run\_matrix\_tcm.py}）统一使用 ROI 分数及 \texttt{recommended\_tau.json} 中的 $\tau_{B2}$。
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=0.95\linewidth]{fig_iqa_hist.pdf}
+  \caption{ShezhenV3 验证集 Edge-IQA：清晰 vs.\ 合成模糊成对样本（$n{=}1{,}144$）。}
+  \label{fig:iqa-hist-zh}
+\end{figure*}
+
+\paragraph{协议一致性。}
+测试集每帧由同一 \texttt{edge\_iqa/scorer.py} 离线打分；延迟分量（采集、IQA、路由、重采、上云）遵循 \S\ref{sec:setup-zh}。
+表~\ref{tab:main-results-zh} 因此反映\emph{真实}质量分数，同时保留可复现的闭环仿真器用于 RTT 聚合。

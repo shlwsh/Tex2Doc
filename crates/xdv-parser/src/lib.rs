@@ -30,11 +30,15 @@
 //! - Integration with DOCX renderer
 
 pub mod error;
+pub mod layout_graph;
 pub mod model;
 pub mod opcode;
 pub mod parser;
 pub mod reader;
 
 pub use error::XdvError;
+pub use layout_graph::{
+    to_collector_layout_graph, xdv_to_layout_nodes, XdvLayoutNode, XdvPageKind,
+};
 pub use model::{FontDef, XdvCommand, XdvDocument, XdvPage, XdvPreamble};
 pub use parser::XdvParser;

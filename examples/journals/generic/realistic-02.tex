@@ -1,0 +1,36 @@
+\documentclass{report}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\begin{document}
+\title{A Generic Technical Report Fixture}
+\author{Example Team}
+\maketitle
+\chapter{Overview}
+This report-style fixture validates chapter headings, lists, display math, and bibliography commands under the generic fallback profile.
+\section{System Model}
+The system receives a source bundle $B$ and emits a document graph $G$.
+\begin{equation}
+  G = R(P(B), M) \label{eq:graph-render}
+\end{equation}
+\section{Checklist}
+\begin{itemize}
+  \item detect a generic profile;
+  \item preserve section hierarchy;
+  \item keep references readable.
+\end{itemize}
+\section{Evaluation}
+Table~\ref{tab:generic-report} summarizes representative conversion checks.
+\begin{table}[ht]
+\centering
+\begin{tabular}{lll}
+Check & Expected & Status\\
+DOCX & Openable & Required\\
+Report & JSON & Required\\
+Profile & generic & Required\\
+\end{tabular}
+\caption{Report fixture checks.}
+\label{tab:generic-report}
+\end{table}
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{document}

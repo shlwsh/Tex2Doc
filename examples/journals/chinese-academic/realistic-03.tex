@@ -1,0 +1,23 @@
+\documentclass{ctexart}
+\usepackage{ctex}
+\usepackage{graphicx}
+\begin{document}
+\title{中文论文图片与标题转换样本}
+\author{赵强}
+\keywords{图片；标题；转换质量}
+\begin{abstract}
+本文档用于验证图片、图题和中文标题在 DOCX 渲染链路中的稳定性。
+\endabstract}
+\section{系统结构}
+图~\ref{fig:cn-system} 展示了一个中文论文中的系统结构图。
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=.6\textwidth]{cn-system.png}
+  \caption{中文论文系统结构示意图}
+  \label{fig:cn-system}
+\end{figure}
+\section{讨论}
+即使图片文件不存在，转换器也应在报告中给出清晰诊断，而不是发生 panic。
+\section{结论}
+该样本覆盖中文图题和交叉引用。
+\end{document}
