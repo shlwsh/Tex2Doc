@@ -1,5 +1,8 @@
 import { Button, VerticalBox, HorizontalBox, LineEdit, GroupBox, ListView } from "std-widgets.slint";
 import { PlanEntry } from "../types.slint";
+import { EmptyState } from "../components/empty-state.slint";
+import { AlertBanner } from "../components/alert-banner.slint";
+import { StatusBadge } from "../components/status-badge.slint";
 
 export component BillingTab inherits Rectangle {
     in-out property <string> api-base-url;
@@ -7,103 +10,182 @@ export component BillingTab inherits Rectangle {
     in-out property <string> billing-status: "--";
     in-out property <[PlanEntry]> plan-catalog;
     in-out property <int> current-plan-index: 0;
+    in-out property <bool> is-billing-busy: false;
+    in-out property <bool> is-signed-in: false;
+    in-out property <string> account-tier: "free";
+    in-out property <int> quota-remaining: 0;
+    in-out property <int> quota-total: 0;
+
+    in property <color> surface-color: #FFFFFF;
+    in property <color> surface-alt-color: #F1F5F9;
+    in property <color> border-color-token: #D7DEE8;
+    in property <color> text-primary-color: #172033;
+    in property <color> text-secondary-color: #42526B;
+    in property <color> text-muted-color: #6B778C;
+    in property <color> accent-color: #2563EB;
+    in property <color> success-color: #0F8A5F;
+    in property <color> warning-color: #B7791F;
+    in property <color> danger-color: #C2413A;
+
+    in property <string> t-billing-subscribe-manage: "Subscribe / Manage";
+    in property <string> t-billing-plan-id: "Plan ID";
+    in property <string> t-billing-plans: "Plans";
+    in property <string> t-billing-checkout: "Checkout";
+    in property <string> t-billing-portal: "Billing Portal";
+    in property <string> t-billing-loading-plans: "Loading plans...";
+    in property <string> t-billing-creating-checkout: "Creating checkout session...";
+    in property <string> t-billing-opening-portal: "Opening billing portal...";
 
     callback show-plans-clicked(string);
     callback checkout-clicked(string, string);
     callback billing-portal-clicked(string);
     callback change-plan-clicked(string);
 
+    background: surface-alt-color;
+
     VerticalBox {
         padding: 16px;
         spacing: 12px;
 
-        GroupBox {
-            title: "Plans (Phase D.2)";
-
-            VerticalBox {
-                spacing: 6px;
-
-                for plan[idx] in plan-catalog: Rectangle {
-                    background: idx == current-plan-index ? #e8f0ff : #f8f8f8;
-                    border-radius: 4px;
-                    HorizontalBox {
-                        padding: 8px;
-                        spacing: 12px;
-                        VerticalBox {
-                            Text { text: plan.name; font-size: 14px; font-weight: 700; }
-                            Text { text: plan.id; font-size: 10px; color: #666; }
-                        }
-                        VerticalBox {
-                            Text { text: plan.price; font-size: 13px; font-weight: 600; }
-                            Text { text: plan.quota + " / month"; font-size: 11px; color: #666; }
-                        }
-                        Text {
-                            text: plan.features;
-                            font-size: 11px;
-                            color: #444;
-                            horizontal-alignment: left;
-                            vertical-alignment: center;
-                            wrap: word-wrap;
-                        }
-                        Button {
-                            text: idx == current-plan-index ? "Current" : "Choose";
-                            enabled: idx != current-plan-index;
-                            clicked => {
-                                root.change-plan-clicked(plan.id);
-                            }
-                        }
-                    }
-                }
-            }
+        AlertBanner {
+            message: !root.is-signed-in ? "Sign in to manage plans and quota." : (root.api-base-url == "" ? "Set API base URL in Settings." : "");
+            background-color: #FFFBEB;
+            border-color-token: root.border-color-token;
+            text-color: root.warning-color;
         }
 
         GroupBox {
-            title: "Plan";
+            title: root.t-billing-subscribe-manage;
 
             VerticalBox {
-                spacing: 6px;
+                spacing: 10px;
+
+                HorizontalBox {
+                    spacing: 10px;
+
+                    StatusBadge {
+                        text: root.account-tier;
+                        background-color: root.account-tier == "free" ? #F1F5F9 : #EFF6FF;
+                        text-color: root.account-tier == "free" ? root.text-muted-color : root.accent-color;
+                    }
+
+                    Text {
+                        text: "Quota " + root.quota-remaining + " / " + root.quota-total;
+                        font-size: 12px;
+                        color: root.text-secondary-color;
+                        vertical-alignment: center;
+                    }
+                }
 
                 HorizontalBox {
                     spacing: 8px;
 
                     LineEdit {
-                        placeholder-text: "Plan ID";
-                        text <=> billing-plan-id;
+                        placeholder-text: root.t-billing-plan-id;
+                        text <=> root.billing-plan-id;
+                        enabled: !root.is-billing-busy;
                     }
 
                     Button {
-                        text: "Plans";
-                        enabled: api-base-url != "";
+                        text: root.t-billing-plans;
+                        enabled: root.api-base-url != "" && !root.is-billing-busy;
                         clicked => {
-                            root.billing-status = "Loading plans...";
-                            root.show-plans-clicked(api-base-url);
+                            root.is-billing-busy = true;
+                            root.billing-status = root.t-billing-loading-plans;
+                            root.show-plans-clicked(root.api-base-url);
+                        }
+                    }
+
+                    Button {
+                        primary: true;
+                        text: root.is-billing-busy ? root.t-billing-creating-checkout : root.t-billing-checkout;
+                        enabled: root.api-base-url != "" && root.billing-plan-id != "" && !root.is-billing-busy;
+                        clicked => {
+                            root.is-billing-busy = true;
+                            root.billing-status = root.t-billing-creating-checkout;
+                            root.checkout-clicked(root.api-base-url, root.billing-plan-id);
+                        }
+                    }
+
+                    Button {
+                        text: root.t-billing-portal;
+                        enabled: root.api-base-url != "" && !root.is-billing-busy;
+                        clicked => {
+                            root.is-billing-busy = true;
+                            root.billing-status = root.t-billing-opening-portal;
+                            root.billing-portal-clicked(root.api-base-url);
                         }
                     }
                 }
 
-                HorizontalBox {
-                    spacing: 8px;
+                Text {
+                    text: root.billing-status;
+                    font-size: 12px;
+                    color: root.text-secondary-color;
+                }
+            }
+        }
 
-                    Button {
-                        text: "Checkout";
-                        enabled: api-base-url != "" && billing-plan-id != "";
-                        clicked => {
-                            root.billing-status = "Creating checkout session...";
-                            root.checkout-clicked(api-base-url, billing-plan-id);
-                        }
-                    }
+        GroupBox {
+            title: root.t-billing-plans;
 
-                    Button {
-                        text: "Portal";
-                        enabled: api-base-url != "";
-                        clicked => {
-                            root.billing-status = "Opening billing portal...";
-                            root.billing-portal-clicked(api-base-url);
+            VerticalBox {
+                spacing: 8px;
+
+                if root.plan-catalog.length == 0: EmptyState {
+                    title: root.is-billing-busy ? root.t-billing-loading-plans : "No plans loaded";
+                    message: root.is-billing-busy ? "Plans will appear here shortly." : "Click Plans to load the latest catalog.";
+                    surface-color: root.surface-color;
+                    border-color-token: root.border-color-token;
+                    text-color: root.text-primary-color;
+                    muted-color: root.text-muted-color;
+                }
+
+                ListView {
+                    visible: root.plan-catalog.length > 0;
+                    height: 260px;
+
+                    for plan[idx] in root.plan-catalog: Rectangle {
+                        background: idx == root.current-plan-index ? #EFF6FF : root.surface-color;
+                        border-color: idx == root.current-plan-index ? root.accent-color : root.border-color-token;
+                        border-radius: 8px;
+                        min-height: 76px;
+
+                        HorizontalBox {
+                            padding: 10px;
+                            spacing: 12px;
+
+                            VerticalBox {
+                                width: 170px;
+                                spacing: 4px;
+                                Text { text: plan.name; font-size: 15px; font-weight: 700; color: root.text-primary-color; }
+                                Text { text: plan.id; font-size: 11px; color: root.text-muted-color; }
+                            }
+
+                            VerticalBox {
+                                width: 120px;
+                                spacing: 4px;
+                                Text { text: plan.price; font-size: 14px; font-weight: 700; color: root.accent-color; }
+                                Text { text: plan.quota + " / month"; font-size: 11px; color: root.text-muted-color; }
+                            }
+
+                            Text {
+                                text: plan.features;
+                                font-size: 12px;
+                                color: root.text-secondary-color;
+                                horizontal-stretch: 1;
+                                vertical-alignment: center;
+                                wrap: word-wrap;
+                            }
+
+                            Button {
+                                text: idx == root.current-plan-index ? "Current" : "Choose";
+                                enabled: idx != root.current-plan-index && !root.is-billing-busy;
+                                clicked => { root.change-plan-clicked(plan.id); }
+                            }
                         }
                     }
                 }
-
-                Text { text: billing-status; font-size: 12px; }
             }
         }
     }

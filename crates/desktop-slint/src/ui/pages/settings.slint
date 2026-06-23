@@ -1,4 +1,6 @@
 import { Button, VerticalBox, HorizontalBox, LineEdit, ComboBox, GroupBox } from "std-widgets.slint";
+import { AlertBanner } from "../components/alert-banner.slint";
+import { StatusBadge } from "../components/status-badge.slint";
 
 export component SettingsTab inherits Rectangle {
     in-out property <string> detected-profile: "auto";
@@ -7,112 +9,214 @@ export component SettingsTab inherits Rectangle {
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
     in-out property <string> api-base-url;
+    in-out property <string> ui-locale: "en";
+    in-out property <string> ui-theme: "default";
     in-out property <bool> is-converting: false;
     in-out property <bool> settings-dirty: false;
     in-out property <string> settings-saved-at: "";
     in-out property <string> settings-panel-state: "idle";
+    in-out property <string> app-version: "";
+
+    in property <color> surface-alt-color: #F1F5F9;
+    in property <color> border-color-token: #D7DEE8;
+    in property <color> text-primary-color: #172033;
+    in property <color> text-secondary-color: #42526B;
+    in property <color> text-muted-color: #6B778C;
+    in property <color> success-color: #0F8A5F;
+    in property <color> warning-color: #B7791F;
+
+    in property <string> t-settings-service: "Service";
+    in property <string> t-settings-api-base-url-placeholder: "API base URL";
+    in property <string> t-settings-default-params: "Default Conversion Parameters";
+    in property <string> t-settings-default-profile: "Default Profile";
+    in property <string> t-settings-default-quality: "Default Quality";
+    in property <string> t-settings-default-output-dir: "Default Output Directory";
+    in property <string> t-settings-updates: "Updates";
+    in property <string> t-settings-release-channel-placeholder: "Release channel";
+    in property <string> t-settings-check-update: "Check Update";
+    in property <string> t-settings-checking-update: "Checking for updates...";
+    in property <string> t-settings-appearance: "Appearance";
+    in property <string> t-settings-language: "Language";
+    in property <string> t-settings-theme: "Theme";
+    in property <string> t-settings-apply-appearance: "Apply Appearance";
+    in property <string> t-settings-about: "About";
+    in property <string> t-settings-product: "Product";
+    in property <string> t-settings-version: "Version";
+    in property <string> t-convert-output-placeholder: "Output DOCX path...";
+    in property <string> t-convert-save-as: "Save As";
 
     callback choose-output-clicked(string);
     callback check-update-clicked(string, string);
+    callback apply-appearance-clicked(string, string);
     callback save-settings-clicked();
+
+    background: surface-alt-color;
 
     VerticalBox {
         padding: 16px;
         spacing: 12px;
 
+        AlertBanner {
+            message: root.settings-dirty ? "You have unsaved changes." : "";
+            background-color: #FFFBEB;
+            border-color-token: root.border-color-token;
+            text-color: root.warning-color;
+        }
+
         GroupBox {
-            title: "Engine Profile";
+            title: root.t-settings-appearance;
 
-            VerticalBox {
-                spacing: 6px;
+            HorizontalBox {
+                spacing: 16px;
 
-                Text { text: "Profile"; font-size: 12px; }
-                ComboBox {
-                    current-value: detected-profile;
-                    model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                VerticalBox {
+                    Text { text: root.t-settings-language; font-size: 12px; color: root.text-secondary-color; }
+                    ComboBox {
+                        current-value <=> root.ui-locale;
+                        model: ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
+                        selected(_) => {
+                            root.settings-dirty = true;
+                            root.apply-appearance-clicked(root.ui-locale, root.ui-theme);
+                        }
+                    }
                 }
 
-                Text { text: "Quality"; font-size: 12px; }
-                ComboBox {
-                    current-value: quality-level;
-                    model: ["preview", "standard", "strict"];
+                VerticalBox {
+                    Text { text: root.t-settings-theme; font-size: 12px; color: root.text-secondary-color; }
+                    ComboBox {
+                        current-value <=> root.ui-theme;
+                        model: ["default", "blue", "green", "purple", "orange", "dark"];
+                        selected(_) => {
+                            root.settings-dirty = true;
+                            root.apply-appearance-clicked(root.ui-locale, root.ui-theme);
+                        }
+                    }
+                }
+
+                Button {
+                    text: root.t-settings-apply-appearance;
+                    clicked => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
                 }
             }
         }
 
         GroupBox {
-            title: "Output Strategy";
+            title: root.t-settings-service;
+
+            LineEdit {
+                placeholder-text: root.t-settings-api-base-url-placeholder;
+                text <=> root.api-base-url;
+            }
+        }
+
+        GroupBox {
+            title: root.t-settings-default-params;
 
             VerticalBox {
-                spacing: 6px;
+                spacing: 8px;
 
-                Text { text: "Default output path"; font-size: 12px; }
-                LineEdit {
-                    placeholder-text: "Output DOCX path...";
-                    text <=> output-path;
+                HorizontalBox {
+                    spacing: 16px;
+
+                    VerticalBox {
+                        Text { text: root.t-settings-default-profile; font-size: 12px; color: root.text-secondary-color; }
+                        ComboBox {
+                            current-value <=> root.detected-profile;
+                            model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
+                            selected(_) => { root.settings-dirty = true; }
+                        }
+                    }
+
+                    VerticalBox {
+                        Text { text: root.t-settings-default-quality; font-size: 12px; color: root.text-secondary-color; }
+                        ComboBox {
+                            current-value <=> root.quality-level;
+                            model: ["preview", "standard", "strict"];
+                            selected(_) => { root.settings-dirty = true; }
+                        }
+                    }
                 }
+
+                Text { text: root.t-settings-default-output-dir; font-size: 12px; color: root.text-secondary-color; }
 
                 HorizontalBox {
                     spacing: 8px;
+                    LineEdit {
+                        placeholder-text: root.t-convert-output-placeholder;
+                        text <=> root.output-path;
+                    }
                     Button {
-                        text: "Save As";
-                        enabled: !is-converting;
-                        clicked => { root.choose-output-clicked(output-path); }
+                        text: root.t-convert-save-as;
+                        enabled: !root.is-converting;
+                        clicked => { root.choose-output-clicked(root.output-path); }
                     }
                 }
             }
         }
 
         GroupBox {
-            title: "Updates";
+            title: root.t-settings-updates;
 
             VerticalBox {
-                spacing: 6px;
+                spacing: 8px;
 
                 HorizontalBox {
                     spacing: 8px;
 
                     LineEdit {
-                        placeholder-text: "Release channel";
-                        text <=> update-channel;
+                        placeholder-text: root.t-settings-release-channel-placeholder;
+                        text <=> root.update-channel;
                     }
 
                     Button {
-                        text: "Check";
-                        enabled: api-base-url != "";
+                        text: root.t-settings-check-update;
+                        enabled: root.api-base-url != "";
                         clicked => {
-                            root.update-status = "Checking for updates...";
-                            root.check-update-clicked(api-base-url, update-channel);
+                            root.update-status = root.t-settings-checking-update;
+                            root.check-update-clicked(root.api-base-url, root.update-channel);
                         }
                     }
                 }
 
-                Text { text: update-status; font-size: 12px; }
+                Text { text: root.update-status; font-size: 12px; color: root.text-secondary-color; }
             }
         }
 
         GroupBox {
-            title: "Persistence (Phase D.4)";
+            title: "Persistence";
+
+            HorizontalBox {
+                spacing: 12px;
+
+                Button {
+                    primary: true;
+                    text: "Save Settings";
+                    enabled: root.settings-dirty && root.settings-panel-state != "saving";
+                    clicked => { root.save-settings-clicked(); }
+                }
+
+                StatusBadge {
+                    text: root.settings-panel-state == "saving" ? "Saving" : (root.settings-dirty ? "Unsaved" : "Saved");
+                    background-color: root.settings-dirty ? #FFFBEB : #ECFDF5;
+                    text-color: root.settings-dirty ? root.warning-color : root.success-color;
+                }
+
+                Text {
+                    text: root.settings-saved-at != "" ? "Last saved: " + root.settings-saved-at : "Not yet saved.";
+                    font-size: 12px;
+                    color: root.text-muted-color;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        GroupBox {
+            title: root.t-settings-about;
 
             VerticalBox {
                 spacing: 6px;
-
-                HorizontalBox {
-                    spacing: 12px;
-                    Button {
-                        primary: true;
-                        text: "Save Settings";
-                        enabled: settings-dirty && settings-panel-state != "saving";
-                        clicked => { root.save-settings-clicked(); }
-                    }
-                    Text {
-                        text: settings-panel-state == "saving" ? "Saving..." : (settings-dirty ? "Unsaved changes" : "All settings saved");
-                        color: settings-dirty ? #a06000 : #207020;
-                        font-size: 12px;
-                        vertical-alignment: center;
-                    }
-                }
-                Text { text: settings-saved-at != "" ? "Last saved: " + settings-saved-at : "Not yet saved."; font-size: 11px; color: #888; }
+                Text { text: root.t-settings-product + ": Tex2Doc Desktop"; font-size: 12px; color: root.text-primary-color; }
+                Text { text: root.t-settings-version + ": " + root.app-version; font-size: 12px; color: root.text-secondary-color; }
             }
         }
     }

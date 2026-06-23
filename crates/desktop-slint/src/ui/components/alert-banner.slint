@@ -1,0 +1,39 @@
+import { HorizontalBox } from "std-widgets.slint";
+import { DesignTokens } from "../tokens.slint";
+
+export component AlertBanner inherits Rectangle {
+    in property <string> message: "";
+    in property <color> background-color: DesignTokens.token-warning-subtle;
+    in property <color> border-color-token: DesignTokens.token-border;
+    in property <color> text-color: DesignTokens.token-warning;
+
+    visible: message != "";
+    background: background-color;
+    border-color: border-color-token;
+    border-radius: 8px;
+    min-height: 38px;
+
+    HorizontalBox {
+        padding: 10px;
+        spacing: 8px;
+
+        Text {
+            text: "!";
+            font-size: 13px;
+            font-weight: 700;
+            color: root.text-color;
+            width: 18px;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+
+        Text {
+            text: root.message;
+            font-size: 12px;
+            color: root.text-color;
+            wrap: word-wrap;
+            vertical-alignment: center;
+            horizontal-stretch: 1;
+        }
+    }
+}

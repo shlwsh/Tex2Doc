@@ -1,0 +1,37 @@
+import { VerticalBox } from "std-widgets.slint";
+import { DesignTokens } from "../tokens.slint";
+
+export component EmptyState inherits Rectangle {
+    in property <string> title: "";
+    in property <string> message: "";
+    in property <color> surface-color: DesignTokens.token-surface-3;
+    in property <color> border-color-token: DesignTokens.token-border;
+    in property <color> text-color: DesignTokens.token-text-secondary;
+    in property <color> muted-color: DesignTokens.token-text-muted;
+
+    background: surface-color;
+    border-color: border-color-token;
+    border-radius: 8px;
+    min-height: 92px;
+
+    VerticalBox {
+        padding: 16px;
+        spacing: 6px;
+
+        Text {
+            text: root.title;
+            font-size: 14px;
+            font-weight: 700;
+            color: root.text-color;
+            horizontal-alignment: center;
+        }
+
+        Text {
+            text: root.message;
+            font-size: 12px;
+            color: root.muted-color;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+    }
+}
