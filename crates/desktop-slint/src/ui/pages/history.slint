@@ -1,5 +1,7 @@
 import { Button, VerticalBox, HorizontalBox, GroupBox, TextEdit, ListView } from "std-widgets.slint";
 import { JobRow } from "../types.slint";
+import { EmptyState } from "../components/empty-state.slint";
+import { StatusBadge } from "../components/status-badge.slint";
 
 export component HistoryTab inherits Rectangle {
     in-out property <string> recent-jobs: "No recent jobs.";
@@ -14,51 +16,100 @@ export component HistoryTab inherits Rectangle {
     in-out property <[JobRow]> job-history;
     in-out property <int> selected-job-index: -1;
 
+    in property <color> surface-color: #FFFFFF;
+    in property <color> surface-alt-color: #F1F5F9;
+    in property <color> border-color-token: #D7DEE8;
+    in property <color> text-primary-color: #172033;
+    in property <color> text-secondary-color: #42526B;
+    in property <color> text-muted-color: #6B778C;
+    in property <color> accent-color: #2563EB;
+    in property <color> success-color: #0F8A5F;
+    in property <color> danger-color: #C2413A;
+
+    in property <string> t-history-recent-jobs: "Recent Jobs";
+    in property <string> t-history-no-recent-jobs: "No recent jobs.";
+    in property <string> t-history-open-output: "Open Output";
+    in property <string> t-history-open-report: "Open Report";
+    in property <string> t-history-export-diagnostics: "Export Diagnostics";
+    in property <string> t-history-exporting-diagnostics: "Exporting diagnostics...";
+
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
     callback remove-job-clicked(string);
     callback clear-jobs-clicked();
+    callback open-output-clicked(string);
+    callback open-report-clicked(string);
+
+    background: surface-alt-color;
 
     VerticalBox {
         padding: 16px;
         spacing: 12px;
 
         GroupBox {
-            title: "Job History (Phase D.5)";
+            title: root.t-history-recent-jobs;
 
             VerticalBox {
-                spacing: 6px;
+                spacing: 8px;
 
-                if job-history.length == 0: Text {
-                    text: "No recent jobs.";
-                    color: #666;
-                    font-size: 12px;
+                if root.job-history.length == 0: EmptyState {
+                    title: root.t-history-no-recent-jobs;
+                    message: "Finished conversions and diagnostic exports will appear here.";
+                    surface-color: root.surface-color;
+                    border-color-token: root.border-color-token;
+                    text-color: root.text-primary-color;
+                    muted-color: root.text-muted-color;
                 }
 
                 ListView {
-                    height: 200px;
-                    for row[idx] in job-history: Rectangle {
-                        background: idx == selected-job-index ? #d8e8ff : (Math.mod(idx, 2) == 0 ? #fafafa : #f3f3f3);
-                        border-radius: 3px;
+                    visible: root.job-history.length > 0;
+                    height: 260px;
+
+                    for row[idx] in root.job-history: Rectangle {
+                        background: idx == root.selected-job-index ? #EFF6FF : (Math.mod(idx, 2) == 0 ? root.surface-color : root.surface-alt-color);
+                        border-color: idx == root.selected-job-index ? root.accent-color : root.border-color-token;
+                        border-radius: 8px;
+                        min-height: 48px;
+
                         HorizontalBox {
-                            padding: 4px;
-                            spacing: 8px;
-                            Text { text: row.id; font-size: 11px; color: #444; width: 80px; }
-                            Text { text: row.kind; font-size: 11px; width: 60px; }
-                            Text { text: row.status; font-size: 11px; width: 80px; color: row.status == "Succeeded" ? #207020 : (row.status == "Failed" ? #a02020 : #444); }
-                            Text { text: row.input; font-size: 11px; color: #666; horizontal-stretch: 1; overflow: elide; }
-                            Text { text: row.opened-at; font-size: 10px; color: #888; width: 130px; }
+                            padding: 8px;
+                            spacing: 10px;
+
+                            Text { text: row.id; font-size: 11px; color: root.text-muted-color; width: 82px; overflow: elide; }
+                            Text { text: row.kind; font-size: 11px; color: root.text-secondary-color; width: 56px; }
+
+                            StatusBadge {
+                                text: row.status;
+                                background-color: row.status == "Succeeded" ? #ECFDF5 : (row.status == "Failed" ? #FEF2F2 : #EFF6FF);
+                                text-color: row.status == "Succeeded" ? root.success-color : (row.status == "Failed" ? root.danger-color : root.accent-color);
+                            }
+
+                            Text {
+                                text: row.input;
+                                font-size: 11px;
+                                color: root.text-secondary-color;
+                                horizontal-stretch: 1;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+
+                            Text {
+                                text: row.opened-at;
+                                font-size: 10px;
+                                color: root.text-muted-color;
+                                width: 132px;
+                                overflow: elide;
+                                vertical-alignment: center;
+                            }
+
                             Button {
                                 text: "Select";
-                                clicked => {
-                                    root.selected-job-index = idx;
-                                }
+                                clicked => { root.selected-job-index = idx; }
                             }
+
                             Button {
                                 text: "Remove";
-                                enabled: !is-converting;
-                                clicked => {
-                                    root.remove-job-clicked(row.id);
-                                }
+                                enabled: !root.is-converting;
+                                clicked => { root.remove-job-clicked(row.id); }
                             }
                         }
                     }
@@ -66,45 +117,46 @@ export component HistoryTab inherits Rectangle {
 
                 HorizontalBox {
                     spacing: 8px;
+
+                    Button {
+                        text: root.t-history-open-output;
+                        enabled: root.output-path != "";
+                        clicked => { root.open-output-clicked(root.output-path); }
+                    }
+
+                    Button {
+                        text: root.t-history-open-report;
+                        enabled: root.output-path != "";
+                        clicked => { root.open-report-clicked(root.output-path); }
+                    }
+
                     Button {
                         text: "Clear All";
-                        enabled: job-history.length > 0 && !is-converting;
+                        enabled: root.job-history.length > 0 && !root.is-converting;
                         clicked => { root.clear-jobs-clicked(); }
                     }
-                    Text {
-                        text: "Selected: " + (selected-job-index >= 0 && selected-job-index < job-history.length ? job-history[selected-job-index].id : "(none)");
-                        font-size: 11px;
-                        color: #666;
-                        vertical-alignment: center;
+
+                    Button {
+                        primary: true;
+                        text: root.t-history-export-diagnostics;
+                        enabled: !root.is-converting;
+                        clicked => {
+                            root.status-text = root.t-history-exporting-diagnostics;
+                            root.export-diagnostics-clicked(root.project-path, root.output-path, root.api-base-url, root.detected-profile, root.quality-level, root.status-text, root.recent-jobs, root.update-status);
+                        }
                     }
                 }
             }
         }
 
         GroupBox {
-            title: "Recent (text view, legacy)";
+            title: "Legacy Text View";
 
             TextEdit {
-                text <=> recent-jobs;
+                text <=> root.recent-jobs;
                 read-only: true;
                 min-height: 80px;
                 font-size: 11px;
-            }
-        }
-
-        GroupBox {
-            title: "Diagnostics";
-
-            VerticalBox {
-                spacing: 6px;
-
-                Button {
-                    text: "Export Diagnostic Bundle";
-                    enabled: !is-converting;
-                    clicked => {
-                        root.export-diagnostics-clicked(project-path, output-path, api-base-url, detected-profile, quality-level, status-text, recent-jobs, update-status);
-                    }
-                }
             }
         }
     }

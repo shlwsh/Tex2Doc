@@ -1,0 +1,50 @@
+import { VerticalBox, ProgressIndicator } from "std-widgets.slint";
+import { DesignTokens } from "../tokens.slint";
+
+export component MetricCard inherits Rectangle {
+    in property <string> label: "";
+    in property <string> value: "--";
+    in property <string> caption: "";
+    in property <float> progress: 0.0;
+    in property <bool> show-progress: false;
+    in property <color> surface-color: DesignTokens.token-surface-1;
+    in property <color> border-color-token: DesignTokens.token-border;
+    in property <color> text-color: DesignTokens.token-text-primary;
+    in property <color> muted-color: DesignTokens.token-text-muted;
+    in property <color> value-color: DesignTokens.token-text-primary;
+
+    background: surface-color;
+    border-color: border-color-token;
+    border-radius: 8px;
+    min-height: 86px;
+
+    VerticalBox {
+        padding: 10px;
+        spacing: 5px;
+
+        Text {
+            text: root.label;
+            font-size: 11px;
+            color: root.muted-color;
+        }
+
+        Text {
+            text: root.value;
+            font-size: 18px;
+            font-weight: 700;
+            color: root.value-color;
+        }
+
+        ProgressIndicator {
+            visible: root.show-progress;
+            progress: root.progress;
+        }
+
+        Text {
+            text: root.caption;
+            font-size: 11px;
+            color: root.muted-color;
+            overflow: elide;
+        }
+    }
+}

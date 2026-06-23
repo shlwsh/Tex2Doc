@@ -237,6 +237,42 @@ async fn p6_commercial_contract_endpoints_return_json() {
 }
 
 #[tokio::test]
+async fn p6_demo_login_endpoint_accepts_demo_account() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+
+    let auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/login"))
+        .json(&serde_json::json!({
+            "email": "demo@example.com",
+            "password": "secret"
+        }))
+        .send()
+        .await
+        .expect("send login")
+        .json()
+        .await
+        .expect("login json");
+    let token = auth["access_token"].as_str().unwrap().to_string();
+    assert!(token.starts_with("demo-access-"));
+    assert_eq!(auth["user"]["email"], "demo@example.com");
+    assert_eq!(auth["user"]["plan_id"], "preview");
+
+    let usage: serde_json::Value = client
+        .get(format!("http://{addr}/v1/usage"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send usage with login token")
+        .json()
+        .await
+        .expect("usage json");
+    assert_eq!(usage["plan_id"], "preview");
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p6_commercial_user_endpoints_require_bearer_token() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();
