@@ -1,13 +1,18 @@
-import { TabWidget, Button, VerticalBox, HorizontalBox, LineEdit, TextEdit, ComboBox, ProgressIndicator, GroupBox } from "std-widgets.slint";
+import { TabWidget, VerticalBox, HorizontalBox } from "std-widgets.slint";
+import { PlanEntry, JobRow, ConversionMode } from "types.slint";
+import { ConvertTab } from "pages/convert.slint";
+import { SettingsTab } from "pages/settings.slint";
+import { AccountTab } from "pages/account.slint";
+import { BillingTab } from "pages/billing.slint";
+import { HistoryTab } from "pages/history.slint";
 
 export component MainWindow inherits Window {
     title: is-signed-in ? t-app-title-signed-out + " " + app-version + " - " + account-display-name : t-app-title-signed-out + " " + app-version;
     icon: @image-url("assets/app_icon.jpg");
-    preferred-width: 1080px;
-    preferred-height: 760px;
+    preferred-width: 1120px;
+    preferred-height: 780px;
     background: color-window-bg;
 
-    // ?? State properties ??????????????????????????????????????????????????????
     in-out property <string> project-path;
     in-out property <string> api-base-url;
     in-out property <string> login-email;
@@ -23,6 +28,8 @@ export component MainWindow inherits Window {
     in-out property <int> quota-total: 0;
     in-out property <string> billing-plan-id: "pro";
     in-out property <string> billing-status: "--";
+    in-out property <[PlanEntry]> plan-catalog;
+    in-out property <int> current-plan-index: 0;
     in-out property <string> update-channel: "stable";
     in-out property <string> update-status: "--";
     in-out property <string> ui-locale: "en";
@@ -43,6 +50,12 @@ export component MainWindow inherits Window {
     in-out property <string> profile-confidence: "--";
     in-out property <float> profile-confidence-progress: 0.0;
     in-out property <string> recent-jobs: "No recent jobs.";
+    in-out property <[JobRow]> job-history;
+    in-out property <int> selected-job-index: -1;
+    in-out property <bool> settings-dirty: false;
+    in-out property <string> settings-saved-at: "";
+    in-out property <string> settings-panel-state: "idle";
+
     in-out property <color> color-window-bg: #f6f8fb;
     in-out property <color> color-surface: #ffffff;
     in-out property <color> color-surface-alt: #f1f5f9;
@@ -150,7 +163,6 @@ export component MainWindow inherits Window {
     in-out property <string> t-history-export-diagnostics: "Export Diagnostics";
     in-out property <string> t-history-exporting-diagnostics: "Exporting diagnostics...";
 
-    // ?? Callbacks (implemented in Rust) ?????????????????????????????????????
     callback convert-clicked(string, string, string, string);
     callback cloud-convert-clicked(string, string, string, string, string, string);
     callback detect-profile-clicked(string);
@@ -162,13 +174,17 @@ export component MainWindow inherits Window {
     callback show-plans-clicked(string);
     callback checkout-clicked(string, string);
     callback billing-portal-clicked(string);
+    callback change-plan-clicked(string);
     callback check-update-clicked(string, string);
     callback apply-appearance-clicked(string, string);
     callback choose-project-folder-clicked(string, string);
     callback choose-project-zip-clicked(string, string);
     callback choose-output-clicked(string);
+    callback save-settings-clicked();
     callback open-output-clicked(string);
     callback open-report-clicked(string);
+    callback remove-job-clicked(string);
+    callback clear-jobs-clicked();
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
 
     VerticalBox {
@@ -176,8 +192,8 @@ export component MainWindow inherits Window {
 
         Rectangle {
             height: 72px;
-            background: color-surface;
-            border-color: color-border;
+            background: root.color-surface;
+            border-color: root.color-border;
 
             HorizontalBox {
                 padding: 14px;
@@ -192,634 +208,310 @@ export component MainWindow inherits Window {
 
                 VerticalBox {
                     spacing: 2px;
+                    horizontal-stretch: 1;
 
                     Text {
-                        text: t-app-title-signed-out;
+                        text: root.t-app-title-signed-out;
                         font-size: 20px;
                         font-weight: 700;
-                        color: color-text-primary;
+                        color: root.color-text-primary;
                     }
 
                     Text {
-                        text: app-version == "" ? "Research document conversion workspace" : "Version " + app-version;
+                        text: root.app-version == "" ? "Commercial document conversion workspace" : "Version " + root.app-version;
                         font-size: 12px;
-                        color: color-text-secondary;
+                        color: root.color-text-secondary;
+                    }
+                }
+
+                Rectangle {
+                    background: root.is-signed-in ? #ECFDF5 : #FEF2F2;
+                    border-radius: 999px;
+                    min-width: 154px;
+                    height: 30px;
+
+                    Text {
+                        text: root.is-signed-in ? root.account-display-name + " | " + root.account-tier : "Guest";
+                        color: root.is-signed-in ? root.color-success : root.color-danger;
+                        font-size: 12px;
+                        font-weight: 700;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
                 }
             }
         }
 
         TabWidget {
+            Tab {
+                title: root.t-tab-convert;
+                ConvertTab {
+                    project-path <=> root.project-path;
+                    api-base-url <=> root.api-base-url;
+                    main-tex <=> root.main-tex;
+                    detected-profile <=> root.detected-profile;
+                    quality-level <=> root.quality-level;
+                    output-path <=> root.output-path;
+                    is-converting <=> root.is-converting;
+                    conversion-progress <=> root.conversion-progress;
+                    compatibility-score <=> root.compatibility-score;
+                    compatibility-progress <=> root.compatibility-progress;
+                    quality-status <=> root.quality-status;
+                    quality-progress <=> root.quality-progress;
+                    profile-confidence <=> root.profile-confidence;
+                    profile-confidence-progress <=> root.profile-confidence-progress;
+                    status-text <=> root.status-text;
+                    is-signed-in <=> root.is-signed-in;
+                    quota-remaining <=> root.quota-remaining;
+                    conversion-mode: root.use-cloud-engine ? ConversionMode.cloud : ConversionMode.local;
+                    use-cloud-engine <=> root.use-cloud-engine;
 
-        // ?? Tab 1: Convert ???????????????????????????????????????????????
-        Tab {
-            title: t-tab-convert;
-            VerticalBox {
-                padding: 16px;
-                spacing: 10px;
+                    surface-color: root.color-surface;
+                    surface-alt-color: root.color-surface-alt;
+                    border-color-token: root.color-border;
+                    text-primary-color: root.color-text-primary;
+                    text-secondary-color: root.color-text-secondary;
+                    text-muted-color: root.color-text-muted;
+                    accent-color: root.color-accent;
+                    success-color: root.color-success;
+                    warning-color: root.color-warning;
+                    danger-color: root.color-danger;
 
-                GroupBox {
-                    title: t-convert-engine;
+                    t-convert-engine: root.t-convert-engine;
+                    t-convert-local: root.t-convert-local;
+                    t-convert-cloud: root.t-convert-cloud;
+                    t-convert-cloud-requires-sign-in: root.t-convert-cloud-requires-sign-in;
+                    t-convert-project: root.t-convert-project;
+                    t-convert-project-placeholder: root.t-convert-project-placeholder;
+                    t-convert-folder: root.t-convert-folder;
+                    t-convert-zip: root.t-convert-zip;
+                    t-convert-main-tex-placeholder: root.t-convert-main-tex-placeholder;
+                    t-convert-options: root.t-convert-options;
+                    t-convert-profile: root.t-convert-profile;
+                    t-convert-quality: root.t-convert-quality;
+                    t-convert-output: root.t-convert-output;
+                    t-convert-output-placeholder: root.t-convert-output-placeholder;
+                    t-convert-save-as: root.t-convert-save-as;
+                    t-convert-detect-profile: root.t-convert-detect-profile;
+                    t-convert-detecting-profile: root.t-convert-detecting-profile;
+                    t-convert-convert: root.t-convert-convert;
+                    t-convert-cloud-convert: root.t-convert-cloud-convert;
+                    t-convert-converting: root.t-convert-converting;
+                    t-convert-uploading: root.t-convert-uploading;
+                    t-convert-reading-source: root.t-convert-reading-source;
+                    t-convert-open-output: root.t-convert-open-output;
+                    t-convert-open-report: root.t-convert-open-report;
+                    t-convert-cloud-reason-sign-in: root.t-convert-cloud-reason-sign-in;
+                    t-convert-cloud-reason-api: root.t-convert-cloud-reason-api;
+                    t-convert-cloud-reason-fields: root.t-convert-cloud-reason-fields;
+                    t-convert-report: root.t-convert-report;
+                    t-convert-detected: root.t-convert-detected;
+                    t-convert-status: root.t-convert-status;
+                    t-convert-ready: root.t-convert-ready;
+                    t-common-compatibility: root.t-common-compatibility;
+                    t-common-confidence: root.t-common-confidence;
+                    t-common-account: root.t-common-account;
+                    t-common-quota: root.t-common-quota;
 
-                    HorizontalBox {
-                        spacing: 12px;
-
-                        Button {
-                            text: t-convert-local;
-                            primary: !use-cloud-engine;
-                            enabled: !is-converting;
-                            clicked => { root.use-cloud-engine = false; }
-                        }
-
-                        Button {
-                            text: t-convert-cloud;
-                            primary: use-cloud-engine;
-                            enabled: !is-converting && is-signed-in;
-                            clicked => { root.use-cloud-engine = true; }
-                        }
-
-                        Text {
-                            text: is-signed-in
-                                ? "Account: " + account-display-name + " | " + account-tier + " | Quota: " + quota-remaining + "/" + quota-total
-                                : t-convert-cloud-requires-sign-in;
-                            font-size: 12px;
-                            color: is-signed-in ? color-text-primary : color-danger;
-                            vertical-alignment: center;
-                        }
-                    }
+                    choose-project-folder-clicked(path, output) => { root.choose-project-folder-clicked(path, output); }
+                    choose-project-zip-clicked(path, output) => { root.choose-project-zip-clicked(path, output); }
+                    choose-output-clicked(path) => { root.choose-output-clicked(path); }
+                    detect-profile-clicked(path) => { root.detect-profile-clicked(path); }
+                    convert-clicked(project, profile, quality, output) => { root.convert-clicked(project, profile, quality, output); }
+                    cloud-convert-clicked(api, project, main, profile, quality, output) => { root.cloud-convert-clicked(api, project, main, profile, quality, output); }
+                    open-output-clicked(path) => { root.open-output-clicked(path); }
+                    open-report-clicked(path) => { root.open-report-clicked(path); }
                 }
+            }
 
-                GroupBox {
-                    title: t-convert-project;
+            Tab {
+                title: root.t-tab-settings;
+                SettingsTab {
+                    detected-profile <=> root.detected-profile;
+                    quality-level <=> root.quality-level;
+                    output-path <=> root.output-path;
+                    update-channel <=> root.update-channel;
+                    update-status <=> root.update-status;
+                    api-base-url <=> root.api-base-url;
+                    ui-locale <=> root.ui-locale;
+                    ui-theme <=> root.ui-theme;
+                    is-converting <=> root.is-converting;
+                    settings-dirty <=> root.settings-dirty;
+                    settings-saved-at <=> root.settings-saved-at;
+                    settings-panel-state <=> root.settings-panel-state;
+                    app-version <=> root.app-version;
 
-                    VerticalBox {
-                        spacing: 6px;
+                    surface-alt-color: root.color-surface-alt;
+                    border-color-token: root.color-border;
+                    text-primary-color: root.color-text-primary;
+                    text-secondary-color: root.color-text-secondary;
+                    text-muted-color: root.color-text-muted;
+                    success-color: root.color-success;
+                    warning-color: root.color-warning;
 
-                        HorizontalBox {
-                            spacing: 8px;
+                    t-settings-service: root.t-settings-service;
+                    t-settings-api-base-url-placeholder: root.t-settings-api-base-url-placeholder;
+                    t-settings-default-params: root.t-settings-default-params;
+                    t-settings-default-profile: root.t-settings-default-profile;
+                    t-settings-default-quality: root.t-settings-default-quality;
+                    t-settings-default-output-dir: root.t-settings-default-output-dir;
+                    t-settings-updates: root.t-settings-updates;
+                    t-settings-release-channel-placeholder: root.t-settings-release-channel-placeholder;
+                    t-settings-check-update: root.t-settings-check-update;
+                    t-settings-checking-update: root.t-settings-checking-update;
+                    t-settings-appearance: root.t-settings-appearance;
+                    t-settings-language: root.t-settings-language;
+                    t-settings-theme: root.t-settings-theme;
+                    t-settings-apply-appearance: root.t-settings-apply-appearance;
+                    t-settings-about: root.t-settings-about;
+                    t-settings-product: root.t-settings-product;
+                    t-settings-version: root.t-settings-version;
+                    t-convert-output-placeholder: root.t-convert-output-placeholder;
+                    t-convert-save-as: root.t-convert-save-as;
 
-                            LineEdit {
-                                placeholder-text: t-convert-project-placeholder;
-                                text <=> project-path;
-                            }
-
-                            Button {
-                                text: t-convert-folder;
-                                enabled: !is-converting;
-                                clicked => {
-                                    root.choose-project-folder-clicked(root.project-path, root.output-path);
-                                }
-                            }
-
-                            Button {
-                                text: t-convert-zip;
-                                enabled: !is-converting;
-                                clicked => {
-                                    root.choose-project-zip-clicked(root.project-path, root.output-path);
-                                }
-                            }
-                        }
-
-                        LineEdit {
-                            placeholder-text: t-convert-main-tex-placeholder;
-                            text <=> main-tex;
-                        }
-                    }
+                    choose-output-clicked(path) => { root.choose-output-clicked(path); }
+                    check-update-clicked(api, channel) => { root.check-update-clicked(api, channel); }
+                    apply-appearance-clicked(locale, theme) => { root.apply-appearance-clicked(locale, theme); }
+                    save-settings-clicked => { root.save-settings-clicked(); }
                 }
+            }
 
-                GroupBox {
-                    title: t-convert-options;
+            Tab {
+                title: root.t-tab-account;
+                AccountTab {
+                    api-base-url <=> root.api-base-url;
+                    login-email <=> root.login-email;
+                    login-password <=> root.login-password;
+                    account-status <=> root.account-status;
+                    usage-status <=> root.usage-status;
+                    is-signed-in <=> root.is-signed-in;
+                    is-account-busy <=> root.is-account-busy;
+                    account-display-name <=> root.account-display-name;
+                    quota-remaining <=> root.quota-remaining;
+                    quota-total <=> root.quota-total;
+                    account-tier <=> root.account-tier;
 
-                    HorizontalBox {
-                        spacing: 16px;
+                    surface-color: root.color-surface;
+                    surface-alt-color: root.color-surface-alt;
+                    border-color-token: root.color-border;
+                    text-primary-color: root.color-text-primary;
+                    text-secondary-color: root.color-text-secondary;
+                    text-muted-color: root.color-text-muted;
+                    accent-color: root.color-accent;
+                    success-color: root.color-success;
+                    warning-color: root.color-warning;
+                    danger-color: root.color-danger;
 
-                        VerticalBox {
-                            Text { text: t-convert-profile; font-size: 12px; color: color-text-secondary; }
-                            ComboBox {
-                                current-value: detected-profile;
-                                model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
-                            }
-                        }
+                    t-account-sign-in-register: root.t-account-sign-in-register;
+                    t-account-email: root.t-account-email;
+                    t-account-password: root.t-account-password;
+                    t-account-login: root.t-account-login;
+                    t-account-register: root.t-account-register;
+                    t-account-refresh: root.t-account-refresh;
+                    t-account-logout: root.t-account-logout;
+                    t-account-account: root.t-account-account;
+                    t-account-display-name: root.t-account-display-name;
+                    t-account-plan: root.t-account-plan;
+                    t-account-quota: root.t-account-quota;
+                    t-account-refresh-usage: root.t-account-refresh-usage;
+                    t-account-signing-in: root.t-account-signing-in;
+                    t-account-registering: root.t-account-registering;
+                    t-account-refreshing: root.t-account-refreshing;
+                    t-account-refreshing-usage: root.t-account-refreshing-usage;
 
-                        VerticalBox {
-                            Text { text: t-convert-quality; font-size: 12px; color: color-text-secondary; }
-                            ComboBox {
-                                current-value: quality-level;
-                                model: ["preview", "standard", "strict"];
-                            }
-                        }
-
-                        VerticalBox {
-                            Text { text: t-convert-output; font-size: 12px; color: color-text-secondary; }
-                            HorizontalBox {
-                                spacing: 6px;
-                                LineEdit {
-                                    placeholder-text: t-convert-output-placeholder;
-                                    text <=> output-path;
-                                }
-                                Button {
-                                    text: t-convert-save-as;
-                                    enabled: !is-converting;
-                                    clicked => { root.choose-output-clicked(root.output-path); }
-                                }
-                            }
-                        }
-                    }
+                    login-clicked(api, email, password) => { root.login-clicked(api, email, password); }
+                    register-clicked(api, email, password) => { root.register-clicked(api, email, password); }
+                    refresh-login-clicked(api) => { root.refresh-login-clicked(api); }
+                    logout-clicked => { root.logout-clicked(); }
+                    refresh-usage-clicked(api) => { root.refresh-usage-clicked(api); }
                 }
+            }
 
-                HorizontalBox {
-                    spacing: 8px;
+            Tab {
+                title: root.t-tab-billing;
+                BillingTab {
+                    api-base-url <=> root.api-base-url;
+                    billing-plan-id <=> root.billing-plan-id;
+                    billing-status <=> root.billing-status;
+                    plan-catalog <=> root.plan-catalog;
+                    current-plan-index <=> root.current-plan-index;
+                    is-billing-busy <=> root.is-billing-busy;
+                    is-signed-in <=> root.is-signed-in;
+                    account-tier <=> root.account-tier;
+                    quota-remaining <=> root.quota-remaining;
+                    quota-total <=> root.quota-total;
 
-                    Button {
-                        text: t-convert-detect-profile;
-                        enabled: project-path != "" && !is-converting;
-                        clicked => {
-                            root.status-text = t-convert-detecting-profile + project-path + "...";
-                            root.detect-profile-clicked(root.project-path);
-                        }
-                    }
+                    surface-color: root.color-surface;
+                    surface-alt-color: root.color-surface-alt;
+                    border-color-token: root.color-border;
+                    text-primary-color: root.color-text-primary;
+                    text-secondary-color: root.color-text-secondary;
+                    text-muted-color: root.color-text-muted;
+                    accent-color: root.color-accent;
+                    success-color: root.color-success;
+                    warning-color: root.color-warning;
+                    danger-color: root.color-danger;
 
-                    Button {
-                        primary: true;
-                        text: is-converting
-                            ? (use-cloud-engine ? t-convert-uploading : t-convert-converting)
-                            : (use-cloud-engine ? t-convert-cloud-convert : t-convert-convert);
-                        enabled: project-path != "" && output-path != "" && !is-converting
-                            && (!use-cloud-engine || (api-base-url != "" && is-signed-in));
-                        clicked => {
-                            root.is-converting = true;
-                            root.conversion-progress = 0.1;
-                            if root.use-cloud-engine {
-                                root.status-text = "[cloud] Uploading TeX project...";
-                                root.cloud-convert-clicked(root.api-base-url, root.project-path, root.main-tex, root.detected-profile, root.quality-level, root.output-path);
-                            } else {
-                                root.status-text = t-convert-reading-source;
-                                root.convert-clicked(root.project-path, root.detected-profile, root.quality-level, root.output-path);
-                            }
-                        }
-                    }
+                    t-billing-subscribe-manage: root.t-billing-subscribe-manage;
+                    t-billing-plan-id: root.t-billing-plan-id;
+                    t-billing-plans: root.t-billing-plans;
+                    t-billing-checkout: root.t-billing-checkout;
+                    t-billing-portal: root.t-billing-portal;
+                    t-billing-loading-plans: root.t-billing-loading-plans;
+                    t-billing-creating-checkout: root.t-billing-creating-checkout;
+                    t-billing-opening-portal: root.t-billing-opening-portal;
 
-                    Button {
-                        text: t-convert-open-output;
-                        enabled: !is-converting && output-path != "";
-                        clicked => { root.open-output-clicked(root.output-path); }
-                    }
-
-                    Button {
-                        text: t-convert-open-report;
-                        enabled: !is-converting && output-path != "";
-                        clicked => { root.open-report-clicked(root.output-path); }
-                    }
-                }
-
-                Text {
-                    visible: use-cloud-engine && (api-base-url == "" || !is-signed-in || project-path == "" || output-path == "");
-                    text: !is-signed-in ? t-convert-cloud-reason-sign-in : (api-base-url == "" ? t-convert-cloud-reason-api : t-convert-cloud-reason-fields);
-                    color: color-danger;
-                    font-size: 11px;
-                }
-
-                ProgressIndicator {
-                    progress: conversion-progress;
-                    visible: is-converting;
-                }
-
-                GroupBox {
-                    title: t-convert-report;
-
-                    HorizontalBox {
-                        spacing: 10px;
-
-                        Rectangle {
-                            background: color-surface;
-                            border-color: color-border;
-                            border-radius: 8px;
-                            VerticalBox {
-                                padding: 8px;
-                                spacing: 4px;
-                                Text { text: t-convert-profile; font-size: 11px; color: color-text-muted; }
-                                Text { text: detected-profile; font-size: 17px; font-weight: 700; color: color-text-primary; }
-                                Text { text: t-convert-detected; font-size: 11px; color: color-text-muted; }
-                            }
-                        }
-
-                        Rectangle {
-                            background: color-surface;
-                            border-color: color-border;
-                            border-radius: 8px;
-                            VerticalBox {
-                                padding: 8px;
-                                spacing: 4px;
-                                Text { text: t-common-compatibility; font-size: 11px; color: color-text-muted; }
-                                Text { text: compatibility-score == "--" ? "--" : compatibility-score + "%"; font-size: 17px; font-weight: 700; color: compatibility-progress >= 0.8 ? color-success : (compatibility-progress >= 0.5 ? color-warning : color-danger); }
-                                ProgressIndicator { progress: compatibility-progress; }
-                            }
-                        }
-
-                        Rectangle {
-                            background: color-surface;
-                            border-color: color-border;
-                            border-radius: 8px;
-                            VerticalBox {
-                                padding: 8px;
-                                spacing: 4px;
-                                Text { text: t-convert-quality; font-size: 11px; color: color-text-muted; }
-                                Text { text: quality-status; font-size: 17px; font-weight: 700; color: color-text-primary; }
-                                ProgressIndicator { progress: quality-progress; }
-                            }
-                        }
-
-                        Rectangle {
-                            background: color-surface;
-                            border-color: color-border;
-                            border-radius: 8px;
-                            VerticalBox {
-                                padding: 8px;
-                                spacing: 4px;
-                                Text { text: t-common-confidence; font-size: 11px; color: color-text-muted; }
-                                Text { text: profile-confidence; font-size: 17px; font-weight: 700; color: color-text-primary; }
-                                ProgressIndicator { progress: profile-confidence-progress; }
-                            }
-                        }
-                    }
-                }
-
-                GroupBox {
-                    title: t-convert-status;
-
-                    TextEdit {
-                        text <=> status-text;
-                        read-only: true;
-                        min-height: 100px;
-                        font-size: 12px;
+                    show-plans-clicked(api) => { root.show-plans-clicked(api); }
+                    checkout-clicked(api, plan) => { root.checkout-clicked(api, plan); }
+                    billing-portal-clicked(api) => { root.billing-portal-clicked(api); }
+                    change-plan-clicked(plan) => {
+                        root.billing-plan-id = plan;
+                        root.change-plan-clicked(plan);
                     }
                 }
             }
-        }
 
-        // ?? Tab 2: Settings ???????????????????????????????????????????????
-        Tab {
-            title: t-tab-settings;
-            VerticalBox {
-                padding: 16px;
-                spacing: 10px;
+            Tab {
+                title: root.t-tab-history;
+                HistoryTab {
+                    recent-jobs <=> root.recent-jobs;
+                    project-path <=> root.project-path;
+                    output-path <=> root.output-path;
+                    api-base-url <=> root.api-base-url;
+                    detected-profile <=> root.detected-profile;
+                    quality-level <=> root.quality-level;
+                    status-text <=> root.status-text;
+                    update-status <=> root.update-status;
+                    is-converting <=> root.is-converting;
+                    job-history <=> root.job-history;
+                    selected-job-index <=> root.selected-job-index;
 
-                GroupBox {
-                    title: t-settings-appearance;
+                    surface-color: root.color-surface;
+                    surface-alt-color: root.color-surface-alt;
+                    border-color-token: root.color-border;
+                    text-primary-color: root.color-text-primary;
+                    text-secondary-color: root.color-text-secondary;
+                    text-muted-color: root.color-text-muted;
+                    accent-color: root.color-accent;
+                    success-color: root.color-success;
+                    danger-color: root.color-danger;
 
-                    VerticalBox {
-                        spacing: 6px;
+                    t-history-recent-jobs: root.t-history-recent-jobs;
+                    t-history-no-recent-jobs: root.t-history-no-recent-jobs;
+                    t-history-open-output: root.t-history-open-output;
+                    t-history-open-report: root.t-history-open-report;
+                    t-history-export-diagnostics: root.t-history-export-diagnostics;
+                    t-history-exporting-diagnostics: root.t-history-exporting-diagnostics;
 
-                        HorizontalBox {
-                            spacing: 16px;
-
-                            VerticalBox {
-                                Text { text: t-settings-language; font-size: 12px; color: color-text-secondary; }
-                                ComboBox {
-                                    current-value <=> ui-locale;
-                                    model: ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
-                                    selected(_) => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
-                                }
-                            }
-
-                            VerticalBox {
-                                Text { text: t-settings-theme; font-size: 12px; color: color-text-secondary; }
-                                ComboBox {
-                                    current-value <=> ui-theme;
-                                    model: ["default", "blue", "green", "purple", "orange", "dark"];
-                                    selected(_) => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
-                                }
-                            }
-
-                            Button {
-                                text: t-settings-apply-appearance;
-                                clicked => { root.apply-appearance-clicked(root.ui-locale, root.ui-theme); }
-                            }
-                        }
+                    export-diagnostics-clicked(project, output, api, profile, quality, status, recent, update) => {
+                        root.export-diagnostics-clicked(project, output, api, profile, quality, status, recent, update);
                     }
-                }
-
-                GroupBox {
-                    title: t-settings-service;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        LineEdit {
-                            placeholder-text: t-settings-api-base-url-placeholder;
-                            text <=> api-base-url;
-                        }
-                    }
-                }
-
-                GroupBox {
-                    title: t-settings-default-params;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        HorizontalBox {
-                            spacing: 16px;
-
-                            VerticalBox {
-                                Text { text: t-settings-default-profile; font-size: 12px; color: color-text-secondary; }
-                                ComboBox {
-                                    current-value: detected-profile;
-                                    model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"];
-                                }
-                            }
-
-                            VerticalBox {
-                                Text { text: t-settings-default-quality; font-size: 12px; color: color-text-secondary; }
-                                ComboBox {
-                                    current-value: quality-level;
-                                    model: ["preview", "standard", "strict"];
-                                }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 8px;
-                            VerticalBox {
-                                Text { text: t-settings-default-output-dir; font-size: 12px; color: color-text-secondary; }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 8px;
-                            LineEdit {
-                                placeholder-text: t-convert-output-placeholder;
-                                text <=> output-path;
-                            }
-                            Button {
-                                text: t-convert-save-as;
-                                enabled: !is-converting;
-                                clicked => { root.choose-output-clicked(root.output-path); }
-                            }
-                        }
-                    }
-                }
-
-                GroupBox {
-                    title: t-settings-updates;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            LineEdit {
-                                placeholder-text: t-settings-release-channel-placeholder;
-                                text <=> update-channel;
-                            }
-
-                            Button {
-                                text: t-settings-check-update;
-                                enabled: api-base-url != "";
-                                clicked => {
-                                    root.update-status = t-settings-checking-update;
-                                    root.check-update-clicked(root.api-base-url, root.update-channel);
-                                }
-                            }
-                        }
-
-                        Text { text: update-status; font-size: 12px; }
-                    }
-                }
-
-                GroupBox {
-                    title: t-settings-about;
-
-                    VerticalBox {
-                        spacing: 6px;
-                        Text { text: t-settings-product + ": Tex2Doc Desktop"; font-size: 12px; color: color-text-primary; }
-                        Text { text: t-settings-version + ": " + app-version; font-size: 12px; color: color-text-secondary; }
-                    }
+                    remove-job-clicked(id) => { root.remove-job-clicked(id); }
+                    clear-jobs-clicked => { root.clear-jobs-clicked(); }
+                    open-output-clicked(path) => { root.open-output-clicked(path); }
+                    open-report-clicked(path) => { root.open-report-clicked(path); }
                 }
             }
-        }
-
-        // ?? Tab 3: Account ???????????????????????????????????????????????
-        Tab {
-            title: t-tab-account;
-            VerticalBox {
-                padding: 16px;
-                spacing: 10px;
-
-                GroupBox {
-                    title: t-account-sign-in-register;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            LineEdit {
-                                placeholder-text: t-account-email;
-                                text <=> login-email;
-                            }
-
-                            LineEdit {
-                                placeholder-text: t-account-password;
-                                input-type: password;
-                                text <=> login-password;
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            Button {
-                                text: is-account-busy ? t-account-signing-in : t-account-login;
-                                enabled: api-base-url != "" && login-email != "" && !is-account-busy;
-                                clicked => {
-                                    root.is-account-busy = true;
-                                    root.account-status = t-account-signing-in;
-                                    root.login-clicked(root.api-base-url, root.login-email, root.login-password);
-                                }
-                            }
-
-                            Button {
-                                text: is-account-busy ? t-account-registering : t-account-register;
-                                enabled: api-base-url != "" && login-email != "" && !is-account-busy;
-                                clicked => {
-                                    root.is-account-busy = true;
-                                    root.account-status = t-account-registering;
-                                    root.register-clicked(root.api-base-url, root.login-email, root.login-password);
-                                }
-                            }
-
-                            Button {
-                                text: is-account-busy ? t-account-refreshing : t-account-refresh;
-                                enabled: api-base-url != "" && !is-account-busy;
-                                clicked => {
-                                    root.is-account-busy = true;
-                                    root.account-status = t-account-refreshing;
-                                    root.refresh-login-clicked(root.api-base-url);
-                                }
-                            }
-
-                            Button {
-                                text: t-account-logout;
-                                clicked => { root.logout-clicked(); }
-                            }
-                        }
-                    }
-                }
-
-                GroupBox {
-                    title: t-account-account;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        HorizontalBox {
-                            spacing: 16px;
-
-                            VerticalBox {
-                                Text { text: t-account-display-name; font-size: 11px; color: color-text-muted; }
-                                Text { text: account-display-name; font-size: 14px; font-weight: 700; color: color-text-primary; }
-                            }
-
-                            VerticalBox {
-                                Text { text: t-account-plan; font-size: 11px; color: color-text-muted; }
-                                Text { text: account-tier; font-size: 14px; font-weight: 700; color: account-tier == "free" ? color-text-muted : color-accent; }
-                            }
-
-                            VerticalBox {
-                                Text { text: t-account-quota; font-size: 11px; color: color-text-muted; }
-                                Text { text: quota-remaining + " / " + quota-total; font-size: 14px; font-weight: 700; color: color-text-primary; }
-                            }
-                        }
-
-                        Button {
-                            text: t-account-refresh-usage;
-                            enabled: api-base-url != "" && is-signed-in;
-                            clicked => {
-                                root.usage-status = t-account-refreshing-usage;
-                                root.refresh-usage-clicked(root.api-base-url);
-                            }
-                        }
-
-                        Text { text: account-status; font-size: 12px; color: color-text-secondary; }
-                        Text { text: usage-status; font-size: 12px; color: color-text-secondary; }
-                    }
-                }
-            }
-        }
-
-        // ?? Tab 4: Plans ?????????????????????????????????????????????????
-        Tab {
-            title: t-tab-billing;
-            VerticalBox {
-                padding: 16px;
-                spacing: 10px;
-
-                GroupBox {
-                    title: t-billing-subscribe-manage;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            LineEdit {
-                                placeholder-text: t-billing-plan-id;
-                                text <=> billing-plan-id;
-                            }
-
-                            Button {
-                                text: t-billing-plans;
-                                enabled: api-base-url != "" && !is-billing-busy;
-                                clicked => {
-                                    root.is-billing-busy = true;
-                                    root.billing-status = t-billing-loading-plans;
-                                    root.show-plans-clicked(root.api-base-url);
-                                }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            Button {
-                                text: t-billing-checkout;
-                                enabled: api-base-url != "" && billing-plan-id != "" && !is-billing-busy;
-                                clicked => {
-                                    root.is-billing-busy = true;
-                                    root.billing-status = t-billing-creating-checkout;
-                                    root.checkout-clicked(root.api-base-url, root.billing-plan-id);
-                                }
-                            }
-
-                            Button {
-                                text: t-billing-portal;
-                                enabled: api-base-url != "" && !is-billing-busy;
-                                clicked => {
-                                    root.is-billing-busy = true;
-                                    root.billing-status = t-billing-opening-portal;
-                                    root.billing-portal-clicked(root.api-base-url);
-                                }
-                            }
-                        }
-
-                        Text { text: billing-status; font-size: 12px; color: color-text-secondary; }
-                    }
-                }
-            }
-        }
-
-        // ?? Tab 5: History ???????????????????????????????????????????????
-        Tab {
-            title: t-tab-history;
-            VerticalBox {
-                padding: 16px;
-                spacing: 10px;
-
-                GroupBox {
-                    title: t-history-recent-jobs;
-
-                    VerticalBox {
-                        spacing: 6px;
-
-                        TextEdit {
-                            text <=> recent-jobs;
-                            read-only: true;
-                            min-height: 180px;
-                            font-size: 11px;
-                        }
-
-                        HorizontalBox {
-                            spacing: 8px;
-
-                            Button {
-                                text: t-history-open-output;
-                                enabled: output-path != "";
-                                clicked => { root.open-output-clicked(root.output-path); }
-                            }
-
-                            Button {
-                                text: t-history-open-report;
-                                enabled: output-path != "";
-                                clicked => { root.open-report-clicked(root.output-path); }
-                            }
-
-                            Button {
-                                text: t-history-export-diagnostics;
-                                enabled: !is-converting;
-                                clicked => {
-                                    root.status-text = t-history-exporting-diagnostics;
-                                    root.export-diagnostics-clicked(root.project-path, root.output-path, root.api-base-url, root.detected-profile, root.quality-level, root.status-text, root.recent-jobs, root.update-status);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
         }
     }
 }

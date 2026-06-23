@@ -1,4 +1,7 @@
 import { Button, VerticalBox, HorizontalBox, LineEdit, GroupBox } from "std-widgets.slint";
+import { MetricCard } from "../components/metric-card.slint";
+import { AlertBanner } from "../components/alert-banner.slint";
+import { StatusBadge } from "../components/status-badge.slint";
 
 export component AccountTab inherits Rectangle {
     in-out property <string> api-base-url;
@@ -7,10 +10,39 @@ export component AccountTab inherits Rectangle {
     in-out property <string> account-status: "Not signed in.";
     in-out property <string> usage-status: "--";
     in-out property <bool> is-signed-in: false;
+    in-out property <bool> is-account-busy: false;
     in-out property <string> account-display-name: "Guest";
     in-out property <int> quota-remaining: 0;
     in-out property <int> quota-total: 0;
     in-out property <string> account-tier: "free";
+
+    in property <color> surface-color: #FFFFFF;
+    in property <color> surface-alt-color: #F1F5F9;
+    in property <color> border-color-token: #D7DEE8;
+    in property <color> text-primary-color: #172033;
+    in property <color> text-secondary-color: #42526B;
+    in property <color> text-muted-color: #6B778C;
+    in property <color> accent-color: #2563EB;
+    in property <color> success-color: #0F8A5F;
+    in property <color> warning-color: #B7791F;
+    in property <color> danger-color: #C2413A;
+
+    in property <string> t-account-sign-in-register: "Sign In / Register";
+    in property <string> t-account-email: "Email";
+    in property <string> t-account-password: "Password";
+    in property <string> t-account-login: "Login";
+    in property <string> t-account-register: "Register";
+    in property <string> t-account-refresh: "Refresh";
+    in property <string> t-account-logout: "Logout";
+    in property <string> t-account-account: "Account";
+    in property <string> t-account-display-name: "Display Name";
+    in property <string> t-account-plan: "Plan";
+    in property <string> t-account-quota: "Quota";
+    in property <string> t-account-refresh-usage: "Refresh Usage";
+    in property <string> t-account-signing-in: "Signing in...";
+    in property <string> t-account-registering: "Registering...";
+    in property <string> t-account-refreshing: "Refreshing...";
+    in property <string> t-account-refreshing-usage: "Refreshing usage...";
 
     callback login-clicked(string, string, string);
     callback register-clicked(string, string, string);
@@ -18,56 +50,79 @@ export component AccountTab inherits Rectangle {
     callback logout-clicked();
     callback refresh-usage-clicked(string);
 
+    background: surface-alt-color;
+
     VerticalBox {
         padding: 16px;
         spacing: 12px;
 
+        AlertBanner {
+            message: root.api-base-url == "" ? "Set API base URL in Settings before signing in." : "";
+            background-color: #FFFBEB;
+            border-color-token: root.border-color-token;
+            text-color: root.warning-color;
+        }
+
         GroupBox {
-            title: "Account (Phase D.1)";
+            title: root.t-account-account;
 
-            VerticalBox {
-                spacing: 6px;
+            HorizontalBox {
+                spacing: 12px;
 
-                HorizontalBox {
-                    spacing: 16px;
-                    VerticalBox {
-                        Text { text: "Display Name"; font-size: 11px; color: #666; }
-                        Text { text: account-display-name; font-size: 14px; font-weight: 600; }
-                    }
-                    VerticalBox {
-                        Text { text: "Tier"; font-size: 11px; color: #666; }
-                        Text { text: account-tier; font-size: 14px; font-weight: 600; }
-                    }
-                    VerticalBox {
-                        Text { text: "Quota"; font-size: 11px; color: #666; }
-                        Text { text: quota-remaining + " / " + quota-total; font-size: 14px; font-weight: 600; }
-                    }
+                MetricCard {
+                    label: root.t-account-display-name;
+                    value: root.account-display-name;
+                    caption: root.is-signed-in ? root.account-status : "Guest workspace";
+                    surface-color: root.surface-color;
+                    border-color-token: root.border-color-token;
+                    text-color: root.text-primary-color;
+                    muted-color: root.text-muted-color;
+                }
+
+                MetricCard {
+                    label: root.t-account-plan;
+                    value: root.account-tier;
+                    caption: root.is-signed-in ? "Active account" : "Not signed in";
+                    surface-color: root.surface-color;
+                    border-color-token: root.border-color-token;
+                    muted-color: root.text-muted-color;
+                    value-color: root.account-tier == "free" ? root.text-muted-color : root.accent-color;
+                }
+
+                MetricCard {
+                    label: root.t-account-quota;
+                    value: root.quota-remaining + " / " + root.quota-total;
+                    caption: root.usage-status;
+                    progress: root.quota-total > 0 ? root.quota-remaining / root.quota-total : 0;
+                    show-progress: root.quota-total > 0;
+                    surface-color: root.surface-color;
+                    border-color-token: root.border-color-token;
+                    muted-color: root.text-muted-color;
+                    value-color: root.quota-remaining > 0 ? root.success-color : root.danger-color;
                 }
             }
         }
 
         GroupBox {
-            title: "Sign In";
+            title: root.t-account-sign-in-register;
 
             VerticalBox {
-                spacing: 6px;
-
-                LineEdit {
-                    placeholder-text: "API base URL";
-                    text <=> api-base-url;
-                }
+                spacing: 10px;
 
                 HorizontalBox {
                     spacing: 8px;
 
                     LineEdit {
-                        placeholder-text: "Email";
-                        text <=> login-email;
+                        placeholder-text: root.t-account-email;
+                        text <=> root.login-email;
+                        enabled: !root.is-account-busy;
                     }
 
                     LineEdit {
-                        placeholder-text: "Password";
-                        text <=> login-password;
+                        placeholder-text: root.t-account-password;
+                        input-type: password;
+                        text <=> root.login-password;
+                        enabled: !root.is-account-busy;
                     }
                 }
 
@@ -75,62 +130,70 @@ export component AccountTab inherits Rectangle {
                     spacing: 8px;
 
                     Button {
-                        text: "Login";
-                        enabled: api-base-url != "" && login-email != "";
+                        primary: true;
+                        text: root.is-account-busy ? root.t-account-signing-in : root.t-account-login;
+                        enabled: root.api-base-url != "" && root.login-email != "" && !root.is-account-busy;
                         clicked => {
-                            root.account-status = "Signing in...";
-                            root.login-clicked(api-base-url, login-email, login-password);
+                            root.is-account-busy = true;
+                            root.account-status = root.t-account-signing-in;
+                            root.login-clicked(root.api-base-url, root.login-email, root.login-password);
                         }
                     }
 
                     Button {
-                        text: "Register";
-                        enabled: api-base-url != "" && login-email != "";
+                        text: root.is-account-busy ? root.t-account-registering : root.t-account-register;
+                        enabled: root.api-base-url != "" && root.login-email != "" && !root.is-account-busy;
                         clicked => {
-                            root.account-status = "Registering...";
-                            root.register-clicked(api-base-url, login-email, login-password);
+                            root.is-account-busy = true;
+                            root.account-status = root.t-account-registering;
+                            root.register-clicked(root.api-base-url, root.login-email, root.login-password);
                         }
                     }
 
                     Button {
-                        text: "Refresh";
-                        enabled: api-base-url != "" && is-signed-in;
+                        text: root.is-account-busy ? root.t-account-refreshing : root.t-account-refresh;
+                        enabled: root.api-base-url != "" && !root.is-account-busy;
                         clicked => {
-                            root.account-status = "Refreshing login...";
-                            root.refresh-login-clicked(api-base-url);
+                            root.is-account-busy = true;
+                            root.account-status = root.t-account-refreshing;
+                            root.refresh-login-clicked(root.api-base-url);
                         }
                     }
 
                     Button {
-                        text: "Logout";
-                        enabled: is-signed-in;
+                        text: root.t-account-logout;
+                        enabled: root.is-signed-in;
                         clicked => { root.logout-clicked(); }
                     }
-                }
 
-                Text { text: account-status; font-size: 12px; }
-            }
-        }
-
-        GroupBox {
-            title: "Account";
-
-            VerticalBox {
-                spacing: 6px;
-
-                HorizontalBox {
-                    spacing: 8px;
                     Button {
-                        text: "Usage";
-                        enabled: api-base-url != "" && is-signed-in;
+                        text: root.t-account-refresh-usage;
+                        enabled: root.api-base-url != "" && root.is-signed-in && !root.is-account-busy;
                         clicked => {
-                            root.usage-status = "Refreshing usage...";
-                            root.refresh-usage-clicked(api-base-url);
+                            root.usage-status = root.t-account-refreshing-usage;
+                            root.refresh-usage-clicked(root.api-base-url);
                         }
                     }
                 }
 
-                Text { text: usage-status; font-size: 12px; }
+                HorizontalBox {
+                    spacing: 8px;
+
+                    StatusBadge {
+                        text: root.is-signed-in ? "Signed in" : "Signed out";
+                        background-color: root.is-signed-in ? #ECFDF5 : #FEF2F2;
+                        text-color: root.is-signed-in ? root.success-color : root.danger-color;
+                    }
+
+                    Text {
+                        text: root.account-status;
+                        font-size: 12px;
+                        color: root.text-secondary-color;
+                        vertical-alignment: center;
+                        horizontal-stretch: 1;
+                        overflow: elide;
+                    }
+                }
             }
         }
     }
