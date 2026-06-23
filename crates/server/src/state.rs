@@ -21,6 +21,7 @@ pub struct ServerState {
 struct ServerStateInner {
     uploads: RwLock<HashMap<String, UploadRecord>>,
     jobs: RwLock<HashMap<String, ConversionJobRecord>>,
+    recharges: RwLock<HashMap<String, Vec<RechargeRecord>>>,
     usage: RwLock<HashMap<String, u64>>,
     seq: AtomicU64,
 }
@@ -68,6 +69,7 @@ impl ConversionStatus {
 #[derive(Debug, Clone)]
 pub struct ConversionJobRecord {
     pub job_id: String,
+    pub user_id: String,
     pub upload_id: String,
     pub main_tex: String,
     pub profile: String,
@@ -80,6 +82,21 @@ pub struct ConversionJobRecord {
     pub report: Option<ConversionReportRecord>,
     pub error_code: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RechargeRecord {
+    pub recharge_id: String,
+    pub user_id: String,
+    pub recharge_type: String,
+    pub package_id: String,
+    pub quantity: u64,
+    pub amount_cents: u64,
+    pub currency: String,
+    pub status: String,
+    pub provider: String,
+    pub provider_trade_id: String,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -105,6 +122,7 @@ impl ServerState {
             inner: Arc::new(ServerStateInner {
                 uploads: RwLock::new(HashMap::new()),
                 jobs: RwLock::new(HashMap::new()),
+                recharges: RwLock::new(HashMap::new()),
                 usage: RwLock::new(HashMap::new()),
                 seq: AtomicU64::new(1),
             }),
@@ -134,6 +152,7 @@ impl ServerState {
 
     pub async fn create_job(
         &self,
+        user_id: String,
         upload_id: String,
         main_tex: String,
         profile: String,
@@ -144,6 +163,7 @@ impl ServerState {
         let now = now_timestamp();
         let job = ConversionJobRecord {
             job_id: job_id.clone(),
+            user_id,
             upload_id,
             main_tex,
             profile,
@@ -172,6 +192,20 @@ impl ServerState {
         self.inner.jobs.read().await.get(job_id).cloned()
     }
 
+    pub async fn list_jobs_by_user(&self, user_id: &str) -> Vec<ConversionJobRecord> {
+        let mut jobs = self
+            .inner
+            .jobs
+            .read()
+            .await
+            .values()
+            .filter(|job| job.user_id == user_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        jobs
+    }
+
     pub async fn cloud_conversions_used(&self, user_id: &str) -> u64 {
         self.inner
             .usage
@@ -191,6 +225,51 @@ impl ServerState {
         let next = used + 1;
         usage.insert(user_id.to_string(), next);
         Ok(next)
+    }
+
+    pub async fn create_recharge(
+        &self,
+        user_id: String,
+        recharge_type: String,
+        package_id: String,
+        quantity: u64,
+        amount_cents: u64,
+    ) -> RechargeRecord {
+        let recharge_id = self.next_id("recharge");
+        let record = RechargeRecord {
+            recharge_id: recharge_id.clone(),
+            user_id: user_id.clone(),
+            recharge_type,
+            package_id,
+            quantity,
+            amount_cents,
+            currency: "CNY".to_string(),
+            status: "paid_mock".to_string(),
+            provider: "mock-pay".to_string(),
+            provider_trade_id: format!("mock_trade_{recharge_id}"),
+            created_at: now_timestamp(),
+        };
+        self.inner
+            .recharges
+            .write()
+            .await
+            .entry(user_id)
+            .or_default()
+            .push(record.clone());
+        record
+    }
+
+    pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {
+        let mut records = self
+            .inner
+            .recharges
+            .read()
+            .await
+            .get(user_id)
+            .cloned()
+            .unwrap_or_default();
+        records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        records
     }
 
     pub async fn update_status(&self, job_id: &str, status: ConversionStatus) {

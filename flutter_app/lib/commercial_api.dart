@@ -56,6 +56,12 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Future<RechargeOptions> rechargeOptions() async {
+    return RechargeOptions.fromJson(
+      await _getJson('recharge/options') as Map<String, dynamic>,
+    );
+  }
+
   Future<AuthResponse> refresh(String refreshToken) async {
     return AuthResponse.fromJson(
       await _postJson('auth/refresh', {'refresh_token': refreshToken}),
@@ -92,6 +98,29 @@ class CommercialApiClient {
         'return_url': returnUrl,
       }, accessToken: accessToken),
     );
+  }
+
+  Future<RechargeRecord> createRecharge({
+    required String accessToken,
+    required String rechargeType,
+    required String packageId,
+    int? quantity,
+  }) async {
+    final body = <String, dynamic>{
+      'recharge_type': rechargeType,
+      'package_id': packageId,
+    };
+    if (quantity != null) body['quantity'] = quantity;
+    return RechargeRecord.fromJson(
+      await _postJson('recharges', body, accessToken: accessToken),
+    );
+  }
+
+  Future<List<RechargeRecord>> recharges(String accessToken) async {
+    final value = await _getJson('recharges', accessToken: accessToken);
+    return (value as List<dynamic>)
+        .map((item) => RechargeRecord.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
   }
 
   Future<UploadResponse> uploadProjectZip({
@@ -136,6 +165,13 @@ class CommercialApiClient {
       await _getJson('conversions/$jobId', accessToken: accessToken)
           as Map<String, dynamic>,
     );
+  }
+
+  Future<List<ConversionJob>> conversions(String accessToken) async {
+    final value = await _getJson('conversions', accessToken: accessToken);
+    return (value as List<dynamic>)
+        .map((item) => ConversionJob.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
   }
 
   Future<List<int>> downloadConversionDocx({
@@ -314,6 +350,107 @@ class PlanSummary {
 
   String get label =>
       '$id: $currency ${(priceCents / 100).toStringAsFixed(2)}/mo, $monthlyConversions conversions';
+}
+
+class RechargeOptions {
+  final String currency;
+  final String provider;
+  final List<RechargePackage> countPackages;
+  final List<RechargePackage> datePackages;
+
+  RechargeOptions({
+    required this.currency,
+    required this.provider,
+    required this.countPackages,
+    required this.datePackages,
+  });
+
+  factory RechargeOptions.fromJson(Map<String, dynamic> json) {
+    final count = json['count'] as Map<String, dynamic>? ?? const {};
+    final date = json['date'] as Map<String, dynamic>? ?? const {};
+    return RechargeOptions(
+      currency: json['currency'] as String? ?? 'CNY',
+      provider: json['provider'] as String? ?? 'mock-pay',
+      countPackages: ((count['packages'] as List<dynamic>?) ?? const [])
+          .map((item) => RechargePackage.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+      datePackages: ((date['packages'] as List<dynamic>?) ?? const [])
+          .map((item) => RechargePackage.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+    );
+  }
+}
+
+class RechargePackage {
+  final String id;
+  final String name;
+  final int quantity;
+  final int amountCents;
+
+  RechargePackage({
+    required this.id,
+    required this.name,
+    required this.quantity,
+    required this.amountCents,
+  });
+
+  factory RechargePackage.fromJson(Map<String, dynamic> json) {
+    return RechargePackage(
+      id: json['id'] as String,
+      name: json['name'] as String,
+      quantity: (json['quantity'] ?? json['days'] ?? 0) as int,
+      amountCents: json['amount_cents'] as int,
+    );
+  }
+
+  String priceLabel(String currency) {
+    final symbol = currency == 'CNY' ? '¥' : '$currency ';
+    return '$name / $symbol${(amountCents / 100).toStringAsFixed(0)}';
+  }
+}
+
+class RechargeRecord {
+  final String rechargeId;
+  final String rechargeType;
+  final String packageId;
+  final int quantity;
+  final int amountCents;
+  final String currency;
+  final String status;
+  final String provider;
+  final String providerTradeId;
+  final String createdAt;
+
+  RechargeRecord({
+    required this.rechargeId,
+    required this.rechargeType,
+    required this.packageId,
+    required this.quantity,
+    required this.amountCents,
+    required this.currency,
+    required this.status,
+    required this.provider,
+    required this.providerTradeId,
+    required this.createdAt,
+  });
+
+  factory RechargeRecord.fromJson(Map<String, dynamic> json) {
+    return RechargeRecord(
+      rechargeId: json['recharge_id'] as String,
+      rechargeType: json['recharge_type'] as String,
+      packageId: json['package_id'] as String,
+      quantity: json['quantity'] as int,
+      amountCents: json['amount_cents'] as int,
+      currency: json['currency'] as String,
+      status: json['status'] as String,
+      provider: json['provider'] as String,
+      providerTradeId: json['provider_trade_id'] as String,
+      createdAt: json['created_at'] as String,
+    );
+  }
+
+  String get label =>
+      '$packageId: $currency ${(amountCents / 100).toStringAsFixed(0)}, $status';
 }
 
 class BillingSession {

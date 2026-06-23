@@ -4,8 +4,8 @@
  *
  * Verifies the browser-facing commercial workflow with Playwright:
  * - Flutter Web page boots and exposes semantic buttons.
- * - Register, login, usage refresh, and plans buttons call the real API.
- * - ZIP selection, local WASM conversion, and DOCX download complete.
+ * - Register, login, usage refresh, recharge, account records, and plans call the real API.
+ * - ZIP selection, cloud semantic conversion, conversion records, and DOCX download complete.
  *
  * Environment:
  * - WEB_PORT=4174
@@ -240,11 +240,41 @@ async function runBrowserTest() {
   await enableFlutterSemantics(page);
 
   const labels = await buttonLabels(page);
-  for (const expected of ['注册', '登录', '刷新', '套餐', '选择 ZIP', '开始转换']) {
+  for (const expected of ['注册', '登录', '刷新', '套餐', '选择 ZIP', '开始转换', '充值']) {
     if (!labels.includes(expected)) {
       throw new Error(`missing semantic button ${expected}; found: ${labels.join(', ')}`);
     }
   }
+
+  log('verify main navigation');
+  await clickButton(page, '账号');
+  await page.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+      .map((node) => node.textContent?.trim() ?? '');
+    return buttons.some((text) => text === '注册') &&
+      !buttons.some((text) => text === '选择 ZIP');
+  }, undefined, { timeout: 30000 });
+  await clickButton(page, '转换');
+  await page.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+      .map((node) => node.textContent?.trim() ?? '');
+    return buttons.some((text) => text === '选择 ZIP') &&
+      !buttons.some((text) => text === '注册');
+  }, undefined, { timeout: 30000 });
+  await clickButton(page, '充值');
+  await page.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+      .map((node) => node.textContent?.trim() ?? '');
+    return buttons.some((text) => text.includes('查询充值记录')) &&
+      buttons.some((text) => text.includes('3 次'));
+  }, undefined, { timeout: 30000 });
+  await clickButton(page, '工作台');
+  await page.waitForFunction(() => {
+    const buttons = Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
+      .map((node) => node.textContent?.trim() ?? '');
+    return buttons.some((text) => text === '注册') &&
+      buttons.some((text) => text === '选择 ZIP');
+  }, undefined, { timeout: 30000 });
 
   const corsProbe = await page.evaluate(async (url) => {
     const response = await fetch(`${url}/v1/auth/register`, {
@@ -295,7 +325,49 @@ async function runBrowserTest() {
     throw new Error(`unexpected plans response: ${JSON.stringify(plans)}`);
   }
 
+  log('mock recharge');
+  await clickButton(page, '充值');
+  const recharge = await expectJsonResponse(page, '/v1/recharges', () =>
+    clickButton(page, '3 次'),
+  );
+  if (recharge.status !== 'paid_mock' || recharge.amount_cents !== 300) {
+    throw new Error(`unexpected recharge response: ${JSON.stringify(recharge)}`);
+  }
+  const rechargeRecords = await expectJsonResponse(page, '/v1/recharges', () =>
+    clickButton(page, '查询充值记录'),
+  );
+  if (!Array.isArray(rechargeRecords) || rechargeRecords.length === 0) {
+    throw new Error(`unexpected recharge records: ${JSON.stringify(rechargeRecords)}`);
+  }
+
+  log('query account records');
+  await clickButton(page, '账号');
+  const accountUsagePromise = page.waitForResponse(
+    (response) => response.url().includes('/v1/usage') && response.request().method() === 'GET',
+    { timeout: 45000 },
+  );
+  const accountRechargePromise = page.waitForResponse(
+    (response) => response.url().includes('/v1/recharges') && response.request().method() === 'GET',
+    { timeout: 45000 },
+  );
+  const accountConversionsPromise = page.waitForResponse(
+    (response) => response.url().includes('/v1/conversions') && response.request().method() === 'GET',
+    { timeout: 45000 },
+  );
+  await clickButton(page, '查询账号记录');
+  for (const response of [
+    await accountUsagePromise,
+    await accountRechargePromise,
+    await accountConversionsPromise,
+  ]) {
+    log(`response ${response.request().method()} ${response.url()} -> ${response.status()}`);
+    if (!response.ok()) {
+      throw new Error(`account query failed: ${response.status()} ${response.url()}`);
+    }
+  }
+
   log('select paper3 ZIP');
+  await clickButton(page, '转换');
   await clickButton(page, '选择 ZIP');
   await page.setInputFiles('#zip-file-input', fixtureZip);
   await page.waitForTimeout(1000);
@@ -329,6 +401,14 @@ async function runBrowserTest() {
       throw new Error(`cloud conversion request failed: ${response.status()} ${response.url()}`);
     }
   }
+
+  log('query conversion records');
+  const conversionRecords = await expectJsonResponse(page, '/v1/conversions', () =>
+    clickButton(page, '查询转换记录'),
+  );
+  if (!Array.isArray(conversionRecords) || conversionRecords.length === 0) {
+    throw new Error(`unexpected conversion records: ${JSON.stringify(conversionRecords)}`);
+  }
   try {
     await page.waitForFunction(() => {
       return Array.from(document.querySelectorAll('flt-semantics[role="button"]'))
@@ -360,7 +440,7 @@ async function runBrowserTest() {
   await context.close();
   await browser.close();
 
-  log(`PASS register/login/usage/plans/convert/download`);
+  log(`PASS register/login/usage/plans/recharge/account-records/convert/download`);
   log(`screenshot: ${screenshotPath}`);
   log(`download: ${docxPath} (${docx.length} bytes)`);
 }
