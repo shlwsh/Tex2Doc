@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:8080/v1/";
+const LEGACY_ONLINE_API_BASE_URL: &str = "https://api.tex2doc.cn/v1/";
+
 /// P5: User settings for the desktop client.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
@@ -37,7 +40,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            api_base_url: "https://api.tex2doc.cn/v1/".to_string(),
+            api_base_url: DEFAULT_API_BASE_URL.to_string(),
             output_dir: dirs_default_output(),
             quality: "standard".to_string(),
             default_profile: "auto".to_string(),
@@ -59,6 +62,7 @@ impl Settings {
             .unwrap_or_default();
         settings.locale = crate::i18n::normalize_locale(&settings.locale);
         settings.theme = crate::theme::normalize_theme(&settings.theme);
+        settings.api_base_url = normalize_api_base_url(&settings.api_base_url);
         settings
     }
 
@@ -79,6 +83,15 @@ impl Settings {
     pub fn set_last_project(&mut self, path: String) {
         self.last_project_path = Some(path);
         let _ = self.save();
+    }
+}
+
+fn normalize_api_base_url(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || trimmed == LEGACY_ONLINE_API_BASE_URL {
+        DEFAULT_API_BASE_URL.to_string()
+    } else {
+        trimmed.to_string()
     }
 }
 
@@ -114,7 +127,7 @@ mod tests {
     #[test]
     fn missing_release_channel_defaults_to_stable() {
         let json = r#"{
-            "api_base_url": "https://api.tex2doc.cn/v1/",
+            "api_base_url": "http://127.0.0.1:8080/v1/",
             "output_dir": "/tmp/tex2doc",
             "quality": "standard",
             "default_profile": "auto",
@@ -126,5 +139,17 @@ mod tests {
         assert_eq!(settings.release_channel, "stable");
         assert_eq!(settings.locale, "en");
         assert_eq!(settings.theme, crate::theme::DEFAULT_THEME);
+    }
+
+    #[test]
+    fn legacy_online_api_base_url_migrates_to_local_demo_server() {
+        assert_eq!(
+            normalize_api_base_url("https://api.tex2doc.cn/v1/"),
+            DEFAULT_API_BASE_URL
+        );
+        assert_eq!(
+            normalize_api_base_url(" http://127.0.0.1:9000/v1/ "),
+            "http://127.0.0.1:9000/v1/"
+        );
     }
 }
