@@ -30,10 +30,6 @@ AUTO_COMMIT_EXCLUDE_PREFIXES = (
     "sessions/",
 )
 
-AUTO_COMMIT_EXCLUDE_SUFFIXES = (
-    ".dump",
-)
-
 # LaTeX / 编译中间文件（不参与 diff 文本）
 LATEX_AUX_SUFFIXES = (".log", ".aux", ".bbl", ".blg", ".out", ".toc", ".fls", ".fdb_latexmk")
 
@@ -276,7 +272,7 @@ def is_excluded_from_auto_commit(file_path: str) -> bool:
         return True
     if any(normalized.startswith(prefix) for prefix in AUTO_COMMIT_EXCLUDE_PREFIXES):
         return True
-    return normalized.startswith("database/") and normalized.endswith(AUTO_COMMIT_EXCLUDE_SUFFIXES)
+    return False
 
 
 def parse_porcelain_path(line: str) -> tuple[str, str]:
