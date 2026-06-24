@@ -40,6 +40,7 @@ pub struct AppUser {
     pub email: String,
     pub display_name: Option<String>,
     pub plan_id: String,
+    pub role: String,
 }
 
 #[derive(Debug, Clone)]
@@ -96,7 +97,7 @@ impl DbStore {
                 display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
                 password_hash = EXCLUDED.password_hash,
                 updated_at = now()
-            RETURNING id::text, email, display_name, default_plan_id
+            RETURNING id::text, email, display_name, default_plan_id, role
             "#,
         )
         .bind(email)
@@ -108,13 +109,14 @@ impl DbStore {
     }
 
     pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
-        let user = self
+        let mut user = self
             .upsert_user("admin@example.com", Some("Demo Admin"), "demo-admin")
             .await?;
         sqlx::query("UPDATE app_users SET role = 'admin' WHERE id = $1")
             .bind(parse_uuid(&user.id)?)
             .execute(&self.pool)
             .await?;
+        user.role = "admin".to_string();
         Ok(user)
     }
 
@@ -149,7 +151,7 @@ impl DbStore {
     pub async fn user_for_token(&self, token: &str) -> Result<Option<AppUser>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT u.id::text, u.email, u.display_name, u.default_plan_id
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role
             FROM app_access_tokens t
             JOIN app_users u ON u.id = t.user_id
             WHERE t.token_hash = $1
@@ -178,7 +180,7 @@ impl DbStore {
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query(
             r#"
-            SELECT u.id::text, u.email, u.display_name, u.default_plan_id
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role
             FROM auth_refresh_tokens t
             JOIN app_users u ON u.id = t.user_id
             WHERE t.token_hash = $1
@@ -1402,6 +1404,7 @@ fn app_user_from_row(row: &PgRow) -> AppUser {
         email: row.get("email"),
         display_name: row.get("display_name"),
         plan_id: row.get("default_plan_id"),
+        role: row.get("role"),
     }
 }
 

@@ -80,6 +80,14 @@ class CommercialApiClient {
     );
   }
 
+  Future<AdminProfile> adminMe(String accessToken) async {
+    final response = await _http.get(
+      _adminUri('me'),
+      headers: _headers(accessToken: accessToken),
+    );
+    return AdminProfile.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
   Future<BillingSession> checkout({
     required String accessToken,
     required String planId,
@@ -310,6 +318,52 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Future<List<FeedbackThread>> adminFeedbackThreads(String adminToken) async {
+    final response = await _http.get(
+      _adminUri('feedback/threads'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => FeedbackThread.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<FeedbackThread> adminUpdateFeedbackThread({
+    required String adminToken,
+    required String threadId,
+    String? status,
+    String? priority,
+  }) async {
+    final body = <String, dynamic>{
+      if (status != null) 'status': status,
+      if (priority != null) 'priority': priority,
+    };
+    final response = await _http.patch(
+      _adminUri('feedback/threads/$threadId'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode(body),
+    );
+    return FeedbackThread.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<FeedbackMessage> adminReplyFeedbackThread({
+    required String adminToken,
+    required String threadId,
+    required String content,
+    bool isInternal = false,
+  }) async {
+    final response = await _http.post(
+      _adminUri('feedback/threads/$threadId/messages'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        'content': content,
+        'is_internal': isInternal,
+      }),
+    );
+    return FeedbackMessage.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
   Future<FeedbackThreadDetail> feedbackThread(
     String accessToken,
     String threadId,
@@ -475,13 +529,18 @@ class UserProfile {
   final String email;
   final String? displayName;
   final String planId;
+  final String role;
 
   UserProfile({
     required this.id,
     required this.email,
     required this.displayName,
     required this.planId,
+    required this.role,
   });
+
+  bool get isAdminRole =>
+      role == 'admin' || role == 'operator' || role == 'support';
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
@@ -489,6 +548,23 @@ class UserProfile {
       email: json['email'] as String,
       displayName: json['display_name'] as String?,
       planId: json['plan_id'] as String,
+      role: json['role'] as String? ?? 'user',
+    );
+  }
+}
+
+class AdminProfile {
+  final UserProfile user;
+  final List<String> permissions;
+
+  AdminProfile({required this.user, required this.permissions});
+
+  factory AdminProfile.fromJson(Map<String, dynamic> json) {
+    return AdminProfile(
+      user: UserProfile.fromJson(json['user'] as Map<String, dynamic>),
+      permissions: (json['permissions'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
     );
   }
 }

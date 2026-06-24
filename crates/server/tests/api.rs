@@ -279,6 +279,75 @@ async fn p6_demo_login_endpoint_accepts_demo_account() {
 }
 
 #[tokio::test]
+async fn p6_admin_me_requires_admin_role() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+
+    let user_auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/login"))
+        .json(&serde_json::json!({
+            "email": format!("user-{}@example.com", uuid::Uuid::new_v4().simple()),
+            "password": "secret"
+        }))
+        .send()
+        .await
+        .expect("send user login")
+        .json()
+        .await
+        .expect("user login json");
+    let user_token = user_auth["access_token"].as_str().unwrap();
+
+    let denied = client
+        .get(format!("http://{addr}/admin/v1/me"))
+        .bearer_auth(user_token)
+        .send()
+        .await
+        .expect("send admin me with user token");
+    assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
+
+    let admin_me: serde_json::Value = client
+        .get(format!("http://{addr}/admin/v1/me"))
+        .bearer_auth("demo-admin")
+        .send()
+        .await
+        .expect("send admin me")
+        .json()
+        .await
+        .expect("admin me json");
+    assert_eq!(admin_me["user"]["email"], "admin@example.com");
+    assert_eq!(admin_me["user"]["role"], "admin");
+    assert!(admin_me["permissions"].as_array().unwrap().contains(&serde_json::json!("redeem")));
+
+    let login_admin: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/login"))
+        .json(&serde_json::json!({
+            "email": "admin@example.com",
+            "password": "demo-admin"
+        }))
+        .send()
+        .await
+        .expect("send admin login")
+        .json()
+        .await
+        .expect("admin login json");
+    let admin_access_token = login_admin["access_token"].as_str().unwrap();
+    assert_eq!(login_admin["user"]["role"], "admin");
+
+    let admin_me_with_login: serde_json::Value = client
+        .get(format!("http://{addr}/admin/v1/me"))
+        .bearer_auth(admin_access_token)
+        .send()
+        .await
+        .expect("send admin me with login token")
+        .json()
+        .await
+        .expect("admin me login json");
+    assert_eq!(admin_me_with_login["user"]["email"], "admin@example.com");
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p6_refresh_token_rotates_and_revokes_old_token() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();

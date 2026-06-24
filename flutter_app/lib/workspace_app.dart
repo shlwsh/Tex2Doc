@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
+import 'admin/admin_feedback_panel.dart';
 import 'commercial_api.dart';
 import 'file_web_stub.dart'
     if (dart.library.js_interop) 'file_web_utils_web.dart'
@@ -23,10 +24,17 @@ const _appIconAsset = 'assets/app_icon.jpg';
 
 // ─── App entry ────────────────────────────────────────────────────────────────
 
+enum DocEngineAppMode { user, admin }
+
 class DocEngineApp extends StatefulWidget {
   final bool isWeb;
+  final DocEngineAppMode mode;
 
-  const DocEngineApp({super.key, required this.isWeb});
+  const DocEngineApp({
+    super.key,
+    required this.isWeb,
+    this.mode = DocEngineAppMode.user,
+  });
 
   @override
   State<DocEngineApp> createState() => _DocEngineAppState();
@@ -82,6 +90,7 @@ class _DocEngineAppState extends State<DocEngineApp> {
           : ThemeMode.light,
       home: _WorkspaceShell(
         isWeb: widget.isWeb,
+        mode: widget.mode,
         themeTone: _themeTone,
         locale: _locale,
         onThemeChanged: _setTheme,
@@ -146,6 +155,7 @@ extension _NavSectionMeta on _NavSection {
 
 class _WorkspaceShell extends StatefulWidget {
   final bool isWeb;
+  final DocEngineAppMode mode;
   final AppThemeTone themeTone;
   final AppLocale locale;
   final ValueChanged<AppThemeTone> onThemeChanged;
@@ -153,6 +163,7 @@ class _WorkspaceShell extends StatefulWidget {
 
   const _WorkspaceShell({
     required this.isWeb,
+    required this.mode,
     required this.themeTone,
     required this.locale,
     required this.onThemeChanged,
@@ -167,12 +178,38 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   _NavSection _selectedSection = _NavSection.account;
   _AuthState? _auth;
   String _apiBaseUrl = defaultCommercialApiBaseUrl;
+  String? _authNotice;
+
+  List<_NavSection> get _availableSections => switch (widget.mode) {
+    DocEngineAppMode.user => const [
+        _NavSection.account,
+        _NavSection.recharge,
+        _NavSection.convert,
+        _NavSection.convertRecords,
+        _NavSection.rechargeRecords,
+        _NavSection.feedback,
+      ],
+    DocEngineAppMode.admin => const [
+        _NavSection.account,
+        _NavSection.redeemManage,
+        _NavSection.redeemRecords,
+        _NavSection.feedback,
+      ],
+  };
 
   void _handleSignedIn(
     String apiBaseUrl,
     String accessToken,
     UserProfile profile,
   ) {
+    if (widget.mode == DocEngineAppMode.admin && !profile.isAdminRole) {
+      setState(() {
+        _apiBaseUrl = apiBaseUrl;
+        _auth = null;
+        _authNotice = 'Admin role required.';
+      });
+      return;
+    }
     setState(() {
       _apiBaseUrl = apiBaseUrl;
       _auth = _AuthState(
@@ -180,6 +217,10 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
         accessToken: accessToken,
         profile: profile,
       );
+      _authNotice = null;
+      if (!_availableSections.contains(_selectedSection)) {
+        _selectedSection = _availableSections.first;
+      }
     });
   }
 
@@ -195,13 +236,41 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   @override
   Widget build(BuildContext context) {
     final strings = AppStrings.of(context);
-    final platform = widget.isWeb ? 'Web' : 'Desktop';
+    final platform = widget.mode == DocEngineAppMode.admin
+        ? 'Web Admin'
+        : widget.isWeb
+            ? 'Web User'
+            : 'Desktop';
 
     DocLogger.instance.i(LogTags.app, 'DocEngineApp build, platform=$platform');
 
     // Gate: show auth window when not signed in
     if (_auth == null) {
-      return AuthWindow(apiBaseUrl: _apiBaseUrl, onSignedIn: _handleSignedIn);
+      return Stack(
+        children: [
+          AuthWindow(apiBaseUrl: _apiBaseUrl, onSignedIn: _handleSignedIn),
+          if (_authNotice != null)
+            Positioned(
+              left: AppSpacing.lg,
+              right: AppSpacing.lg,
+              top: AppSpacing.lg,
+              child: Material(
+                elevation: 4,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Text(
+                    _authNotice!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
+      );
     }
 
     return Scaffold(
@@ -210,7 +279,9 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           builder: (context, constraints) {
             final compact = constraints.maxWidth < AppBreakpoints.tablet;
             final content = _NavContent(
+              mode: widget.mode,
               selectedSection: _selectedSection,
+              sections: _availableSections,
               compact: compact,
               apiBaseUrl: _auth!.apiBaseUrl,
               accessToken: _auth!.accessToken,
@@ -242,6 +313,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
                 _Sidebar(
                   strings: strings,
                   selectedSection: _selectedSection,
+                  sections: _availableSections,
                   onSectionChanged: _selectSection,
                 ),
                 Expanded(
@@ -275,11 +347,13 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 class _Sidebar extends StatelessWidget {
   final AppStrings strings;
   final _NavSection selectedSection;
+  final List<_NavSection> sections;
   final ValueChanged<_NavSection> onSectionChanged;
 
   const _Sidebar({
     required this.strings,
     required this.selectedSection,
+    required this.sections,
     required this.onSectionChanged,
   });
 
@@ -320,7 +394,7 @@ class _Sidebar extends StatelessWidget {
           const SizedBox(height: AppSpacing.xs),
           Text(strings.t('app.subtitle'), style: theme.textTheme.bodySmall),
           const SizedBox(height: AppSpacing.xl),
-          for (final section in _NavSection.values)
+          for (final section in sections)
             _NavItem(
               icon: section.icon,
               label: section.label(strings),
@@ -895,7 +969,9 @@ class _ObscuredTextFieldState extends State<_ObscuredTextField> {
 // ─── Nav content ───────────────────────────────────────────────────────────────
 
 class _NavContent extends StatelessWidget {
+  final DocEngineAppMode mode;
   final _NavSection selectedSection;
+  final List<_NavSection> sections;
   final bool compact;
   final String apiBaseUrl;
   final String accessToken;
@@ -904,7 +980,9 @@ class _NavContent extends StatelessWidget {
   final VoidCallback onSignedOut;
 
   const _NavContent({
+    required this.mode,
     required this.selectedSection,
+    required this.sections,
     required this.compact,
     required this.apiBaseUrl,
     required this.accessToken,
@@ -928,10 +1006,10 @@ class _NavContent extends StatelessWidget {
         _RechargePanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
       _NavSection.redeemManage => <Widget>[
-        _RedeemManagePanel(apiBaseUrl: apiBaseUrl),
+        _RedeemManagePanel(apiBaseUrl: apiBaseUrl, adminToken: accessToken),
       ],
       _NavSection.redeemRecords => <Widget>[
-        _RedeemRecordsPanel(apiBaseUrl: apiBaseUrl),
+        _RedeemRecordsPanel(apiBaseUrl: apiBaseUrl, adminToken: accessToken),
       ],
       _NavSection.convert => <Widget>[
         _ConvertPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
@@ -943,7 +1021,10 @@ class _NavContent extends StatelessWidget {
         RechargeRecordsPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
       _NavSection.feedback => <Widget>[
-        FeedbackPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+        if (mode == DocEngineAppMode.admin)
+          AdminFeedbackPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken)
+        else
+          FeedbackPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
     };
 
@@ -954,6 +1035,7 @@ class _NavContent extends StatelessWidget {
           if (compact) ...[
             _CompactSectionTabs(
               selectedSection: selectedSection,
+              sections: sections,
               onSectionChanged: onSectionChanged,
             ),
             const SizedBox(height: AppSpacing.lg),
@@ -967,10 +1049,12 @@ class _NavContent extends StatelessWidget {
 
 class _CompactSectionTabs extends StatelessWidget {
   final _NavSection selectedSection;
+  final List<_NavSection> sections;
   final ValueChanged<_NavSection> onSectionChanged;
 
   const _CompactSectionTabs({
     required this.selectedSection,
+    required this.sections,
     required this.onSectionChanged,
   });
 
@@ -980,7 +1064,7 @@ class _CompactSectionTabs extends StatelessWidget {
     return SegmentedButton<_NavSection>(
       showSelectedIcon: false,
       segments: [
-        for (final section in _NavSection.values)
+        for (final section in sections)
           ButtonSegment<_NavSection>(
             value: section,
             icon: Icon(section.icon, size: 16),
@@ -1358,8 +1442,9 @@ class _RechargePanelState extends State<_RechargePanel> {
 
 class _RedeemManagePanel extends StatefulWidget {
   final String apiBaseUrl;
+  final String? adminToken;
 
-  const _RedeemManagePanel({required this.apiBaseUrl});
+  const _RedeemManagePanel({required this.apiBaseUrl, this.adminToken});
 
   @override
   State<_RedeemManagePanel> createState() => _RedeemManagePanelState();
@@ -1382,6 +1467,11 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
   RedeemCodeBatch? _batch;
   String? _status;
   bool _busy = false;
+
+  String get _adminToken =>
+      widget.adminToken?.trim().isNotEmpty == true
+          ? widget.adminToken!.trim()
+          : _adminTokenController.text.trim();
 
   @override
   void dispose() {
@@ -1408,7 +1498,7 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
       final batch = await client.createRedeemCodeBatch(
-        adminToken: _adminTokenController.text.trim(),
+        adminToken: _adminToken,
         packageId: _packageId,
         quantity: quantity,
         channel: _channelController.text,
@@ -1441,7 +1531,7 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
       final bytes = await client.exportRedeemCodeBatch(
-        adminToken: _adminTokenController.text.trim(),
+        adminToken: _adminToken,
         batchId: batch.batchId,
       );
       downloadBlob(
@@ -1535,16 +1625,18 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
           ],
         ),
         const SizedBox(height: AppSpacing.md),
-        TextField(
-          controller: _adminTokenController,
-          enabled: !_busy,
-          obscureText: true,
-          decoration: InputDecoration(
-            labelText: strings.t('redeemManage.adminToken'),
-            prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+        if (widget.adminToken == null) ...[
+          TextField(
+            controller: _adminTokenController,
+            enabled: !_busy,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: strings.t('redeemManage.adminToken'),
+              prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
+        ],
         TextField(
           controller: _noteController,
           enabled: !_busy,
@@ -1608,8 +1700,9 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
 
 class _RedeemRecordsPanel extends StatefulWidget {
   final String apiBaseUrl;
+  final String? adminToken;
 
-  const _RedeemRecordsPanel({required this.apiBaseUrl});
+  const _RedeemRecordsPanel({required this.apiBaseUrl, this.adminToken});
 
   @override
   State<_RedeemRecordsPanel> createState() => _RedeemRecordsPanelState();
@@ -1624,6 +1717,11 @@ class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
   RedeemCodeBatch? _selectedBatch;
   String? _status;
   bool _busy = false;
+
+  String get _adminToken =>
+      widget.adminToken?.trim().isNotEmpty == true
+          ? widget.adminToken!.trim()
+          : _adminTokenController.text.trim();
 
   @override
   void initState() {
@@ -1646,7 +1744,7 @@ class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
       final batches = await client.redeemCodeBatches(
-        adminToken: _adminTokenController.text.trim(),
+        adminToken: _adminToken,
       );
       if (!mounted) return;
       setState(() {
@@ -1673,7 +1771,7 @@ class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
       final detail = await client.redeemCodeBatchDetail(
-        adminToken: _adminTokenController.text.trim(),
+        adminToken: _adminToken,
         batchId: batch.batchId,
       );
       if (!mounted) return;
@@ -1700,7 +1798,7 @@ class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
     try {
       final client = CommercialApiClient(widget.apiBaseUrl);
       final bytes = await client.exportRedeemCodeBatch(
-        adminToken: _adminTokenController.text.trim(),
+        adminToken: _adminToken,
         batchId: batch.batchId,
       );
       downloadBlob(
@@ -1731,16 +1829,18 @@ class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
           description: strings.t('redeemRecords.description'),
         ),
         const SizedBox(height: AppSpacing.lg),
-        TextField(
-          controller: _adminTokenController,
-          enabled: !_busy,
-          obscureText: true,
-          decoration: InputDecoration(
-            labelText: strings.t('redeemManage.adminToken'),
-            prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+        if (widget.adminToken == null) ...[
+          TextField(
+            controller: _adminTokenController,
+            enabled: !_busy,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: strings.t('redeemManage.adminToken'),
+              prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+            ),
           ),
-        ),
-        const SizedBox(height: AppSpacing.md),
+          const SizedBox(height: AppSpacing.md),
+        ],
         Wrap(
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,

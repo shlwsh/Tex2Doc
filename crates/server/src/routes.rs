@@ -3,13 +3,14 @@
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch, post};
+use axum::routing::{get, get_service, patch, post};
 use axum::{extract::Request, Json, Router};
 use mime::Mime;
 use serde::Deserialize;
 use serde_json::json;
 use std::io::Cursor;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
@@ -51,6 +52,7 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/api/v1/auth/refresh", post(auth_refresh))
         .route("/v1/me", get(me))
         .route("/api/v1/me", get(me))
+        .route("/admin/v1/me", get(admin_me))
         .route("/v1/usage", get(usage))
         .route("/api/v1/usage", get(usage))
         .route("/v1/plans", get(plans))
@@ -120,6 +122,7 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/admin/v1/feedback/threads/:id/messages", post(admin_reply_feedback_message))
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
+        .merge(static_router())
         .with_state(state)
         .layer(
             CorsLayer::new()
@@ -128,6 +131,31 @@ pub fn router_with_state(state: ServerState) -> Router {
                 .allow_headers(Any),
         )
         .layer(tower_http::limit::RequestBodyLimitLayer::new(MAX_BODY))
+}
+
+fn static_router() -> Router<ServerState> {
+    let static_root = std::env::var("TEX2DOC_STATIC_DIR")
+        .unwrap_or_else(|_| "apps/rust-service/static".to_string());
+    let home_dir = format!("{static_root}/home");
+    let user_dir = format!("{static_root}/user");
+    let admin_dir = format!("{static_root}/admin");
+
+    Router::new()
+        .route_service(
+            "/",
+            get_service(ServeFile::new(format!("{home_dir}/index.html"))),
+        )
+        .nest_service(
+            "/app",
+            ServeDir::new(&user_dir)
+                .not_found_service(ServeFile::new(format!("{user_dir}/index.html"))),
+        )
+        .nest_service(
+            "/admin",
+            ServeDir::new(&admin_dir)
+                .not_found_service(ServeFile::new(format!("{admin_dir}/index.html"))),
+        )
+        .nest_service("/assets", ServeDir::new(format!("{static_root}/assets")))
 }
 
 async fn health() -> Json<serde_json::Value> {
@@ -249,6 +277,17 @@ async fn me(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_session(&state, &headers).await?;
     Ok(Json(app_user_json(&session)))
+}
+
+async fn admin_me(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    Ok(Json(json!({
+        "user": app_user_json(&admin),
+        "permissions": admin_permissions(&admin.role),
+    })))
 }
 
 async fn usage(
@@ -714,14 +753,15 @@ async fn auth_response(
     display_name: Option<String>,
     password: Option<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let user = state
-        .upsert_user(
-            &email,
-            display_name.as_deref(),
-            password.as_deref().unwrap_or("secret"),
-        )
-        .await
-        .map_err(db_error)?;
+    let password_value = password.as_deref().unwrap_or("secret");
+    let user = if email == "admin@example.com" && password_value == "demo-admin" {
+        state.ensure_demo_admin().await.map_err(db_error)?
+    } else {
+        state
+            .upsert_user(&email, display_name.as_deref(), password_value)
+            .await
+            .map_err(db_error)?
+    };
     let access_token = state
         .issue_token(&user.id, "demo-access")
         .await
@@ -771,11 +811,18 @@ async fn require_admin_session(
         .ok_or_else(|| ApiError::Unauthorized("expected Bearer token".to_string()))?
         .trim();
     if token.starts_with("admin-") || token == "demo-admin" {
-        state.ensure_demo_admin().await.map_err(db_error)
+        return state.ensure_demo_admin().await.map_err(db_error);
+    }
+
+    let user = state
+        .user_for_token(token)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::Unauthorized("invalid admin bearer token".to_string()))?;
+    if is_admin_role(&user.role) {
+        Ok(user)
     } else {
-        Err(ApiError::Unauthorized(
-            "unsupported admin token for preview server".to_string(),
-        ))
+        Err(ApiError::Unauthorized("admin role required".to_string()))
     }
 }
 
@@ -785,7 +832,21 @@ fn app_user_json(user: &AppUser) -> serde_json::Value {
         "email": user.email,
         "display_name": user.display_name,
         "plan_id": user.plan_id,
+        "role": user.role,
     })
+}
+
+fn is_admin_role(role: &str) -> bool {
+    matches!(role, "admin" | "operator" | "support")
+}
+
+fn admin_permissions(role: &str) -> Vec<&'static str> {
+    match role {
+        "admin" => vec!["dashboard", "users", "billing", "redeem", "feedback", "releases", "audit"],
+        "operator" => vec!["dashboard", "billing", "redeem", "feedback", "releases"],
+        "support" => vec!["dashboard", "feedback"],
+        _ => Vec::new(),
+    }
 }
 
 fn db_error(error: sqlx::Error) -> ApiError {
