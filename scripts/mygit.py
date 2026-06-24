@@ -151,6 +151,14 @@ def load_config(workspace: str, script_dir: str) -> dict[str, str]:
             for key, value in load_env_file(extra_path).items():
                 if key in ("GITHUB_TOKEN", "GH_TOKEN") or key not in config:
                     config[key] = value
+    for key in (
+        "MYGIT_NO_AI",
+        "MYGIT_FORCE_AI",
+        "MYGIT_FAST_RULES",
+        "MYGIT_PREFER_OLLAMA",
+    ):
+        if key in os.environ:
+            config[key] = os.environ[key]
     return config
 
 
