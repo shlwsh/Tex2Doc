@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::db_store::{AppUser, BillingPlanRecord, DbStore};
+use crate::db_store::{AppUser, BillingPlanRecord, DbStore, ManualOrderRecord};
 use crate::excel_export;
 use crate::feedback_service::FeedbackStore;
 use crate::file_storage::FileStorage;
@@ -239,17 +239,21 @@ impl ServerState {
         })
     }
 
-    pub async fn upsert_user(
+    pub async fn register_user(
         &self,
         email: &str,
         display_name: Option<&str>,
         password: &str,
     ) -> Result<AppUser, sqlx::Error> {
-        self.db.upsert_user(email, display_name, password).await
+        self.db.register_user(email, display_name, password).await
     }
 
-    pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
-        self.db.ensure_demo_admin().await
+    pub async fn login_user(
+        &self,
+        email: &str,
+        password: &str,
+    ) -> Result<Option<AppUser>, sqlx::Error> {
+        self.db.login_user(email, password).await
     }
 
     pub async fn issue_token(&self, user_id: &str, prefix: &str) -> Result<String, sqlx::Error> {
@@ -412,12 +416,124 @@ impl ServerState {
                 package_id,
                 quantity,
                 amount_cents,
-                "paid_mock",
-                "mock-pay",
-                format!("mock_trade_{}", Uuid::new_v4().simple()),
+                "pending_manual",
+                "manual-request",
+                format!("manual_request_{}", Uuid::new_v4().simple()),
             )
             .await
             .map_err(|e| e.to_string())
+    }
+
+    pub async fn create_manual_order(
+        &self,
+        user_id: String,
+        recharge_type: String,
+        package_id: String,
+        quantity: u64,
+        amount_cents: u64,
+        operator_id: String,
+        payment_note: Option<String>,
+    ) -> Result<ManualOrderRecord, String> {
+        self.db
+            .create_manual_order(
+                user_id,
+                recharge_type,
+                package_id,
+                quantity,
+                amount_cents,
+                operator_id,
+                payment_note,
+            )
+            .await
+            .map_err(|e| e.to_string())
+    }
+
+    pub async fn list_manual_orders(&self) -> Result<Vec<ManualOrderRecord>, sqlx::Error> {
+        self.db.list_manual_orders().await
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+        self.db.list_users().await
+    }
+
+    pub async fn list_usage_ledger(&self) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+        self.db.list_usage_ledger().await
+    }
+
+    pub async fn create_waitlist_lead(
+        &self,
+        email: String,
+        identity: Option<String>,
+        paper_type: Option<String>,
+        current_tool: Option<String>,
+        pain_point: Option<String>,
+        paid_intent: Option<String>,
+    ) -> Result<serde_json::Value, sqlx::Error> {
+        self.db
+            .create_waitlist_lead(
+                email,
+                identity,
+                paper_type,
+                current_tool,
+                pain_point,
+                paid_intent,
+            )
+            .await
+    }
+
+    pub async fn list_waitlist_leads(&self) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+        self.db.list_waitlist_leads().await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn publish_release(
+        &self,
+        actor: &str,
+        channel: String,
+        platform: String,
+        arch: String,
+        version: String,
+        download_url: String,
+        sha256: String,
+        signature: Option<String>,
+        file_size_bytes: u64,
+        release_title: Option<String>,
+        release_notes: Option<String>,
+        strategy_type: Option<String>,
+    ) -> Result<serde_json::Value, sqlx::Error> {
+        self.db
+            .publish_release(
+                actor,
+                channel,
+                platform,
+                arch,
+                version,
+                download_url,
+                sha256,
+                signature,
+                file_size_bytes,
+                release_title,
+                release_notes,
+                strategy_type,
+            )
+            .await
+    }
+
+    pub async fn list_release_manifests(&self) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+        self.db.list_release_manifests().await
+    }
+
+    pub async fn rollback_release(
+        &self,
+        actor: &str,
+        release_id: &str,
+        reason: Option<String>,
+    ) -> Result<serde_json::Value, sqlx::Error> {
+        self.db.rollback_release(actor, release_id, reason).await
+    }
+
+    pub async fn list_release_audit(&self) -> Result<Vec<serde_json::Value>, sqlx::Error> {
+        self.db.list_release_audit().await
     }
 
     pub async fn create_redeem_batch(

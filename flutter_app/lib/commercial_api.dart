@@ -93,7 +93,14 @@ class CommercialApiClient {
       _adminUri('dashboard'),
       headers: _headers(accessToken: accessToken),
     );
-    return AdminDashboardSummary.fromJson(_decode(response) as Map<String, dynamic>);
+    return AdminDashboardSummary.fromJson(
+      _decode(response) as Map<String, dynamic>,
+    );
+  }
+
+  Future<Map<String, dynamic>> downloads() async {
+    return _decode(await _http.get(baseUri.resolve('downloads')))
+        as Map<String, dynamic>;
   }
 
   Future<BillingSession> checkout({
@@ -143,6 +150,25 @@ class CommercialApiClient {
     return (value as List<dynamic>)
         .map((item) => RechargeRecord.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
+  }
+
+  Future<Map<String, dynamic>> createWaitlistLead({
+    required String email,
+    String? displayName,
+    String? company,
+    String? scenario,
+    String? source,
+  }) async {
+    return _postJson('waitlist', {
+      'email': email,
+      if (displayName != null && displayName.trim().isNotEmpty)
+        'display_name': displayName.trim(),
+      if (company != null && company.trim().isNotEmpty)
+        'company': company.trim(),
+      if (scenario != null && scenario.trim().isNotEmpty)
+        'scenario': scenario.trim(),
+      if (source != null && source.trim().isNotEmpty) 'source': source.trim(),
+    });
   }
 
   Future<RedeemCodeOptions> redeemCodeOptions(String accessToken) async {
@@ -364,12 +390,150 @@ class CommercialApiClient {
     final response = await _http.post(
       _adminUri('feedback/threads/$threadId/messages'),
       headers: _headers(accessToken: adminToken),
-      body: jsonEncode({
-        'content': content,
-        'is_internal': isInternal,
-      }),
+      body: jsonEncode({'content': content, 'is_internal': isInternal}),
     );
     return FeedbackMessage.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<List<Map<String, dynamic>>> adminUsers(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('users'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminUsageLedger(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('usage-ledger'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminManualOrders(
+    String adminToken,
+  ) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('manual-orders'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> adminCreateManualOrder({
+    required String adminToken,
+    required String userId,
+    required String rechargeType,
+    required String packageId,
+    required int quantity,
+    required int amountCents,
+    String currency = 'CNY',
+    String? note,
+  }) async {
+    final response = await _http.post(
+      _adminUri('manual-orders'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        'user_id': userId,
+        'recharge_type': rechargeType,
+        'package_id': packageId,
+        'quantity': quantity,
+        'amount_cents': amountCents,
+        'currency': currency,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> adminWaitlist(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('waitlist'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminReleases(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('releases'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> adminPublishRelease({
+    required String adminToken,
+    required String channel,
+    required String platform,
+    required String version,
+    required String downloadUrl,
+    required String sha256,
+    String arch = 'x64',
+    String? minAppVersion,
+    String? signature,
+    String? signatureAlgorithm,
+    int? fileSizeBytes,
+    String? releaseTitle,
+    bool isPrerelease = false,
+    Map<String, dynamic>? strategy,
+  }) async {
+    final response = await _http.post(
+      _adminUri('releases'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        'channel': channel,
+        'platform': platform,
+        'arch': arch,
+        'version': version,
+        'download_url': downloadUrl,
+        'sha256': sha256,
+        if (minAppVersion != null && minAppVersion.trim().isNotEmpty)
+          'min_app_version': minAppVersion.trim(),
+        if (signature != null && signature.trim().isNotEmpty)
+          'signature': signature.trim(),
+        if (signatureAlgorithm != null && signatureAlgorithm.trim().isNotEmpty)
+          'signature_algorithm': signatureAlgorithm.trim(),
+        if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
+        if (releaseTitle != null && releaseTitle.trim().isNotEmpty)
+          'release_title': releaseTitle.trim(),
+        'is_prerelease': isPrerelease,
+        if (strategy != null) 'strategy': strategy,
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> adminRollbackRelease({
+    required String adminToken,
+    required String releaseId,
+    String? reason,
+  }) async {
+    final response = await _http.post(
+      _adminUri('releases/$releaseId/rollback'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> adminReleaseAudit(
+    String adminToken,
+  ) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('release-audit'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
   }
 
   Future<FeedbackThreadDetail> feedbackThread(
@@ -413,7 +577,11 @@ class CommercialApiClient {
       if (parentMessageId != null) 'parent_message_id': parentMessageId,
     };
     return FeedbackMessage.fromJson(
-      await _postJson('feedback/threads/$threadId/messages', body, accessToken: accessToken),
+      await _postJson(
+        'feedback/threads/$threadId/messages',
+        body,
+        accessToken: accessToken,
+      ),
     );
   }
 
@@ -497,6 +665,13 @@ class CommercialApiClient {
       return <String, dynamic>{};
     }
     return jsonDecode(text);
+  }
+
+  List<Map<String, dynamic>> _decodeMapList(http.Response response) {
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList(growable: false);
   }
 
   static Uri _normalizeBaseUrl(String value) {
@@ -708,7 +883,7 @@ class RechargeOptions {
     final date = json['date'] as Map<String, dynamic>? ?? const {};
     return RechargeOptions(
       currency: json['currency'] as String? ?? 'CNY',
-      provider: json['provider'] as String? ?? 'mock-pay',
+      provider: json['provider'] as String? ?? 'manual-order',
       countPackages: ((count['packages'] as List<dynamic>?) ?? const [])
           .map((item) => RechargePackage.fromJson(item as Map<String, dynamic>))
           .toList(growable: false),
@@ -992,13 +1167,43 @@ class RedeemCodeBatch {
 class BillingSession {
   final String url;
   final String expiresAt;
+  final String provider;
+  final String phase;
+  final String status;
+  final String? message;
+  final String? planId;
+  final String? userId;
+  final String? returnUrl;
+  final String? successUrl;
+  final String? cancelUrl;
 
-  BillingSession({required this.url, required this.expiresAt});
+  BillingSession({
+    required this.url,
+    required this.expiresAt,
+    required this.provider,
+    required this.phase,
+    required this.status,
+    this.message,
+    this.planId,
+    this.userId,
+    this.returnUrl,
+    this.successUrl,
+    this.cancelUrl,
+  });
 
   factory BillingSession.fromJson(Map<String, dynamic> json) {
     return BillingSession(
-      url: json['url'] as String,
-      expiresAt: json['expires_at'] as String,
+      url: json['url'] as String? ?? '',
+      expiresAt: json['expires_at'] as String? ?? '',
+      provider: json['provider'] as String? ?? 'manual-order',
+      phase: json['phase'] as String? ?? 'phase_a',
+      status: json['status'] as String? ?? 'pending_manual',
+      message: json['message'] as String?,
+      planId: json['plan_id'] as String?,
+      userId: json['user_id'] as String?,
+      returnUrl: json['return_url'] as String?,
+      successUrl: json['success_url'] as String?,
+      cancelUrl: json['cancel_url'] as String?,
     );
   }
 }
@@ -1087,6 +1292,7 @@ class ConversionJob {
       status == ConversionStatus.expired;
 
   factory ConversionJob.fromJson(Map<String, dynamic> json) {
+    final storage = json['storage_info'] ?? json['storage'];
     return ConversionJob(
       jobId: json['job_id'] as String,
       uploadId: json['upload_id'] as String?,
@@ -1101,8 +1307,8 @@ class ConversionJob {
       reportReady: json['report_ready'] as bool,
       errorCode: json['error_code'] as String?,
       error: json['error'] as String?,
-      storageInfo: (json['storage_info'] as Map<String, dynamic>?) != null
-          ? ConversionStorageInfo.fromJson(json['storage_info'] as Map<String, dynamic>)
+      storageInfo: storage is Map<String, dynamic>
+          ? ConversionStorageInfo.fromJson(storage)
           : null,
     );
   }
@@ -1198,17 +1404,23 @@ class FeedbackThread {
       messageCount: (json['message_count'] as num?)?.toInt() ?? 0,
       latestMessageAt: json['latest_message_at'] as String?,
       createdAt: json['created_at'] as String,
-      updatedAt: (json['updated_at'] as String?) ?? json['created_at'] as String,
+      updatedAt:
+          (json['updated_at'] as String?) ?? json['created_at'] as String,
     );
   }
 
   String get statusLabel {
     switch (status) {
-      case 'open': return 'Open';
-      case 'in_progress': return 'In Progress';
-      case 'resolved': return 'Resolved';
-      case 'closed': return 'Closed';
-      default: return status;
+      case 'open':
+        return 'Open';
+      case 'in_progress':
+        return 'In Progress';
+      case 'resolved':
+        return 'Resolved';
+      case 'closed':
+        return 'Closed';
+      default:
+        return status;
     }
   }
 
@@ -1266,10 +1478,14 @@ class FeedbackMessage {
 
   String get senderLabel {
     switch (senderType) {
-      case 'user': return 'You';
-      case 'admin': return 'Support';
-      case 'system': return 'System';
-      default: return senderType;
+      case 'user':
+        return 'You';
+      case 'admin':
+        return 'Support';
+      case 'system':
+        return 'System';
+      default:
+        return senderType;
     }
   }
 
@@ -1329,6 +1545,10 @@ class FileMeta {
     );
   }
 
+  factory FileMeta.fromKey(String? key, int? bytes) {
+    return FileMeta(key: key ?? '', bytes: bytes);
+  }
+
   String get sizeLabel {
     if (bytes == null) return '';
     if (bytes! < 1024) return '$bytes B';
@@ -1343,17 +1563,41 @@ class ConversionStorageInfo {
   final FileMeta? resultDocx;
   final FileMeta? conversionLog;
 
-  ConversionStorageInfo({this.path, this.sourceZip, this.resultDocx, this.conversionLog});
+  ConversionStorageInfo({
+    this.path,
+    this.sourceZip,
+    this.resultDocx,
+    this.conversionLog,
+  });
 
   factory ConversionStorageInfo.fromJson(Map<String, dynamic> json) {
+    final sourceZipKey = json['source_zip_key'] as String?;
+    final resultDocxKey = json['result_docx_key'] as String?;
+    final conversionLogKey =
+        (json['conversion_log_key'] ?? json['result_log_key']) as String?;
     return ConversionStorageInfo(
       path: json['path'] as String?,
       sourceZip: (json['source_zip'] as Map<String, dynamic>?) != null
-          ? FileMeta.fromJson(json['source_zip'] as Map<String, dynamic>) : null,
+          ? FileMeta.fromJson(json['source_zip'] as Map<String, dynamic>)
+          : sourceZipKey != null
+          ? FileMeta.fromKey(sourceZipKey, (json['zip_bytes'] as num?)?.toInt())
+          : null,
       resultDocx: (json['result_docx'] as Map<String, dynamic>?) != null
-          ? FileMeta.fromJson(json['result_docx'] as Map<String, dynamic>) : null,
+          ? FileMeta.fromJson(json['result_docx'] as Map<String, dynamic>)
+          : resultDocxKey != null
+          ? FileMeta.fromKey(
+              resultDocxKey,
+              (json['docx_bytes'] as num?)?.toInt(),
+            )
+          : null,
       conversionLog: (json['conversion_log'] as Map<String, dynamic>?) != null
-          ? FileMeta.fromJson(json['conversion_log'] as Map<String, dynamic>) : null,
+          ? FileMeta.fromJson(json['conversion_log'] as Map<String, dynamic>)
+          : conversionLogKey != null
+          ? FileMeta.fromKey(
+              conversionLogKey,
+              (json['log_bytes'] as num?)?.toInt(),
+            )
+          : null,
     );
   }
 

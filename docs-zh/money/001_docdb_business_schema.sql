@@ -12,9 +12,9 @@ CREATE TABLE IF NOT EXISTS app_users (
     password_hash TEXT NOT NULL,
     display_name TEXT,
     role TEXT NOT NULL DEFAULT 'user'
-        CHECK (role IN ('user', 'admin')),
+        CHECK (role IN ('user', 'admin', 'operator', 'support')),
     status TEXT NOT NULL DEFAULT 'active'
-        CHECK (status IN ('active', 'locked', 'deleted')),
+        CHECK (status IN ('active', 'locked', 'disabled', 'pending', 'deleted')),
     default_plan_id TEXT NOT NULL DEFAULT 'preview',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -22,7 +22,21 @@ CREATE TABLE IF NOT EXISTS app_users (
 
 ALTER TABLE app_users
     ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'
-    CHECK (role IN ('user', 'admin'));
+    CHECK (role IN ('user', 'admin', 'operator', 'support'));
+
+ALTER TABLE app_users
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'active',
+    ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+
+ALTER TABLE app_users
+    DROP CONSTRAINT IF EXISTS app_users_role_check,
+    DROP CONSTRAINT IF EXISTS app_users_status_check;
+
+ALTER TABLE app_users
+    ADD CONSTRAINT app_users_role_check
+    CHECK (role IN ('user', 'admin', 'operator', 'support')),
+    ADD CONSTRAINT app_users_status_check
+    CHECK (status IN ('active', 'locked', 'disabled', 'pending', 'deleted'));
 
 CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -155,15 +169,50 @@ CREATE TABLE IF NOT EXISTS recharges (
     quantity INTEGER NOT NULL CHECK (quantity > 0),
     amount_cents INTEGER NOT NULL DEFAULT 0,
     currency TEXT NOT NULL DEFAULT 'CNY',
-    status TEXT NOT NULL CHECK (status IN ('paid', 'paid_mock', 'refunded', 'voided')),
+    status TEXT NOT NULL CHECK (status IN ('pending_manual', 'paid', 'refunded', 'voided')),
     provider TEXT NOT NULL,
     provider_trade_id TEXT NOT NULL UNIQUE,
     metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+ALTER TABLE recharges
+    DROP CONSTRAINT IF EXISTS recharges_status_check;
+
+UPDATE recharges
+SET status = 'paid'
+WHERE status = 'paid_mock';
+
+ALTER TABLE recharges
+    ADD CONSTRAINT recharges_status_check
+    CHECK (status IN ('pending_manual', 'paid', 'refunded', 'voided'));
+
 CREATE INDEX IF NOT EXISTS idx_recharges_user_created
     ON recharges(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS manual_orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    recharge_id UUID REFERENCES recharges(id) ON DELETE SET NULL,
+    recharge_type TEXT NOT NULL CHECK (recharge_type IN ('count', 'date')),
+    package_id TEXT NOT NULL,
+    quantity INTEGER NOT NULL CHECK (quantity > 0),
+    amount_cents INTEGER NOT NULL DEFAULT 0 CHECK (amount_cents >= 0),
+    currency TEXT NOT NULL DEFAULT 'CNY',
+    status TEXT NOT NULL DEFAULT 'paid'
+        CHECK (status IN ('pending', 'paid', 'refunded', 'voided')),
+    operator_id UUID REFERENCES app_users(id) ON DELETE SET NULL,
+    payment_note TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_manual_orders_user_created
+    ON manual_orders(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_manual_orders_status_created
+    ON manual_orders(status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS redeem_code_batches (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -312,6 +361,11 @@ CREATE TABLE IF NOT EXISTS usage_ledger (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_ledger_job_event_unique
+    ON usage_ledger(conversion_job_id, event_type)
+    WHERE conversion_job_id IS NOT NULL
+      AND event_type IN ('reserve', 'commit', 'refund');
+
 CREATE INDEX IF NOT EXISTS idx_usage_ledger_user_created
     ON usage_ledger(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_usage_ledger_job
@@ -320,17 +374,115 @@ CREATE INDEX IF NOT EXISTS idx_usage_ledger_job
 CREATE TABLE IF NOT EXISTS release_manifests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     channel TEXT NOT NULL CHECK (channel IN ('stable', 'beta', 'dev')),
-    platform TEXT NOT NULL CHECK (platform IN ('windows', 'macos', 'linux')),
+    platform TEXT NOT NULL CHECK (platform IN ('windows', 'macos', 'linux', 'web', 'android', 'ios')),
     arch TEXT NOT NULL DEFAULT 'x64',
     version TEXT NOT NULL,
     download_url TEXT NOT NULL,
     sha256 TEXT NOT NULL,
     signature TEXT NOT NULL,
+    signature_algorithm TEXT NOT NULL DEFAULT 'sha256',
+    file_size_bytes BIGINT NOT NULL DEFAULT 0,
+    release_title TEXT NOT NULL DEFAULT '',
     release_notes TEXT NOT NULL DEFAULT '',
+    published_by TEXT NOT NULL DEFAULT 'system',
+    is_prerelease BOOLEAN NOT NULL DEFAULT false,
     published_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     active BOOLEAN NOT NULL DEFAULT true,
+    deprecated_at TIMESTAMPTZ,
+    deprecated_by TEXT,
+    deprecation_reason TEXT,
     UNIQUE (channel, platform, arch, version)
 );
+
+ALTER TABLE release_manifests
+    DROP CONSTRAINT IF EXISTS release_manifests_platform_check;
+
+ALTER TABLE release_manifests
+    ADD CONSTRAINT release_manifests_platform_check
+    CHECK (platform IN ('windows', 'macos', 'linux', 'web', 'android', 'ios'));
+
+ALTER TABLE release_manifests
+    ADD COLUMN IF NOT EXISTS signature_algorithm TEXT NOT NULL DEFAULT 'sha256',
+    ADD COLUMN IF NOT EXISTS file_size_bytes BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS release_title TEXT NOT NULL DEFAULT '',
+    ADD COLUMN IF NOT EXISTS published_by TEXT NOT NULL DEFAULT 'system',
+    ADD COLUMN IF NOT EXISTS is_prerelease BOOLEAN NOT NULL DEFAULT false,
+    ADD COLUMN IF NOT EXISTS deprecated_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS deprecated_by TEXT,
+    ADD COLUMN IF NOT EXISTS deprecation_reason TEXT;
+
+CREATE TABLE IF NOT EXISTS release_strategies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    release_id UUID NOT NULL REFERENCES release_manifests(id) ON DELETE CASCADE,
+    strategy_type TEXT NOT NULL DEFAULT 'recommended'
+        CHECK (strategy_type IN ('optional', 'recommended', 'force', 'grayroll')),
+    min_required_version TEXT,
+    force_deadline_at TIMESTAMPTZ,
+    block_if_outdated BOOLEAN NOT NULL DEFAULT false,
+    rollout_percentage INTEGER NOT NULL DEFAULT 100 CHECK (rollout_percentage BETWEEN 0 AND 100),
+    prompt_title TEXT NOT NULL DEFAULT '',
+    prompt_message TEXT NOT NULL DEFAULT '',
+    prompt_dismissable BOOLEAN NOT NULL DEFAULT true,
+    is_active BOOLEAN NOT NULL DEFAULT true,
+    created_by TEXT NOT NULL DEFAULT 'system',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE (release_id, strategy_type)
+);
+
+CREATE TABLE IF NOT EXISTS release_rollout_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    release_id UUID NOT NULL REFERENCES release_manifests(id) ON DELETE CASCADE,
+    strategy_id UUID REFERENCES release_strategies(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL,
+    previous_percentage INTEGER,
+    new_percentage INTEGER,
+    event_reason TEXT,
+    triggered_by TEXT NOT NULL DEFAULT 'system',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS release_audit_log (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    target_release_id UUID REFERENCES release_manifests(id) ON DELETE SET NULL,
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_release_audit_created
+    ON release_audit_log(created_at DESC);
+
+CREATE TABLE IF NOT EXISTS app_update_preferences (
+    user_id TEXT NOT NULL DEFAULT '',
+    device_id TEXT NOT NULL,
+    auto_update BOOLEAN NOT NULL DEFAULT true,
+    update_channel TEXT NOT NULL DEFAULT 'stable'
+        CHECK (update_channel IN ('stable', 'beta', 'dev')),
+    platform TEXT NOT NULL,
+    app_version TEXT NOT NULL,
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS waitlist_leads (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email TEXT NOT NULL,
+    identity TEXT,
+    paper_type TEXT,
+    current_tool TEXT,
+    pain_point TEXT,
+    paid_intent TEXT,
+    status TEXT NOT NULL DEFAULT 'new'
+        CHECK (status IN ('new', 'contacted', 'invited', 'converted', 'closed')),
+    follow_up_note TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_waitlist_leads_status_created
+    ON waitlist_leads(status, created_at DESC);
 
 INSERT INTO billing_plans (id, name, currency, price_cents, monthly_conversions, storage_bytes, features)
 VALUES

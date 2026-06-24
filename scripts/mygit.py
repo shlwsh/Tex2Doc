@@ -403,8 +403,7 @@ def call_ollama_api(
     OpenAI 兼容层不接受 think=False 参数）。本函数改走 Ollama 原生
     /api/chat 端点并设置 think=False，从而让本地模型真正输出 commit 信息。
 
-    本机调用不走代理；超时放宽到 300s（首次加载模型约 10-30s，
-    在 8B Q4 模型 + 大 diff 场景下前向推理可能再吃 30-120s）。
+    本机调用不走代理；超时默认 300s，可由 payload["timeout"] 覆盖。
     """
     # 把 OpenAI 风格的 url 改写到原生 /api/chat
     native_url = url.replace("/v1/chat/completions", "/api/chat")
@@ -426,17 +425,21 @@ def call_ollama_api(
         resp = session.post(
             native_url,
             json=native_payload,
-            timeout=300,
+            timeout=int(payload.get("timeout", 300)),
             proxies={"http": None, "https": None},
         )
         resp.raise_for_status()
-    except requests.RequestException as exc:
+    except (requests.RequestException, TimeoutError, OSError) as exc:
         raise RuntimeError(f"Ollama 请求失败: {exc}") from exc
 
     # 把原生响应包装成 OpenAI 兼容的 choices 形式，让上游 strip_markdown_fence
     # 逻辑无需改动
     data = resp.json()
     message = data.get("message") or {}
+    content = message.get("content", "")
+    if not content.strip():
+        raise RuntimeError("Ollama 返回内容为空")
+
     class _Shim:
         def __init__(self, d):
             self._d = d
@@ -446,7 +449,7 @@ def call_ollama_api(
                     {
                         "message": {
                             "role": message.get("role", "assistant"),
-                            "content": message.get("content", ""),
+                            "content": content,
                         }
                     }
                 ]
@@ -977,6 +980,8 @@ def main() -> None:
                     "max_tokens": max_tokens,
                     "temperature": 0.7,
                 }
+                if backend_label == "Ollama":
+                    payload["timeout"] = int(config.get("OLLAMA_TIMEOUT_SECONDS", "300"))
                 session = requests.Session()
                 if backend_label == "Ollama":
                     resp = call_ollama_api(session, backend_url, payload)
@@ -991,7 +996,9 @@ def main() -> None:
                 )
                 source_label = f"AI 生成（{backend_label}）"
                 break
-            except Exception as exc:
+            except (KeyboardInterrupt, SystemExit):
+                raise
+            except BaseException as exc:
                 print(f"⚠️  {backend_label} 生成失败 ({exc})，{'切换到下一后端' if len(backends) > 1 else '降级到托底'}...")
                 continue
 

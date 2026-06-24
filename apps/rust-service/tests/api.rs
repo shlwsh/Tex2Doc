@@ -34,6 +34,8 @@ async fn run_server(listener: TcpListener, mut shutdown: tokio::sync::oneshot::R
 
 /// 启动一个可关闭的 server 测试装置。
 async fn spawn_test_server() -> (SocketAddr, tokio::sync::oneshot::Sender<()>) {
+    std::env::set_var("TEX2DOC_BOOTSTRAP_ADMIN_EMAIL", "admin@example.com");
+    std::env::set_var("TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD", "admin-secret");
     let listener = TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind ephemeral port");
@@ -88,6 +90,23 @@ async fn register_preview_token(client: &reqwest::Client, addr: SocketAddr) -> S
     auth["access_token"].as_str().unwrap().to_string()
 }
 
+async fn admin_token(client: &reqwest::Client, addr: SocketAddr) -> String {
+    let auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/login"))
+        .json(&serde_json::json!({
+            "email": "admin@example.com",
+            "password": "admin-secret"
+        }))
+        .send()
+        .await
+        .expect("send admin login")
+        .json()
+        .await
+        .expect("admin login json");
+    assert_eq!(auth["user"]["role"], "admin");
+    auth["access_token"].as_str().unwrap().to_string()
+}
+
 #[tokio::test]
 async fn health_returns_ok() {
     let (addr, shutdown) = spawn_test_server().await;
@@ -138,10 +157,7 @@ async fn p6_commercial_contract_endpoints_return_json() {
         .json()
         .await
         .expect("register json");
-    assert!(auth["access_token"]
-        .as_str()
-        .unwrap()
-        .starts_with("demo-access-"));
+    assert!(auth["access_token"].as_str().unwrap().starts_with("access-"));
     assert_eq!(auth["user"]["plan_id"], "preview");
     let token = auth["access_token"].as_str().unwrap().to_string();
 
@@ -243,14 +259,28 @@ async fn p6_commercial_contract_endpoints_return_json() {
 }
 
 #[tokio::test]
-async fn p6_demo_login_endpoint_accepts_demo_account() {
+async fn p6_login_endpoint_accepts_registered_account() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();
+    let email = format!("login-{}@example.com", uuid::Uuid::new_v4().simple());
+
+    let _registered: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/register"))
+        .json(&serde_json::json!({
+            "email": email,
+            "password": "secret"
+        }))
+        .send()
+        .await
+        .expect("send register")
+        .json()
+        .await
+        .expect("register json");
 
     let auth: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/login"))
         .json(&serde_json::json!({
-            "email": "demo@example.com",
+            "email": email,
             "password": "secret"
         }))
         .send()
@@ -260,8 +290,7 @@ async fn p6_demo_login_endpoint_accepts_demo_account() {
         .await
         .expect("login json");
     let token = auth["access_token"].as_str().unwrap().to_string();
-    assert!(token.starts_with("demo-access-"));
-    assert_eq!(auth["user"]["email"], "demo@example.com");
+    assert!(token.starts_with("access-"));
     assert_eq!(auth["user"]["plan_id"], "preview");
 
     let usage: serde_json::Value = client
@@ -282,11 +311,25 @@ async fn p6_demo_login_endpoint_accepts_demo_account() {
 async fn p6_admin_me_requires_admin_role() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();
+    let user_email = format!("user-{}@example.com", uuid::Uuid::new_v4().simple());
+
+    let _registered: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/register"))
+        .json(&serde_json::json!({
+            "email": user_email,
+            "password": "secret"
+        }))
+        .send()
+        .await
+        .expect("send user register")
+        .json()
+        .await
+        .expect("user register json");
 
     let user_auth: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/login"))
         .json(&serde_json::json!({
-            "email": format!("user-{}@example.com", uuid::Uuid::new_v4().simple()),
+            "email": user_email,
             "password": "secret"
         }))
         .send()
@@ -305,27 +348,11 @@ async fn p6_admin_me_requires_admin_role() {
         .expect("send admin me with user token");
     assert_eq!(denied.status(), reqwest::StatusCode::UNAUTHORIZED);
 
-    let admin_me: serde_json::Value = client
-        .get(format!("http://{addr}/admin/v1/me"))
-        .bearer_auth("demo-admin")
-        .send()
-        .await
-        .expect("send admin me")
-        .json()
-        .await
-        .expect("admin me json");
-    assert_eq!(admin_me["user"]["email"], "admin@example.com");
-    assert_eq!(admin_me["user"]["role"], "admin");
-    assert!(admin_me["permissions"]
-        .as_array()
-        .unwrap()
-        .contains(&serde_json::json!("redeem")));
-
     let login_admin: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/login"))
         .json(&serde_json::json!({
             "email": "admin@example.com",
-            "password": "demo-admin"
+            "password": "admin-secret"
         }))
         .send()
         .await
@@ -382,9 +409,9 @@ async fn p6_refresh_token_rotates_and_revokes_old_token() {
     assert!(refreshed["access_token"]
         .as_str()
         .unwrap()
-        .starts_with("demo-access-"));
+        .starts_with("access-"));
     let rotated_refresh = refreshed["refresh_token"].as_str().unwrap();
-    assert!(rotated_refresh.starts_with("demo-refresh-"));
+    assert!(rotated_refresh.starts_with("refresh-"));
 
     let old_refresh = client
         .post(format!("http://{addr}/v1/auth/refresh"))
@@ -451,7 +478,7 @@ async fn p8_recharge_count_entitlement_is_consumed_before_preview_quota() {
         .json()
         .await
         .expect("recharge json");
-    assert_eq!(recharge["status"], "paid_mock");
+    assert_eq!(recharge["status"], "pending_manual");
     assert_eq!(recharge["quantity"], 3);
 
     let usage_after_recharge: serde_json::Value = client
@@ -520,10 +547,11 @@ async fn redeem_code_batch_exports_and_redeems_once() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();
     let token = register_preview_token(&client, addr).await;
+    let admin = admin_token(&client, addr).await;
 
     let batch: serde_json::Value = client
         .post(format!("http://{addr}/admin/v1/redeem-code-batches"))
-        .bearer_auth("demo-admin")
+        .bearer_auth(&admin)
         .json(&serde_json::json!({
             "package_id": "count_10",
             "quantity": 2,
@@ -545,7 +573,7 @@ async fn redeem_code_batch_exports_and_redeems_once() {
         .get(format!(
             "http://{addr}/admin/v1/redeem-code-batches/{batch_id}/export.xlsx"
         ))
-        .bearer_auth("demo-admin")
+        .bearer_auth(&admin)
         .send()
         .await
         .expect("send export redeem batch");

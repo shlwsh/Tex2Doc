@@ -14,7 +14,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
-use crate::db_store::AppUser;
+use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
 use crate::feedback_service::{
     AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
@@ -45,6 +45,10 @@ pub fn router_with_state(state: ServerState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/version", get(version))
+        .route("/v1/downloads", get(downloads))
+        .route("/api/v1/downloads", get(downloads))
+        .route("/v1/waitlist", post(create_waitlist_lead))
+        .route("/api/v1/waitlist", post(create_waitlist_lead))
         .route("/api/v1/convert", post(convert))
         .route("/v1/auth/register", post(auth_register))
         .route("/api/v1/auth/register", post(auth_register))
@@ -56,6 +60,10 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/api/v1/me", get(me))
         .route("/admin/v1/me", get(admin_me))
         .route("/admin/v1/dashboard", get(admin_dashboard))
+        .route("/admin/v1/users", get(admin_list_users))
+        .route("/admin/v1/usage-ledger", get(admin_list_usage_ledger))
+        .route("/admin/v1/manual-orders", get(admin_list_manual_orders).post(admin_create_manual_order))
+        .route("/admin/v1/waitlist", get(admin_list_waitlist))
         .route("/v1/usage", get(usage))
         .route("/api/v1/usage", get(usage))
         .route("/v1/plans", get(plans))
@@ -149,6 +157,9 @@ pub fn router_with_state(state: ServerState) -> Router {
         )
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
+        .route("/admin/v1/releases", get(admin_list_releases).post(admin_publish_release))
+        .route("/admin/v1/releases/:id/rollback", post(admin_rollback_release))
+        .route("/admin/v1/release-audit", get(admin_release_audit))
         .merge(static_router())
         .with_state(state)
         .layer(
@@ -196,12 +207,68 @@ async fn version() -> Json<serde_json::Value> {
     }))
 }
 
+async fn downloads() -> Json<serde_json::Value> {
+    Json(json!({
+        "channel": "preview",
+        "platforms": [
+            {
+                "platform": "windows",
+                "arch": "x64",
+                "version": env!("CARGO_PKG_VERSION"),
+                "download_url": "https://releases.tex2doc.cn/desktop/preview/Tex2Doc-preview-windows-x64.exe",
+                "sha256": "pending-preview-build",
+                "signature": "",
+                "release_notes": "邀请制 Beta 阶段预览安装包。正式签名安装包由 release 管理接口发布后替换。",
+                "known_limits": [
+                    "当前为 Preview 交付包",
+                    "建议配合示例项目和诊断包使用",
+                    "如遇转换失败请通过反馈模块提交 job id 和诊断信息"
+                ]
+            }
+        ]
+    }))
+}
+
+async fn create_waitlist_lead(
+    State(state): State<ServerState>,
+    Json(payload): Json<WaitlistBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if !payload.email.contains('@') {
+        return Err(ApiError::BadRequest {
+            code: "invalid_email",
+            message: "waitlist email is invalid".to_string(),
+        });
+    }
+    let lead = state
+        .create_waitlist_lead(
+            payload.email,
+            payload.identity,
+            payload.paper_type,
+            payload.current_tool,
+            payload.pain_point,
+            payload.paid_intent,
+        )
+        .await
+        .map_err(db_error)?;
+    Ok(Json(lead))
+}
+
 #[derive(Debug, Deserialize)]
 struct AuthRequest {
     email: Option<String>,
     display_name: Option<String>,
     password: Option<String>,
     refresh_token: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct WaitlistBody {
+    email: String,
+    identity: Option<String>,
+    paper_type: Option<String>,
+    current_tool: Option<String>,
+    pain_point: Option<String>,
+    paid_intent: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -230,6 +297,36 @@ struct RechargeBody {
 }
 
 #[derive(Debug, Deserialize)]
+struct AdminManualOrderBody {
+    user_id: String,
+    recharge_type: Option<String>,
+    package_id: String,
+    quantity: Option<u64>,
+    amount_cents: Option<u64>,
+    payment_note: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PublishReleaseBody {
+    channel: String,
+    platform: String,
+    arch: Option<String>,
+    version: String,
+    download_url: String,
+    sha256: String,
+    signature: Option<String>,
+    file_size_bytes: Option<u64>,
+    release_title: Option<String>,
+    release_notes: Option<String>,
+    strategy_type: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RollbackReleaseBody {
+    reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct RedeemCodeBody {
     code: Option<String>,
 }
@@ -247,48 +344,51 @@ async fn auth_register(
     State(state): State<ServerState>,
     Json(payload): Json<AuthRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    auth_response(
-        &state,
-        payload
-            .email
-            .unwrap_or_else(|| "demo@example.com".to_string()),
-        payload.display_name,
-        payload.password,
-    )
-    .await
+    let email = require_non_empty(payload.email, "email")?;
+    let password = require_non_empty(payload.password, "password")?;
+    let user = state
+        .register_user(&email, payload.display_name.as_deref(), &password)
+        .await
+        .map_err(|error| {
+            if is_unique_violation(&error) {
+                ApiError::Conflict(format!("user already exists: {email}"))
+            } else {
+                db_error(error)
+            }
+        })?;
+    issue_auth_response(&state, &user).await
 }
 
 async fn auth_login(
     State(state): State<ServerState>,
     Json(payload): Json<AuthRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    auth_response(
-        &state,
-        payload
-            .email
-            .unwrap_or_else(|| "demo@example.com".to_string()),
-        payload.display_name,
-        payload.password,
-    )
-    .await
+    let email = require_non_empty(payload.email, "email")?;
+    let password = require_non_empty(payload.password, "password")?;
+    let user = state
+        .login_user(&email, &password)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::Unauthorized("invalid email or password".to_string()))?;
+    issue_auth_response(&state, &user).await
 }
 
 async fn auth_refresh(
     State(state): State<ServerState>,
     Json(payload): Json<AuthRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let suffix = payload.refresh_token.unwrap_or_else(|| "demo".to_string());
+    let suffix = require_non_empty(payload.refresh_token, "refresh_token")?;
     let user = state
         .user_for_refresh_token(&suffix)
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Unauthorized("invalid refresh token".to_string()))?;
     let access_token = state
-        .issue_token(&user.id, "demo-access")
+        .issue_token(&user.id, "access")
         .await
         .map_err(db_error)?;
     let refresh_token = state
-        .issue_token(&user.id, "demo-refresh")
+        .issue_token(&user.id, "refresh")
         .await
         .map_err(db_error)?;
     Ok(Json(json!({
@@ -353,6 +453,66 @@ async fn admin_dashboard(
         ],
         "generated_at": chrono::Utc::now().to_rfc3339(),
     })))
+}
+
+async fn admin_list_users(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let users = state.list_users().await.map_err(db_error)?;
+    Ok(Json(json!({ "users": users })))
+}
+
+async fn admin_list_usage_ledger(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let events = state.list_usage_ledger().await.map_err(db_error)?;
+    Ok(Json(json!({ "events": events })))
+}
+
+async fn admin_create_manual_order(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminManualOrderBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let recharge_type = payload.recharge_type.unwrap_or_else(|| "count".to_string());
+    let (normalized_type, quantity, default_amount_cents) =
+        compute_recharge_amount(&recharge_type, &payload.package_id, payload.quantity)?;
+    let order = state
+        .create_manual_order(
+            payload.user_id,
+            normalized_type,
+            payload.package_id,
+            quantity,
+            payload.amount_cents.unwrap_or(default_amount_cents),
+            admin.id,
+            payload.payment_note,
+        )
+        .await
+        .map_err(ApiError::Io)?;
+    Ok(Json(manual_order_json(&order)))
+}
+
+async fn admin_list_manual_orders(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let orders = state.list_manual_orders().await.map_err(db_error)?;
+    Ok(Json(json!(orders.iter().map(manual_order_json).collect::<Vec<_>>())))
+}
+
+async fn admin_list_waitlist(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let leads = state.list_waitlist_leads().await.map_err(db_error)?;
+    Ok(Json(json!({ "leads": leads })))
 }
 
 async fn usage(
@@ -435,7 +595,9 @@ async fn recharge_options(
         .collect::<Vec<_>>();
     Ok(Json(json!({
         "currency": "CNY",
-        "provider": "mock-pay",
+        "provider": "manual-order",
+        "phase": "A",
+        "support_text": "邀请制 Beta 阶段通过兑换码或人工订单开通权益；Stripe/支付沙箱暂未启用。",
         "count": {
             "unit_price_cents": 100,
             "minimum_quantity": 3,
@@ -613,7 +775,7 @@ async fn billing_checkout(
     headers: HeaderMap,
     Json(payload): Json<CheckoutBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&state, &headers).await?;
+    let session = require_session(&state, &headers).await?;
     let plan_id = payload.plan_id.unwrap_or_else(|| "pro".to_string());
     let success_url = payload
         .success_url
@@ -622,8 +784,14 @@ async fn billing_checkout(
         .cancel_url
         .unwrap_or_else(|| "https://tex2doc.cn/cancel".to_string());
     Ok(Json(json!({
-        "url": format!("https://billing.tex2doc.cn/checkout?plan={plan_id}&success={success_url}&cancel={cancel_url}"),
-        "expires_at": "2026-06-21T23:59:59Z",
+        "provider": "manual-order",
+        "phase": "A",
+        "status": "manual_required",
+        "plan_id": plan_id,
+        "user_id": session.id,
+        "success_url": success_url,
+        "cancel_url": cancel_url,
+        "message": "当前 Beta 阶段请联系运营创建人工订单，或使用兑换码开通权益。",
     })))
 }
 
@@ -637,8 +805,10 @@ async fn billing_portal(
         .return_url
         .unwrap_or_else(|| "https://tex2doc.cn/account".to_string());
     Ok(Json(json!({
-        "url": format!("https://billing.tex2doc.cn/portal?return={return_url}"),
-        "expires_at": "2026-06-21T23:59:59Z",
+        "provider": "manual-order",
+        "phase": "A",
+        "return_url": return_url,
+        "message": "当前仅支持兑换码和人工订单，第三方支付门户暂未启用。",
     })))
 }
 
@@ -740,10 +910,11 @@ async fn get_conversion(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&state, &headers).await?;
+    let session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
+        .filter(|job| job.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
     Ok(Json(job_json(&job)))
 }
@@ -753,14 +924,19 @@ async fn download_conversion_docx(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let _session = require_session(&state, &headers).await?;
+    let session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
+        .filter(|job| job.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
-    let body = job
-        .docx
+    let key = job
+        .result_docx_key
+        .as_deref()
         .ok_or_else(|| ApiError::Conflict(format!("conversion {id} docx is not ready")))?;
+    let body = state
+        .load_storage_key(key)
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id} docx file")))?;
     let mime: Mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
         .parse()
         .expect("static mime is valid");
@@ -781,10 +957,11 @@ async fn get_conversion_report(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&state, &headers).await?;
+    let session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
+        .filter(|job| job.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
     let report = job
         .report
@@ -808,41 +985,124 @@ async fn release_manifest(
     Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "channel": channel,
+        "platform": "windows",
+        "arch": "x64",
         "download_url": "https://releases.tex2doc.cn/desktop/latest",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "signature": "pending-p9-signature",
+        "signature_algorithm": "sha256",
+        "file_size_bytes": 0,
+        "release_title": "Tex2Doc Preview",
         "release_notes": "P9 preview manifest. Installers and real signatures are pending platform release builds.",
+        "strategy": {
+            "type": "optional",
+            "block_if_outdated": false,
+            "rollout_percentage": 100,
+            "prompt_title": "Tex2Doc Preview",
+            "prompt_message": "预览版更新信息，正式安装包发布后会由后台 manifest 替换。",
+            "prompt_dismissable": true
+        }
     })))
 }
 
-async fn auth_response(
-    state: &ServerState,
-    email: String,
-    display_name: Option<String>,
-    password: Option<String>,
+async fn admin_list_releases(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let password_value = password.as_deref().unwrap_or("secret");
-    let user = if email == "admin@example.com" && password_value == "demo-admin" {
-        state.ensure_demo_admin().await.map_err(db_error)?
-    } else {
-        state
-            .upsert_user(&email, display_name.as_deref(), password_value)
-            .await
-            .map_err(db_error)?
-    };
+    let _admin = require_admin_session(&state, &headers).await?;
+    let releases = state.list_release_manifests().await.map_err(db_error)?;
+    Ok(Json(json!({ "releases": releases })))
+}
+
+async fn admin_publish_release(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<PublishReleaseBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    if payload.sha256.len() != 64 && payload.sha256 != "pending-preview-build" {
+        return Err(ApiError::BadRequest {
+            code: "invalid_sha256",
+            message: "sha256 must be a 64-character hex digest".to_string(),
+        });
+    }
+    let release = state
+        .publish_release(
+            &admin.email,
+            payload.channel,
+            payload.platform,
+            payload.arch.unwrap_or_else(|| "x64".to_string()),
+            payload.version,
+            payload.download_url,
+            payload.sha256,
+            payload.signature,
+            payload.file_size_bytes.unwrap_or_default(),
+            payload.release_title,
+            payload.release_notes,
+            payload.strategy_type,
+        )
+        .await
+        .map_err(db_error)?;
+    Ok(Json(release))
+}
+
+async fn admin_rollback_release(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<RollbackReleaseBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let release = state
+        .rollback_release(&admin.email, &id, payload.reason)
+        .await
+        .map_err(db_error)?;
+    Ok(Json(release))
+}
+
+async fn admin_release_audit(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let logs = state.list_release_audit().await.map_err(db_error)?;
+    Ok(Json(json!({ "logs": logs })))
+}
+
+async fn issue_auth_response(
+    state: &ServerState,
+    user: &AppUser,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let access_token = state
-        .issue_token(&user.id, "demo-access")
+        .issue_token(&user.id, "access")
         .await
         .map_err(db_error)?;
     let refresh_token = state
-        .issue_token(&user.id, "demo-refresh")
+        .issue_token(&user.id, "refresh")
         .await
         .map_err(db_error)?;
     Ok(Json(json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
-        "user": app_user_json(&user),
+        "user": app_user_json(user),
     })))
+}
+
+fn require_non_empty(value: Option<String>, field: &'static str) -> Result<String, ApiError> {
+    let value = value.unwrap_or_default();
+    if value.trim().is_empty() {
+        return Err(ApiError::BadRequest {
+            code: "missing_field",
+            message: format!("{field} is required"),
+        });
+    }
+    Ok(value.trim().to_string())
+}
+
+fn is_unique_violation(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .is_some_and(|db_error| db_error.code().as_deref() == Some("23505"))
 }
 
 async fn require_session(state: &ServerState, headers: &HeaderMap) -> Result<AppUser, ApiError> {
@@ -878,10 +1138,6 @@ async fn require_admin_session(
         .strip_prefix("Bearer ")
         .ok_or_else(|| ApiError::Unauthorized("expected Bearer token".to_string()))?
         .trim();
-    if token.starts_with("admin-") || token == "demo-admin" {
-        return state.ensure_demo_admin().await.map_err(db_error);
-    }
-
     let user = state
         .user_for_token(token)
         .await
@@ -901,6 +1157,7 @@ fn app_user_json(user: &AppUser) -> serde_json::Value {
         "display_name": user.display_name,
         "plan_id": user.plan_id,
         "role": user.role,
+        "status": user.status,
     })
 }
 
@@ -987,6 +1244,23 @@ fn recharge_json(record: &RechargeRecord) -> serde_json::Value {
         "status": record.status,
         "provider": record.provider,
         "provider_trade_id": record.provider_trade_id,
+        "created_at": record.created_at,
+    })
+}
+
+fn manual_order_json(record: &ManualOrderRecord) -> serde_json::Value {
+    json!({
+        "order_id": record.order_id,
+        "user_id": record.user_id,
+        "recharge_id": record.recharge_id,
+        "recharge_type": record.recharge_type,
+        "package_id": record.package_id,
+        "quantity": record.quantity,
+        "amount_cents": record.amount_cents,
+        "currency": record.currency,
+        "status": record.status,
+        "operator_id": record.operator_id,
+        "payment_note": record.payment_note,
         "created_at": record.created_at,
     })
 }
@@ -1202,10 +1476,18 @@ fn job_json(job: &ConversionJobRecord) -> serde_json::Value {
         "status": job.status.as_str(),
         "created_at": job.created_at,
         "updated_at": job.updated_at,
-        "docx_ready": job.docx.is_some(),
+        "docx_ready": job.result_docx_key.is_some(),
         "report_ready": job.report.is_some(),
         "error_code": job.error_code,
         "error": job.error,
+        "storage": {
+            "source_zip_key": job.source_zip_key,
+            "result_docx_key": job.result_docx_key,
+            "result_log_key": job.result_log_key,
+            "zip_bytes": job.zip_bytes,
+            "docx_bytes": job.docx_bytes,
+            "log_bytes": job.log_bytes,
+        }
     })
 }
 

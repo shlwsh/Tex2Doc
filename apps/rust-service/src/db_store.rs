@@ -40,6 +40,7 @@ pub struct AppUser {
     pub display_name: Option<String>,
     pub plan_id: String,
     pub role: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -51,6 +52,22 @@ pub struct BillingPlanRecord {
     pub monthly_conversions: u64,
     pub storage_bytes: u64,
     pub features: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManualOrderRecord {
+    pub order_id: String,
+    pub user_id: String,
+    pub recharge_id: Option<String>,
+    pub recharge_type: String,
+    pub package_id: String,
+    pub quantity: u64,
+    pub amount_cents: u64,
+    pub currency: String,
+    pub status: String,
+    pub operator_id: Option<String>,
+    pub payment_note: Option<String>,
+    pub created_at: String,
 }
 
 impl DbStore {
@@ -78,10 +95,39 @@ impl DbStore {
     async fn init_schema(&self) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(BUSINESS_SCHEMA).execute(&self.pool).await?;
         sqlx::raw_sql(FEEDBACK_SCHEMA).execute(&self.pool).await?;
+        self.seed_admin_from_env().await?;
         Ok(())
     }
 
-    pub async fn upsert_user(
+    async fn seed_admin_from_env(&self) -> Result<(), sqlx::Error> {
+        let Ok(email) = std::env::var("TEX2DOC_BOOTSTRAP_ADMIN_EMAIL") else {
+            return Ok(());
+        };
+        let Ok(password) = std::env::var("TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD") else {
+            return Ok(());
+        };
+        if email.trim().is_empty() || password.trim().is_empty() {
+            return Ok(());
+        }
+        sqlx::query(
+            r#"
+            INSERT INTO app_users (email, password_hash, display_name, default_plan_id, role, status)
+            VALUES ($1, $2, 'Tex2Doc Admin', 'preview', 'admin', 'active')
+            ON CONFLICT (email) DO UPDATE SET
+                password_hash = EXCLUDED.password_hash,
+                role = 'admin',
+                status = 'active',
+                updated_at = now()
+            "#,
+        )
+        .bind(email.trim())
+        .bind(hash_text(password.trim()))
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn register_user(
         &self,
         email: &str,
         display_name: Option<&str>,
@@ -89,13 +135,9 @@ impl DbStore {
     ) -> Result<AppUser, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            INSERT INTO app_users (email, password_hash, display_name, default_plan_id)
-            VALUES ($1, $2, $3, 'preview')
-            ON CONFLICT (email) DO UPDATE SET
-                display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
-                password_hash = EXCLUDED.password_hash,
-                updated_at = now()
-            RETURNING id::text, email, display_name, default_plan_id, role
+            INSERT INTO app_users (email, password_hash, display_name, default_plan_id, status)
+            VALUES ($1, $2, $3, 'preview', 'active')
+            RETURNING id::text, email, display_name, default_plan_id, role, status
             "#,
         )
         .bind(email)
@@ -106,16 +148,29 @@ impl DbStore {
         Ok(app_user_from_row(&row))
     }
 
-    pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
-        let mut user = self
-            .upsert_user("admin@example.com", Some("Demo Admin"), "demo-admin")
-            .await?;
-        sqlx::query("UPDATE app_users SET role = 'admin' WHERE id = $1")
-            .bind(parse_uuid(&user.id)?)
+    pub async fn login_user(&self, email: &str, password: &str) -> Result<Option<AppUser>, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT id::text, email, display_name, default_plan_id, role, status, password_hash
+            FROM app_users
+            WHERE email = $1 AND status = 'active'
+            "#,
+        )
+        .bind(email)
+        .fetch_optional(&self.pool)
+        .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let stored_hash: String = row.get("password_hash");
+        if stored_hash != hash_text(password) {
+            return Ok(None);
+        }
+        sqlx::query("UPDATE app_users SET last_login_at = now(), updated_at = now() WHERE id = $1")
+            .bind(parse_uuid(row.get::<String, _>("id").as_str())?)
             .execute(&self.pool)
             .await?;
-        user.role = "admin".to_string();
-        Ok(user)
+        Ok(Some(app_user_from_row(&row)))
     }
 
     pub async fn issue_token(&self, user_id: &str, prefix: &str) -> Result<String, sqlx::Error> {
@@ -149,7 +204,7 @@ impl DbStore {
     pub async fn user_for_token(&self, token: &str) -> Result<Option<AppUser>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role, u.status
             FROM app_access_tokens t
             JOIN app_users u ON u.id = t.user_id
             WHERE t.token_hash = $1
@@ -178,7 +233,7 @@ impl DbStore {
         let mut tx = self.pool.begin().await?;
         let row = sqlx::query(
             r#"
-            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id, u.role, u.status
             FROM auth_refresh_tokens t
             JOIN app_users u ON u.id = t.user_id
             WHERE t.token_hash = $1
@@ -244,11 +299,18 @@ impl DbStore {
     ) -> Result<Option<Value>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            SELECT channel, platform, arch, version, download_url, sha256, signature,
-                   release_notes, EXTRACT(EPOCH FROM published_at)::bigint AS published_at_secs
-            FROM release_manifests
-            WHERE channel = $1 AND active = true
-            ORDER BY published_at DESC, version DESC
+            SELECT r.id::text, r.channel, r.platform, r.arch, r.version, r.download_url,
+                   r.sha256, r.signature, r.signature_algorithm, r.file_size_bytes,
+                   r.release_title, r.release_notes, r.published_by, r.is_prerelease,
+                   EXTRACT(EPOCH FROM r.published_at)::bigint AS published_at_secs,
+                   s.strategy_type, s.min_required_version,
+                   EXTRACT(EPOCH FROM s.force_deadline_at)::bigint AS force_deadline_secs,
+                   s.block_if_outdated, s.rollout_percentage, s.prompt_title,
+                   s.prompt_message, s.prompt_dismissable
+            FROM release_manifests r
+            LEFT JOIN release_strategies s ON s.release_id = r.id AND s.is_active = true
+            WHERE r.channel = $1 AND r.active = true
+            ORDER BY r.published_at DESC, r.version DESC
             LIMIT 1
             "#,
         )
@@ -264,8 +326,23 @@ impl DbStore {
                 "download_url": row.get::<String, _>("download_url"),
                 "sha256": row.get::<String, _>("sha256"),
                 "signature": row.get::<String, _>("signature"),
+                "signature_algorithm": row.get::<String, _>("signature_algorithm"),
+                "file_size_bytes": row.get::<i64, _>("file_size_bytes").max(0),
+                "release_title": row.get::<String, _>("release_title"),
                 "release_notes": row.get::<String, _>("release_notes"),
+                "published_by": row.get::<String, _>("published_by"),
+                "is_prerelease": row.get::<bool, _>("is_prerelease"),
                 "published_at": epoch_col(&row, "published_at_secs"),
+                "strategy": row.try_get::<Option<String>, _>("strategy_type").ok().flatten().map(|strategy_type| serde_json::json!({
+                    "type": strategy_type,
+                    "min_required_version": row.try_get::<Option<String>, _>("min_required_version").ok().flatten(),
+                    "force_deadline_at": epoch_col(&row, "force_deadline_secs"),
+                    "block_if_outdated": row.try_get::<bool, _>("block_if_outdated").unwrap_or(false),
+                    "rollout_percentage": row.try_get::<i32, _>("rollout_percentage").unwrap_or(100),
+                    "prompt_title": row.try_get::<String, _>("prompt_title").unwrap_or_default(),
+                    "prompt_message": row.try_get::<String, _>("prompt_message").unwrap_or_default(),
+                    "prompt_dismissable": row.try_get::<bool, _>("prompt_dismissable").unwrap_or(true),
+                })),
             })
         }))
     }
@@ -779,9 +856,95 @@ impl DbStore {
             &provider_trade_id,
         )
         .await?;
-        apply_entitlement_sql(&mut tx, parse_uuid(&user_id)?, &recharge).await?;
+        let user_uuid = parse_uuid(&user_id)?;
+        apply_entitlement_sql(&mut tx, user_uuid, &recharge).await?;
+        insert_grant_ledger(&mut tx, user_uuid, &recharge, provider).await?;
         tx.commit().await?;
         Ok(recharge)
+    }
+
+    pub async fn create_manual_order(
+        &self,
+        user_id: String,
+        recharge_type: String,
+        package_id: String,
+        quantity: u64,
+        amount_cents: u64,
+        operator_id: String,
+        payment_note: Option<String>,
+    ) -> Result<ManualOrderRecord, sqlx::Error> {
+        let user_uuid = parse_uuid(&user_id)?;
+        let operator_uuid = parse_uuid(&operator_id)?;
+        let mut tx = self.pool.begin().await?;
+        let provider_trade_id = format!("manual_order_{}", Uuid::new_v4().simple());
+        let recharge = insert_recharge(
+            &mut tx,
+            user_uuid,
+            &recharge_type,
+            &package_id,
+            quantity,
+            amount_cents,
+            "paid",
+            "manual-order",
+            &provider_trade_id,
+        )
+        .await?;
+        apply_entitlement_sql(&mut tx, user_uuid, &recharge).await?;
+        insert_grant_ledger(&mut tx, user_uuid, &recharge, "manual-order").await?;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO manual_orders
+                (user_id, recharge_id, recharge_type, package_id, quantity, amount_cents,
+                 status, operator_id, payment_note)
+            VALUES ($1, $2, $3, $4, $5, $6, 'paid', $7, $8)
+            RETURNING id::text, user_id::text, recharge_id::text, recharge_type, package_id,
+                      quantity, amount_cents, currency, status, operator_id::text, payment_note,
+                      EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            "#,
+        )
+        .bind(user_uuid)
+        .bind(parse_uuid(&recharge.recharge_id)?)
+        .bind(&recharge_type)
+        .bind(&package_id)
+        .bind(quantity as i32)
+        .bind(amount_cents as i32)
+        .bind(operator_uuid)
+        .bind(&payment_note)
+        .fetch_one(&mut *tx)
+        .await?;
+        self.insert_audit_log_tx(
+            &mut tx,
+            &operator_id,
+            "manual_order.create",
+            None,
+            serde_json::json!({
+                "manual_order_id": row.get::<String, _>("id"),
+                "user_id": user_id,
+                "recharge_id": recharge.recharge_id,
+                "package_id": package_id,
+                "quantity": quantity,
+                "amount_cents": amount_cents,
+            }),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(manual_order_from_row(&row))
+    }
+
+    pub async fn list_manual_orders(&self) -> Result<Vec<ManualOrderRecord>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, user_id::text, recharge_id::text, recharge_type, package_id,
+                   quantity, amount_cents, currency, status, operator_id::text, payment_note,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            FROM manual_orders
+            ORDER BY created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(manual_order_from_row).collect())
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Result<Vec<RechargeRecord>, sqlx::Error> {
@@ -799,6 +962,349 @@ impl DbStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(recharge_from_row).collect())
+    }
+
+    pub async fn list_usage_ledger(&self) -> Result<Vec<Value>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT l.id::text, l.user_id::text, u.email, l.conversion_job_id::text,
+                   l.event_type, l.quantity, l.balance_after, l.source, l.reason,
+                   EXTRACT(EPOCH FROM l.created_at)::bigint AS created_at_secs
+            FROM usage_ledger l
+            JOIN app_users u ON u.id = l.user_id
+            ORDER BY l.created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<String, _>("id"),
+                    "user_id": row.get::<String, _>("user_id"),
+                    "email": row.get::<String, _>("email"),
+                    "conversion_job_id": row.get::<Option<String>, _>("conversion_job_id"),
+                    "event_type": row.get::<String, _>("event_type"),
+                    "quantity": row.get::<i64, _>("quantity"),
+                    "balance_after": row.get::<Option<i64>, _>("balance_after"),
+                    "source": row.get::<String, _>("source"),
+                    "reason": row.get::<Option<String>, _>("reason"),
+                    "created_at": epoch_col(row, "created_at_secs"),
+                })
+            })
+            .collect())
+    }
+
+    pub async fn list_users(&self) -> Result<Vec<Value>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, email, display_name, default_plan_id, role, status,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
+                   EXTRACT(EPOCH FROM last_login_at)::bigint AS last_login_secs
+            FROM app_users
+            ORDER BY created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<String, _>("id"),
+                    "email": row.get::<String, _>("email"),
+                    "display_name": row.get::<Option<String>, _>("display_name"),
+                    "plan_id": row.get::<String, _>("default_plan_id"),
+                    "role": row.get::<String, _>("role"),
+                    "status": row.get::<String, _>("status"),
+                    "created_at": epoch_col(row, "created_at_secs"),
+                    "last_login_at": epoch_col(row, "last_login_secs"),
+                })
+            })
+            .collect())
+    }
+
+    pub async fn create_waitlist_lead(
+        &self,
+        email: String,
+        identity: Option<String>,
+        paper_type: Option<String>,
+        current_tool: Option<String>,
+        pain_point: Option<String>,
+        paid_intent: Option<String>,
+    ) -> Result<Value, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO waitlist_leads
+                (email, identity, paper_type, current_tool, pain_point, paid_intent)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id::text, email, identity, paper_type, current_tool, pain_point,
+                      paid_intent, status, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            "#,
+        )
+        .bind(email)
+        .bind(identity)
+        .bind(paper_type)
+        .bind(current_tool)
+        .bind(pain_point)
+        .bind(paid_intent)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(waitlist_from_row(&row))
+    }
+
+    pub async fn list_waitlist_leads(&self) -> Result<Vec<Value>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, email, identity, paper_type, current_tool, pain_point,
+                   paid_intent, status, follow_up_note,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            FROM waitlist_leads
+            ORDER BY created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(waitlist_from_row).collect())
+    }
+
+    pub async fn list_release_manifests(&self) -> Result<Vec<Value>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, channel, platform, arch, version, download_url, sha256,
+                   signature, signature_algorithm, file_size_bytes, release_title,
+                   release_notes, published_by, is_prerelease, active,
+                   EXTRACT(EPOCH FROM published_at)::bigint AS published_at_secs
+            FROM release_manifests
+            ORDER BY published_at DESC, version DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(release_from_row).collect())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn publish_release(
+        &self,
+        actor: &str,
+        channel: String,
+        platform: String,
+        arch: String,
+        version: String,
+        download_url: String,
+        sha256: String,
+        signature: Option<String>,
+        file_size_bytes: u64,
+        release_title: Option<String>,
+        release_notes: Option<String>,
+        strategy_type: Option<String>,
+    ) -> Result<Value, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query(
+            "UPDATE release_manifests SET active = false WHERE channel = $1 AND platform = $2 AND arch = $3",
+        )
+        .bind(&channel)
+        .bind(&platform)
+        .bind(&arch)
+        .execute(&mut *tx)
+        .await?;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO release_manifests
+                (channel, platform, arch, version, download_url, sha256, signature,
+                 file_size_bytes, release_title, release_notes, published_by, active)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, true)
+            ON CONFLICT (channel, platform, arch, version) DO UPDATE SET
+                download_url = EXCLUDED.download_url,
+                sha256 = EXCLUDED.sha256,
+                signature = EXCLUDED.signature,
+                file_size_bytes = EXCLUDED.file_size_bytes,
+                release_title = EXCLUDED.release_title,
+                release_notes = EXCLUDED.release_notes,
+                published_by = EXCLUDED.published_by,
+                active = true,
+                deprecated_at = NULL,
+                deprecation_reason = NULL,
+                published_at = now()
+            RETURNING id::text, channel, platform, arch, version, download_url, sha256,
+                      signature, signature_algorithm, file_size_bytes, release_title,
+                      release_notes, published_by, is_prerelease, active,
+                      EXTRACT(EPOCH FROM published_at)::bigint AS published_at_secs
+            "#,
+        )
+        .bind(&channel)
+        .bind(&platform)
+        .bind(&arch)
+        .bind(&version)
+        .bind(&download_url)
+        .bind(&sha256)
+        .bind(signature.unwrap_or_default())
+        .bind(file_size_bytes as i64)
+        .bind(release_title.unwrap_or_else(|| format!("Tex2Doc {version}")))
+        .bind(release_notes.unwrap_or_default())
+        .bind(actor)
+        .fetch_one(&mut *tx)
+        .await?;
+        let release_id = parse_uuid(&row.get::<String, _>("id"))?;
+        let strategy = strategy_type.unwrap_or_else(|| "recommended".to_string());
+        let strategy_row = sqlx::query(
+            r#"
+            INSERT INTO release_strategies
+                (release_id, strategy_type, prompt_title, prompt_message, created_by)
+            VALUES ($1, $2, '发现新版本', '建议升级到最新版本以获得更稳定的转换体验。', $3)
+            ON CONFLICT (release_id, strategy_type) DO UPDATE SET
+                is_active = true,
+                updated_at = now()
+            RETURNING id
+            "#,
+        )
+        .bind(release_id)
+        .bind(&strategy)
+        .bind(actor)
+        .fetch_one(&mut *tx)
+        .await?;
+        self.insert_audit_log_tx(
+            &mut tx,
+            actor,
+            "release.publish",
+            Some(release_id),
+            serde_json::json!({
+                "channel": channel,
+                "platform": platform,
+                "arch": arch,
+                "version": version,
+                "strategy": strategy,
+            }),
+        )
+        .await?;
+        sqlx::query(
+            r#"
+            INSERT INTO release_rollout_events
+                (release_id, strategy_id, event_type, new_percentage, event_reason, triggered_by)
+            VALUES ($1, $2, 'rollout_started', 100, 'release published', $3)
+            "#,
+        )
+        .bind(release_id)
+        .bind(strategy_row.get::<Uuid, _>("id"))
+        .bind(actor)
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(release_from_row(&row))
+    }
+
+    pub async fn rollback_release(
+        &self,
+        actor: &str,
+        release_id: &str,
+        reason: Option<String>,
+    ) -> Result<Value, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let current = sqlx::query(
+            "SELECT id, channel, platform, arch, version FROM release_manifests WHERE id = $1",
+        )
+        .bind(parse_uuid(release_id)?)
+        .fetch_one(&mut *tx)
+        .await?;
+        let target = sqlx::query(
+            r#"
+            SELECT id::text, channel, platform, arch, version, download_url, sha256,
+                   signature, signature_algorithm, file_size_bytes, release_title,
+                   release_notes, published_by, is_prerelease, active,
+                   EXTRACT(EPOCH FROM published_at)::bigint AS published_at_secs
+            FROM release_manifests
+            WHERE channel = $1 AND platform = $2 AND arch = $3 AND id <> $4
+            ORDER BY published_at DESC, version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(current.get::<String, _>("channel"))
+        .bind(current.get::<String, _>("platform"))
+        .bind(current.get::<String, _>("arch"))
+        .bind(current.get::<Uuid, _>("id"))
+        .fetch_one(&mut *tx)
+        .await?;
+        let target_id = parse_uuid(&target.get::<String, _>("id"))?;
+        sqlx::query("UPDATE release_manifests SET active = false, deprecated_at = now(), deprecated_by = $2, deprecation_reason = $3 WHERE id = $1")
+            .bind(current.get::<Uuid, _>("id"))
+            .bind(actor)
+            .bind(reason.as_deref())
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query("UPDATE release_manifests SET active = true, deprecated_at = NULL, deprecation_reason = NULL WHERE id = $1")
+            .bind(target_id)
+            .execute(&mut *tx)
+            .await?;
+        self.insert_audit_log_tx(
+            &mut tx,
+            actor,
+            "release.rollback",
+            Some(current.get::<Uuid, _>("id")),
+            serde_json::json!({
+                "from": current.get::<String, _>("version"),
+                "to": target.get::<String, _>("version"),
+                "reason": reason,
+            }),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(release_from_row(&target))
+    }
+
+    pub async fn list_release_audit(&self) -> Result<Vec<Value>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, actor, action, target_release_id::text, details,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            FROM release_audit_log
+            ORDER BY created_at DESC
+            LIMIT 200
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| {
+                serde_json::json!({
+                    "id": row.get::<String, _>("id"),
+                    "actor": row.get::<String, _>("actor"),
+                    "action": row.get::<String, _>("action"),
+                    "target_release_id": row.get::<Option<String>, _>("target_release_id"),
+                    "details": row.get::<Value, _>("details"),
+                    "created_at": epoch_col(row, "created_at_secs"),
+                })
+            })
+            .collect())
+    }
+
+    async fn insert_audit_log_tx(
+        &self,
+        tx: &mut Transaction<'_, Postgres>,
+        actor: &str,
+        action: &str,
+        target_release_id: Option<Uuid>,
+        details: Value,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            INSERT INTO release_audit_log (actor, action, target_release_id, details)
+            VALUES ($1, $2, $3, $4)
+            "#,
+        )
+        .bind(actor)
+        .bind(action)
+        .bind(target_release_id)
+        .bind(details)
+        .execute(&mut **tx)
+        .await?;
+        Ok(())
     }
 
     pub async fn create_redeem_batch(
@@ -1063,6 +1569,9 @@ impl DbStore {
         .await
         .map_err(|_| RedeemFailure::InvalidCode)?;
         apply_entitlement_sql(&mut tx, user_uuid, &recharge)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+        insert_grant_ledger(&mut tx, user_uuid, &recharge, "redeem-code")
             .await
             .map_err(|_| RedeemFailure::InvalidCode)?;
         sqlx::query(
@@ -1508,6 +2017,9 @@ fn app_user_from_row(row: &PgRow) -> AppUser {
         display_name: row.get("display_name"),
         plan_id: row.get("default_plan_id"),
         role: row.get("role"),
+        status: row
+            .try_get("status")
+            .unwrap_or_else(|_| "active".to_string()),
     }
 }
 
@@ -1648,6 +2160,59 @@ fn recharge_from_row(row: &PgRow) -> RechargeRecord {
     }
 }
 
+fn manual_order_from_row(row: &PgRow) -> ManualOrderRecord {
+    ManualOrderRecord {
+        order_id: row.get("id"),
+        user_id: row.get("user_id"),
+        recharge_id: row.get("recharge_id"),
+        recharge_type: row.get("recharge_type"),
+        package_id: row.get("package_id"),
+        quantity: row.get::<i32, _>("quantity").max(0) as u64,
+        amount_cents: row.get::<i32, _>("amount_cents").max(0) as u64,
+        currency: row.get("currency"),
+        status: row.get("status"),
+        operator_id: row.get("operator_id"),
+        payment_note: row.get("payment_note"),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+    }
+}
+
+fn waitlist_from_row(row: &PgRow) -> Value {
+    serde_json::json!({
+        "id": row.get::<String, _>("id"),
+        "email": row.get::<String, _>("email"),
+        "identity": row.get::<Option<String>, _>("identity"),
+        "paper_type": row.get::<Option<String>, _>("paper_type"),
+        "current_tool": row.get::<Option<String>, _>("current_tool"),
+        "pain_point": row.get::<Option<String>, _>("pain_point"),
+        "paid_intent": row.get::<Option<String>, _>("paid_intent"),
+        "status": row.get::<String, _>("status"),
+        "follow_up_note": row.try_get::<Option<String>, _>("follow_up_note").ok().flatten(),
+        "created_at": epoch_col(row, "created_at_secs"),
+    })
+}
+
+fn release_from_row(row: &PgRow) -> Value {
+    serde_json::json!({
+        "id": row.get::<String, _>("id"),
+        "channel": row.get::<String, _>("channel"),
+        "platform": row.get::<String, _>("platform"),
+        "arch": row.get::<String, _>("arch"),
+        "version": row.get::<String, _>("version"),
+        "download_url": row.get::<String, _>("download_url"),
+        "sha256": row.get::<String, _>("sha256"),
+        "signature": row.get::<String, _>("signature"),
+        "signature_algorithm": row.get::<String, _>("signature_algorithm"),
+        "file_size_bytes": row.get::<i64, _>("file_size_bytes").max(0),
+        "release_title": row.get::<String, _>("release_title"),
+        "release_notes": row.get::<String, _>("release_notes"),
+        "published_by": row.get::<String, _>("published_by"),
+        "is_prerelease": row.get::<bool, _>("is_prerelease"),
+        "active": row.get::<bool, _>("active"),
+        "published_at": epoch_col(row, "published_at_secs"),
+    })
+}
+
 async fn insert_recharge(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
@@ -1723,6 +2288,41 @@ async fn apply_entitlement_sql(
             .await?;
         }
         _ => {}
+    }
+    Ok(())
+}
+
+async fn insert_grant_ledger(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    record: &RechargeRecord,
+    source: &str,
+) -> Result<(), sqlx::Error> {
+    let (quantity, balance_after) = match record.recharge_type.as_str() {
+        "count" => {
+            let row = sqlx::query(
+                "SELECT count_balance FROM commercial_entitlements WHERE user_id = $1",
+            )
+            .bind(user_id)
+            .fetch_one(&mut **tx)
+            .await?;
+            (record.quantity as i64, Some(row.get::<i64, _>("count_balance")))
+        }
+        "date" => (record.quantity as i64, None),
+        _ => (0, None),
+    };
+    if quantity > 0 {
+        insert_usage_ledger(
+            tx,
+            user_id,
+            None,
+            "grant",
+            quantity,
+            balance_after,
+            source,
+            Some(&record.recharge_id),
+        )
+        .await?;
     }
     Ok(())
 }
