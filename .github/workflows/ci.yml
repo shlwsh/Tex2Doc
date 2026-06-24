@@ -41,7 +41,16 @@ jobs:
             libegl1-mesa-dev \
             libgl1-mesa-dev \
             libudev-dev \
-            libinput-dev
+            libinput-dev \
+            postgresql \
+            postgresql-contrib
+
+      - name: Start PostgreSQL test database
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres createdb -O postgres docdb || true
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -60,7 +69,15 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace --all-targets -- --test-threads=1
+        run: |
+          cargo test --workspace --all-targets --exclude doc-server -- --test-threads=1
+          cargo test -p doc-server --lib --bin doc-server -- --test-threads=1
+
+      - name: doc-server API integration tests
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/docdb
+        run: cargo test -p doc-server --test api -- --test-threads=1
 
       - name: End-to-end artifact
         if: matrix.os == 'ubuntu-latest'
