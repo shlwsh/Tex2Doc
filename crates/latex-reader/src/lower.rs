@@ -502,7 +502,7 @@ fn lower_with_macros_numbering_and_cites(
     // expanded 已被 strip_preamble → 取 parse.source 原文（用 expand 前更稳）
     let fm = crate::latex_to_text::extract_front_matter(
         &parse.source,
-        &pre_stripped,
+        pre_stripped,
         &macros.to_hashmap(),
     );
     doc.metadata.title = Some(fm.title_zh.clone()).filter(|s| !s.is_empty());
@@ -548,7 +548,7 @@ fn lower_with_macros_numbering_and_cites(
 
     // V2：从 flushleft 里直接抽取中文/英文引用格式（如果上面 extract_front_matter 没拿到）
     let text_for_cite = strip_preamble(&parse.source);
-    let (cz, ce) = extract_citation_from_flushleft(&text_for_cite);
+    let (cz, ce) = extract_citation_from_flushleft(text_for_cite);
     if doc.metadata.citation_zh.is_none() && !cz.is_empty() {
         doc.metadata.citation_zh = Some(cz);
     }
@@ -961,7 +961,7 @@ fn flush_paragraph(
                 // Normalize remaining text through latex_to_text (handles \textit, \ref, etc.)
                 let cite_map: HashMap<String, usize> = HashMap::new();
                 let normalized =
-                    crate::normalize::latex_to_text(&text_content, &cite_map, label_map);
+                    crate::normalize::latex_to_text(text_content, &cite_map, label_map);
                 for r in normalized.runs {
                     runs.push(TextRun {
                         text: r.text,
@@ -1698,8 +1698,7 @@ fn strip_list_param_lines(body: &str) -> String {
         let trimmed = line.trim_start();
         // 必须是真正的 `\item` (后跟空白、`[`、`{`、或行尾)，
         // 不能匹配 `\itemindent` / `\itemsep` 等以 `\item` 开头的命令。
-        if trimmed.starts_with("\\item") {
-            let after = &trimmed[5..];
+        if let Some(after) = trimmed.strip_prefix("\\item") {
             if after.is_empty()
                 || after.starts_with(' ')
                 || after.starts_with('\t')
@@ -1822,8 +1821,8 @@ fn extract_bracketed_label(s: &str) -> Option<(&str, &str)> {
                     };
                     // Skip trailing `}` from malformed `\item[{[5]}]`
                     let rest_raw = rest_inside[i + 1..].trim_start();
-                    let rest = if rest_raw.starts_with('}') {
-                        &rest_raw[1..]
+                    let rest = if let Some(stripped) = rest_raw.strip_prefix('}') {
+                        stripped
                     } else {
                         rest_raw
                     };
@@ -2146,13 +2145,11 @@ fn strip_label_formatting(raw: &str) -> String {
             out.push('\\');
             out.push_str(cmd);
             i = k;
+        } else if let Some(ch) = raw[i..].chars().next() {
+            out.push(ch);
+            i += ch.len_utf8();
         } else {
-            if let Some(ch) = raw[i..].chars().next() {
-                out.push(ch);
-                i += ch.len_utf8();
-            } else {
-                i += 1;
-            }
+            i += 1;
         }
     }
     out
