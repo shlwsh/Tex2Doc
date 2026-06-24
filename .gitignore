@@ -49,7 +49,7 @@ scripts/combined.html
 
 # PostgreSQL local binary backups
 # /database/
-database/**/*.dump
+# database/**/*.dump
 sessions/
 
 # 本地工具 / 临时产物（不进入版本库）
