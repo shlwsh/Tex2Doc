@@ -140,13 +140,10 @@ pub fn merge_adjacent_runs(runs: Vec<Run>) -> Vec<Run> {
                     if !is_footnote {
                         // v13.2 F15: 双向去重——last 末尾或 run 前导已带空白时不重复追加。
                         //   避免 `merge` 后多 1 空格（如 `[5]  冯志勇` → `[5] 冯志勇`）。
-                        let last_ends_with_space = last
-                            .text
-                            .chars()
-                            .last()
-                            .map_or(false, |c| c.is_whitespace());
+                        let last_ends_with_space =
+                            last.text.chars().last().is_some_and(|c| c.is_whitespace());
                         let run_starts_with_space =
-                            run.text.chars().next().map_or(false, |c| c.is_whitespace());
+                            run.text.chars().next().is_some_and(|c| c.is_whitespace());
                         if !last_ends_with_space && !run_starts_with_space {
                             last.text.push(' ');
                         }

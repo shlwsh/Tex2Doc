@@ -239,23 +239,12 @@ impl SemanticBackendKind {
 }
 
 /// Report describing how the backend was selected.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackendSelectionReport {
     pub requested: SemanticBackendKind,
     pub selected: SemanticBackendKind,
     pub fallback_from: Option<SemanticBackendKind>,
     pub reason: String,
-}
-
-impl Default for BackendSelectionReport {
-    fn default() -> Self {
-        Self {
-            requested: SemanticBackendKind::default(),
-            selected: SemanticBackendKind::default(),
-            fallback_from: None,
-            reason: String::new(),
-        }
-    }
 }
 
 impl BackendSelectionReport {

@@ -68,6 +68,7 @@ impl ConversionStatus {
         }
     }
 
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(value: &str) -> Self {
         match value {
             "normalizing" => Self::Normalizing,
@@ -424,6 +425,7 @@ impl ServerState {
             .map_err(|e| e.to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_manual_order(
         &self,
         user_id: String,

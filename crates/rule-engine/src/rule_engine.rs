@@ -257,10 +257,7 @@ impl Default for RuleEngine {
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        AuditCache, AuditRecord, DecisionSource, MacroRule, RuleEngine, RuleEngineConfig,
-        RuleOutput, RuleRegistry,
-    };
+    use crate::{DecisionSource, RuleEngine, RuleEngineConfig, RuleOutput};
 
     #[test]
     fn builtin_rules_loaded() {

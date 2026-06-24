@@ -156,7 +156,7 @@ fn compare_versions(left: &str, right: &str) -> std::cmp::Ordering {
 fn version_segments(version: &str) -> Vec<u64> {
     version
         .trim_start_matches('v')
-        .split(|ch: char| ch == '.' || ch == '-' || ch == '+')
+        .split(['.', '-', '+'])
         .map(|segment| {
             segment
                 .chars()

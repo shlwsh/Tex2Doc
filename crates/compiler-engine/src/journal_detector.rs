@@ -203,7 +203,7 @@ impl JournalDetector {
             }
 
             let Ok(bytes) = vfs.read(path) else { continue };
-            let Ok(raw) = std::str::from_utf8(&bytes) else {
+            let Ok(raw) = std::str::from_utf8(bytes) else {
                 continue;
             };
 
@@ -497,8 +497,7 @@ fn scan_command(source: &str, commands: &[&str]) -> Vec<CmdMatch> {
         let rest = &source[i + 1..];
         let mut found_cmd = None;
         for &cmd in commands {
-            if rest.starts_with(cmd) {
-                let after = &rest[cmd.len()..];
+            if let Some(after) = rest.strip_prefix(cmd) {
                 if after
                     .chars()
                     .next()

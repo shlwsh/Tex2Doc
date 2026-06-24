@@ -906,10 +906,8 @@ pub fn parse_node_tree_jsonl(content: &str) -> Result<CollectorLayoutGraph, Stri
         match serde_json::from_str::<NodeEntry>(trimmed) {
             Ok(entry) => {
                 // Track page from summary entries
-                if let NodeEntry::NodeTree { page, .. } = &entry {
-                    if let Some(p) = page {
-                        current_page = *p;
-                    }
+                if let NodeEntry::NodeTree { page: Some(p), .. } = &entry {
+                    current_page = *p;
                 }
                 entries.push(entry);
             }

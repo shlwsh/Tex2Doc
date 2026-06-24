@@ -37,7 +37,7 @@ fn build_doc(preamble: &[u8], page_content: &[u8]) -> Vec<u8> {
 }
 
 /// Returns page commands excluding Bop and Eop markers.
-fn page_content<'a>(page: &'a doc_xdv_parser::XdvPage) -> Vec<&'a XdvCommand> {
+fn page_content(page: &doc_xdv_parser::XdvPage) -> Vec<&XdvCommand> {
     page.commands
         .iter()
         .filter(|c| !matches!(c, XdvCommand::Bop | XdvCommand::Eop))

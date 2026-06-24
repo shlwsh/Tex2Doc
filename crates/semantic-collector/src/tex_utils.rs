@@ -14,10 +14,8 @@ pub struct Command {
 /// Parse semantic events from a JSONL sidecar file (v1 and v2 schema).
 pub fn parse_semantic_events_jsonl(input: &str) -> Result<Vec<SemanticEvent>, CollectorError> {
     let mut events = Vec::new();
-    let mut line_number = 0;
-
-    for raw_line in input.lines() {
-        line_number += 1;
+    for (line_index, raw_line) in input.lines().enumerate() {
+        let line_number = line_index + 1;
         let trimmed = raw_line.trim();
         if trimmed.is_empty() || trimmed.starts_with('#') {
             continue;

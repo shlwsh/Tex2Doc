@@ -9,6 +9,7 @@ use std::path::PathBuf;
 use anyhow::{Context, Result};
 
 /// 建一个临时 user-profile 目录，路径形如 `<temp>/doc-docx-pdf/lo-profile-<pid>-<nanos>`。
+#[allow(dead_code)]
 pub fn temp_user_profile() -> Result<PathBuf> {
     let base = std::env::temp_dir().join("doc-docx-pdf");
     std::fs::create_dir_all(&base)

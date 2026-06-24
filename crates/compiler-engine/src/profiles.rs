@@ -64,7 +64,7 @@ fn default_signal_weight() -> f32 {
 }
 
 /// Backend selection policy for a profile.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct BackendSpec {
     /// Preferred semantic collection backend.
     /// One of: "luatex-node" | "xelatex-hook" | "rule-based".
@@ -79,17 +79,6 @@ pub struct BackendSpec {
     /// If true, prefers LuaTeX engine.
     #[serde(default)]
     pub prefers_luatex: bool,
-}
-
-impl Default for BackendSpec {
-    fn default() -> Self {
-        Self {
-            preferred: String::new(),
-            fallback: Vec::new(),
-            requires_xetex: false,
-            prefers_luatex: false,
-        }
-    }
 }
 
 /// Semantic policy controlling unknown-macro handling and event collection.
@@ -187,7 +176,7 @@ fn default_min_score() -> u8 {
 // ---------------------------------------------------------------------------
 
 /// A loaded profile specification from a JSON or TOML file.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ProfileSpecFile {
     pub id: String,
     pub display_name: String,
@@ -222,27 +211,6 @@ pub struct ProfileSpecFile {
     /// Quality thresholds.
     #[serde(default)]
     pub quality: QualitySpec,
-}
-
-impl Default for ProfileSpecFile {
-    fn default() -> Self {
-        Self {
-            id: String::new(),
-            display_name: String::new(),
-            document_classes: Vec::new(),
-            aliases: Vec::new(),
-            page_setup: PageSetupSpec::default(),
-            font_policy: FontPolicySpecFile::default(),
-            caption_policy: CaptionPolicySpecFile::default(),
-            citation_policy: CitationPolicySpecFile::default(),
-            detection: DetectionSpec::default(),
-            backend: BackendSpec::default(),
-            semantic_policy: SemanticPolicySpec::default(),
-            macro_rules: Vec::new(),
-            style_map: Vec::new(),
-            quality: QualitySpec::default(),
-        }
-    }
 }
 
 /// Page setup section in a profile file.
@@ -482,6 +450,7 @@ pub enum ProfileLoadSource {
 /// Result of a profile load attempt.
 #[derive(Debug)]
 #[allow(dead_code)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProfileLoadResult {
     /// Profile was loaded from a JSON or TOML file.
     Loaded(ProfileSpecFile),

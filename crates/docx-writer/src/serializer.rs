@@ -152,7 +152,7 @@ fn write_front_matter_with_style(
         write_paragraph(w, &p);
     }
 
-    if !meta.abstract_text.as_ref().is_some_and(|a| !a.is_empty()) || !meta.keywords.is_empty() {
+    if meta.abstract_text.as_ref().is_none_or(|a| a.is_empty()) || !meta.keywords.is_empty() {
         write_spacer(w, 200);
     }
 
@@ -1489,7 +1489,7 @@ fn read_script_arg(text: &str, start: usize) -> (String, usize) {
         }
     }
     let mut end = i;
-    while end < bytes.len() {
+    if end < bytes.len() {
         let ch = text[end..].chars().next().unwrap_or_default();
         if ch.is_alphanumeric() || ch == '\\' {
             end += ch.len_utf8();
@@ -1502,9 +1502,7 @@ fn read_script_arg(text: &str, start: usize) -> (String, usize) {
                     end += c.len_utf8();
                 }
             }
-            break;
         }
-        break;
     }
     (text[i..end].to_string(), end.max(i + 1))
 }
@@ -1665,7 +1663,7 @@ fn is_journal_bio_list(items: &[Vec<Block>]) -> bool {
                 let s: String = runs.iter().map(|r| r.text.as_str()).collect();
                 // 必须不含 [N] 编号 + 是中文 bio 段（含中文字符 + bio 关键词）
                 !s.contains('[')
-                    && s.chars().any(|c| '\u{4e00}' <= c && c <= '\u{9fff}')
+                    && s.chars().any(|c| ('\u{4e00}'..='\u{9fff}').contains(&c))
                     && (s.contains("，博士")
                         || s.contains("，教授")
                         || s.contains("E-mail")
@@ -1706,7 +1704,7 @@ fn itemize_item_runs(sub: &[Block], prefix: &str) -> Vec<Run> {
                 runs.extend(converted);
             }
             _ => {
-                let text = summarize_to_string(&[block.clone()]);
+                let text = summarize_to_string(std::slice::from_ref(block));
                 if !text.is_empty() {
                     runs.push(Run::plain(text));
                 }
@@ -2051,7 +2049,7 @@ fn end_algorithm_table_row(w: &mut Writer<Vec<u8>>) {
     w.write_event(Event::End(BytesEnd::new("w:tr"))).unwrap();
 }
 
-#[allow(dead_code)]
+#[allow(dead_code, clippy::too_many_arguments)]
 fn write_algorithm_cell(
     w: &mut Writer<Vec<u8>>,
     runs: Vec<Run>,
@@ -2414,11 +2412,7 @@ fn write_table(
             w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
             let p = Paragraph {
-                style_id: Some(if is_header {
-                    STYLE_TABLE_TEXT.to_string()
-                } else {
-                    STYLE_TABLE_TEXT.to_string()
-                }),
+                style_id: Some(STYLE_TABLE_TEXT.to_string()),
                 runs: if cell.runs.is_empty() {
                     vec![Run::plain(String::new())]
                 } else {
@@ -2927,12 +2921,10 @@ fn collapse_cjk_internal_spaces(text: &str) -> String {
             // (a) CJK-非字母 (CJK-CJK / CJK-标点)
             // (b) 非字母-非字母 (标点-标点)
             // (c) CJK-CJK 字母
-            let left_collapse = prev.map_or(false, |p| {
-                is_cjk_char(p) || (!p.is_alphanumeric() && !p.is_whitespace())
-            });
-            let right_collapse = next.map_or(false, |n| {
-                is_cjk_char(n) || (!n.is_alphanumeric() && !n.is_whitespace())
-            });
+            let left_collapse = prev
+                .is_some_and(|p| is_cjk_char(p) || (!p.is_alphanumeric() && !p.is_whitespace()));
+            let right_collapse = next
+                .is_some_and(|n| is_cjk_char(n) || (!n.is_alphanumeric() && !n.is_whitespace()));
             if left_collapse && right_collapse {
                 i += 1;
                 continue;
@@ -2942,8 +2934,7 @@ fn collapse_cjk_internal_spaces(text: &str) -> String {
         i += 1;
     }
     // v13.1 P2 尾步: 去掉 "字母+空格+尾标点" 模式中的空格 (e.g. "CPU *" → "CPU*")
-    let trimmed = strip_trailing_space_before_punct(&out);
-    trimmed
+    strip_trailing_space_before_punct(&out)
 }
 
 /// 去除形如 "字母/数字+空格+尾标点" 的多余空格。
@@ -3655,7 +3646,7 @@ mod tests {
     }
 
     #[test]
-    fn table_has_center_alignment_and_tcW() {
+    fn table_has_center_alignment_and_tc_w() {
         use doc_semantic_ast::{TableCell, TableRow};
         let doc = Document {
             metadata: Default::default(),
@@ -3699,7 +3690,7 @@ mod tests {
     /// v13.2 F8: 表格 tblW 必须是 pct=5000 (100% 页宽)，而不是硬编码 9000/dxa。
     /// cell 宽度 (tcW) 来自 page_setup.text_width_twips()，不是固定值。
     #[test]
-    fn table_tblW_uses_pct_and_tcW_scales_with_text_width() {
+    fn table_tbl_w_uses_pct_and_tc_w_scales_with_text_width() {
         use crate::page_setup::PageSetup;
         use doc_semantic_ast::{TableCell, TableRow};
         let doc = Document {

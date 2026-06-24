@@ -81,6 +81,7 @@ impl FileStorage {
     }
 
     /// Build a conversion log from structured data.
+    #[allow(clippy::too_many_arguments)]
     pub fn build_conversion_log(
         job_id: &str,
         user_id: &str,

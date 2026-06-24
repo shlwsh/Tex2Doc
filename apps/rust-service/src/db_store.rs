@@ -836,6 +836,7 @@ impl DbStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_recharge(
         &self,
         user_id: String,
@@ -867,6 +868,7 @@ impl DbStore {
         Ok(recharge)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_manual_order(
         &self,
         user_id: String,
@@ -2217,6 +2219,7 @@ fn release_from_row(row: &PgRow) -> Value {
     })
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_recharge(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
@@ -2383,6 +2386,7 @@ async fn preview_conversions_used_tx(
     cloud_conversions_used_tx(tx, user_id).await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn insert_usage_ledger(
     tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,

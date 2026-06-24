@@ -1205,7 +1205,7 @@ fn compute_recharge_amount(
 ) -> Result<(String, u64, u64), ApiError> {
     match recharge_type {
         "count" => {
-            let resolved_quantity = quantity.unwrap_or_else(|| match package_id {
+            let resolved_quantity = quantity.unwrap_or(match package_id {
                 "count_10" => 10,
                 "count_30" => 30,
                 _ => 3,

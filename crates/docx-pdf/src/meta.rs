@@ -29,7 +29,7 @@ pub fn inspect(pdf: &Path) -> Result<PdfMeta> {
 
     let mut fonts: std::collections::BTreeSet<String> = Default::default();
     let mut tounicode = false;
-    for (_id, obj) in &doc.objects {
+    for obj in doc.objects.values() {
         if let Ok(dict) = obj.as_dict() {
             if let Ok(name) = dict.get(b"BaseFont") {
                 if let Ok(name) = name.as_name() {
@@ -58,6 +58,7 @@ pub fn inspect(pdf: &Path) -> Result<PdfMeta> {
 }
 
 /// 异步包装：内部用 `spawn_blocking` 跑 `inspect`。
+#[allow(dead_code)]
 pub async fn inspect_async(pdf: &Path) -> Result<PdfMeta> {
     let pdf = pdf.to_path_buf();
     tokio::task::spawn_blocking(move || inspect(&pdf))

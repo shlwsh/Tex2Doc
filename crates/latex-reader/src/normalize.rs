@@ -1406,7 +1406,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_math_inline_trend_Freq() {
+    fn clean_math_inline_trend_freq() {
         // v13.2 F12: 完整公式 sigma\bigl((F_t-F_{t-1})/.../bigr)
         // 与 sh oracle `sigma bigl((F_t-F_{t-1})/max(F_{t-1},varepsilon)bigr)` 对齐
         let input = r"\sigma\bigl((F_t-F_{t-1})/max(F_{t-1},\varepsilon)\bigr)";

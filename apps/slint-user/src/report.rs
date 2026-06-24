@@ -70,7 +70,7 @@ impl ReportSummary {
     /// Format as a multi-line string for display in the UI status panel.
     pub fn format_for_ui(&self) -> String {
         let mut lines = Vec::new();
-        lines.push(format!("=== Conversion Report ==="));
+        lines.push("=== Conversion Report ===".to_string());
         lines.push(format!("Profile: {} ({})", self.profile, self.display_name));
         lines.push(format!("Source: {}", self.source));
         if let Some(conf) = self.confidence {

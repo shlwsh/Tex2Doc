@@ -301,7 +301,7 @@ pub fn pack_with_page_setup(
 ) -> Result<Vec<u8>, DocxWriteError> {
     // V2：先把 PageSetup 里的 header/footer 渲染成 part
     let parts = page_setup
-        .map(|ps| build_header_footer(ps))
+        .map(build_header_footer)
         .unwrap_or(HeaderFooterParts {
             masthead_header_xml: None,
             default_header_xml: None,
@@ -529,6 +529,7 @@ fn build_content_types(
 ///
 /// rIdH0→header0, rIdH1→header1, rIdH2→header2,
 /// rIdF1→footer1, rIdF2→footer2, rIdF3→footer3。
+#[allow(clippy::too_many_arguments)]
 fn build_doc_rels(
     has_mh: bool,
     has_h: bool,

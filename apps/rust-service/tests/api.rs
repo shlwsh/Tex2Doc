@@ -714,9 +714,9 @@ async fn p7_cloud_worker_converts_uploaded_zip() {
         "jos-paper" | "jos-paper-toml"
     ));
     assert_eq!(report["executor"], "semantic-engine");
-    assert!(report["backend"].as_str().unwrap().len() > 0);
+    assert!(!report["backend"].as_str().unwrap().is_empty());
     assert!(report["quality_score"].as_u64().is_some());
-    assert!(report["quality_status"].as_str().unwrap().len() > 0);
+    assert!(!report["quality_status"].as_str().unwrap().is_empty());
     assert!(report["compatibility_score"].as_u64().is_some());
     assert!(report["docx_bytes"].as_u64().unwrap() > 4 * 1024);
 
