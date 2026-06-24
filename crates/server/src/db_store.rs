@@ -21,6 +21,7 @@ use crate::state::{
     hash_text, normalize_redeem_code, now_timestamp, random_bytes, redeem_checksum_valid,
     redeem_package, ConversionJobRecord, ConversionReportRecord, ConversionStatus,
     EntitlementRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
+    RedeemPackage,
     RedeemFailure, UploadRecord, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 
@@ -41,10 +42,21 @@ pub struct AppUser {
     pub plan_id: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct BillingPlanRecord {
+    pub id: String,
+    pub name: String,
+    pub currency: String,
+    pub price_cents: u64,
+    pub monthly_conversions: u64,
+    pub storage_bytes: u64,
+    pub features: Vec<String>,
+}
+
 impl DbStore {
     pub async fn connect_from_env() -> Result<Self, sqlx::Error> {
         let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://postgres:postgres@localhost:5432/docdb".to_string()
+            "postgres://postgres:postgres@127.0.0.1:5432/docdb".to_string()
         });
         let pool = PgPoolOptions::new()
             .max_connections(10)
@@ -67,26 +79,6 @@ impl DbStore {
     async fn init_schema(&self) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(BUSINESS_SCHEMA).execute(&self.pool).await?;
         sqlx::raw_sql(FEEDBACK_SCHEMA).execute(&self.pool).await?;
-        sqlx::raw_sql(
-            r#"
-            CREATE TABLE IF NOT EXISTS commercial_entitlements (
-                user_id UUID PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
-                count_balance BIGINT NOT NULL DEFAULT 0 CHECK (count_balance >= 0),
-                valid_until TIMESTAMPTZ,
-                source_order_id TEXT,
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-
-            CREATE TABLE IF NOT EXISTS app_access_tokens (
-                token_hash TEXT PRIMARY KEY,
-                user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
-                expires_at TIMESTAMPTZ,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-            );
-            "#,
-        )
-        .execute(&self.pool)
-        .await?;
         Ok(())
     }
 
@@ -116,19 +108,41 @@ impl DbStore {
     }
 
     pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
-        self.upsert_user("admin@example.com", Some("Demo Admin"), "demo-admin")
-            .await
+        let user = self
+            .upsert_user("admin@example.com", Some("Demo Admin"), "demo-admin")
+            .await?;
+        sqlx::query("UPDATE app_users SET role = 'admin' WHERE id = $1")
+            .bind(parse_uuid(&user.id)?)
+            .execute(&self.pool)
+            .await?;
+        Ok(user)
     }
 
     pub async fn issue_token(&self, user_id: &str, prefix: &str) -> Result<String, sqlx::Error> {
         let token = format!("{prefix}-{}", Uuid::new_v4().simple());
-        sqlx::query(
-            "INSERT INTO app_access_tokens (token_hash, user_id) VALUES ($1, $2)",
-        )
-        .bind(hash_text(&token))
-        .bind(parse_uuid(user_id)?)
-        .execute(&self.pool)
-        .await?;
+        if prefix.contains("refresh") {
+            sqlx::query(
+                r#"
+                INSERT INTO auth_refresh_tokens (user_id, token_hash, expires_at)
+                VALUES ($1, $2, now() + interval '30 days')
+                "#,
+            )
+            .bind(parse_uuid(user_id)?)
+            .bind(hash_text(&token))
+            .execute(&self.pool)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                INSERT INTO app_access_tokens (token_hash, user_id, expires_at)
+                VALUES ($1, $2, now() + interval '12 hours')
+                "#,
+            )
+            .bind(hash_text(&token))
+            .bind(parse_uuid(user_id)?)
+            .execute(&self.pool)
+            .await?;
+        }
         Ok(token)
     }
 
@@ -140,13 +154,120 @@ impl DbStore {
             JOIN app_users u ON u.id = t.user_id
             WHERE t.token_hash = $1
               AND (t.expires_at IS NULL OR t.expires_at > now())
+              AND t.revoked_at IS NULL
               AND u.status = 'active'
             "#,
         )
         .bind(hash_text(token))
         .fetch_optional(&self.pool)
         .await?;
+        if row.is_some() {
+            sqlx::query("UPDATE app_access_tokens SET last_used_at = now() WHERE token_hash = $1")
+                .bind(hash_text(token))
+                .execute(&self.pool)
+                .await?;
+        }
         Ok(row.as_ref().map(app_user_from_row))
+    }
+
+    pub async fn user_for_refresh_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<AppUser>, sqlx::Error> {
+        let token_hash = hash_text(token);
+        let mut tx = self.pool.begin().await?;
+        let row = sqlx::query(
+            r#"
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id
+            FROM auth_refresh_tokens t
+            JOIN app_users u ON u.id = t.user_id
+            WHERE t.token_hash = $1
+              AND t.revoked_at IS NULL
+              AND t.expires_at > now()
+              AND u.status = 'active'
+            "#,
+        )
+        .bind(&token_hash)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if row.is_some() {
+            sqlx::query(
+                "UPDATE auth_refresh_tokens SET last_used_at = now(), revoked_at = now() WHERE token_hash = $1",
+            )
+            .bind(&token_hash)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
+        Ok(row.as_ref().map(app_user_from_row))
+    }
+
+    pub async fn list_billing_plans(&self) -> Result<Vec<BillingPlanRecord>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, currency, price_cents, monthly_conversions, storage_bytes, features
+            FROM billing_plans
+            WHERE active = true
+            ORDER BY price_cents ASC, id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(billing_plan_from_row).collect())
+    }
+
+    pub async fn list_redeem_packages(&self) -> Result<Vec<RedeemPackage>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id, name, package_type, quantity
+            FROM redeem_packages
+            WHERE active = true
+            ORDER BY quantity ASC, id ASC
+            "#,
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows
+            .iter()
+            .map(|row| RedeemPackage {
+                id: row.get("id"),
+                name: row.get("name"),
+                package_type: row.get("package_type"),
+                quantity: row.get::<i32, _>("quantity").max(0) as u64,
+            })
+            .collect())
+    }
+
+    pub async fn latest_release_manifest(
+        &self,
+        channel: &str,
+    ) -> Result<Option<Value>, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT channel, platform, arch, version, download_url, sha256, signature,
+                   release_notes, EXTRACT(EPOCH FROM published_at)::bigint AS published_at_secs
+            FROM release_manifests
+            WHERE channel = $1 AND active = true
+            ORDER BY published_at DESC, version DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(channel)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| {
+            serde_json::json!({
+                "version": row.get::<String, _>("version"),
+                "channel": row.get::<String, _>("channel"),
+                "platform": row.get::<String, _>("platform"),
+                "arch": row.get::<String, _>("arch"),
+                "download_url": row.get::<String, _>("download_url"),
+                "sha256": row.get::<String, _>("sha256"),
+                "signature": row.get::<String, _>("signature"),
+                "release_notes": row.get::<String, _>("release_notes"),
+                "published_at": epoch_col(&row, "published_at_secs"),
+            })
+        }))
     }
 
     pub async fn store_upload(
@@ -204,7 +325,7 @@ impl DbStore {
             INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status)
             VALUES ($1, $2, $3, $4, $5, $6, 'queued')
             RETURNING id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
-                      result_docx_key, result_report_key, source_zip_key, result_log_key, storage_path,
+                      result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                       zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                       EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
                       EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
@@ -291,7 +412,7 @@ impl DbStore {
             UPDATE conversion_jobs
             SET status = 'completed',
                 result_docx_key = $2,
-                result_report_key = $3,
+                report_json = $3,
                 result_log_key = $4,
                 docx_bytes = $5,
                 log_bytes = $6,
@@ -304,7 +425,7 @@ impl DbStore {
         )
         .bind(parse_uuid(job_id)?)
         .bind(docx_key)
-        .bind(serde_json::to_string(report).unwrap_or_default())
+        .bind(serde_json::to_value(report).unwrap_or_else(|_| Value::Object(Default::default())))
         .bind(log_key)
         .bind(docx_bytes as i64)
         .bind(log_bytes as i64)
@@ -330,7 +451,8 @@ impl DbStore {
                 error_message = $3,
                 result_log_key = $4,
                 log_bytes = $5,
-                result_report_key = $6,
+                report_json = $6,
+                failed_at = now(),
                 updated_at = now()
             WHERE id = $1
             "#,
@@ -340,13 +462,89 @@ impl DbStore {
         .bind(error)
         .bind(log_key)
         .bind(log_bytes as i64)
-        .bind(serde_json::to_string(report).unwrap_or_default())
+        .bind(serde_json::to_value(report).unwrap_or_else(|_| Value::Object(Default::default())))
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
+    pub async fn claim_next_job(&self, worker_id: &str) -> Result<Option<String>, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            WITH picked AS (
+                SELECT id
+                FROM conversion_jobs
+                WHERE status = 'queued'
+                  AND next_run_at <= now()
+                ORDER BY created_at ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+            )
+            UPDATE conversion_jobs j
+            SET status = 'normalizing',
+                worker_id = $1,
+                locked_at = now(),
+                started_at = COALESCE(started_at, now()),
+                attempts = attempts + 1,
+                updated_at = now()
+            FROM picked
+            WHERE j.id = picked.id
+            RETURNING j.id::text
+            "#,
+        )
+        .bind(worker_id)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.map(|row| row.get("id")))
+    }
+
+    pub async fn recover_stale_jobs(&self) -> Result<u64, sqlx::Error> {
+        let result = sqlx::query(
+            r#"
+            UPDATE conversion_jobs
+            SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'queued' END,
+                error_code = CASE WHEN attempts >= 3 THEN 'worker_timeout' ELSE error_code END,
+                error_message = CASE WHEN attempts >= 3 THEN 'worker timed out before completing this conversion' ELSE error_message END,
+                failed_at = CASE WHEN attempts >= 3 THEN now() ELSE failed_at END,
+                worker_id = NULL,
+                locked_at = NULL,
+                next_run_at = CASE
+                    WHEN attempts >= 3 THEN next_run_at
+                    ELSE now() + make_interval(secs => LEAST(60, GREATEST(1, attempts * 5)))
+                END,
+                updated_at = now()
+            WHERE status IN ('normalizing', 'detecting', 'analyzing', 'compiling', 'rendering', 'verifying')
+              AND locked_at IS NOT NULL
+              AND locked_at < now() - interval '15 minutes'
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
+    }
+
     pub async fn cloud_conversions_used(&self, user_id: &str) -> Result<u64, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(*)::bigint AS ledger_count,
+                   COALESCE(SUM(
+                       CASE
+                           WHEN event_type = 'reserve' THEN quantity
+                           WHEN event_type = 'refund' THEN -quantity
+                           ELSE 0
+                       END
+                   ), 0)::bigint AS ledger_used
+            FROM usage_ledger
+            WHERE user_id = $1 AND source = 'preview'
+            "#,
+        )
+        .bind(parse_uuid(user_id)?)
+        .fetch_one(&self.pool)
+        .await?;
+        if row.get::<i64, _>("ledger_count") > 0 {
+            return Ok(row.get::<i64, _>("ledger_used").max(0) as u64);
+        }
+
         let row = sqlx::query(
             r#"
             SELECT COALESCE(SUM(quantity), 0)::bigint AS used
@@ -378,8 +576,13 @@ impl DbStore {
         Ok(entitlement_from_row(&row))
     }
 
-    pub async fn try_consume_cloud_conversion(&self, user_id: &str) -> Result<u64, u64> {
+    pub async fn reserve_cloud_conversion(
+        &self,
+        user_id: &str,
+        job_id: &str,
+    ) -> Result<u64, u64> {
         let user_uuid = parse_uuid(user_id).map_err(|_| 0_u64)?;
+        let job_uuid = parse_uuid(job_id).map_err(|_| 0_u64)?;
         let mut tx = self.pool.begin().await.map_err(|_| 0_u64)?;
         let entitlement = sqlx::query(
             r#"
@@ -399,37 +602,157 @@ impl DbStore {
             .ok()
             .flatten()
             .is_some_and(|value| value >= chrono::Utc::now());
-        let used = cloud_conversions_used_tx(&mut tx, user_uuid).await.map_err(|_| 0_u64)?;
+        let used = preview_conversions_used_tx(&mut tx, user_uuid)
+            .await
+            .map_err(|_| 0_u64)?;
+
         if valid_until_active {
-            tx.commit().await.map_err(|_| used)?;
-            return Ok(used);
-        }
-        if count_balance > 0 {
-            sqlx::query(
-                "UPDATE commercial_entitlements SET count_balance = count_balance - 1, updated_at = now() WHERE user_id = $1",
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                Some(job_uuid),
+                "reserve",
+                0,
+                None,
+                "date_entitlement",
+                Some("date entitlement active"),
             )
-            .bind(user_uuid)
-            .execute(&mut *tx)
             .await
             .map_err(|_| used)?;
             tx.commit().await.map_err(|_| used)?;
             return Ok(used);
         }
+
+        if count_balance > 0 {
+            let new_balance = count_balance - 1;
+            sqlx::query(
+                "UPDATE commercial_entitlements SET count_balance = $2, updated_at = now() WHERE user_id = $1",
+            )
+            .bind(user_uuid)
+            .bind(new_balance)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| used)?;
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                Some(job_uuid),
+                "reserve",
+                1,
+                Some(new_balance),
+                "entitlement",
+                Some("count entitlement reserved for conversion"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
         if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
             tx.rollback().await.ok();
             return Err(used);
         }
+
         let period_id = ensure_usage_period(&mut tx, user_uuid).await.map_err(|_| used)?;
         sqlx::query(
-            "INSERT INTO usage_events (user_id, usage_period_id, event_type, quantity) VALUES ($1, $2, 'cloud_conversion', 1)",
+            "INSERT INTO usage_events (user_id, usage_period_id, event_type, quantity, source_id) VALUES ($1, $2, 'cloud_conversion', 1, $3)",
         )
         .bind(user_uuid)
         .bind(period_id)
+        .bind(job_id)
         .execute(&mut *tx)
+        .await
+        .map_err(|_| used)?;
+        insert_usage_ledger(
+            &mut tx,
+            user_uuid,
+            Some(job_uuid),
+            "reserve",
+            1,
+            None,
+            "preview",
+            Some("preview quota reserved for conversion"),
+        )
         .await
         .map_err(|_| used)?;
         tx.commit().await.map_err(|_| used)?;
         Ok(used + 1)
+    }
+
+    pub async fn refund_cloud_conversion_for_job(
+        &self,
+        job_id: &str,
+        reason: &str,
+    ) -> Result<(), sqlx::Error> {
+        let job_uuid = parse_uuid(job_id)?;
+        let mut tx = self.pool.begin().await?;
+        let existing_refund = sqlx::query(
+            "SELECT id FROM usage_ledger WHERE conversion_job_id = $1 AND event_type = 'refund' LIMIT 1",
+        )
+        .bind(job_uuid)
+        .fetch_optional(&mut *tx)
+        .await?;
+        if existing_refund.is_some() {
+            tx.commit().await?;
+            return Ok(());
+        }
+
+        let reserve = sqlx::query(
+            r#"
+            SELECT user_id, quantity, source
+            FROM usage_ledger
+            WHERE conversion_job_id = $1 AND event_type = 'reserve'
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#,
+        )
+        .bind(job_uuid)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(reserve) = reserve else {
+            tx.commit().await?;
+            return Ok(());
+        };
+        let user_uuid: Uuid = reserve.get("user_id");
+        let quantity = reserve.get::<i64, _>("quantity").max(0);
+        let source: String = reserve.get("source");
+        if quantity == 0 {
+            tx.commit().await?;
+            return Ok(());
+        }
+
+        let balance_after = if source == "entitlement" {
+            let row = sqlx::query(
+                r#"
+                UPDATE commercial_entitlements
+                SET count_balance = count_balance + $2, updated_at = now()
+                WHERE user_id = $1
+                RETURNING count_balance
+                "#,
+            )
+            .bind(user_uuid)
+            .bind(quantity)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(row.get::<i64, _>("count_balance"))
+        } else {
+            None
+        };
+
+        insert_usage_ledger(
+            &mut tx,
+            user_uuid,
+            Some(job_uuid),
+            "refund",
+            quantity,
+            balance_after,
+            &source,
+            Some(reason),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub async fn create_recharge(
@@ -1082,6 +1405,19 @@ fn app_user_from_row(row: &PgRow) -> AppUser {
     }
 }
 
+fn billing_plan_from_row(row: &PgRow) -> BillingPlanRecord {
+    let features: Value = row.get("features");
+    BillingPlanRecord {
+        id: row.get("id"),
+        name: row.get("name"),
+        currency: row.get("currency"),
+        price_cents: row.get::<i32, _>("price_cents").max(0) as u64,
+        monthly_conversions: row.get::<i32, _>("monthly_conversions").max(0) as u64,
+        storage_bytes: row.get::<i64, _>("storage_bytes").max(0) as u64,
+        features: serde_json::from_value(features).unwrap_or_default(),
+    }
+}
+
 fn parse_uuid(value: &str) -> Result<Uuid, sqlx::Error> {
     Uuid::parse_str(value).map_err(|e| sqlx::Error::Protocol(e.to_string()))
 }
@@ -1125,7 +1461,7 @@ fn job_select_sql(tail: &str) -> String {
     format!(
         r#"
         SELECT id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
-               result_docx_key, result_report_key, source_zip_key, result_log_key, storage_path,
+               result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
                EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
@@ -1166,7 +1502,15 @@ fn job_from_row(
 }
 
 fn report_from_row(row: &PgRow) -> Option<ConversionReportRecord> {
-    let raw: Option<String> = row.get("result_report_key");
+    let report_json = row.try_get::<Value, _>("report_json").ok();
+    if let Some(value) = report_json {
+        if !value.is_null() && value != Value::Object(Default::default()) {
+            if let Ok(report) = serde_json::from_value(value) {
+                return Some(report);
+            }
+        }
+    }
+    let raw: Option<String> = row.try_get("result_report_key").ok().flatten();
     raw.and_then(|value| serde_json::from_str(&value).ok())
 }
 
@@ -1286,6 +1630,62 @@ async fn cloud_conversions_used_tx(
     .fetch_one(&mut **tx)
     .await?;
     Ok(row.get::<i64, _>("used").max(0) as u64)
+}
+
+async fn preview_conversions_used_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        SELECT COUNT(*)::bigint AS ledger_count,
+               COALESCE(SUM(
+                   CASE
+                       WHEN event_type = 'reserve' THEN quantity
+                       WHEN event_type = 'refund' THEN -quantity
+                       ELSE 0
+                   END
+               ), 0)::bigint AS ledger_used
+        FROM usage_ledger
+        WHERE user_id = $1 AND source = 'preview'
+        "#,
+    )
+    .bind(user_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    if row.get::<i64, _>("ledger_count") > 0 {
+        return Ok(row.get::<i64, _>("ledger_used").max(0) as u64);
+    }
+    cloud_conversions_used_tx(tx, user_id).await
+}
+
+async fn insert_usage_ledger(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    conversion_job_id: Option<Uuid>,
+    event_type: &str,
+    quantity: i64,
+    balance_after: Option<i64>,
+    source: &str,
+    reason: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT INTO usage_ledger
+            (user_id, conversion_job_id, event_type, quantity, balance_after, source, reason)
+        VALUES ($1, $2, $3, $4, $5, $6, $7)
+        "#,
+    )
+    .bind(user_id)
+    .bind(conversion_job_id)
+    .bind(event_type)
+    .bind(quantity)
+    .bind(balance_after)
+    .bind(source)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
 }
 
 async fn ensure_usage_period(

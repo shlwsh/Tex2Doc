@@ -279,6 +279,53 @@ async fn p6_demo_login_endpoint_accepts_demo_account() {
 }
 
 #[tokio::test]
+async fn p6_refresh_token_rotates_and_revokes_old_token() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let email = format!("refresh-{}@example.com", uuid::Uuid::new_v4().simple());
+
+    let auth: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/register"))
+        .json(&serde_json::json!({
+            "email": email,
+            "password": "secret"
+        }))
+        .send()
+        .await
+        .expect("send register")
+        .json()
+        .await
+        .expect("register json");
+    let refresh_token = auth["refresh_token"].as_str().unwrap().to_string();
+
+    let refreshed: serde_json::Value = client
+        .post(format!("http://{addr}/v1/auth/refresh"))
+        .json(&serde_json::json!({ "refresh_token": refresh_token }))
+        .send()
+        .await
+        .expect("send refresh")
+        .json()
+        .await
+        .expect("refresh json");
+    assert!(refreshed["access_token"]
+        .as_str()
+        .unwrap()
+        .starts_with("demo-access-"));
+    let rotated_refresh = refreshed["refresh_token"].as_str().unwrap();
+    assert!(rotated_refresh.starts_with("demo-refresh-"));
+
+    let old_refresh = client
+        .post(format!("http://{addr}/v1/auth/refresh"))
+        .json(&serde_json::json!({ "refresh_token": auth["refresh_token"] }))
+        .send()
+        .await
+        .expect("send old refresh");
+    assert_eq!(old_refresh.status(), 401);
+
+    let _ = shutdown.send(());
+}
+
+#[tokio::test]
 async fn p6_commercial_user_endpoints_require_bearer_token() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();

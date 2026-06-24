@@ -3,6 +3,7 @@
 use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
 use doc_core::{convert_zip, ConvertOptions};
 use tokio::sync::mpsc;
+use tokio::time::{self, Duration};
 
 use crate::state::{ConversionReportRecord, ConversionStatus, ServerState};
 
@@ -19,8 +20,31 @@ pub async fn spawn_worker_state() -> Result<ServerState, sqlx::Error> {
 }
 
 async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) {
-    while let Some(command) = rx.recv().await {
-        process_job(state.clone(), command.job_id).await;
+    let worker_id = format!("worker-{}", uuid::Uuid::new_v4().simple());
+    let mut interval = time::interval(Duration::from_secs(1));
+    loop {
+        tokio::select! {
+            Some(command) = rx.recv() => {
+                tracing::debug!("worker notified for job {}", command.job_id);
+            }
+            _ = interval.tick() => {
+                if let Err(error) = state.recover_stale_jobs().await {
+                    tracing::warn!("failed to recover stale conversion jobs: {error}");
+                }
+            }
+            else => break,
+        }
+
+        loop {
+            match state.claim_next_job(&worker_id).await {
+                Ok(Some(job_id)) => process_job(state.clone(), job_id).await,
+                Ok(None) => break,
+                Err(error) => {
+                    tracing::error!("failed to claim queued conversion job: {error}");
+                    break;
+                }
+            }
+        }
     }
 }
 

@@ -11,12 +11,18 @@ CREATE TABLE IF NOT EXISTS app_users (
     email TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     display_name TEXT,
+    role TEXT NOT NULL DEFAULT 'user'
+        CHECK (role IN ('user', 'admin')),
     status TEXT NOT NULL DEFAULT 'active'
         CHECK (status IN ('active', 'locked', 'deleted')),
     default_plan_id TEXT NOT NULL DEFAULT 'preview',
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE app_users
+    ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user'
+    CHECK (role IN ('user', 'admin'));
 
 CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -28,6 +34,24 @@ CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_used_at TIMESTAMPTZ
 );
+
+CREATE TABLE IF NOT EXISTS app_access_tokens (
+    token_hash TEXT PRIMARY KEY,
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    expires_at TIMESTAMPTZ,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_used_at TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS idx_app_access_tokens_user
+    ON app_access_tokens(user_id, created_at DESC);
+
+ALTER TABLE app_access_tokens
+    ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS revoked_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS last_used_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS billing_plans (
     id TEXT PRIMARY KEY,
@@ -101,6 +125,14 @@ CREATE TABLE IF NOT EXISTS usage_events (
 
 CREATE INDEX IF NOT EXISTS idx_usage_events_user_period
     ON usage_events(user_id, usage_period_id, event_type);
+
+CREATE TABLE IF NOT EXISTS commercial_entitlements (
+    user_id UUID PRIMARY KEY REFERENCES app_users(id) ON DELETE CASCADE,
+    count_balance BIGINT NOT NULL DEFAULT 0 CHECK (count_balance >= 0),
+    valid_until TIMESTAMPTZ,
+    source_order_id TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 CREATE TABLE IF NOT EXISTS redeem_packages (
     id TEXT PRIMARY KEY,
@@ -219,12 +251,20 @@ CREATE TABLE IF NOT EXISTS conversion_jobs (
         )),
     result_docx_key TEXT,
     result_report_key TEXT,
+    report_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     source_zip_key TEXT,
     result_log_key TEXT,
     storage_path TEXT,
     zip_bytes BIGINT,
     docx_bytes BIGINT,
     log_bytes BIGINT,
+    worker_id TEXT,
+    locked_at TIMESTAMPTZ,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    next_run_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    queued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at TIMESTAMPTZ,
+    failed_at TIMESTAMPTZ,
     error_code TEXT,
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -232,8 +272,50 @@ CREATE TABLE IF NOT EXISTS conversion_jobs (
     completed_at TIMESTAMPTZ
 );
 
+ALTER TABLE conversion_jobs
+    ADD COLUMN IF NOT EXISTS result_docx_key TEXT,
+    ADD COLUMN IF NOT EXISTS result_report_key TEXT,
+    ADD COLUMN IF NOT EXISTS report_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ADD COLUMN IF NOT EXISTS source_zip_key TEXT,
+    ADD COLUMN IF NOT EXISTS result_log_key TEXT,
+    ADD COLUMN IF NOT EXISTS storage_path TEXT,
+    ADD COLUMN IF NOT EXISTS zip_bytes BIGINT,
+    ADD COLUMN IF NOT EXISTS docx_bytes BIGINT,
+    ADD COLUMN IF NOT EXISTS log_bytes BIGINT,
+    ADD COLUMN IF NOT EXISTS worker_id TEXT,
+    ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS attempts INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ;
+
 CREATE INDEX IF NOT EXISTS idx_conversion_jobs_user_created
     ON conversion_jobs(user_id, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_conversion_jobs_queue
+    ON conversion_jobs(status, next_run_at, created_at)
+    WHERE status IN ('queued', 'normalizing', 'detecting', 'analyzing', 'compiling', 'rendering', 'verifying');
+
+CREATE TABLE IF NOT EXISTS usage_ledger (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
+    conversion_job_id UUID REFERENCES conversion_jobs(id) ON DELETE SET NULL,
+    event_type TEXT NOT NULL CHECK (event_type IN (
+        'reserve', 'commit', 'refund', 'grant', 'adjust'
+    )),
+    quantity BIGINT NOT NULL,
+    balance_after BIGINT,
+    source TEXT NOT NULL DEFAULT 'system',
+    reason TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_ledger_user_created
+    ON usage_ledger(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_ledger_job
+    ON usage_ledger(conversion_job_id);
 
 CREATE TABLE IF NOT EXISTS release_manifests (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

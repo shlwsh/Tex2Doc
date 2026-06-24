@@ -1,0 +1,6 @@
+interface:
+  display_name: "Product Commercialization Assessment"
+  short_description: "Evaluate readiness for paid rollout and growth"
+  default_prompt: "Use $product-commercialization-assessment to evaluate this product's commercialization maturity and produce an actionable report."
+policy:
+  allow_implicit_invocation: true

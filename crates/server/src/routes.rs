@@ -20,7 +20,7 @@ use crate::limits::{
 };
 use crate::db_store::AppUser;
 use crate::state::{
-    redeem_packages, ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
+    ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
     RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 use crate::feedback_service::{
@@ -224,7 +224,7 @@ async fn auth_refresh(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let suffix = payload.refresh_token.unwrap_or_else(|| "demo".to_string());
     let user = state
-        .user_for_token(&suffix)
+        .user_for_refresh_token(&suffix)
         .await
         .map_err(db_error)?
         .ok_or_else(|| ApiError::Unauthorized("invalid refresh token".to_string()))?;
@@ -285,49 +285,62 @@ async fn usage(
     })))
 }
 
-async fn plans() -> Json<serde_json::Value> {
-    Json(json!([
-        {
-            "id": "preview",
-            "name": "Preview",
-            "price_cents": 0,
-            "currency": "USD",
-            "monthly_conversions": 100,
-            "features": ["local-convert", "cloud-preview", "quality-report"]
-        },
-        {
-            "id": "pro",
-            "name": "Pro",
-            "price_cents": 2900,
-            "currency": "USD",
-            "monthly_conversions": 1000,
-            "features": ["priority-worker", "journal-profiles", "desktop-sync"]
-        }
-    ]))
+async fn plans(State(state): State<ServerState>) -> Result<Json<serde_json::Value>, ApiError> {
+    let plans = state.list_billing_plans().await.map_err(db_error)?;
+    Ok(Json(json!(plans
+        .iter()
+        .map(|plan| json!({
+            "id": plan.id,
+            "name": plan.name,
+            "price_cents": plan.price_cents,
+            "currency": plan.currency,
+            "monthly_conversions": plan.monthly_conversions,
+            "storage_bytes": plan.storage_bytes,
+            "features": plan.features,
+        }))
+        .collect::<Vec<_>>())))
 }
 
-async fn recharge_options() -> Json<serde_json::Value> {
-    Json(json!({
+async fn recharge_options(
+    State(state): State<ServerState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let packages = state.list_redeem_packages().await.map_err(db_error)?;
+    let count_packages = packages
+        .iter()
+        .filter(|package| package.package_type == "count")
+        .map(|package| {
+            json!({
+                "id": package.id,
+                "name": package.name,
+                "quantity": package.quantity,
+                "amount_cents": package.quantity * 100,
+            })
+        })
+        .collect::<Vec<_>>();
+    let date_packages = packages
+        .iter()
+        .filter(|package| package.package_type == "date")
+        .map(|package| {
+            json!({
+                "id": package.id,
+                "name": package.name,
+                "days": package.quantity,
+                "amount_cents": package.quantity * 100,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({
         "currency": "CNY",
         "provider": "mock-pay",
         "count": {
             "unit_price_cents": 100,
             "minimum_quantity": 3,
-            "packages": [
-                {"id": "count_3", "name": "3 次", "quantity": 3, "amount_cents": 300},
-                {"id": "count_10", "name": "10 次", "quantity": 10, "amount_cents": 1000},
-                {"id": "count_30", "name": "30 次", "quantity": 30, "amount_cents": 3000}
-            ]
+            "packages": count_packages
         },
         "date": {
-            "packages": [
-                {"id": "day", "name": "日卡", "days": 1, "amount_cents": 500},
-                {"id": "week", "name": "周卡", "days": 7, "amount_cents": 1400},
-                {"id": "month", "name": "月卡", "days": 30, "amount_cents": 3000},
-                {"id": "year", "name": "年卡", "days": 365, "amount_cents": 12000}
-            ]
+            "packages": date_packages
         }
-    }))
+    })))
 }
 
 async fn redeem_code_options(
@@ -335,12 +348,13 @@ async fn redeem_code_options(
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let _session = require_session(&state, &headers).await?;
+    let packages = state.list_redeem_packages().await.map_err(db_error)?;
     Ok(Json(json!({
         "enabled": true,
         "provider": "redeem-code",
         "code_format_hint": "T2D-XXXX-XXXX-XXXX-XX",
         "support_text": "请输入购买或活动获得的兑换码",
-        "packages": redeem_packages().iter().map(|package| json!({
+        "packages": packages.iter().map(|package| json!({
             "id": package.id,
             "name": package.name,
             "recharge_type": package.package_type,
@@ -570,14 +584,6 @@ async fn create_conversion(
     let main_tex = payload
         .main_tex
         .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
-    state
-        .try_consume_cloud_conversion(&session.id)
-        .await
-        .map_err(|used| {
-            ApiError::PaymentRequired(format!(
-                "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
-            ))
-        })?;
     let job = state
         .create_job(
             session.id.clone(),
@@ -589,6 +595,23 @@ async fn create_conversion(
         )
         .await
         .map_err(ApiError::Io)?;
+    if let Err(used) = state
+        .reserve_cloud_conversion(&session.id, &job.job_id)
+        .await
+    {
+        state
+            .fail_job_with_code(
+                &job.job_id,
+                "quota_exhausted",
+                format!(
+                    "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
+                ),
+            )
+            .await;
+        return Err(ApiError::PaymentRequired(format!(
+            "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
+        )));
+    }
     state
         .enqueue_job(job.job_id.clone())
         .await
@@ -664,15 +687,25 @@ async fn get_conversion_report(
     ))
 }
 
-async fn release_manifest(Path(channel): Path<String>) -> Json<serde_json::Value> {
-    Json(json!({
+async fn release_manifest(
+    State(state): State<ServerState>,
+    Path(channel): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    if let Some(manifest) = state
+        .latest_release_manifest(&channel)
+        .await
+        .map_err(db_error)?
+    {
+        return Ok(Json(manifest));
+    }
+    Ok(Json(json!({
         "version": env!("CARGO_PKG_VERSION"),
         "channel": channel,
         "download_url": "https://releases.tex2doc.cn/desktop/latest",
         "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         "signature": "pending-p9-signature",
         "release_notes": "P9 preview manifest. Installers and real signatures are pending platform release builds.",
-    }))
+    })))
 }
 
 async fn auth_response(
@@ -1268,8 +1301,12 @@ async fn download_conversion_zip(
         .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
+    let key = job
+        .source_zip_key
+        .as_deref()
+        .ok_or_else(|| ApiError::NotFound("ZIP file key not found for this conversion".to_string()))?;
     let bytes = state
-        .load_session_file(&job_id, "source.zip")
+        .load_storage_key(key)
         .ok_or_else(|| ApiError::NotFound("ZIP file not found for this conversion".to_string()))?;
 
     let resp = Response::builder()
@@ -1298,8 +1335,12 @@ async fn download_conversion_log(
         .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
+    let key = job
+        .result_log_key
+        .as_deref()
+        .ok_or_else(|| ApiError::NotFound("conversion log key not found for this job".to_string()))?;
     let bytes = state
-        .load_session_file(&job_id, "conversion.log")
+        .load_storage_key(key)
         .ok_or_else(|| ApiError::NotFound("conversion log not found for this job".to_string()))?;
 
     let resp = Response::builder()

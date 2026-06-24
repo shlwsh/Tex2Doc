@@ -49,12 +49,6 @@ impl FileStorage {
         Ok(path)
     }
 
-    /// Load bytes from a file inside the session directory.
-    pub fn load(&self, job_id: &str, filename: &str) -> io::Result<Vec<u8>> {
-        let dir = self.session_dir(job_id);
-        fs::read(dir.join(fixed_filename(filename)))
-    }
-
     /// Load bytes by a previously persisted relative object key.
     pub fn load_key(&self, key: &str) -> io::Result<Vec<u8>> {
         fs::read(self.root.join(key))

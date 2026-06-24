@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
-use crate::db_store::{AppUser, DbStore};
+use crate::db_store::{AppUser, BillingPlanRecord, DbStore};
 use crate::excel_export;
 use crate::feedback_service::FeedbackStore;
 use crate::file_storage::FileStorage;
@@ -260,6 +260,28 @@ impl ServerState {
         self.db.user_for_token(token).await
     }
 
+    pub async fn user_for_refresh_token(
+        &self,
+        token: &str,
+    ) -> Result<Option<AppUser>, sqlx::Error> {
+        self.db.user_for_refresh_token(token).await
+    }
+
+    pub async fn list_billing_plans(&self) -> Result<Vec<BillingPlanRecord>, sqlx::Error> {
+        self.db.list_billing_plans().await
+    }
+
+    pub async fn list_redeem_packages(&self) -> Result<Vec<RedeemPackage>, sqlx::Error> {
+        self.db.list_redeem_packages().await
+    }
+
+    pub async fn latest_release_manifest(
+        &self,
+        channel: &str,
+    ) -> Result<Option<serde_json::Value>, sqlx::Error> {
+        self.db.latest_release_manifest(channel).await
+    }
+
     pub async fn store_upload(
         &self,
         user_id: &str,
@@ -322,6 +344,14 @@ impl ServerState {
             .map_err(|e| format!("conversion queue unavailable: {e}"))
     }
 
+    pub async fn claim_next_job(&self, worker_id: &str) -> Result<Option<String>, sqlx::Error> {
+        self.db.claim_next_job(worker_id).await
+    }
+
+    pub async fn recover_stale_jobs(&self) -> Result<u64, sqlx::Error> {
+        self.db.recover_stale_jobs().await
+    }
+
     pub async fn get_job(&self, job_id: &str) -> Option<ConversionJobRecord> {
         let mut job = self.db.get_job(job_id).await.ok().flatten()?;
         if let Some(key) = job.result_docx_key.as_deref() {
@@ -346,8 +376,12 @@ impl ServerState {
         })
     }
 
-    pub async fn try_consume_cloud_conversion(&self, user_id: &str) -> Result<u64, u64> {
-        self.db.try_consume_cloud_conversion(user_id).await
+    pub async fn reserve_cloud_conversion(
+        &self,
+        user_id: &str,
+        job_id: &str,
+    ) -> Result<u64, u64> {
+        self.db.reserve_cloud_conversion(user_id, job_id).await
     }
 
     pub async fn create_recharge(
@@ -516,10 +550,17 @@ impl ServerState {
         {
             tracing::error!("failed to mark conversion job failed: {db_error}");
         }
+        if let Err(refund_error) = self
+            .db
+            .refund_cloud_conversion_for_job(job_id, error_code)
+            .await
+        {
+            tracing::error!("failed to refund conversion quota: {refund_error}");
+        }
     }
 
-    pub fn load_session_file(&self, job_id: &str, filename: &str) -> Option<Vec<u8>> {
-        self.file_storage.load(job_id, filename).ok()
+    pub fn load_storage_key(&self, key: &str) -> Option<Vec<u8>> {
+        self.file_storage.load_key(key).ok()
     }
 
     pub fn feedback_store(&self) -> &FeedbackStore {
