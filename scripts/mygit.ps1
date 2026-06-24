@@ -206,5 +206,10 @@ Write-Host ("  scriptDir : {0}" -f $ScriptDir)
 Write-Host ("  python    : {0}" -f $pyExe)
 Write-Host ""
 
+if ($env:MYGIT_FORCE_AI -ne "1" -and [string]::IsNullOrWhiteSpace($env:MYGIT_NO_AI)) {
+    $env:MYGIT_NO_AI = "1"
+    Write-Host "AI summary disabled by default; using rule-based commit message. Set MYGIT_FORCE_AI=1 to enable AI." -ForegroundColor Yellow
+}
+
 & $pyExe @pyArgs $pyFile $TargetDir $ScriptDir
 exit $LASTEXITCODE

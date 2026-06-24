@@ -27,6 +27,11 @@ AUTO_COMMIT_EXCLUDE_PREFIXES = (
     "experiments/results/tmp/",
     "__pycache__/",
     "latex/output/",
+    "sessions/",
+)
+
+AUTO_COMMIT_EXCLUDE_SUFFIXES = (
+    ".dump",
 )
 
 # LaTeX / 编译中间文件（不参与 diff 文本）
@@ -261,7 +266,9 @@ def is_excluded_from_auto_commit(file_path: str) -> bool:
         return True
     if normalized.endswith(".pyc") or "/__pycache__/" in normalized:
         return True
-    return any(normalized.startswith(prefix) for prefix in AUTO_COMMIT_EXCLUDE_PREFIXES)
+    if any(normalized.startswith(prefix) for prefix in AUTO_COMMIT_EXCLUDE_PREFIXES):
+        return True
+    return normalized.startswith("database/") and normalized.endswith(AUTO_COMMIT_EXCLUDE_SUFFIXES)
 
 
 def parse_porcelain_path(line: str) -> tuple[str, str]:
@@ -721,6 +728,16 @@ def stage_changes(workspace: str) -> None:
             run_git(["reset", "HEAD", "--", file_name], check=False)
         except RuntimeError:
             pass
+    staged_status = run_command("git status --porcelain") or ""
+    for line in staged_status.splitlines():
+        status, file_path = parse_porcelain_path(line)
+        if not file_path or not is_excluded_from_auto_commit(file_path):
+            continue
+        if status[0] != " " and status[0] != "?":
+            try:
+                run_git(["reset", "HEAD", "--", file_path], check=False)
+            except RuntimeError:
+                pass
 
 
 def check_version_files(changes_raw: str) -> bool:
