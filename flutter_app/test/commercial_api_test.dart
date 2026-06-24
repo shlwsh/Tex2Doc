@@ -12,7 +12,7 @@ void main() {
       'http://127.0.0.1:2624/v1/',
     );
     expect(
-      CommercialApiClient('http://127.0.0.1:8080/v1/').baseUri.toString(),
+      CommercialApiClient('http://127.0.0.1:2624/v1/').baseUri.toString(),
       'http://127.0.0.1:2624/v1/',
     );
   });

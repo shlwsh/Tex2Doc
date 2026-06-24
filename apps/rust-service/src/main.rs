@@ -38,7 +38,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(RequestBodyLimitLayer::new(MAX_BODY));
 
     let addr: SocketAddr = std::env::var("DOC_SERVER_ADDR")
-        .unwrap_or_else(|_| "0.0.0.0:8080".to_string())
+        .unwrap_or_else(|_| "127.0.0.1:2624".to_string())
         .parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!("doc-server listening on http://{addr}");

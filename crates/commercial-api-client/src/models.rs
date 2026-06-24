@@ -394,13 +394,19 @@ impl ConversionStorageInfo {
     #[inline]
     #[allow(dead_code)]
     pub fn docx_size(&self) -> Option<u64> {
-        self.result_docx.as_ref().and_then(|d| d.bytes).or(self.docx_bytes)
+        self.result_docx
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.docx_bytes)
     }
 
     #[inline]
     #[allow(dead_code)]
     pub fn zip_size(&self) -> Option<u64> {
-        self.source_zip.as_ref().and_then(|d| d.bytes).or(self.zip_bytes)
+        self.source_zip
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.zip_bytes)
     }
 
     #[inline]

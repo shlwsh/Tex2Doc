@@ -62,7 +62,10 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/admin/v1/dashboard", get(admin_dashboard))
         .route("/admin/v1/users", get(admin_list_users))
         .route("/admin/v1/usage-ledger", get(admin_list_usage_ledger))
-        .route("/admin/v1/manual-orders", get(admin_list_manual_orders).post(admin_create_manual_order))
+        .route(
+            "/admin/v1/manual-orders",
+            get(admin_list_manual_orders).post(admin_create_manual_order),
+        )
         .route("/admin/v1/waitlist", get(admin_list_waitlist))
         .route("/v1/usage", get(usage))
         .route("/api/v1/usage", get(usage))
@@ -157,8 +160,14 @@ pub fn router_with_state(state: ServerState) -> Router {
         )
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
-        .route("/admin/v1/releases", get(admin_list_releases).post(admin_publish_release))
-        .route("/admin/v1/releases/:id/rollback", post(admin_rollback_release))
+        .route(
+            "/admin/v1/releases",
+            get(admin_list_releases).post(admin_publish_release),
+        )
+        .route(
+            "/admin/v1/releases/:id/rollback",
+            post(admin_rollback_release),
+        )
         .route("/admin/v1/release-audit", get(admin_release_audit))
         .merge(static_router())
         .with_state(state)
@@ -503,7 +512,10 @@ async fn admin_list_manual_orders(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let _admin = require_admin_session(&state, &headers).await?;
     let orders = state.list_manual_orders().await.map_err(db_error)?;
-    Ok(Json(json!(orders.iter().map(manual_order_json).collect::<Vec<_>>())))
+    Ok(Json(json!(orders
+        .iter()
+        .map(manual_order_json)
+        .collect::<Vec<_>>())))
 }
 
 async fn admin_list_waitlist(

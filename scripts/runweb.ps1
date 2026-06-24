@@ -7,7 +7,7 @@ Launches flutter_app with Flutter's web target. The default web-server device
 prints a local URL that can be opened from any browser.
 
 .PARAMETER Port
-Web server port. Default: 5173.
+Web server port. Default: 2625.
 
 .PARAMETER HostAddress
 Host address for the web-server target. Default: 127.0.0.1.
@@ -21,11 +21,11 @@ Run the app in release mode.
 .EXAMPLE
 .\scripts\runweb.ps1
 .EXAMPLE
-.\scripts\runweb.ps1 -Device chrome -Port 8080
+.\scripts\runweb.ps1 -Device chrome -Port 2625
 #>
 
 param(
-    [int]$Port = 5173,
+    [int]$Port = 2625,
     [string]$HostAddress = "127.0.0.1",
     [ValidateSet("web-server", "chrome", "edge")]
     [string]$Device = "web-server",

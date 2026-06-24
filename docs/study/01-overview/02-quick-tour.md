@@ -92,7 +92,7 @@ npx playwright install chromium
 npm run build:wasm
 npm run build:web
 
-# 启 PWA 服务（默认 4173 端口）
+# 启 PWA 服务（默认 2627 端口）
 node scripts/serve_flutter_web.mjs &
 sleep 3
 
@@ -161,15 +161,15 @@ cargo run -p doc-engine -- convert \
 ## 2.8 启动 HTTP 服务端
 
 ```bash
-# 默认监听 0.0.0.0:8080
-DOC_SERVER_ADDR=0.0.0.0:8080 cargo run -p doc-server
+# 默认监听 0.0.0.0:2624
+DOC_SERVER_ADDR=0.0.0.0:2624 cargo run -p doc-server
 
 # 验证
-curl http://127.0.0.1:8080/api/v1/health
+curl http://127.0.0.1:2624/api/v1/health
 # {"status":"ok"}
 
 # 提交转换
-curl -X POST http://127.0.0.1:8080/api/v1/convert \
+curl -X POST http://127.0.0.1:2624/api/v1/convert \
   -F "file=@examples/paper3/upload.zip" \
   -F "main_tex=main-jos.tex" \
   -o out.docx

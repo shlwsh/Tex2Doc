@@ -115,7 +115,7 @@ a.click();
 | `mygit.ps1` | PowerShell | 200+ | 通用 mygit 工具 |
 | `mygit.sh` | Bash | 50+ | 通用 mygit 工具 |
 | `mygit.py` | Python | 800+ | 通用 mygit 工具 |
-| `serve_flutter_web.mjs` | Node | 100+ | 静态服务器（端口 4173） |
+| `serve_flutter_web.mjs` | Node | 100+ | 静态服务器（端口 2627） |
 | `test_proxy.py` | Python | 30+ | 测试代理 |
 | `verify_install.mjs` | Node | 20+ | 环境自检 |
 | `verify_paper3.mjs` | Node | 272 | 旧版 verify（保留） |
@@ -162,7 +162,7 @@ a.click();
 
 ```javascript
 // 1) 启 Playwright + Chromium
-// 2) 访问 $BASE_URL (默认 http://127.0.0.1:4173/)
+// 2) 访问 $BASE_URL (默认 http://127.0.0.1:2627/)
 // 3) 等 Flutter 容器挂载 + 2s 渲染 → 截图 flutter-app.png
 // 4) 等 window.docEngine 就绪 → 读 version()
 // 5) 上传 paper3/upload.zip → 调 window.docEngine.convert_zip_to_docx
@@ -192,7 +192,7 @@ a.click();
 
 ```javascript
 // 启 http.createServer，serve flutter_app/build/web/
-// 端口默认 4173
+// 端口默认 2627
 // MIME 自定
 ```
 

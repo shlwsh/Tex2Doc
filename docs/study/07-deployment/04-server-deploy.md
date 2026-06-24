@@ -36,7 +36,7 @@ cd /opt/doc-engine
 chmod +x doc-server
 
 # 3. 启动
-DOC_SERVER_ADDR=0.0.0.0:8080 RUST_LOG=info ./doc-server
+DOC_SERVER_ADDR=0.0.0.0:2624 RUST_LOG=info ./doc-server
 ```
 
 ### 2.2 systemd 服务
@@ -52,7 +52,7 @@ After=network.target
 Type=simple
 User=doc-engine
 Group=doc-engine
-Environment=DOC_SERVER_ADDR=0.0.0.0:8080
+Environment=DOC_SERVER_ADDR=0.0.0.0:2624
 Environment=RUST_LOG=info,doc_server=info
 ExecStart=/opt/doc-engine/doc-server
 Restart=on-failure
@@ -116,12 +116,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=builder /build/target/release/doc-server /usr/local/bin/doc-server
 
 USER doc-engine
-EXPOSE 8080
-ENV DOC_SERVER_ADDR=0.0.0.0:8080
+EXPOSE 2624
+ENV DOC_SERVER_ADDR=0.0.0.0:2624
 ENV RUST_LOG=info
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
-  CMD wget -qO- http://127.0.0.1:8080/api/v1/health || exit 1
+  CMD wget -qO- http://127.0.0.1:2624/api/v1/health || exit 1
 
 CMD ["/usr/local/bin/doc-server"]
 ```
@@ -132,11 +132,11 @@ CMD ["/usr/local/bin/doc-server"]
 docker build -t doc-engine/server:0.1.0 -f Dockerfile.server .
 
 # 测试
-docker run --rm -p 8080:8080 doc-engine/server:0.1.0
-curl http://127.0.0.1:8080/api/v1/health
+docker run --rm -p 2624:2624 doc-engine/server:0.1.0
+curl http://127.0.0.1:2624/api/v1/health
 
 # 后台运行
-docker run -d --name doc-server -p 8080:8080 \
+docker run -d --name doc-server -p 2624:2624 \
   --restart unless-stopped \
   -e RUST_LOG=info \
   -v /var/log/doc-server:/var/log/doc-server \
@@ -153,12 +153,12 @@ services:
     image: doc-engine/server:0.1.0
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "2624:2624"
     environment:
-      DOC_SERVER_ADDR: "0.0.0.0:8080"
+      DOC_SERVER_ADDR: "0.0.0.0:2624"
       RUST_LOG: "info"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/api/v1/health"]
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:2624/api/v1/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -204,10 +204,10 @@ spec:
           imagePullPolicy: IfNotPresent
           ports:
             - name: http
-              containerPort: 8080
+              containerPort: 2624
           env:
             - name: DOC_SERVER_ADDR
-              value: "0.0.0.0:8080"
+              value: "0.0.0.0:2624"
             - name: RUST_LOG
               value: "info"
           resources:
@@ -345,7 +345,7 @@ curl https://doc-engine.example.com/api/v1/health
 
 ```nginx
 upstream doc_server {
-    server 127.0.0.1:8080;
+    server 127.0.0.1:2624;
     keepalive 32;
 }
 
@@ -395,7 +395,7 @@ server {
 
 ```caddyfile
 doc-engine.example.com {
-    reverse_proxy 127.0.0.1:8080 {
+    reverse_proxy 127.0.0.1:2624 {
         transport http {
             dial_timeout 5s
             response_header_timeout 120s
@@ -432,7 +432,7 @@ services:
       - "traefik.enable=true"
       - "traefik.http.routers.doc-server.rule=Host(`doc-engine.example.com`)"
       - "traefik.http.routers.doc-server.tls.certresolver=letsencrypt"
-      - "traefik.http.services.doc-server.loadbalancer.server.port=8080"
+      - "traefik.http.services.doc-server.loadbalancer.server.port=2624"
 
 volumes:
   letsencrypt:
@@ -496,7 +496,7 @@ ssl_certificate_key /etc/ssl/private/doc-engine.key;
 ### 5.1 基础健康检查
 
 ```bash
-curl -f http://127.0.0.1:8080/api/v1/health
+curl -f http://127.0.0.1:2624/api/v1/health
 ```
 
 ### 5.2 日志

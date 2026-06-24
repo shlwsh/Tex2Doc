@@ -36,15 +36,15 @@ npm run build:web
 
 ```bash
 node scripts/serve_flutter_web.mjs
-# 默认端口 4173
-# 访问 http://127.0.0.1:4173/
+# 默认端口 2627
+# 访问 http://127.0.0.1:2627/
 ```
 
 或用任意静态服务器：
 
 ```bash
 cd flutter_app/build/web
-python -m http.server 4173
+python -m http.server 2627
 ```
 
 ---
@@ -53,7 +53,7 @@ python -m http.server 4173
 
 ### 2.1 打开页面
 
-访问 `http://127.0.0.1:4173/`，应看到 Material 3 风格的 Flutter App。
+访问 `http://127.0.0.1:2627/`，应看到 Material 3 风格的 Flutter App。
 
 ### 2.2 状态卡
 
@@ -160,7 +160,7 @@ add_header Cross-Origin-Embedder-Policy "require-corp" always;
 ### 5.2 Flutter Web 调试
 
 ```bash
-flutter run -d chrome --web-port 4173
+flutter run -d chrome --web-port 2626
 ```
 
 * 支持 hot reload。

@@ -3,21 +3,21 @@
 Start Flutter Web dev server with hot reload, auto-clearing port conflicts.
 
 .DESCRIPTION
-Checks whether the target port (default 4173) is already in use. If so, force-kills
+Checks whether the target port (default 2626) is already in use. If so, force-kills
 the occupying process and retries until the port is free, then launches:
     flutter run -d chrome --web-port <port>
 
 .PARAMETER Port
-Web server port. Default: 4173.
+Web server port. Default: 2626.
 
 .EXAMPLE
 .\scripts\run_flutter_webservice.ps1
 .EXAMPLE
-.\scripts\run_flutter_webservice.ps1 -Port 8080
+.\scripts\run_flutter_webservice.ps1 -Port 2626
 #>
 
 param(
-    [int]$Port = 4173,
+    [int]$Port = 2626,
     [int]$RetrySeconds = 10,
     [int]$RetryIntervalSec = 1
 )

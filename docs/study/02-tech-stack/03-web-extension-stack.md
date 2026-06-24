@@ -174,7 +174,7 @@ docEngine = mod;
 | `scripts/e2e_extension.mjs` | 启 Playwright，加载 Chrome 扩展 popup，验证转换 |
 | `scripts/verify_paper3.mjs` | 旧版验证脚本（保留）；调 cargo test 生成 docx，做内容断言 |
 | `scripts/verify_install.mjs` | 环境自检 |
-| `scripts/serve_flutter_web.mjs` | 启静态服务器（默认 4173），serve `flutter_app/build/web/` |
+| `scripts/serve_flutter_web.mjs` | 启静态服务器（默认 2627），serve `flutter_app/build/web/` |
 | `scripts/verify_paper3.ps1` | PowerShell 版 verify 入口（与 `verify_paper3.mjs` 对应） |
 
 ### 1.3.3 验证脚本关键技术

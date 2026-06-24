@@ -2260,7 +2260,10 @@ fn format_algline_for_docx(line: &AlgLine, line_no: usize) -> String {
     } else {
         format!(" // {}", line.comment)
     };
-    format!("{:>3} | {}{}{}", line_no, indent_str, code_text, comment_part)
+    format!(
+        "{:>3} | {}{}{}",
+        line_no, indent_str, code_text, comment_part
+    )
 }
 
 #[allow(dead_code)]
@@ -2476,7 +2479,8 @@ fn write_inline_math_run(w: &mut Writer<Vec<u8>>, latex: &str) {
 
 /// Emit `<m:oMathPara><m:oMath>...</m:oMath></m:oMathPara>` for the expression.
 fn write_omath_para(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
-    w.write_event(Event::Start(BytesStart::new("m:oMath"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:oMath")))
+        .unwrap();
     write_omath(w, e);
     w.write_event(Event::End(BytesEnd::new("m:oMath"))).unwrap();
 }
@@ -2501,38 +2505,46 @@ fn write_omath(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         }
         MathExpr::Space => {}
         MathExpr::Sub { base, sub } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSub"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSub")))
+                .unwrap();
             write_omath_e(w, base);
             write_omath_sub(w, sub);
             w.write_event(Event::End(BytesEnd::new("m:sSub"))).unwrap();
         }
         MathExpr::Sup { base, sup } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSup")))
+                .unwrap();
             write_omath_e(w, base);
             write_omath_sup(w, sup);
             w.write_event(Event::End(BytesEnd::new("m:sSup"))).unwrap();
         }
         MathExpr::SubSup { base, sub, sup } => {
-            w.write_event(Event::Start(BytesStart::new("m:sSubSup"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:sSubSup")))
+                .unwrap();
             write_omath_e(w, base);
             write_omath_sub(w, sub);
             write_omath_sup(w, sup);
-            w.write_event(Event::End(BytesEnd::new("m:sSubSup"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:sSubSup")))
+                .unwrap();
         }
         MathExpr::Frac { num, den } => {
             w.write_event(Event::Start(BytesStart::new("m:f"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:num"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:num")))
+                .unwrap();
             write_omath(w, num);
             w.write_event(Event::End(BytesEnd::new("m:num"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:den"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:den")))
+                .unwrap();
             write_omath(w, den);
             w.write_event(Event::End(BytesEnd::new("m:den"))).unwrap();
             w.write_event(Event::End(BytesEnd::new("m:f"))).unwrap();
         }
         MathExpr::Sqrt { body, index } => {
-            w.write_event(Event::Start(BytesStart::new("m:rad"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:rad")))
+                .unwrap();
             if let Some(idx) = index {
-                w.write_event(Event::Start(BytesStart::new("m:deg"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:deg")))
+                    .unwrap();
                 write_omath(w, idx);
                 w.write_event(Event::End(BytesEnd::new("m:deg"))).unwrap();
             }
@@ -2541,18 +2553,24 @@ fn write_omath(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         }
         MathExpr::Fenced { open, body, close } => {
             w.write_event(Event::Start(BytesStart::new("m:d"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:begChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:begChr")))
+                .unwrap();
             write_omath_text(w, open);
-            w.write_event(Event::End(BytesEnd::new("m:begChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:begChr")))
+                .unwrap();
             write_omath_e(w, body);
-            w.write_event(Event::Start(BytesStart::new("m:endChr"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:endChr")))
+                .unwrap();
             write_omath_text(w, close);
-            w.write_event(Event::End(BytesEnd::new("m:endChr"))).unwrap();
+            w.write_event(Event::End(BytesEnd::new("m:endChr")))
+                .unwrap();
             w.write_event(Event::End(BytesEnd::new("m:d"))).unwrap();
         }
         MathExpr::Function { name, arg } => {
-            w.write_event(Event::Start(BytesStart::new("m:func"))).unwrap();
-            w.write_event(Event::Start(BytesStart::new("m:fName"))).unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:func")))
+                .unwrap();
+            w.write_event(Event::Start(BytesStart::new("m:fName")))
+                .unwrap();
             w.write_event(Event::Start(BytesStart::new("m:r"))).unwrap();
             write_omath_text(w, name);
             w.write_event(Event::End(BytesEnd::new("m:r"))).unwrap();
@@ -2563,7 +2581,8 @@ fn write_omath(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
         MathExpr::Matrix { rows } => {
             w.write_event(Event::Start(BytesStart::new("m:m"))).unwrap();
             for row in rows {
-                w.write_event(Event::Start(BytesStart::new("m:mr"))).unwrap();
+                w.write_event(Event::Start(BytesStart::new("m:mr")))
+                    .unwrap();
                 for cell in row {
                     w.write_event(Event::Start(BytesStart::new("m:e"))).unwrap();
                     write_omath(w, cell);
@@ -2593,13 +2612,15 @@ fn write_omath_e(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
 }
 
 fn write_omath_sub(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
-    w.write_event(Event::Start(BytesStart::new("m:sub"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:sub")))
+        .unwrap();
     write_omath(w, e);
     w.write_event(Event::End(BytesEnd::new("m:sub"))).unwrap();
 }
 
 fn write_omath_sup(w: &mut Writer<Vec<u8>>, e: &MathExpr) {
-    w.write_event(Event::Start(BytesStart::new("m:sup"))).unwrap();
+    w.write_event(Event::Start(BytesStart::new("m:sup")))
+        .unwrap();
     write_omath(w, e);
     w.write_event(Event::End(BytesEnd::new("m:sup"))).unwrap();
 }
@@ -3536,7 +3557,10 @@ mod tests {
         // The inline math must produce OMML inside the itemize item.
         assert!(xml.contains("<m:oMath"), "itemize item should contain OMML");
         // No raw LaTeX should leak.
-        assert!(!xml.contains(r"\varepsilon"), "raw \\varepsilon should not appear");
+        assert!(
+            !xml.contains(r"\varepsilon"),
+            "raw \\varepsilon should not appear"
+        );
     }
 
     #[test]

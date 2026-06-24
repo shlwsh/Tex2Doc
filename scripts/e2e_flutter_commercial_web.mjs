@@ -8,8 +8,8 @@
  * - ZIP selection, cloud semantic conversion, conversion records, and DOCX download complete.
  *
  * Environment:
- * - WEB_PORT=4174
- * - API_PORT=8080
+ * - WEB_PORT=2628
+ * - API_PORT=2624
  * - SKIP_FLUTTER_BUILD=1 to reuse flutter_app/build/web
  */
 import { spawn } from 'node:child_process';
@@ -25,8 +25,8 @@ const flutterAppDir = resolve(repoRoot, 'flutter_app');
 const targetDir = resolve(repoRoot, 'target', 'playwright');
 const flutterWebDir = resolve(flutterAppDir, 'build', 'web');
 const logPath = resolve(targetDir, 'commercial-web-e2e.log');
-const webPort = Number(process.env.WEB_PORT ?? 4174);
-const apiPort = Number(process.env.API_PORT ?? 8080);
+const webPort = Number(process.env.WEB_PORT ?? 2628);
+const apiPort = Number(process.env.API_PORT ?? 2624);
 const webUrl = `http://127.0.0.1:${webPort}/`;
 const apiBase = `http://127.0.0.1:${apiPort}`;
 const spawned = [];

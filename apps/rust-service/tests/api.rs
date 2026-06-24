@@ -157,7 +157,10 @@ async fn p6_commercial_contract_endpoints_return_json() {
         .json()
         .await
         .expect("register json");
-    assert!(auth["access_token"].as_str().unwrap().starts_with("access-"));
+    assert!(auth["access_token"]
+        .as_str()
+        .unwrap()
+        .starts_with("access-"));
     assert_eq!(auth["user"]["plan_id"], "preview");
     let token = auth["access_token"].as_str().unwrap().to_string();
 

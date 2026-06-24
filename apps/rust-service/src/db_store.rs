@@ -148,7 +148,11 @@ impl DbStore {
         Ok(app_user_from_row(&row))
     }
 
-    pub async fn login_user(&self, email: &str, password: &str) -> Result<Option<AppUser>, sqlx::Error> {
+    pub async fn login_user(
+        &self,
+        email: &str,
+        password: &str,
+    ) -> Result<Option<AppUser>, sqlx::Error> {
         let row = sqlx::query(
             r#"
             SELECT id::text, email, display_name, default_plan_id, role, status, password_hash
@@ -2300,13 +2304,15 @@ async fn insert_grant_ledger(
 ) -> Result<(), sqlx::Error> {
     let (quantity, balance_after) = match record.recharge_type.as_str() {
         "count" => {
-            let row = sqlx::query(
-                "SELECT count_balance FROM commercial_entitlements WHERE user_id = $1",
+            let row =
+                sqlx::query("SELECT count_balance FROM commercial_entitlements WHERE user_id = $1")
+                    .bind(user_id)
+                    .fetch_one(&mut **tx)
+                    .await?;
+            (
+                record.quantity as i64,
+                Some(row.get::<i64, _>("count_balance")),
             )
-            .bind(user_id)
-            .fetch_one(&mut **tx)
-            .await?;
-            (record.quantity as i64, Some(row.get::<i64, _>("count_balance")))
         }
         "date" => (record.quantity as i64, None),
         _ => (0, None),

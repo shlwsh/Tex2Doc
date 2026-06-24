@@ -5,7 +5,6 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 const defaultCommercialApiBaseUrl = 'http://127.0.0.1:2624/v1/';
-const legacyLocalCommercialApiBaseUrl = 'http://127.0.0.1:8080/v1/';
 const legacyOnlineCommercialApiBaseUrl = 'https://api.tex2doc.cn/v1/';
 
 class CommercialApiException implements Exception {
@@ -677,9 +676,7 @@ class CommercialApiClient {
   static Uri _normalizeBaseUrl(String value) {
     final valueTrimmed = value.trim();
     final trimmed =
-        valueTrimmed.isEmpty ||
-            valueTrimmed == legacyLocalCommercialApiBaseUrl ||
-            valueTrimmed == legacyOnlineCommercialApiBaseUrl
+        valueTrimmed.isEmpty || valueTrimmed == legacyOnlineCommercialApiBaseUrl
         ? defaultCommercialApiBaseUrl
         : valueTrimmed;
     final withSlash = trimmed.endsWith('/') ? trimmed : '$trimmed/';
