@@ -275,13 +275,11 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
         30,
         31,
     ];
-    let mut m = 1u64;
-    for &dm in &months {
+    for (m, &dm) in (1u64..).zip(months.iter()) {
         if remaining < dm {
             return (y, m, remaining + 1);
         }
         remaining -= dm;
-        m += 1;
     }
     (y, 12, 31)
 }
