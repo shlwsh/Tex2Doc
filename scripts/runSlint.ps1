@@ -160,7 +160,7 @@ function Get-PortProcessIds {
 }
 
 function Clear-ServerPort {
-    $processIds = Get-PortProcessIds
+    $processIds = @(Get-PortProcessIds)
     if (-not $processIds -or $processIds.Count -eq 0) {
         return
     }
@@ -196,6 +196,8 @@ function Start-LocalServer {
     $serverArgs = @("run", "-p", $serverPackageName)
     $envBlock = @{
         "DOC_SERVER_ADDR" = "${serverHost}:${serverPort}"
+        "TEX2DOC_BOOTSTRAP_ADMIN_EMAIL" = "demo@example.com"
+        "TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD" = "demo"
     }
 
     $psi = [System.Diagnostics.ProcessStartInfo]::new()

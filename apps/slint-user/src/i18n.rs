@@ -296,7 +296,7 @@ fn en(key: &str) -> Option<&'static str> {
         "auth.required_subtitle" => Some(
             "Login is required before using conversion, recharge, records, and account modules.",
         ),
-        "auth.demo_hint" => Some("Demo account: demo@example.com / secret"),
+        "auth.demo_hint" => Some("Demo account: demo@example.com / demo"),
         "auth.api_hint" => Some("Start doc-server first, or change the API base URL below."),
         "account.overview_title" => Some("Account Overview"),
         "account.active_subscription" => Some("Active subscription"),
@@ -440,7 +440,7 @@ fn zh_hans(key: &str) -> Option<&'static str> {
         "nav.mock_payment_history" => Some("兑换与充值历史"),
         "auth.required_title" => Some("登录 Tex2Doc"),
         "auth.required_subtitle" => Some("必须先登录，才能使用转换、充值、记录与账号模块。"),
-        "auth.demo_hint" => Some("Demo 账号：demo@example.com / secret"),
+        "auth.demo_hint" => Some("Demo 账号：demo@example.com / demo"),
         "auth.api_hint" => Some("请先启动 doc-server，或修改下面的 API 地址。"),
         "account.overview_title" => Some("账号总览"),
         "account.active_subscription" => Some("有效订阅"),
@@ -530,7 +530,7 @@ fn zh_hant(key: &str) -> Option<&'static str> {
         "nav.mock_payment_history" => Some("兌換與儲值歷史"),
         "auth.required_title" => Some("登入 Tex2Doc"),
         "auth.required_subtitle" => Some("必須先登入，才能使用轉換、儲值、記錄與帳號模組。"),
-        "auth.demo_hint" => Some("Demo 帳號：demo@example.com / secret"),
+        "auth.demo_hint" => Some("Demo 帳號：demo@example.com / demo"),
         "auth.api_hint" => Some("請先啟動 doc-server，或修改下面的 API 位址。"),
         "account.overview_title" => Some("帳號總覽"),
         "account.active_subscription" => Some("有效訂閱"),
@@ -652,7 +652,7 @@ fn ja(key: &str) -> Option<&'static str> {
         "auth.required_subtitle" => {
             Some("変換、チャージ、履歴、アカウント機能を使うにはログインが必要です。")
         }
-        "auth.demo_hint" => Some("Demo account: demo@example.com / secret"),
+        "auth.demo_hint" => Some("Demo account: demo@example.com / demo"),
         "auth.api_hint" => Some("doc-server を起動するか、API URL を変更してください。"),
         "recharge.title" => Some("チャージ"),
         "records.conversion_title" => Some("変換履歴"),

@@ -425,18 +425,15 @@ impl ConversionTableRow {
             has_zip,
             has_log,
             docx_size: storage
-                .and_then(|s| s.result_docx.as_ref())
-                .and_then(|d| d.bytes)
+                .and_then(|s| s.docx_size())
                 .map(format_size)
                 .unwrap_or_default(),
             zip_size: storage
-                .and_then(|s| s.source_zip.as_ref())
-                .and_then(|d| d.bytes)
+                .and_then(|s| s.zip_size())
                 .map(format_size)
                 .unwrap_or_default(),
             log_size: storage
-                .and_then(|s| s.conversion_log.as_ref())
-                .and_then(|d| d.bytes)
+                .and_then(|s| s.log_size())
                 .map(format_size)
                 .unwrap_or_default(),
         }

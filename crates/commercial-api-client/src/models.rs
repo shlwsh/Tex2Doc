@@ -246,7 +246,7 @@ pub struct ConversionJob {
     pub report_ready: bool,
     pub error_code: Option<String>,
     pub error: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "storage")]
     pub storage_info: Option<ConversionStorageInfo>,
 }
 
@@ -355,28 +355,61 @@ pub struct ConversionStorageInfo {
     #[serde(default)]
     pub source_zip: Option<FileMeta>,
     #[serde(default)]
+    pub source_zip_key: Option<String>,
+    #[serde(default)]
+    pub zip_bytes: Option<u64>,
+    #[serde(default)]
     pub result_docx: Option<FileMeta>,
     #[serde(default)]
+    pub result_docx_key: Option<String>,
+    #[serde(default)]
+    pub docx_bytes: Option<u64>,
+    #[serde(default)]
     pub conversion_log: Option<FileMeta>,
+    #[serde(default, alias = "result_log_key")]
+    pub conversion_log_key: Option<String>,
+    #[serde(default)]
+    pub log_bytes: Option<u64>,
 }
 
 impl ConversionStorageInfo {
     #[inline]
     #[allow(dead_code)]
     pub fn has_docx(&self) -> bool {
-        self.result_docx.is_some()
+        self.result_docx.is_some() || self.result_docx_key.is_some()
     }
 
     #[inline]
     #[allow(dead_code)]
     pub fn has_zip(&self) -> bool {
-        self.source_zip.is_some()
+        self.source_zip.is_some() || self.source_zip_key.is_some()
     }
 
     #[inline]
     #[allow(dead_code)]
     pub fn has_log(&self) -> bool {
-        self.conversion_log.is_some()
+        self.conversion_log.is_some() || self.conversion_log_key.is_some()
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn docx_size(&self) -> Option<u64> {
+        self.result_docx.as_ref().and_then(|d| d.bytes).or(self.docx_bytes)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn zip_size(&self) -> Option<u64> {
+        self.source_zip.as_ref().and_then(|d| d.bytes).or(self.zip_bytes)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn log_size(&self) -> Option<u64> {
+        self.conversion_log
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.log_bytes)
     }
 
     #[inline]
