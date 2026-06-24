@@ -6,11 +6,10 @@
 use std::time::Duration;
 
 use doc_commercial_api_client::{
-    ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession,
-    CheckoutRequest, ClientConfig, ConversionJob,
-    LoginRequest, PlanSummary,
-    RechargeRecord, RedeemCodeRecord, RedeemCodeRequest, RedeemCodeResult, RefreshRequest,
-    RegisterRequest, UsageSummary, UserProfile,
+    ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession, CheckoutRequest,
+    ClientConfig, ConversionJob, LoginRequest, PlanSummary, RechargeRecord, RedeemCodeRecord,
+    RedeemCodeRequest, RedeemCodeResult, RefreshRequest, RegisterRequest, UsageSummary,
+    UserProfile,
 };
 use thiserror::Error;
 

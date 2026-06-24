@@ -54,10 +54,10 @@ if ($NoBuild -and $BuildOnly) {
 }
 
 $Root = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot "..")).Path
-$CargoToml = Join-Path $Root "crates\desktop-slint\Cargo.toml"
+$CargoToml = Join-Path $Root "apps\slint-user\Cargo.toml"
 
 if (-not (Test-Path -LiteralPath $CargoToml)) {
-    throw "desktop-slint Cargo.toml not found at: $CargoToml"
+    throw "slint-user Cargo.toml not found at: $CargoToml"
 }
 
 function Resolve-CargoPath {

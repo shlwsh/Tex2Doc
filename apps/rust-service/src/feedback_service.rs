@@ -69,7 +69,9 @@ impl FeedbackStore {
         user_id: &str,
         thread_id: &str,
     ) -> Result<(FeedbackThread, Vec<FeedbackMessage>), FeedbackError> {
-        self.db.get_feedback_thread_for_user(user_id, thread_id).await
+        self.db
+            .get_feedback_thread_for_user(user_id, thread_id)
+            .await
     }
 }
 

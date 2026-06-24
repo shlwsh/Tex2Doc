@@ -4,7 +4,9 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import '../ui/app_i18n.dart';
 import '../ui/app_theme.dart';
 import '../ui/app_tokens.dart';
-import '../workspace_app.dart';
+import '../admin/admin_app.dart';
+import '../shared/workspace_app.dart';
+import '../user/user_app.dart';
 
 const _appIconAsset = 'assets/app_icon.jpg';
 
@@ -218,9 +220,7 @@ class _MetricLine extends StatelessWidget {
             width: 96,
             child: Text(label, style: theme.textTheme.labelLarge),
           ),
-          Expanded(
-            child: Text(value, style: theme.textTheme.bodyMedium),
-          ),
+          Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
         ],
       ),
     );
@@ -335,7 +335,9 @@ class _ReleaseBand extends StatelessWidget {
 void _openWorkspace(BuildContext context, DocEngineAppMode mode) {
   Navigator.of(context).pushReplacement(
     MaterialPageRoute<void>(
-      builder: (_) => DocEngineApp(isWeb: true, mode: mode),
+      builder: (_) => mode == DocEngineAppMode.admin
+          ? const AdminApp(isWeb: true)
+          : const UserApp(isWeb: true),
     ),
   );
 }

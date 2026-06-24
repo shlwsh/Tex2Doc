@@ -5,7 +5,9 @@ This release unit maps to the admin mode in the current `flutter_app` project.
 Current source path:
 
 - `flutter_app/lib/main_admin.dart`
-- `flutter_app/lib/workspace_app.dart`
+- `flutter_app/lib/admin/admin_app.dart`
+- `flutter_app/lib/admin/pages/*`
+- `flutter_app/lib/shared/workspace_app.dart`
 
 Build target:
 

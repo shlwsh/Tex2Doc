@@ -318,7 +318,14 @@ impl ServerState {
     ) -> Result<ConversionJobRecord, String> {
         let mut job = self
             .db
-            .create_job(user_id, upload_id.clone(), main_tex, profile, quality, engine)
+            .create_job(
+                user_id,
+                upload_id.clone(),
+                main_tex,
+                profile,
+                quality,
+                engine,
+            )
             .await
             .map_err(|e| e.to_string())?;
         if let Some(upload) = self.get_upload(&upload_id).await {
@@ -327,7 +334,11 @@ impl ServerState {
                 .store(&job.job_id, "source.zip", &upload.bytes)
                 .map_err(|e| e.to_string())?;
             self.db
-                .update_job_source_storage(&job.job_id, source_key.clone(), upload.bytes.len() as u64)
+                .update_job_source_storage(
+                    &job.job_id,
+                    source_key.clone(),
+                    upload.bytes.len() as u64,
+                )
                 .await
                 .map_err(|e| e.to_string())?;
             job.source_zip_key = Some(source_key.clone());
@@ -365,22 +376,24 @@ impl ServerState {
     }
 
     pub async fn cloud_conversions_used(&self, user_id: &str) -> u64 {
-        self.db.cloud_conversions_used(user_id).await.unwrap_or_default()
+        self.db
+            .cloud_conversions_used(user_id)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn entitlement(&self, user_id: &str) -> EntitlementRecord {
-        self.db.entitlement(user_id).await.unwrap_or_else(|_| EntitlementRecord {
-            user_id: user_id.to_string(),
-            updated_at: now_timestamp(),
-            ..EntitlementRecord::default()
-        })
+        self.db
+            .entitlement(user_id)
+            .await
+            .unwrap_or_else(|_| EntitlementRecord {
+                user_id: user_id.to_string(),
+                updated_at: now_timestamp(),
+                ..EntitlementRecord::default()
+            })
     }
 
-    pub async fn reserve_cloud_conversion(
-        &self,
-        user_id: &str,
-        job_id: &str,
-    ) -> Result<u64, u64> {
+    pub async fn reserve_cloud_conversion(&self, user_id: &str, job_id: &str) -> Result<u64, u64> {
         self.db.reserve_cloud_conversion(user_id, job_id).await
     }
 
@@ -417,7 +430,14 @@ impl ServerState {
         created_by: String,
     ) -> Result<RedeemCodeBatchRecord, RedeemFailure> {
         self.db
-            .create_redeem_batch(package_id, requested_count, channel, note, expires_at, created_by)
+            .create_redeem_batch(
+                package_id,
+                requested_count,
+                channel,
+                note,
+                expires_at,
+                created_by,
+            )
             .await
     }
 
@@ -426,11 +446,19 @@ impl ServerState {
     }
 
     pub async fn get_redeem_batch(&self, batch_id: &str) -> Option<RedeemCodeBatchRecord> {
-        self.db.get_redeem_batch(batch_id, true).await.ok().flatten()
+        self.db
+            .get_redeem_batch(batch_id, true)
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn get_redeem_batch_detail(&self, batch_id: &str) -> Option<RedeemCodeBatchRecord> {
-        self.db.get_redeem_batch(batch_id, true).await.ok().flatten()
+        self.db
+            .get_redeem_batch(batch_id, true)
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn mark_redeem_batch_exported(&self, batch_id: &str) -> Result<(), String> {
@@ -449,7 +477,10 @@ impl ServerState {
     }
 
     pub async fn list_redeem_records(&self, user_id: &str) -> Vec<RedeemCodeRecord> {
-        self.db.list_redeem_records(user_id).await.unwrap_or_default()
+        self.db
+            .list_redeem_records(user_id)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {
@@ -477,7 +508,8 @@ impl ServerState {
         );
         match (
             self.file_storage.store(job_id, "result.docx", &docx),
-            self.file_storage.store(job_id, "conversion.log", log.as_bytes()),
+            self.file_storage
+                .store(job_id, "conversion.log", log.as_bytes()),
         ) {
             (Ok(_), Ok(_)) => {
                 let docx_key = self.file_storage.file_key(job_id, "result.docx");
@@ -527,7 +559,9 @@ impl ServerState {
         let log = FileStorage::build_conversion_log(
             job_id,
             job.as_ref().map(|j| j.user_id.as_str()).unwrap_or_default(),
-            job.as_ref().map(|j| j.upload_id.as_str()).unwrap_or_default(),
+            job.as_ref()
+                .map(|j| j.upload_id.as_str())
+                .unwrap_or_default(),
             &report.main_tex,
             &report.profile,
             "",
@@ -545,7 +579,14 @@ impl ServerState {
         }
         if let Err(db_error) = self
             .db
-            .fail_job(job_id, error_code, &error, log_key, log.len() as u64, &report)
+            .fail_job(
+                job_id,
+                error_code,
+                &error,
+                log_key,
+                log.len() as u64,
+                &report,
+            )
             .await
         {
             tracing::error!("failed to mark conversion job failed: {db_error}");

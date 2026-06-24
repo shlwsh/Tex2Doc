@@ -148,7 +148,10 @@ fn fixed_filename(name: &str) -> String {
     match name {
         "source.zip" | "result.docx" | "conversion.log" => name.to_string(),
         _ => {
-            if name.chars().all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_') {
+            if name
+                .chars()
+                .all(|c| c.is_alphanumeric() || c == '.' || c == '-' || c == '_')
+            {
                 name.to_string()
             } else {
                 "file".to_string()

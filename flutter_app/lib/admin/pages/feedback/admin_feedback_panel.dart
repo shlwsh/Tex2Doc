@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 
-import '../commercial_api.dart';
-import '../ui/app_components.dart';
-import '../ui/app_tokens.dart';
+import '../../../commercial_api.dart';
+import '../../../ui/app_components.dart';
+import '../../../ui/app_tokens.dart';
 
 class AdminFeedbackPanel extends StatefulWidget {
   final String apiBaseUrl;
@@ -108,7 +108,10 @@ class _AdminFeedbackPanelState extends State<AdminFeedbackPanel> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+            Text(
+              _error!,
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
             const SizedBox(height: AppSpacing.md),
             OutlinedButton.icon(
               onPressed: _load,
@@ -126,7 +129,8 @@ class _AdminFeedbackPanelState extends State<AdminFeedbackPanel> {
           children: [
             const AppSectionHeader(
               title: 'Feedback management',
-              description: 'Review user feedback, update status, and send replies.',
+              description:
+                  'Review user feedback, update status, and send replies.',
             ),
             const Spacer(),
             IconButton(
@@ -231,7 +235,10 @@ class _AdminFeedbackThreadCard extends StatelessWidget {
                         value: 'in_progress',
                         child: Text('In progress'),
                       ),
-                      DropdownMenuItem(value: 'resolved', child: Text('Resolved')),
+                      DropdownMenuItem(
+                        value: 'resolved',
+                        child: Text('Resolved'),
+                      ),
                       DropdownMenuItem(value: 'closed', child: Text('Closed')),
                     ],
                     onChanged: (value) {

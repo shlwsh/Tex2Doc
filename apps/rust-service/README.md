@@ -1,6 +1,6 @@
 # Tex2Doc Rust Service
 
-This release unit maps to the current `crates/server` package.
+This release unit contains the Rust `doc-server` package.
 
 Responsibilities:
 
@@ -10,9 +10,9 @@ Responsibilities:
 - Static hosting for the product home, Flutter user app, and Flutter admin app.
 - Invocation of the shared Rust conversion engine crates.
 
-Current source path:
+Source path:
 
-- `crates/server`
+- `apps/rust-service`
 
 Static deployment root:
 

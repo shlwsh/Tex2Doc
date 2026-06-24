@@ -316,7 +316,10 @@ async fn p6_admin_me_requires_admin_role() {
         .expect("admin me json");
     assert_eq!(admin_me["user"]["email"], "admin@example.com");
     assert_eq!(admin_me["user"]["role"], "admin");
-    assert!(admin_me["permissions"].as_array().unwrap().contains(&serde_json::json!("redeem")));
+    assert!(admin_me["permissions"]
+        .as_array()
+        .unwrap()
+        .contains(&serde_json::json!("redeem")));
 
     let login_admin: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/login"))

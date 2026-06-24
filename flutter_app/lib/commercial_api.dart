@@ -88,6 +88,14 @@ class CommercialApiClient {
     return AdminProfile.fromJson(_decode(response) as Map<String, dynamic>);
   }
 
+  Future<AdminDashboardSummary> adminDashboard(String accessToken) async {
+    final response = await _http.get(
+      _adminUri('dashboard'),
+      headers: _headers(accessToken: accessToken),
+    );
+    return AdminDashboardSummary.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
   Future<BillingSession> checkout({
     required String accessToken,
     required String planId,
@@ -565,6 +573,43 @@ class AdminProfile {
       permissions: (json['permissions'] as List<dynamic>? ?? const [])
           .map((item) => item.toString())
           .toList(growable: false),
+    );
+  }
+}
+
+class AdminDashboardSummary {
+  final int billingPlans;
+  final int redeemBatches;
+  final int feedbackThreads;
+  final int openFeedback;
+  final List<String> releaseChannels;
+  final List<String> modules;
+  final String generatedAt;
+
+  AdminDashboardSummary({
+    required this.billingPlans,
+    required this.redeemBatches,
+    required this.feedbackThreads,
+    required this.openFeedback,
+    required this.releaseChannels,
+    required this.modules,
+    required this.generatedAt,
+  });
+
+  factory AdminDashboardSummary.fromJson(Map<String, dynamic> json) {
+    final counts = json['counts'] as Map<String, dynamic>? ?? const {};
+    return AdminDashboardSummary(
+      billingPlans: (counts['billing_plans'] as num?)?.toInt() ?? 0,
+      redeemBatches: (counts['redeem_batches'] as num?)?.toInt() ?? 0,
+      feedbackThreads: (counts['feedback_threads'] as num?)?.toInt() ?? 0,
+      openFeedback: (counts['open_feedback'] as num?)?.toInt() ?? 0,
+      releaseChannels: (json['release_channels'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      modules: (json['modules'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      generatedAt: json['generated_at']?.toString() ?? '',
     );
   }
 }

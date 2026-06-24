@@ -14,19 +14,19 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
+use crate::db_store::AppUser;
 use crate::error::ApiError;
+use crate::feedback_service::{
+    AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
+    FeedbackError, ThreadFilters,
+};
 use crate::limits::{
     MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_ZIP_BYTES,
 };
-use crate::db_store::AppUser;
 use crate::state::{
-    ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
-    RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
-};
-use crate::feedback_service::{
-    AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
-    FeedbackError, ThreadFilters,
+    ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
+    RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 use crate::worker_service;
 
@@ -35,7 +35,9 @@ const DEFAULT_MAIN_TEX: &str = "main-jos.tex";
 
 /// 组装对外 router。
 pub async fn router() -> Result<Router, sqlx::Error> {
-    Ok(router_with_state(worker_service::spawn_worker_state().await?))
+    Ok(router_with_state(
+        worker_service::spawn_worker_state().await?,
+    ))
 }
 
 /// 组装带状态的 router，供测试或外部嵌入复用。
@@ -53,6 +55,7 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/v1/me", get(me))
         .route("/api/v1/me", get(me))
         .route("/admin/v1/me", get(admin_me))
+        .route("/admin/v1/dashboard", get(admin_dashboard))
         .route("/v1/usage", get(usage))
         .route("/api/v1/usage", get(usage))
         .route("/v1/plans", get(plans))
@@ -109,17 +112,41 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/v1/conversions/:id/report", get(get_conversion_report))
         .route("/api/v1/conversions/:id/report", get(get_conversion_report))
         // Conversion file download (enhanced)
-        .route("/v1/conversions/:id/download/zip", get(download_conversion_zip))
-        .route("/v1/conversions/:id/download/log", get(download_conversion_log))
+        .route(
+            "/v1/conversions/:id/download/zip",
+            get(download_conversion_zip),
+        )
+        .route(
+            "/v1/conversions/:id/download/log",
+            get(download_conversion_log),
+        )
         // Feedback routes (user)
-        .route("/v1/feedback/threads", get(list_feedback_threads).post(create_feedback_thread))
+        .route(
+            "/v1/feedback/threads",
+            get(list_feedback_threads).post(create_feedback_thread),
+        )
         .route("/v1/feedback/threads/:id", get(get_feedback_thread))
-        .route("/v1/feedback/threads/:id/messages", post(add_feedback_message))
+        .route(
+            "/v1/feedback/threads/:id/messages",
+            post(add_feedback_message),
+        )
         // Admin feedback routes
-        .route("/admin/v1/feedback/threads", get(admin_list_feedback_threads))
-        .route("/admin/v1/feedback/threads/export.xlsx", get(admin_export_feedback_threads))
-        .route("/admin/v1/feedback/threads/:id", patch(admin_update_feedback_thread))
-        .route("/admin/v1/feedback/threads/:id/messages", post(admin_reply_feedback_message))
+        .route(
+            "/admin/v1/feedback/threads",
+            get(admin_list_feedback_threads),
+        )
+        .route(
+            "/admin/v1/feedback/threads/export.xlsx",
+            get(admin_export_feedback_threads),
+        )
+        .route(
+            "/admin/v1/feedback/threads/:id",
+            patch(admin_update_feedback_thread),
+        )
+        .route(
+            "/admin/v1/feedback/threads/:id/messages",
+            post(admin_reply_feedback_message),
+        )
         .route("/v1/releases/:channel", get(release_manifest))
         .route("/api/v1/releases/:channel", get(release_manifest))
         .merge(static_router())
@@ -290,6 +317,44 @@ async fn admin_me(
     })))
 }
 
+async fn admin_dashboard(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let plans = state.list_billing_plans().await.map_err(db_error)?;
+    let redeem_batches = state.list_redeem_batches().await;
+    let feedback_threads = state
+        .feedback_store()
+        .admin_list(&ThreadFilters::default())
+        .await;
+    let open_feedback = feedback_threads
+        .iter()
+        .filter(|thread| thread.status == "open" || thread.status == "in_progress")
+        .count();
+
+    Ok(Json(json!({
+        "admin": app_user_json(&admin),
+        "counts": {
+            "billing_plans": plans.len(),
+            "redeem_batches": redeem_batches.len(),
+            "feedback_threads": feedback_threads.len(),
+            "open_feedback": open_feedback,
+        },
+        "release_channels": ["stable", "beta"],
+        "modules": [
+            "dashboard",
+            "redeem_codes",
+            "feedback",
+            "releases",
+            "audit",
+            "billing",
+            "conversions"
+        ],
+        "generated_at": chrono::Utc::now().to_rfc3339(),
+    })))
+}
+
 async fn usage(
     State(state): State<ServerState>,
     headers: HeaderMap,
@@ -453,7 +518,7 @@ async fn admin_create_redeem_batch(
 async fn admin_list_redeem_batches(
     State(state): State<ServerState>,
     headers: HeaderMap,
-)-> Result<Json<serde_json::Value>, ApiError> {
+) -> Result<Json<serde_json::Value>, ApiError> {
     let _admin = require_admin_session(&state, &headers).await?;
     let batches = state.list_redeem_batches().await;
     Ok(Json(json!(batches
@@ -486,7 +551,10 @@ async fn admin_export_redeem_batch(
         .await
         .ok_or_else(|| ApiError::NotFound(format!("redeem batch {id}")))?;
     let body = build_redeem_codes_xlsx(&batch)?;
-    state.mark_redeem_batch_exported(&id).await.map_err(ApiError::Io)?;
+    state
+        .mark_redeem_batch_exported(&id)
+        .await
+        .map_err(ApiError::Io)?;
     Response::builder()
         .status(StatusCode::OK)
         .header(
@@ -842,7 +910,15 @@ fn is_admin_role(role: &str) -> bool {
 
 fn admin_permissions(role: &str) -> Vec<&'static str> {
     match role {
-        "admin" => vec!["dashboard", "users", "billing", "redeem", "feedback", "releases", "audit"],
+        "admin" => vec![
+            "dashboard",
+            "users",
+            "billing",
+            "redeem",
+            "feedback",
+            "releases",
+            "audit",
+        ],
         "operator" => vec!["dashboard", "billing", "redeem", "feedback", "releases"],
         "support" => vec!["dashboard", "feedback"],
         _ => Vec::new(),
@@ -1362,10 +1438,9 @@ async fn download_conversion_zip(
         .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
-    let key = job
-        .source_zip_key
-        .as_deref()
-        .ok_or_else(|| ApiError::NotFound("ZIP file key not found for this conversion".to_string()))?;
+    let key = job.source_zip_key.as_deref().ok_or_else(|| {
+        ApiError::NotFound("ZIP file key not found for this conversion".to_string())
+    })?;
     let bytes = state
         .load_storage_key(key)
         .ok_or_else(|| ApiError::NotFound("ZIP file not found for this conversion".to_string()))?;
@@ -1396,10 +1471,9 @@ async fn download_conversion_log(
         .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
-    let key = job
-        .result_log_key
-        .as_deref()
-        .ok_or_else(|| ApiError::NotFound("conversion log key not found for this job".to_string()))?;
+    let key = job.result_log_key.as_deref().ok_or_else(|| {
+        ApiError::NotFound("conversion log key not found for this job".to_string())
+    })?;
     let bytes = state
         .load_storage_key(key)
         .ok_or_else(|| ApiError::NotFound("conversion log not found for this job".to_string()))?;
@@ -1409,7 +1483,10 @@ async fn download_conversion_log(
         .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
         .header(
             header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"conversion-{}.log\"", sanitize(&job.main_tex)),
+            format!(
+                "attachment; filename=\"conversion-{}.log\"",
+                sanitize(&job.main_tex)
+            ),
         )
         .header(header::CONTENT_LENGTH, bytes.len())
         .body(axum::body::Body::from(bytes))
@@ -1486,7 +1563,9 @@ async fn get_feedback_thread(
                 "messages": msgs,
             })))
         }
-        Err(FeedbackError::NotFound) => Err(ApiError::NotFound("feedback thread not found".to_string())),
+        Err(FeedbackError::NotFound) => {
+            Err(ApiError::NotFound("feedback thread not found".to_string()))
+        }
         Err(FeedbackError::Forbidden) | Err(FeedbackError::Unauthorized) => {
             Err(ApiError::Unauthorized("not authorized".to_string()))
         }
@@ -1549,7 +1628,10 @@ async fn admin_export_feedback_threads(
     let bytes = state.build_feedback_export(threads);
     let resp = Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
         .header(
             header::CONTENT_DISPOSITION,
             "attachment; filename=\"feedback-export.xlsx\"",
@@ -1631,7 +1713,9 @@ fn thread_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value
     })
 }
 
-fn thread_summary_from_summary(t: &crate::feedback_service::FeedbackThreadSummary) -> serde_json::Value {
+fn thread_summary_from_summary(
+    t: &crate::feedback_service::FeedbackThreadSummary,
+) -> serde_json::Value {
     serde_json::json!({
         "thread_id": t.thread_id,
         "conversion_job_id": t.conversion_job_id,
@@ -1661,9 +1745,14 @@ fn message_json(m: &crate::feedback_service::FeedbackMessage) -> serde_json::Val
 fn feedback_error_to_api_error(e: crate::feedback_service::FeedbackError) -> ApiError {
     match e {
         FeedbackError::NotFound => ApiError::NotFound("feedback thread not found".to_string()),
-        FeedbackError::Forbidden => ApiError::Unauthorized("not authorized to access this feedback".to_string()),
+        FeedbackError::Forbidden => {
+            ApiError::Unauthorized("not authorized to access this feedback".to_string())
+        }
         FeedbackError::Unauthorized => ApiError::Unauthorized("not authorized".to_string()),
-        FeedbackError::Validation(msg) => ApiError::BadRequest { code: "validation", message: msg },
+        FeedbackError::Validation(msg) => ApiError::BadRequest {
+            code: "validation",
+            message: msg,
+        },
     }
 }
 

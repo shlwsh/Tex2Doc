@@ -11,7 +11,10 @@ use std::io::Write;
 use crate::feedback_service::FeedbackThreadSummary;
 
 /// Build a feedback thread export workbook.
-pub fn build_feedback_export_xlsx(threads: &[FeedbackThreadSummary], include_content: bool) -> Vec<u8> {
+pub fn build_feedback_export_xlsx(
+    threads: &[FeedbackThreadSummary],
+    include_content: bool,
+) -> Vec<u8> {
     let mut cursor = std::io::Cursor::new(Vec::new());
     {
         let mut zip = zip::ZipWriter::new(&mut cursor);
@@ -21,7 +24,12 @@ pub fn build_feedback_export_xlsx(threads: &[FeedbackThreadSummary], include_con
         write_xml_part(&mut zip, opts, "[Content_Types].xml", content_types_xml());
         write_xml_part(&mut zip, opts, "_rels/.rels", rels_xml());
         write_xml_part(&mut zip, opts, "xl/workbook.xml", workbook_xml());
-        write_xml_part(&mut zip, opts, "xl/_rels/workbook.xml.rels", workbook_rels_xml());
+        write_xml_part(
+            &mut zip,
+            opts,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml(),
+        );
 
         // Sheet 1: thread list
         write_xml_part(
@@ -57,7 +65,8 @@ fn write_xml_part<W: Write + std::io::Seek, S: AsRef<str>>(
     name: &str,
     content: S,
 ) {
-    zip.start_file(name, opts).expect("zip start_file should not fail");
+    zip.start_file(name, opts)
+        .expect("zip start_file should not fail");
     zip.write_all(content.as_ref().as_bytes())
         .expect("zip write_all should not fail");
 }
@@ -110,10 +119,10 @@ fn feedback_threads_sheet_xml(threads: &[FeedbackThreadSummary]) -> String {
         "Updated At",
     ];
 
-    let mut sheet = String::from(
-        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#,
+    let mut sheet = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    sheet.push_str(
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
     );
-    sheet.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#);
     sheet.push_str("<sheetData>");
 
     // Header row
@@ -122,20 +131,28 @@ fn feedback_threads_sheet_xml(threads: &[FeedbackThreadSummary]) -> String {
         let col_letter = (b'A' + col as u8) as char;
         header_row.push_str(&format!(
             r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
-            col_letter, 1, xml_escape(h)
+            col_letter,
+            1,
+            xml_escape(h)
         ));
     }
     header_row.push_str("</row>");
     sheet.push_str(&header_row);
 
     // Data rows
-        for (row_idx, t) in threads.iter().enumerate() {
+    for (row_idx, t) in threads.iter().enumerate() {
         let r = (row_idx + 2) as u32;
         let mut row = format!(r#"<row r="{r}">"#);
 
         let count_str = t.message_count.to_string();
-        let latest_str = t.latest_message_at.clone().unwrap_or_else(|| "-".to_string());
-        let job_id_str = t.conversion_job_id.clone().unwrap_or_else(|| "-".to_string());
+        let latest_str = t
+            .latest_message_at
+            .clone()
+            .unwrap_or_else(|| "-".to_string());
+        let job_id_str = t
+            .conversion_job_id
+            .clone()
+            .unwrap_or_else(|| "-".to_string());
 
         macro_rules! cell {
             ($col:expr, $val:expr) => {{

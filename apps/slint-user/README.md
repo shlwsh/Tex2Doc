@@ -1,6 +1,6 @@
 # Tex2Doc Slint User
 
-This release unit maps to the current `crates/desktop-slint` package.
+This release unit contains the `doc-desktop-slint` package.
 
 Responsibilities:
 
@@ -8,9 +8,9 @@ Responsibilities:
 - Cloud conversion through user APIs.
 - Account, billing, usage, feedback, history, and update checks.
 
-Current source path:
+Source path:
 
-- `crates/desktop-slint`
+- `apps/slint-user`
 
 Build target:
 

@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'workspace_app.dart';
+import 'user/user_app.dart';
 
 void main() {
-  runApp(DocEngineApp(isWeb: kIsWeb, mode: DocEngineAppMode.user));
+  runApp(UserApp(isWeb: kIsWeb));
 }

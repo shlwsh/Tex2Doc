@@ -5,8 +5,8 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
-use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use sqlx::postgres::PgPoolOptions;
+use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
 use uuid::Uuid;
 
 static SCHEMA_INIT_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
@@ -21,8 +21,7 @@ use crate::state::{
     hash_text, normalize_redeem_code, now_timestamp, random_bytes, redeem_checksum_valid,
     redeem_package, ConversionJobRecord, ConversionReportRecord, ConversionStatus,
     EntitlementRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
-    RedeemPackage,
-    RedeemFailure, UploadRecord, PREVIEW_CLOUD_CONVERSION_LIMIT,
+    RedeemFailure, RedeemPackage, UploadRecord, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 
 const BUSINESS_SCHEMA: &str = include_str!("../../../docs-zh/money/001_docdb_business_schema.sql");
@@ -56,9 +55,8 @@ pub struct BillingPlanRecord {
 
 impl DbStore {
     pub async fn connect_from_env() -> Result<Self, sqlx::Error> {
-        let database_url = std::env::var("DATABASE_URL").unwrap_or_else(|_| {
-            "postgres://postgres:postgres@127.0.0.1:5432/docdb".to_string()
-        });
+        let database_url = std::env::var("DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://postgres:postgres@127.0.0.1:5432/docdb".to_string());
         let pool = PgPoolOptions::new()
             .max_connections(10)
             .connect(&database_url)
@@ -377,10 +375,12 @@ impl DbStore {
         &self,
         user_id: &str,
     ) -> Result<Vec<ConversionJobRecord>, sqlx::Error> {
-        let rows = sqlx::query(&job_select_sql("WHERE user_id = $1 ORDER BY created_at DESC"))
-            .bind(parse_uuid(user_id)?)
-            .fetch_all(&self.pool)
-            .await?;
+        let rows = sqlx::query(&job_select_sql(
+            "WHERE user_id = $1 ORDER BY created_at DESC",
+        ))
+        .bind(parse_uuid(user_id)?)
+        .fetch_all(&self.pool)
+        .await?;
         Ok(rows
             .iter()
             .map(|row| job_from_row(row, None, report_from_row(row)))
@@ -578,11 +578,7 @@ impl DbStore {
         Ok(entitlement_from_row(&row))
     }
 
-    pub async fn reserve_cloud_conversion(
-        &self,
-        user_id: &str,
-        job_id: &str,
-    ) -> Result<u64, u64> {
+    pub async fn reserve_cloud_conversion(&self, user_id: &str, job_id: &str) -> Result<u64, u64> {
         let user_uuid = parse_uuid(user_id).map_err(|_| 0_u64)?;
         let job_uuid = parse_uuid(job_id).map_err(|_| 0_u64)?;
         let mut tx = self.pool.begin().await.map_err(|_| 0_u64)?;
@@ -656,7 +652,9 @@ impl DbStore {
             return Err(used);
         }
 
-        let period_id = ensure_usage_period(&mut tx, user_uuid).await.map_err(|_| used)?;
+        let period_id = ensure_usage_period(&mut tx, user_uuid)
+            .await
+            .map_err(|_| used)?;
         sqlx::query(
             "INSERT INTO usage_events (user_id, usage_period_id, event_type, quantity, source_id) VALUES ($1, $2, 'cloud_conversion', 1, $3)",
         )
@@ -816,10 +814,18 @@ impl DbStore {
             return Err(RedeemFailure::InvalidCode);
         }
         let package = redeem_package(package_id).ok_or(RedeemFailure::InvalidCode)?;
-        let expires_sql = parse_optional_epoch(&expires_at).map_err(|_| RedeemFailure::InvalidCode)?;
+        let expires_sql =
+            parse_optional_epoch(&expires_at).map_err(|_| RedeemFailure::InvalidCode)?;
         let created_by_uuid = parse_uuid(&created_by).map_err(|_| RedeemFailure::InvalidCode)?;
-        let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
-        let batch_no = format!("RC{}", Uuid::new_v4().simple().to_string()[..10].to_uppercase());
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+        let batch_no = format!(
+            "RC{}",
+            Uuid::new_v4().simple().to_string()[..10].to_uppercase()
+        );
         let batch_row = sqlx::query(
             r#"
             INSERT INTO redeem_code_batches
@@ -868,9 +874,15 @@ impl DbStore {
             codes.push(code);
         }
 
-        insert_redeem_event(&mut tx, None, Some(created_by_uuid), "generated", Some(&format!("batch {batch_no}")))
-            .await
-            .map_err(|_| RedeemFailure::InvalidCode)?;
+        insert_redeem_event(
+            &mut tx,
+            None,
+            Some(created_by_uuid),
+            "generated",
+            Some(&format!("batch {batch_no}")),
+        )
+        .await
+        .map_err(|_| RedeemFailure::InvalidCode)?;
         tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
 
         Ok(RedeemCodeBatchRecord {
@@ -965,7 +977,11 @@ impl DbStore {
             let _ = self.record_redeem_failure(user_uuid, "invalid_code").await;
             return Err(RedeemFailure::InvalidCode);
         }
-        let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
         let row = sqlx::query(
             r#"
             SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
@@ -987,9 +1003,15 @@ impl DbStore {
         .await
         .map_err(|_| RedeemFailure::InvalidCode)?;
         let Some(row) = row else {
-            insert_redeem_event(&mut tx, None, Some(user_uuid), "redeem_failed", Some("invalid_code"))
-                .await
-                .ok();
+            insert_redeem_event(
+                &mut tx,
+                None,
+                Some(user_uuid),
+                "redeem_failed",
+                Some("invalid_code"),
+            )
+            .await
+            .ok();
             tx.commit().await.ok();
             return Err(RedeemFailure::InvalidCode);
         };
@@ -1007,14 +1029,22 @@ impl DbStore {
             .and_then(|value| value.parse::<u64>().ok())
             .is_some_and(|expires_at| expires_at < now_secs())
         {
-            sqlx::query("UPDATE redeem_codes SET status = 'expired', updated_at = now() WHERE id = $1")
-                .bind(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?)
-                .execute(&mut *tx)
-                .await
-                .map_err(|_| RedeemFailure::InvalidCode)?;
-            insert_redeem_event(&mut tx, Some(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?), Some(user_uuid), "expired", Some("expired"))
-                .await
-                .ok();
+            sqlx::query(
+                "UPDATE redeem_codes SET status = 'expired', updated_at = now() WHERE id = $1",
+            )
+            .bind(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+            insert_redeem_event(
+                &mut tx,
+                Some(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?),
+                Some(user_uuid),
+                "expired",
+                Some("expired"),
+            )
+            .await
+            .ok();
             tx.commit().await.ok();
             return Err(RedeemFailure::Expired);
         }
@@ -1056,7 +1086,10 @@ impl DbStore {
         tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
 
         record.status = "redeemed".to_string();
-        let entitlement = self.entitlement(&user_id).await.map_err(|_| RedeemFailure::InvalidCode)?;
+        let entitlement = self
+            .entitlement(&user_id)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
         Ok(RedeemCodeResult {
             redeem_id: record.code_id,
             recharge_id: recharge.recharge_id,
@@ -1113,26 +1146,42 @@ impl DbStore {
         req: crate::feedback_service::CreateThreadRequest,
     ) -> Result<(FeedbackThread, FeedbackMessage), crate::feedback_service::FeedbackError> {
         if req.title.trim().is_empty() {
-            return Err(crate::feedback_service::FeedbackError::Validation("title is required".into()));
+            return Err(crate::feedback_service::FeedbackError::Validation(
+                "title is required".into(),
+            ));
         }
         if req.content.trim().is_empty() {
-            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+            return Err(crate::feedback_service::FeedbackError::Validation(
+                "content is required".into(),
+            ));
         }
-        let feedback_type: FeedbackType = req.feedback_type.parse().map_err(crate::feedback_service::FeedbackError::Validation)?;
+        let feedback_type: FeedbackType = req
+            .feedback_type
+            .parse()
+            .map_err(crate::feedback_service::FeedbackError::Validation)?;
         let priority: FeedbackPriority = req
             .priority
             .as_deref()
             .unwrap_or("normal")
             .parse()
             .map_err(crate::feedback_service::FeedbackError::Validation)?;
-        let user_uuid = parse_uuid(&user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let user_uuid = parse_uuid(&user_id)
+            .map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
         let job_uuid = req
             .conversion_job_id
             .as_deref()
             .map(parse_uuid)
             .transpose()
-            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid conversion_job_id".into()))?;
-        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+            .map_err(|_| {
+                crate::feedback_service::FeedbackError::Validation(
+                    "invalid conversion_job_id".into(),
+                )
+            })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         let thread_row = sqlx::query(
             r#"
             INSERT INTO feedback_threads (user_id, conversion_job_id, title, feedback_type, priority)
@@ -1154,7 +1203,9 @@ impl DbStore {
         let thread_id: String = thread_row.get("id");
         let msg = insert_feedback_message(
             &mut tx,
-            parse_uuid(&thread_id).map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid thread id".into()))?,
+            parse_uuid(&thread_id).map_err(|_| {
+                crate::feedback_service::FeedbackError::Validation("invalid thread id".into())
+            })?,
             None,
             Some(user_uuid),
             SenderType::User,
@@ -1163,7 +1214,9 @@ impl DbStore {
         )
         .await
         .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         let thread = feedback_thread_from_row(&thread_row, 1, Some(msg.created_at.clone()));
         Ok((thread, msg))
     }
@@ -1175,16 +1228,22 @@ impl DbStore {
         req: crate::feedback_service::AddMessageRequest,
     ) -> Result<FeedbackMessage, crate::feedback_service::FeedbackError> {
         if req.content.trim().is_empty() {
-            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+            return Err(crate::feedback_service::FeedbackError::Validation(
+                "content is required".into(),
+            ));
         }
-        let user_uuid = parse_uuid(&user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
-        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let user_uuid = parse_uuid(&user_id)
+            .map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid =
+            parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
         let owner = sqlx::query("SELECT user_id FROM feedback_threads WHERE id = $1")
             .bind(thread_uuid)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        let Some(owner) = owner else { return Err(crate::feedback_service::FeedbackError::NotFound); };
+        let Some(owner) = owner else {
+            return Err(crate::feedback_service::FeedbackError::NotFound);
+        };
         if owner.get::<Uuid, _>("user_id") != user_uuid {
             return Err(crate::feedback_service::FeedbackError::Forbidden);
         }
@@ -1193,8 +1252,16 @@ impl DbStore {
             .as_deref()
             .map(parse_uuid)
             .transpose()
-            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid parent_message_id".into()))?;
-        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+            .map_err(|_| {
+                crate::feedback_service::FeedbackError::Validation(
+                    "invalid parent_message_id".into(),
+                )
+            })?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         let msg = insert_feedback_message(
             &mut tx,
             thread_uuid,
@@ -1211,7 +1278,9 @@ impl DbStore {
             .execute(&mut *tx)
             .await
             .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         Ok(msg)
     }
 
@@ -1222,11 +1291,19 @@ impl DbStore {
         req: crate::feedback_service::AdminReplyRequest,
     ) -> Result<FeedbackMessage, crate::feedback_service::FeedbackError> {
         if req.content.trim().is_empty() {
-            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+            return Err(crate::feedback_service::FeedbackError::Validation(
+                "content is required".into(),
+            ));
         }
-        let admin_uuid = parse_uuid(&admin_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
-        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
-        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let admin_uuid = parse_uuid(&admin_id)
+            .map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid =
+            parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         let updated = sqlx::query(
             "UPDATE feedback_threads SET status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END, updated_at = now() WHERE id = $1",
         )
@@ -1248,7 +1325,9 @@ impl DbStore {
         )
         .await
         .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit()
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         Ok(msg)
     }
 
@@ -1257,7 +1336,8 @@ impl DbStore {
         thread_id: &str,
         req: crate::feedback_service::AdminUpdateThreadRequest,
     ) -> Result<FeedbackThread, crate::feedback_service::FeedbackError> {
-        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let thread_uuid =
+            parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
         let status = req
             .status
             .as_deref()
@@ -1275,7 +1355,9 @@ impl DbStore {
             .as_deref()
             .map(parse_uuid)
             .transpose()
-            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid admin_assignee".into()))?;
+            .map_err(|_| {
+                crate::feedback_service::FeedbackError::Validation("invalid admin_assignee".into())
+            })?;
         let row = sqlx::query(
             r#"
             UPDATE feedback_threads
@@ -1297,8 +1379,13 @@ impl DbStore {
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        let Some(row) = row else { return Err(crate::feedback_service::FeedbackError::NotFound); };
-        let summary = self.feedback_counts(thread_uuid).await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let Some(row) = row else {
+            return Err(crate::feedback_service::FeedbackError::NotFound);
+        };
+        let summary = self
+            .feedback_counts(thread_uuid)
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
         Ok(feedback_thread_from_row(&row, summary.0, summary.1))
     }
 
@@ -1338,27 +1425,43 @@ impl DbStore {
         let page = filters.page.unwrap_or(1).max(1);
         let page_size = filters.page_size.unwrap_or(20).min(100);
         let start = ((page - 1) * page_size) as usize;
-        Ok(rows.into_iter().skip(start).take(page_size as usize).collect())
+        Ok(rows
+            .into_iter()
+            .skip(start)
+            .take(page_size as usize)
+            .collect())
     }
 
     pub async fn get_feedback_thread_for_user(
         &self,
         user_id: &str,
         thread_id: &str,
-    ) -> Result<(FeedbackThread, Vec<FeedbackMessage>), crate::feedback_service::FeedbackError> {
-        let user_uuid = parse_uuid(user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
-        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+    ) -> Result<(FeedbackThread, Vec<FeedbackMessage>), crate::feedback_service::FeedbackError>
+    {
+        let user_uuid = parse_uuid(user_id)
+            .map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid =
+            parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
         let row = sqlx::query(&feedback_thread_sql("WHERE id = $1"))
             .bind(thread_uuid)
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        let Some(row) = row else { return Err(crate::feedback_service::FeedbackError::NotFound); };
+        let Some(row) = row else {
+            return Err(crate::feedback_service::FeedbackError::NotFound);
+        };
         if row.get::<Uuid, _>("user_id_raw") != user_uuid {
             return Err(crate::feedback_service::FeedbackError::Forbidden);
         }
-        let messages = self.feedback_messages(thread_uuid, false).await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
-        let thread = feedback_thread_from_row(&row, messages.len() as u32, messages.last().map(|m| m.created_at.clone()));
+        let messages = self
+            .feedback_messages(thread_uuid, false)
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let thread = feedback_thread_from_row(
+            &row,
+            messages.len() as u32,
+            messages.last().map(|m| m.created_at.clone()),
+        );
         Ok((thread, messages))
     }
 
@@ -1498,9 +1601,21 @@ fn job_from_row(
         source_zip_key: row.get("source_zip_key"),
         result_docx_key: row.get("result_docx_key"),
         result_log_key: row.get("result_log_key"),
-        zip_bytes: row.try_get::<Option<i64>, _>("zip_bytes").ok().flatten().map(|v| v.max(0) as u64),
-        docx_bytes: row.try_get::<Option<i64>, _>("docx_bytes").ok().flatten().map(|v| v.max(0) as u64),
-        log_bytes: row.try_get::<Option<i64>, _>("log_bytes").ok().flatten().map(|v| v.max(0) as u64),
+        zip_bytes: row
+            .try_get::<Option<i64>, _>("zip_bytes")
+            .ok()
+            .flatten()
+            .map(|v| v.max(0) as u64),
+        docx_bytes: row
+            .try_get::<Option<i64>, _>("docx_bytes")
+            .ok()
+            .flatten()
+            .map(|v| v.max(0) as u64),
+        log_bytes: row
+            .try_get::<Option<i64>, _>("log_bytes")
+            .ok()
+            .flatten()
+            .map(|v| v.max(0) as u64),
     }
 }
 
