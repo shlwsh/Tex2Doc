@@ -15,6 +15,7 @@ use tower_http::trace::TraceLayer;
 use tracing_subscriber::EnvFilter;
 
 mod error;
+mod db_store;
 mod excel_export;
 mod feedback_service;
 mod file_storage;
@@ -32,6 +33,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let app: Router = routes::router()
+        .await?
         .layer(TraceLayer::new_for_http())
         .layer(RequestBodyLimitLayer::new(MAX_BODY));
 

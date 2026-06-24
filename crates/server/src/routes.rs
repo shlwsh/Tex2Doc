@@ -18,6 +18,7 @@ use crate::limits::{
     MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_ZIP_BYTES,
 };
+use crate::db_store::AppUser;
 use crate::state::{
     redeem_packages, ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
     RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
@@ -32,8 +33,8 @@ use crate::worker_service;
 const DEFAULT_MAIN_TEX: &str = "main-jos.tex";
 
 /// 组装对外 router。
-pub fn router() -> Router {
-    router_with_state(worker_service::spawn_worker_state())
+pub async fn router() -> Result<Router, sqlx::Error> {
+    Ok(router_with_state(worker_service::spawn_worker_state().await?))
 }
 
 /// 组装带状态的 router，供测试或外部嵌入复用。
@@ -69,7 +70,11 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/api/v1/redeem-codes/records", get(list_redeem_records))
         .route(
             "/admin/v1/redeem-code-batches",
-            post(admin_create_redeem_batch),
+            get(admin_list_redeem_batches).post(admin_create_redeem_batch),
+        )
+        .route(
+            "/admin/v1/redeem-code-batches/:id",
+            get(admin_get_redeem_batch),
         )
         .route(
             "/admin/v1/redeem-code-batches/:id/export.xlsx",
@@ -140,6 +145,7 @@ async fn version() -> Json<serde_json::Value> {
 struct AuthRequest {
     email: Option<String>,
     display_name: Option<String>,
+    password: Option<String>,
     refresh_token: Option<String>,
 }
 
@@ -182,48 +188,76 @@ struct AdminRedeemBatchBody {
     expires_at: Option<String>,
 }
 
-async fn auth_register(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+async fn auth_register(
+    State(state): State<ServerState>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth_response(
+        &state,
         payload
             .email
             .unwrap_or_else(|| "demo@example.com".to_string()),
         payload.display_name,
+        payload.password,
     )
+    .await
 }
 
-async fn auth_login(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+async fn auth_login(
+    State(state): State<ServerState>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     auth_response(
+        &state,
         payload
             .email
             .unwrap_or_else(|| "demo@example.com".to_string()),
         payload.display_name,
+        payload.password,
     )
+    .await
 }
 
-async fn auth_refresh(Json(payload): Json<AuthRequest>) -> Json<serde_json::Value> {
+async fn auth_refresh(
+    State(state): State<ServerState>,
+    Json(payload): Json<AuthRequest>,
+) -> Result<Json<serde_json::Value>, ApiError> {
     let suffix = payload.refresh_token.unwrap_or_else(|| "demo".to_string());
-    Json(json!({
-        "access_token": format!("demo-access-{suffix}"),
-        "refresh_token": format!("demo-refresh-{suffix}"),
-        "user": demo_user("demo@example.com", None),
-    }))
+    let user = state
+        .user_for_token(&suffix)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::Unauthorized("invalid refresh token".to_string()))?;
+    let access_token = state
+        .issue_token(&user.id, "demo-access")
+        .await
+        .map_err(db_error)?;
+    let refresh_token = state
+        .issue_token(&user.id, "demo-refresh")
+        .await
+        .map_err(db_error)?;
+    Ok(Json(json!({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": app_user_json(&user),
+    })))
 }
 
-async fn me(headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
-    Ok(Json(demo_user(
-        &session.email,
-        Some("Demo User".to_string()),
-    )))
+async fn me(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    Ok(Json(app_user_json(&session)))
 }
 
 async fn usage(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
-    let used = state.cloud_conversions_used(&session.user_id).await;
-    let entitlement = state.entitlement(&session.user_id).await;
+    let session = require_session(&state, &headers).await?;
+    let used = state.cloud_conversions_used(&session.id).await;
+    let entitlement = state.entitlement(&session.id).await;
     let date_valid = entitlement
         .valid_until
         .as_deref()
@@ -296,8 +330,11 @@ async fn recharge_options() -> Json<serde_json::Value> {
     }))
 }
 
-async fn redeem_code_options(headers: HeaderMap) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&headers)?;
+async fn redeem_code_options(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_session(&state, &headers).await?;
     Ok(Json(json!({
         "enabled": true,
         "provider": "redeem-code",
@@ -317,10 +354,10 @@ async fn redeem_code(
     headers: HeaderMap,
     Json(payload): Json<RedeemCodeBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let code = payload.code.unwrap_or_default();
     let result = state
-        .redeem_code(session.user_id, code)
+        .redeem_code(session.id, code)
         .await
         .map_err(redeem_failure_to_error)?;
     Ok(Json(redeem_result_json(&result)))
@@ -330,8 +367,8 @@ async fn list_redeem_records(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
-    let records = state.list_redeem_records(&session.user_id).await;
+    let session = require_session(&state, &headers).await?;
+    let records = state.list_redeem_records(&session.id).await;
     Ok(Json(json!(records
         .iter()
         .map(redeem_record_json)
@@ -343,7 +380,7 @@ async fn admin_create_redeem_batch(
     headers: HeaderMap,
     Json(payload): Json<AdminRedeemBatchBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let admin = require_admin_session(&headers)?;
+    let admin = require_admin_session(&state, &headers).await?;
     let package_id = payload.package_id.unwrap_or_else(|| "count_10".to_string());
     let quantity = payload.quantity.unwrap_or(100);
     let batch = state
@@ -353,10 +390,35 @@ async fn admin_create_redeem_batch(
             payload.channel,
             payload.note,
             payload.expires_at,
-            admin.user_id,
+            admin.id,
         )
         .await
         .map_err(redeem_failure_to_error)?;
+    Ok(Json(redeem_batch_json(&batch, true)))
+}
+
+async fn admin_list_redeem_batches(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+)-> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let batches = state.list_redeem_batches().await;
+    Ok(Json(json!(batches
+        .iter()
+        .map(|batch| redeem_batch_json(batch, false))
+        .collect::<Vec<_>>())))
+}
+
+async fn admin_get_redeem_batch(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let batch = state
+        .get_redeem_batch_detail(&id)
+        .await
+        .ok_or_else(|| ApiError::NotFound(format!("redeem batch {id}")))?;
     Ok(Json(redeem_batch_json(&batch, true)))
 }
 
@@ -365,13 +427,13 @@ async fn admin_export_redeem_batch(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let _admin = require_admin_session(&headers)?;
+    let _admin = require_admin_session(&state, &headers).await?;
     let batch = state
         .get_redeem_batch(&id)
         .await
         .ok_or_else(|| ApiError::NotFound(format!("redeem batch {id}")))?;
     let body = build_redeem_codes_xlsx(&batch)?;
-    state.mark_redeem_batch_exported(&id).await;
+    state.mark_redeem_batch_exported(&id).await.map_err(ApiError::Io)?;
     Response::builder()
         .status(StatusCode::OK)
         .header(
@@ -395,20 +457,21 @@ async fn create_recharge(
     headers: HeaderMap,
     Json(payload): Json<RechargeBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let recharge_type = payload.recharge_type.unwrap_or_else(|| "count".to_string());
     let package_id = payload.package_id.unwrap_or_else(|| "count_3".to_string());
     let (normalized_type, quantity, amount_cents) =
         compute_recharge_amount(&recharge_type, &package_id, payload.quantity)?;
     let record = state
         .create_recharge(
-            session.user_id,
+            session.id,
             normalized_type,
             package_id,
             quantity,
             amount_cents,
         )
-        .await;
+        .await
+        .map_err(ApiError::Io)?;
     Ok(Json(recharge_json(&record)))
 }
 
@@ -416,8 +479,8 @@ async fn list_recharges(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
-    let records = state.list_recharges(&session.user_id).await;
+    let session = require_session(&state, &headers).await?;
+    let records = state.list_recharges(&session.id).await;
     Ok(Json(json!(records
         .iter()
         .map(recharge_json)
@@ -425,10 +488,11 @@ async fn list_recharges(
 }
 
 async fn billing_checkout(
+    State(state): State<ServerState>,
     headers: HeaderMap,
     Json(payload): Json<CheckoutBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&headers)?;
+    let _session = require_session(&state, &headers).await?;
     let plan_id = payload.plan_id.unwrap_or_else(|| "pro".to_string());
     let success_url = payload
         .success_url
@@ -443,10 +507,11 @@ async fn billing_checkout(
 }
 
 async fn billing_portal(
+    State(state): State<ServerState>,
     headers: HeaderMap,
     Json(payload): Json<CheckoutBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&headers)?;
+    let _session = require_session(&state, &headers).await?;
     let return_url = payload
         .return_url
         .unwrap_or_else(|| "https://tex2doc.cn/account".to_string());
@@ -461,7 +526,7 @@ async fn upload_project(
     request: Request,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let (parts, body) = request.into_parts();
-    let _session = require_session(&parts.headers)?;
+    let session = require_session(&state, &parts.headers).await?;
     let full_body = axum::body::to_bytes(body, MAX_BODY)
         .await
         .map_err(|e| ApiError::Io(format!("body read error: {e}")))?;
@@ -472,12 +537,13 @@ async fn upload_project(
     }
     validate_project_zip(&file_part)?;
     let record = state
-        .store_upload("project.zip".to_string(), file_part)
-        .await;
+        .store_upload(&session.id, "project.zip".to_string(), file_part)
+        .await
+        .map_err(ApiError::Io)?;
     Ok(Json(json!({
         "upload_id": record.upload_id,
         "status": "stored",
-        "bytes": record.bytes.len() as u64,
+        "bytes": record.bytes_size,
         "file_name": record.file_name,
         "created_at": record.created_at,
     })))
@@ -488,7 +554,7 @@ async fn create_conversion(
     headers: HeaderMap,
     Json(payload): Json<ConversionBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let upload_id = payload
         .upload_id
         .unwrap_or_else(|| "upload_demo".to_string());
@@ -505,7 +571,7 @@ async fn create_conversion(
         .main_tex
         .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
     state
-        .try_consume_cloud_conversion(&session.user_id)
+        .try_consume_cloud_conversion(&session.id)
         .await
         .map_err(|used| {
             ApiError::PaymentRequired(format!(
@@ -514,14 +580,15 @@ async fn create_conversion(
         })?;
     let job = state
         .create_job(
-            session.user_id.clone(),
+            session.id.clone(),
             upload_id,
             main_tex,
             profile,
             quality,
             engine,
         )
-        .await;
+        .await
+        .map_err(ApiError::Io)?;
     state
         .enqueue_job(job.job_id.clone())
         .await
@@ -533,8 +600,8 @@ async fn list_conversions(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
-    let jobs = state.list_jobs_by_user(&session.user_id).await;
+    let session = require_session(&state, &headers).await?;
+    let jobs = state.list_jobs_by_user(&session.id).await;
     Ok(Json(json!(jobs.iter().map(job_json).collect::<Vec<_>>())))
 }
 
@@ -543,7 +610,7 @@ async fn get_conversion(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&headers)?;
+    let _session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
@@ -556,7 +623,7 @@ async fn download_conversion_docx(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let _session = require_session(&headers)?;
+    let _session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
@@ -584,7 +651,7 @@ async fn get_conversion_report(
     headers: HeaderMap,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_session(&headers)?;
+    let _session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&id)
         .await
@@ -608,21 +675,36 @@ async fn release_manifest(Path(channel): Path<String>) -> Json<serde_json::Value
     }))
 }
 
-fn auth_response(email: String, display_name: Option<String>) -> Json<serde_json::Value> {
-    Json(json!({
-        "access_token": format!("demo-access-{}", email.replace('@', "_")),
-        "refresh_token": format!("demo-refresh-{}", email.replace('@', "_")),
-        "user": demo_user(&email, display_name),
-    }))
-}
-
-#[derive(Debug, Clone)]
-struct DemoSession {
-    user_id: String,
+async fn auth_response(
+    state: &ServerState,
     email: String,
+    display_name: Option<String>,
+    password: Option<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let user = state
+        .upsert_user(
+            &email,
+            display_name.as_deref(),
+            password.as_deref().unwrap_or("secret"),
+        )
+        .await
+        .map_err(db_error)?;
+    let access_token = state
+        .issue_token(&user.id, "demo-access")
+        .await
+        .map_err(db_error)?;
+    let refresh_token = state
+        .issue_token(&user.id, "demo-refresh")
+        .await
+        .map_err(db_error)?;
+    Ok(Json(json!({
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "user": app_user_json(&user),
+    })))
 }
 
-fn require_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
+async fn require_session(state: &ServerState, headers: &HeaderMap) -> Result<AppUser, ApiError> {
     let value = headers
         .get(header::AUTHORIZATION)
         .ok_or_else(|| ApiError::Unauthorized("missing bearer token".to_string()))?
@@ -635,22 +717,17 @@ fn require_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
     if token.is_empty() {
         return Err(ApiError::Unauthorized("empty bearer token".to_string()));
     }
-    if !(token.starts_with("demo-access-") || token.starts_with("demo-refresh-")) {
-        return Err(ApiError::Unauthorized(
-            "unsupported bearer token for preview server".to_string(),
-        ));
-    }
-    let suffix = token
-        .strip_prefix("demo-access-")
-        .or_else(|| token.strip_prefix("demo-refresh-"))
-        .unwrap_or("demo");
-    Ok(DemoSession {
-        user_id: suffix.to_string(),
-        email: "demo@example.com".to_string(),
-    })
+    state
+        .user_for_token(token)
+        .await
+        .map_err(db_error)?
+        .ok_or_else(|| ApiError::Unauthorized("invalid bearer token".to_string()))
 }
 
-fn require_admin_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
+async fn require_admin_session(
+    state: &ServerState,
+    headers: &HeaderMap,
+) -> Result<AppUser, ApiError> {
     let value = headers
         .get(header::AUTHORIZATION)
         .ok_or_else(|| ApiError::Unauthorized("missing admin bearer token".to_string()))?
@@ -661,10 +738,7 @@ fn require_admin_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
         .ok_or_else(|| ApiError::Unauthorized("expected Bearer token".to_string()))?
         .trim();
     if token.starts_with("admin-") || token == "demo-admin" {
-        Ok(DemoSession {
-            user_id: "admin_demo".to_string(),
-            email: "admin@example.com".to_string(),
-        })
+        state.ensure_demo_admin().await.map_err(db_error)
     } else {
         Err(ApiError::Unauthorized(
             "unsupported admin token for preview server".to_string(),
@@ -672,13 +746,17 @@ fn require_admin_session(headers: &HeaderMap) -> Result<DemoSession, ApiError> {
     }
 }
 
-fn demo_user(email: &str, display_name: Option<String>) -> serde_json::Value {
+fn app_user_json(user: &AppUser) -> serde_json::Value {
     json!({
-        "id": "user_demo",
-        "email": email,
-        "display_name": display_name,
-        "plan_id": "preview",
+        "id": user.id,
+        "email": user.email,
+        "display_name": user.display_name,
+        "plan_id": user.plan_id,
     })
+}
+
+fn db_error(error: sqlx::Error) -> ApiError {
+    ApiError::Io(format!("database error: {error}"))
 }
 
 fn compute_recharge_amount(
@@ -1183,11 +1261,11 @@ async fn download_conversion_zip(
     headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&job_id)
         .await
-        .filter(|j| j.user_id == session.user_id)
+        .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
     let bytes = state
@@ -1213,11 +1291,11 @@ async fn download_conversion_log(
     headers: HeaderMap,
     Path(job_id): Path<String>,
 ) -> Result<Response, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let job = state
         .get_job(&job_id)
         .await
-        .filter(|j| j.user_id == session.user_id)
+        .filter(|j| j.user_id == session.id)
         .ok_or_else(|| ApiError::NotFound("conversion job not found".to_string()))?;
 
     let bytes = state
@@ -1255,7 +1333,7 @@ async fn create_feedback_thread(
     headers: HeaderMap,
     Json(payload): Json<CreateThreadJson>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let request = CreateThreadRequest {
         conversion_job_id: payload.conversion_job_id,
         title: payload.title,
@@ -1264,7 +1342,7 @@ async fn create_feedback_thread(
         priority: payload.priority,
     };
     let store = state.feedback_store();
-    let result = store.create_thread(session.user_id, request).await;
+    let result = store.create_thread(session.id, request).await;
     match result {
         Ok((thread, msg)) => Ok(Json(serde_json::json!({
             "thread_id": thread.thread_id,
@@ -1280,9 +1358,9 @@ async fn list_feedback_threads(
     State(state): State<ServerState>,
     headers: HeaderMap,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let store = state.feedback_store();
-    let threads = store.list_user_threads(&session.user_id).await;
+    let threads = store.list_user_threads(&session.id).await;
     let summaries: Vec<_> = threads
         .into_iter()
         .map(|t| thread_summary_from_summary(&t))
@@ -1295,9 +1373,9 @@ async fn get_feedback_thread(
     headers: HeaderMap,
     Path(thread_id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let store = state.feedback_store();
-    let result = store.get_thread_for_user(&session.user_id, &thread_id).await;
+    let result = store.get_thread_for_user(&session.id, &thread_id).await;
     match result {
         Ok((t, messages)) => {
             let msgs: Vec<_> = messages.into_iter().map(|m| message_json(&m)).collect();
@@ -1326,13 +1404,13 @@ async fn add_feedback_message(
     Path(thread_id): Path<String>,
     Json(payload): Json<AddMessageJson>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&headers)?;
+    let session = require_session(&state, &headers).await?;
     let request = AddMessageRequest {
         content: payload.content,
         parent_message_id: payload.parent_message_id,
     };
     let store = state.feedback_store();
-    let result = store.add_message(session.user_id, &thread_id, request).await;
+    let result = store.add_message(session.id, &thread_id, request).await;
     match result {
         Ok(msg) => Ok(Json(serde_json::json!(message_json(&msg)))),
         Err(e) => Err(feedback_error_to_api_error(e)),
@@ -1348,7 +1426,7 @@ async fn admin_list_feedback_threads(
     headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<ThreadFilters>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let _session = require_admin_session(&headers)?;
+    let _session = require_admin_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.admin_list(&params).await;
     let summaries: Vec<_> = threads
@@ -1363,7 +1441,7 @@ async fn admin_export_feedback_threads(
     headers: HeaderMap,
     axum::extract::Query(params): axum::extract::Query<ThreadFilters>,
 ) -> Result<Response, ApiError> {
-    let _session = require_admin_session(&headers)?;
+    let _session = require_admin_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.admin_list(&params).await;
     let bytes = state.build_feedback_export(threads);
@@ -1393,11 +1471,11 @@ async fn admin_update_feedback_thread(
     Path(thread_id): Path<String>,
     Json(payload): Json<AdminUpdateJson>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_admin_session(&headers)?;
+    let session = require_admin_session(&state, &headers).await?;
     let request = AdminUpdateThreadRequest {
         status: payload.status,
         priority: payload.priority,
-        admin_assignee: payload.admin_assignee.or(Some(session.user_id)),
+        admin_assignee: payload.admin_assignee.or(Some(session.id)),
     };
     let store = state.feedback_store();
     let result = store.admin_update(&thread_id, request).await;
@@ -1419,13 +1497,13 @@ async fn admin_reply_feedback_message(
     Path(thread_id): Path<String>,
     Json(payload): Json<AdminReplyJson>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_admin_session(&headers)?;
+    let session = require_admin_session(&state, &headers).await?;
     let request = AdminReplyRequest {
         content: payload.content,
         is_internal: payload.is_internal,
     };
     let store = state.feedback_store();
-    let result = store.admin_reply(session.user_id, &thread_id, request).await;
+    let result = store.admin_reply(session.id, &thread_id, request).await;
     match result {
         Ok(msg) => Ok(Json(serde_json::json!(message_json(&msg)))),
         Err(e) => Err(feedback_error_to_api_error(e)),
@@ -1451,22 +1529,6 @@ fn thread_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value
     })
 }
 
-fn thread_summary_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value {
-    serde_json::json!({
-        "thread_id": t.thread_id,
-        "user_id": t.user_id,
-        "conversion_job_id": t.conversion_job_id,
-        "title": t.title,
-        "feedback_type": t.feedback_type.as_str(),
-        "status": t.status.as_str(),
-        "priority": t.priority.as_str(),
-        "message_count": t.message_count,
-        "latest_message_at": t.latest_message_at,
-        "created_at": t.created_at,
-        "updated_at": t.updated_at,
-    })
-}
-
 fn thread_summary_from_summary(t: &crate::feedback_service::FeedbackThreadSummary) -> serde_json::Value {
     serde_json::json!({
         "thread_id": t.thread_id,
@@ -1477,22 +1539,6 @@ fn thread_summary_from_summary(t: &crate::feedback_service::FeedbackThreadSummar
         "priority": t.priority,
         "message_count": t.message_count,
         "latest_message_at": t.latest_message_at,
-        "created_at": t.created_at,
-        "updated_at": t.updated_at,
-    })
-}
-
-fn thread_summary_json_from_thread(t: &crate::feedback_service::FeedbackThread, message_count: u32, latest_message_at: Option<String>) -> serde_json::Value {
-    serde_json::json!({
-        "thread_id": t.thread_id,
-        "user_id": t.user_id,
-        "conversion_job_id": t.conversion_job_id,
-        "title": t.title,
-        "feedback_type": t.feedback_type.as_str(),
-        "status": t.status.as_str(),
-        "priority": t.priority.as_str(),
-        "message_count": message_count,
-        "latest_message_at": latest_message_at,
         "created_at": t.created_at,
         "updated_at": t.updated_at,
     })

@@ -244,8 +244,9 @@ class _FileButtons extends StatelessWidget {
   }
 
   void _download(BuildContext context, String type) async {
+    final panel = context.findAncestorWidgetOfExactType<ConvertRecordsPanel>();
     final api = CommercialApiClient(
-      (context.findAncestorWidgetOfExactType<ConvertRecordsPanel>() as ConvertRecordsPanel?)?.apiBaseUrl ?? '',
+      panel?.apiBaseUrl ?? '',
     );
     try {
       List<int> bytes;

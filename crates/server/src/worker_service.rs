@@ -1,4 +1,4 @@
-//! P7 in-memory cloud conversion worker.
+//! P7 cloud conversion worker.
 
 use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
 use doc_core::{convert_zip, ConvertOptions};
@@ -11,11 +11,11 @@ pub struct WorkerCommand {
     pub job_id: String,
 }
 
-pub fn spawn_worker_state() -> ServerState {
+pub async fn spawn_worker_state() -> Result<ServerState, sqlx::Error> {
     let (tx, rx) = mpsc::channel(32);
-    let state = ServerState::new(tx);
+    let state = ServerState::new(tx).await?;
     tokio::spawn(worker_loop(state.clone(), rx));
-    state
+    Ok(state)
 }
 
 async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) {

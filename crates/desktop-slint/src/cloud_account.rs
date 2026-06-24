@@ -6,9 +6,9 @@
 use std::time::Duration;
 
 use doc_commercial_api_client::{
-    AddMessageRequest, ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession,
-    CheckoutRequest, ClientConfig, ConversionJob, CreateFeedbackRequest, CreateFeedbackResponse,
-    FeedbackMessage, FeedbackThread, FeedbackThreadDetail, LoginRequest, PlanSummary,
+    ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession,
+    CheckoutRequest, ClientConfig, ConversionJob,
+    LoginRequest, PlanSummary,
     RechargeRecord, RedeemCodeRecord, RedeemCodeRequest, RedeemCodeResult, RefreshRequest,
     RegisterRequest, UsageSummary, UserProfile,
 };
@@ -273,146 +273,6 @@ pub fn fetch_conversion_table_blocking(
     })
 }
 
-pub fn fetch_feedback_threads_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-) -> Result<Vec<FeedbackThreadRow>> {
-    let access_token = access_token.ok_or_else(|| {
-        CloudAccountError::Api(ApiError::Api {
-            code: "missing_access_token".to_string(),
-            message: "sign in before querying feedback".to_string(),
-        })
-    })?;
-    let base_url = parse_base_url(base_url)?;
-    let runtime = runtime()?;
-
-    runtime.block_on(async move {
-        let client = authenticated_client(base_url, &access_token)?;
-        let mut rows = Vec::new();
-        for thread in client.feedback_threads().await? {
-            rows.push(FeedbackThreadRow::from_thread(thread));
-        }
-        rows.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        Ok(rows)
-    })
-}
-
-pub fn fetch_feedback_detail_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-    thread_id: &str,
-) -> Result<FeedbackDetailRow> {
-    let access_token = access_token.ok_or_else(|| {
-        CloudAccountError::Api(ApiError::Api {
-            code: "missing_access_token".to_string(),
-            message: "sign in before querying feedback".to_string(),
-        })
-    })?;
-    let base_url = parse_base_url(base_url)?;
-    let runtime = runtime()?;
-    let thread_id = thread_id.to_string();
-
-    runtime.block_on(async move {
-        let client = authenticated_client(base_url, &access_token)?;
-        let detail = client.feedback_thread(&thread_id).await?;
-        Ok(FeedbackDetailRow::from_detail(detail))
-    })
-}
-
-pub fn create_feedback_thread_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-    title: &str,
-    feedback_type: &str,
-    content: &str,
-    conversion_job_id: Option<&str>,
-    priority: Option<&str>,
-) -> Result<String> {
-    let access_token = access_token.ok_or_else(|| {
-        CloudAccountError::Api(ApiError::Api {
-            code: "missing_access_token".to_string(),
-            message: "sign in before creating feedback".to_string(),
-        })
-    })?;
-    let base_url = parse_base_url(base_url)?;
-    let runtime = runtime()?;
-
-    runtime.block_on(async move {
-        let client = authenticated_client(base_url, &access_token)?;
-        let result = client
-            .create_feedback_thread(&CreateFeedbackRequest {
-                title: title.to_string(),
-                feedback_type: feedback_type.to_string(),
-                content: content.to_string(),
-                conversion_job_id: conversion_job_id.map(String::from),
-                priority: priority.map(String::from),
-            })
-            .await?;
-        Ok(result.thread_id)
-    })
-}
-
-pub fn add_feedback_message_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-    thread_id: &str,
-    content: &str,
-) -> Result<()> {
-    let access_token = access_token.ok_or_else(|| {
-        CloudAccountError::Api(ApiError::Api {
-            code: "missing_access_token".to_string(),
-            message: "sign in before replying to feedback".to_string(),
-        })
-    })?;
-    let base_url = parse_base_url(base_url)?;
-    let runtime = runtime()?;
-    let thread_id = thread_id.to_string();
-    let content = content.to_string();
-
-    runtime.block_on(async move {
-        let client = authenticated_client(base_url, &access_token)?;
-        client
-            .add_feedback_message(
-                &thread_id,
-                &AddMessageRequest {
-                    content,
-                    parent_message_id: None,
-                },
-            )
-            .await?;
-        Ok(())
-    })
-}
-
-pub fn download_conversion_file_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-    job_id: &str,
-    file_type: &str,
-) -> Result<Vec<u8>> {
-    let access_token = access_token.ok_or_else(|| {
-        CloudAccountError::Api(ApiError::Api {
-            code: "missing_access_token".to_string(),
-            message: "sign in before downloading files".to_string(),
-        })
-    })?;
-    let base_url = parse_base_url(base_url)?;
-    let runtime = runtime()?;
-    let job_id = job_id.to_string();
-    let file_type = file_type.to_string();
-
-    runtime.block_on(async move {
-        let client = authenticated_client(base_url, &access_token)?;
-        let bytes = match file_type.as_str() {
-            "docx" => client.download_conversion_docx(&job_id).await?,
-            "zip" => client.download_conversion_zip(&job_id).await?,
-            "log" => client.download_conversion_log(&job_id).await?,
-            _ => return Err(CloudAccountError::Runtime(format!("unknown file type: {file_type}"))),
-        };
-        Ok(bytes)
-    })
-}
-
 pub fn usage_line(usage: &UsageSummary) -> String {
     let remaining = usage
         .cloud_conversions_limit
@@ -591,75 +451,6 @@ fn format_size(bytes: u64) -> String {
         format!("{:.1}KB", bytes as f64 / 1024.0)
     } else {
         format!("{:.1}MB", bytes as f64 / 1024.0 / 1024.0)
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct FeedbackThreadRow {
-    pub thread_id: String,
-    pub title: String,
-    pub feedback_type: String,
-    pub status: String,
-    pub priority: String,
-    pub message_count: i32,
-    pub latest_message_at: String,
-    pub created_at: String,
-    pub conversion_job_id: String,
-}
-
-impl FeedbackThreadRow {
-    fn from_thread(record: FeedbackThread) -> Self {
-        Self {
-            thread_id: record.thread_id,
-            title: record.title,
-            feedback_type: record.feedback_type,
-            status: record.status,
-            priority: record.priority,
-            message_count: record.message_count.unwrap_or(0) as i32,
-            latest_message_at: record.latest_message_at.unwrap_or_default(),
-            created_at: record.created_at,
-            conversion_job_id: record.conversion_job_id.unwrap_or_default(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct FeedbackDetailRow {
-    pub thread: FeedbackThreadRow,
-    pub messages: Vec<FeedbackMessageRow>,
-}
-
-impl FeedbackDetailRow {
-    fn from_detail(record: FeedbackThreadDetail) -> Self {
-        Self {
-            thread: FeedbackThreadRow::from_thread(record.thread),
-            messages: record
-                .messages
-                .into_iter()
-                .map(FeedbackMessageRow::from_message)
-                .collect(),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-pub struct FeedbackMessageRow {
-    pub message_id: String,
-    pub sender_type: String,
-    pub content: String,
-    pub created_at: String,
-}
-
-impl FeedbackMessageRow {
-    fn from_message(record: FeedbackMessage) -> Self {
-        Self {
-            message_id: record.message_id,
-            sender_type: record.sender_type,
-            content: record.content,
-            created_at: record.created_at,
-        }
     }
 }
 

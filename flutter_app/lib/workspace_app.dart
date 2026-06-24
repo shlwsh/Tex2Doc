@@ -17,7 +17,6 @@ import 'ui/app_tokens.dart';
 import 'ui/auth_window.dart';
 import 'ui/convert_records_panel.dart';
 import 'ui/feedback_panel.dart';
-import 'ui/feedback_thread_panel.dart';
 import 'ui/recharge_records_panel.dart';
 
 const _appIconAsset = 'assets/app_icon.jpg';
@@ -112,6 +111,7 @@ enum _NavSection {
   account,
   recharge,
   redeemManage,
+  redeemRecords,
   convert,
   convertRecords,
   rechargeRecords,
@@ -123,6 +123,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.account => Icons.person_outline,
     _NavSection.recharge => Icons.payments_outlined,
     _NavSection.redeemManage => Icons.confirmation_number_outlined,
+    _NavSection.redeemRecords => Icons.fact_check_outlined,
     _NavSection.convert => Icons.sync_alt,
     _NavSection.convertRecords => Icons.history,
     _NavSection.rechargeRecords => Icons.receipt_long,
@@ -133,6 +134,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.account => s.t('nav.account'),
     _NavSection.recharge => s.t('nav.recharge'),
     _NavSection.redeemManage => s.t('nav.redeemManage'),
+    _NavSection.redeemRecords => s.t('nav.redeemRecords'),
     _NavSection.convert => s.t('nav.convert'),
     _NavSection.convertRecords => s.t('nav.convertRecords'),
     _NavSection.rechargeRecords => s.t('nav.rechargeRecords'),
@@ -928,6 +930,9 @@ class _NavContent extends StatelessWidget {
       _NavSection.redeemManage => <Widget>[
         _RedeemManagePanel(apiBaseUrl: apiBaseUrl),
       ],
+      _NavSection.redeemRecords => <Widget>[
+        _RedeemRecordsPanel(apiBaseUrl: apiBaseUrl),
+      ],
       _NavSection.convert => <Widget>[
         _ConvertPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
@@ -938,7 +943,7 @@ class _NavContent extends StatelessWidget {
         RechargeRecordsPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
       _NavSection.feedback => <Widget>[
-        FeedbackPanel(api: CommercialApiClient(apiBaseUrl), accessToken: accessToken),
+        FeedbackPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
     };
 
@@ -1592,6 +1597,242 @@ class _RedeemManagePanelState extends State<_RedeemManagePanel> {
             entries: previewCodes.isEmpty
                 ? [strings.t('empty.noData')]
                 : previewCodes,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+// ─── Redeem code records panel ───────────────────────────────────────────────
+
+class _RedeemRecordsPanel extends StatefulWidget {
+  final String apiBaseUrl;
+
+  const _RedeemRecordsPanel({required this.apiBaseUrl});
+
+  @override
+  State<_RedeemRecordsPanel> createState() => _RedeemRecordsPanelState();
+}
+
+class _RedeemRecordsPanelState extends State<_RedeemRecordsPanel> {
+  final TextEditingController _adminTokenController = TextEditingController(
+    text: 'demo-admin',
+  );
+
+  List<RedeemCodeBatch> _batches = const [];
+  RedeemCodeBatch? _selectedBatch;
+  String? _status;
+  bool _busy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    unawaited(_loadBatches());
+  }
+
+  @override
+  void dispose() {
+    _adminTokenController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadBatches() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = AppStrings.of(context).t('status.working');
+    });
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final batches = await client.redeemCodeBatches(
+        adminToken: _adminTokenController.text.trim(),
+      );
+      if (!mounted) return;
+      setState(() {
+        _batches = batches;
+        _selectedBatch = null;
+        _status = AppStrings.of(context).t('redeemRecords.loaded').fill({
+          'count': batches.length,
+        });
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _status = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _openBatch(RedeemCodeBatch batch) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = AppStrings.of(context).t('status.working');
+    });
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final detail = await client.redeemCodeBatchDetail(
+        adminToken: _adminTokenController.text.trim(),
+        batchId: batch.batchId,
+      );
+      if (!mounted) return;
+      setState(() {
+        _selectedBatch = detail;
+        _status = AppStrings.of(context).t('redeemRecords.detailLoaded').fill({
+          'batch': detail.batchNo,
+        });
+      });
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _status = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _downloadExcel(RedeemCodeBatch batch) async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _status = AppStrings.of(context).t('status.working');
+    });
+    try {
+      final client = CommercialApiClient(widget.apiBaseUrl);
+      final bytes = await client.exportRedeemCodeBatch(
+        adminToken: _adminTokenController.text.trim(),
+        batchId: batch.batchId,
+      );
+      downloadBlob(
+        Uint8List.fromList(bytes),
+        'redeem-codes-${batch.batchNo}.xlsx',
+      );
+      if (!mounted) return;
+      setState(() => _status = AppStrings.of(context).t('redeemManage.exported'));
+    } on Object catch (e) {
+      if (!mounted) return;
+      setState(() => _status = e.toString());
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final theme = Theme.of(context);
+    final selected = _selectedBatch;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        AppSectionHeader(
+          title: strings.t('nav.redeemRecords'),
+          description: strings.t('redeemRecords.description'),
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        TextField(
+          controller: _adminTokenController,
+          enabled: !_busy,
+          obscureText: true,
+          decoration: InputDecoration(
+            labelText: strings.t('redeemManage.adminToken'),
+            prefixIcon: const Icon(Icons.admin_panel_settings_outlined),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            FilledButton.icon(
+              onPressed: _busy ? null : _loadBatches,
+              icon: const Icon(Icons.refresh),
+              label: Text(strings.t('common.refresh')),
+            ),
+            if (selected != null)
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : () => _downloadExcel(selected),
+                icon: const Icon(Icons.download),
+                label: Text(strings.t('redeemManage.downloadExcel')),
+              ),
+          ],
+        ),
+        if (_status != null) ...[
+          const SizedBox(height: AppSpacing.md),
+          Text(_status!, style: theme.textTheme.bodySmall),
+        ],
+        const SizedBox(height: AppSpacing.lg),
+        if (_batches.isEmpty)
+          _KeyValueList(entries: [strings.t('empty.noData')])
+        else
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              columns: [
+                DataColumn(label: Text(strings.t('redeemRecords.batchNo'))),
+                DataColumn(label: Text(strings.t('redeemManage.package'))),
+                DataColumn(label: Text(strings.t('redeemRecords.generated'))),
+                DataColumn(label: Text(strings.t('redeemManage.status'))),
+                DataColumn(label: Text(strings.t('redeemRecords.channel'))),
+                DataColumn(label: Text(strings.t('redeemManage.createdAt'))),
+                DataColumn(label: Text(strings.t('redeemRecords.actions'))),
+              ],
+              rows: _batches
+                  .map(
+                    (batch) => DataRow(
+                      selected: selected?.batchId == batch.batchId,
+                      cells: [
+                        DataCell(Text(batch.batchNo)),
+                        DataCell(Text(batch.packageName)),
+                        DataCell(Text(batch.generatedCount.toString())),
+                        DataCell(Text(batch.status)),
+                        DataCell(Text(batch.channel ?? '-')),
+                        DataCell(Text(batch.createdAt)),
+                        DataCell(
+                          Wrap(
+                            spacing: AppSpacing.xs,
+                            children: [
+                              IconButton(
+                                tooltip: strings.t('redeemRecords.viewDetail'),
+                                onPressed: _busy ? null : () => _openBatch(batch),
+                                icon: const Icon(Icons.visibility_outlined),
+                              ),
+                              IconButton(
+                                tooltip: strings.t('redeemManage.downloadExcel'),
+                                onPressed: _busy ? null : () => _downloadExcel(batch),
+                                icon: const Icon(Icons.download),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  )
+                  .toList(growable: false),
+            ),
+          ),
+        if (selected != null) ...[
+          const SizedBox(height: AppSpacing.lg),
+          Text(selected.label, style: theme.textTheme.titleSmall),
+          const SizedBox(height: AppSpacing.sm),
+          _KeyValueList(
+            entries: [
+              '${strings.t('redeemManage.batchId')}: ${selected.batchId}',
+              '${strings.t('redeemRecords.exported')}: ${selected.exportedCount}',
+              '${strings.t('redeemManage.note')}: ${selected.note ?? '-'}',
+            ],
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Text(
+            strings.t('redeemManage.previewCodes'),
+            style: theme.textTheme.titleSmall,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          _KeyValueList(
+            entries: selected.codes.isEmpty
+                ? [strings.t('empty.noData')]
+                : selected.codes.take(60).toList(growable: false),
           ),
         ],
       ],

@@ -55,6 +55,11 @@ impl FileStorage {
         fs::read(dir.join(fixed_filename(filename)))
     }
 
+    /// Load bytes by a previously persisted relative object key.
+    pub fn load_key(&self, key: &str) -> io::Result<Vec<u8>> {
+        fs::read(self.root.join(key))
+    }
+
     /// Returns true if the given file exists in the session directory.
     #[allow(dead_code)]
     pub fn exists(&self, job_id: &str, filename: &str) -> bool {
@@ -160,7 +165,7 @@ fn fixed_filename(name: &str) -> String {
 
 /// Strip `..` and other path traversal components from an ID.
 fn sanitize_id(id: &str) -> String {
-    id.replace("..", "_")
+    id.replace("..", "")
         .chars()
         .filter(|c| c.is_alphanumeric() || *c == '_' || *c == '-')
         .collect()

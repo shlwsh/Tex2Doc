@@ -9,11 +9,19 @@ BEGIN;
 -- ─────────────────────────────────────────────────────────────
 ALTER TABLE conversion_jobs
     ADD COLUMN IF NOT EXISTS source_zip_key TEXT,
+    ADD COLUMN IF NOT EXISTS result_docx_key TEXT,
     ADD COLUMN IF NOT EXISTS result_log_key TEXT,
     ADD COLUMN IF NOT EXISTS storage_path TEXT,
     ADD COLUMN IF NOT EXISTS zip_bytes BIGINT,
     ADD COLUMN IF NOT EXISTS docx_bytes BIGINT,
     ADD COLUMN IF NOT EXISTS log_bytes BIGINT;
+
+-- ─────────────────────────────────────────────────────────────
+-- 1b. Enhance uploads with result storage keys
+-- ─────────────────────────────────────────────────────────────
+ALTER TABLE uploads
+    ADD COLUMN IF NOT EXISTS result_docx_key TEXT,
+    ADD COLUMN IF NOT EXISTS result_log_key TEXT;
 
 -- ─────────────────────────────────────────────────────────────
 -- 2. Feedback threads

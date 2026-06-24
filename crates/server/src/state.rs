@@ -1,15 +1,15 @@
-//! In-memory commercial API state for P7 cloud conversion jobs.
+//! Commercial API state backed by PostgreSQL and session file storage.
 
-use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::mpsc;
+use uuid::Uuid;
 
+use crate::db_store::{AppUser, DbStore};
 use crate::excel_export;
 use crate::feedback_service::FeedbackStore;
 use crate::file_storage::FileStorage;
@@ -19,29 +19,21 @@ pub const PREVIEW_CLOUD_CONVERSION_LIMIT: u64 = 100;
 
 #[derive(Clone)]
 pub struct ServerState {
-    inner: Arc<ServerStateInner>,
+    db: DbStore,
     queue: mpsc::Sender<WorkerCommand>,
-}
-
-struct ServerStateInner {
-    uploads: RwLock<HashMap<String, UploadRecord>>,
-    jobs: RwLock<HashMap<String, ConversionJobRecord>>,
-    recharges: RwLock<HashMap<String, Vec<RechargeRecord>>>,
-    entitlements: RwLock<HashMap<String, EntitlementRecord>>,
-    redeem_batches: RwLock<HashMap<String, RedeemCodeBatchRecord>>,
-    redeem_codes: RwLock<HashMap<String, RedeemCodeRecord>>,
-    redeem_events: RwLock<Vec<RedeemCodeEventRecord>>,
-    usage: RwLock<HashMap<String, u64>>,
-    seq: AtomicU64,
     file_storage: FileStorage,
     feedback_store: FeedbackStore,
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct UploadRecord {
     pub upload_id: String,
     pub file_name: String,
     pub bytes: Vec<u8>,
+    pub storage_key: Option<String>,
+    pub storage_path: Option<String>,
+    pub bytes_size: u64,
     pub created_at: String,
 }
 
@@ -75,9 +67,25 @@ impl ConversionStatus {
             Self::Expired => "expired",
         }
     }
+
+    pub fn from_str(value: &str) -> Self {
+        match value {
+            "normalizing" => Self::Normalizing,
+            "detecting" => Self::Detecting,
+            "analyzing" => Self::Analyzing,
+            "compiling" => Self::Compiling,
+            "rendering" => Self::Rendering,
+            "verifying" => Self::Verifying,
+            "completed" => Self::Completed,
+            "failed" => Self::Failed,
+            "expired" => Self::Expired,
+            _ => Self::Queued,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct ConversionJobRecord {
     pub job_id: String,
     pub user_id: String,
@@ -93,7 +101,6 @@ pub struct ConversionJobRecord {
     pub report: Option<ConversionReportRecord>,
     pub error_code: Option<String>,
     pub error: Option<String>,
-    // Session file storage
     pub storage_path: Option<String>,
     pub source_zip_key: Option<String>,
     pub result_docx_key: Option<String>,
@@ -170,15 +177,7 @@ pub struct RedeemCodeRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RedeemCodeEventRecord {
-    pub code_id: Option<String>,
-    pub user_id: Option<String>,
-    pub event_type: String,
-    pub reason: Option<String>,
-    pub created_at: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct RedeemCodeResult {
     pub redeem_id: String,
     pub recharge_id: String,
@@ -200,6 +199,7 @@ pub enum RedeemFailure {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[allow(dead_code)]
 pub struct EntitlementRecord {
     pub user_id: String,
     pub count_balance: u64,
@@ -226,45 +226,63 @@ pub struct ConversionReportRecord {
 }
 
 impl ServerState {
-    pub fn new(queue: mpsc::Sender<WorkerCommand>) -> Self {
-        let file_storage = FileStorage::new(std::path::PathBuf::from("sessions"))
-            .expect("sessions root directory should be creatable");
-        Self {
-            inner: Arc::new(ServerStateInner {
-                uploads: RwLock::new(HashMap::new()),
-                jobs: RwLock::new(HashMap::new()),
-                recharges: RwLock::new(HashMap::new()),
-                entitlements: RwLock::new(HashMap::new()),
-                redeem_batches: RwLock::new(HashMap::new()),
-                redeem_codes: RwLock::new(HashMap::new()),
-                redeem_events: RwLock::new(Vec::new()),
-                usage: RwLock::new(HashMap::new()),
-                seq: AtomicU64::new(1),
-                file_storage,
-                feedback_store: FeedbackStore::new(),
-            }),
+    pub async fn new(queue: mpsc::Sender<WorkerCommand>) -> Result<Self, sqlx::Error> {
+        let db = DbStore::connect_from_env().await?;
+        let file_storage = FileStorage::new(PathBuf::from("sessions"))
+            .map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
+        let feedback_store = FeedbackStore::new(db.clone());
+        Ok(Self {
+            db,
             queue,
-        }
+            file_storage,
+            feedback_store,
+        })
     }
 
-    pub async fn store_upload(&self, file_name: String, bytes: Vec<u8>) -> UploadRecord {
-        let upload_id = self.next_id("upload");
-        let record = UploadRecord {
-            upload_id: upload_id.clone(),
-            file_name,
-            bytes,
-            created_at: now_timestamp(),
-        };
-        self.inner
-            .uploads
-            .write()
+    pub async fn upsert_user(
+        &self,
+        email: &str,
+        display_name: Option<&str>,
+        password: &str,
+    ) -> Result<AppUser, sqlx::Error> {
+        self.db.upsert_user(email, display_name, password).await
+    }
+
+    pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
+        self.db.ensure_demo_admin().await
+    }
+
+    pub async fn issue_token(&self, user_id: &str, prefix: &str) -> Result<String, sqlx::Error> {
+        self.db.issue_token(user_id, prefix).await
+    }
+
+    pub async fn user_for_token(&self, token: &str) -> Result<Option<AppUser>, sqlx::Error> {
+        self.db.user_for_token(token).await
+    }
+
+    pub async fn store_upload(
+        &self,
+        user_id: &str,
+        file_name: String,
+        bytes: Vec<u8>,
+    ) -> Result<UploadRecord, String> {
+        let upload_id = Uuid::new_v4().to_string();
+        let object_key = self.file_storage.file_key(&upload_id, "source.zip");
+        self.file_storage
+            .store(&upload_id, "source.zip", &bytes)
+            .map_err(|e| e.to_string())?;
+        self.db
+            .store_upload(&upload_id, user_id, file_name, object_key, bytes)
             .await
-            .insert(upload_id, record.clone());
-        record
+            .map_err(|e| e.to_string())
     }
 
     pub async fn get_upload(&self, upload_id: &str) -> Option<UploadRecord> {
-        self.inner.uploads.read().await.get(upload_id).cloned()
+        let mut upload = self.db.get_upload(upload_id).await.ok().flatten()?;
+        if let Some(key) = upload.storage_key.as_deref() {
+            upload.bytes = self.file_storage.load_key(key).ok()?;
+        }
+        Some(upload)
     }
 
     pub async fn create_job(
@@ -275,34 +293,26 @@ impl ServerState {
         profile: String,
         quality: String,
         engine: String,
-    ) -> ConversionJobRecord {
-        let job_id = self.next_id("conv");
-        let now = now_timestamp();
-        let job = ConversionJobRecord {
-            job_id: job_id.clone(),
-            user_id,
-            upload_id,
-            main_tex,
-            profile,
-            quality,
-            engine,
-            status: ConversionStatus::Queued,
-            created_at: now.clone(),
-            updated_at: now,
-            docx: None,
-            report: None,
-            error_code: None,
-            error: None,
-            storage_path: None,
-            source_zip_key: None,
-            result_docx_key: None,
-            result_log_key: None,
-            zip_bytes: None,
-            docx_bytes: None,
-            log_bytes: None,
-        };
-        self.inner.jobs.write().await.insert(job_id, job.clone());
-        job
+    ) -> Result<ConversionJobRecord, String> {
+        let mut job = self
+            .db
+            .create_job(user_id, upload_id.clone(), main_tex, profile, quality, engine)
+            .await
+            .map_err(|e| e.to_string())?;
+        if let Some(upload) = self.get_upload(&upload_id).await {
+            let source_key = self.file_storage.file_key(&job.job_id, "source.zip");
+            self.file_storage
+                .store(&job.job_id, "source.zip", &upload.bytes)
+                .map_err(|e| e.to_string())?;
+            self.db
+                .update_job_source_storage(&job.job_id, source_key.clone(), upload.bytes.len() as u64)
+                .await
+                .map_err(|e| e.to_string())?;
+            job.source_zip_key = Some(source_key.clone());
+            job.storage_path = Some(source_key);
+            job.zip_bytes = Some(upload.bytes.len() as u64);
+        }
+        Ok(job)
     }
 
     pub async fn enqueue_job(&self, job_id: String) -> Result<(), String> {
@@ -313,78 +323,31 @@ impl ServerState {
     }
 
     pub async fn get_job(&self, job_id: &str) -> Option<ConversionJobRecord> {
-        self.inner.jobs.read().await.get(job_id).cloned()
+        let mut job = self.db.get_job(job_id).await.ok().flatten()?;
+        if let Some(key) = job.result_docx_key.as_deref() {
+            job.docx = self.file_storage.load_key(key).ok();
+        }
+        Some(job)
     }
 
     pub async fn list_jobs_by_user(&self, user_id: &str) -> Vec<ConversionJobRecord> {
-        let mut jobs = self
-            .inner
-            .jobs
-            .read()
-            .await
-            .values()
-            .filter(|job| job.user_id == user_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        jobs.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        jobs
+        self.db.list_jobs_by_user(user_id).await.unwrap_or_default()
     }
 
     pub async fn cloud_conversions_used(&self, user_id: &str) -> u64 {
-        self.inner
-            .usage
-            .read()
-            .await
-            .get(user_id)
-            .copied()
-            .unwrap_or_default()
+        self.db.cloud_conversions_used(user_id).await.unwrap_or_default()
     }
 
     pub async fn entitlement(&self, user_id: &str) -> EntitlementRecord {
-        self.inner
-            .entitlements
-            .read()
-            .await
-            .get(user_id)
-            .cloned()
-            .unwrap_or_else(|| EntitlementRecord {
-                user_id: user_id.to_string(),
-                updated_at: now_timestamp(),
-                ..EntitlementRecord::default()
-            })
+        self.db.entitlement(user_id).await.unwrap_or_else(|_| EntitlementRecord {
+            user_id: user_id.to_string(),
+            updated_at: now_timestamp(),
+            ..EntitlementRecord::default()
+        })
     }
 
     pub async fn try_consume_cloud_conversion(&self, user_id: &str) -> Result<u64, u64> {
-        {
-            let mut entitlements = self.inner.entitlements.write().await;
-            if let Some(entitlement) = entitlements.get_mut(user_id) {
-                if entitlement
-                    .valid_until
-                    .as_deref()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .is_some_and(|valid_until| valid_until >= now_secs())
-                {
-                    entitlement.updated_at = now_timestamp();
-                    let used = self.cloud_conversions_used(user_id).await;
-                    return Ok(used);
-                }
-                if entitlement.count_balance > 0 {
-                    entitlement.count_balance -= 1;
-                    entitlement.updated_at = now_timestamp();
-                    let used = self.cloud_conversions_used(user_id).await;
-                    return Ok(used);
-                }
-            }
-        }
-
-        let mut usage = self.inner.usage.write().await;
-        let used = usage.get(user_id).copied().unwrap_or_default();
-        if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
-            return Err(used);
-        }
-        let next = used + 1;
-        usage.insert(user_id.to_string(), next);
-        Ok(next)
+        self.db.try_consume_cloud_conversion(user_id).await
     }
 
     pub async fn create_recharge(
@@ -394,30 +357,20 @@ impl ServerState {
         package_id: String,
         quantity: u64,
         amount_cents: u64,
-    ) -> RechargeRecord {
-        let recharge_id = self.next_id("recharge");
-        let record = RechargeRecord {
-            recharge_id: recharge_id.clone(),
-            user_id: user_id.clone(),
-            recharge_type,
-            package_id,
-            quantity,
-            amount_cents,
-            currency: "CNY".to_string(),
-            status: "paid_mock".to_string(),
-            provider: "mock-pay".to_string(),
-            provider_trade_id: format!("mock_trade_{recharge_id}"),
-            created_at: now_timestamp(),
-        };
-        self.inner
-            .recharges
-            .write()
+    ) -> Result<RechargeRecord, String> {
+        self.db
+            .create_recharge(
+                user_id,
+                recharge_type,
+                package_id,
+                quantity,
+                amount_cents,
+                "paid_mock",
+                "mock-pay",
+                format!("mock_trade_{}", Uuid::new_v4().simple()),
+            )
             .await
-            .entry(user_id)
-            .or_default()
-            .push(record.clone());
-        self.apply_recharge_entitlement(&record).await;
-        record
+            .map_err(|e| e.to_string())
     }
 
     pub async fn create_redeem_batch(
@@ -429,128 +382,28 @@ impl ServerState {
         expires_at: Option<String>,
         created_by: String,
     ) -> Result<RedeemCodeBatchRecord, RedeemFailure> {
-        let package = redeem_package(package_id).ok_or(RedeemFailure::InvalidCode)?;
-        if requested_count == 0 || requested_count > 10_000 {
-            return Err(RedeemFailure::InvalidCode);
-        }
-
-        let batch_id = self.next_id("redeem_batch");
-        let batch_no = format!(
-            "RC{}",
-            batch_id.trim_start_matches("redeem_batch_").to_uppercase()
-        );
-        let batch_prefix = batch_no
-            .chars()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<String>();
-        let now = now_timestamp();
-        let mut codes = Vec::with_capacity(requested_count as usize);
-        let mut records = Vec::with_capacity(requested_count as usize);
-
-        for _ in 0..requested_count {
-            let code_id = self.next_id("redeem_code");
-            let code = generate_redeem_code(&batch_prefix);
-            let normalized = normalize_redeem_code(&code).ok_or(RedeemFailure::InvalidCode)?;
-            let code_hash = code_hash(&normalized);
-            let nonce = random_bytes(12);
-            let ciphertext = encrypt_code(&normalized, &nonce);
-            let record = RedeemCodeRecord {
-                code_id: code_id.clone(),
-                batch_id: batch_id.clone(),
-                batch_no: batch_no.clone(),
-                package_id: package.id.clone(),
-                package_name: package.name.clone(),
-                recharge_type: package.package_type.clone(),
-                quantity: package.quantity,
-                code_hash,
-                code_ciphertext: ciphertext,
-                code_nonce: nonce,
-                code_preview: code_preview(&code),
-                plaintext_code: code.clone(),
-                key_version: "v1".to_string(),
-                status: "unused".to_string(),
-                redeemed_by: None,
-                redeemed_recharge_id: None,
-                redeemed_at: None,
-                expires_at: expires_at.clone(),
-                created_at: now.clone(),
-            };
-            codes.push(code);
-            records.push(record);
-        }
-
-        let batch = RedeemCodeBatchRecord {
-            batch_id: batch_id.clone(),
-            batch_no,
-            batch_prefix,
-            package_id: package.id,
-            package_name: package.name,
-            recharge_type: package.package_type,
-            quantity: package.quantity,
-            generated_count: requested_count,
-            exported_count: 0,
-            status: "active".to_string(),
-            channel,
-            note,
-            expires_at,
-            created_by,
-            created_at: now.clone(),
-            codes,
-        };
-
-        {
-            let mut code_map = self.inner.redeem_codes.write().await;
-            for record in records {
-                code_map.insert(record.code_hash.clone(), record);
-            }
-        }
-        self.inner
-            .redeem_batches
-            .write()
+        self.db
+            .create_redeem_batch(package_id, requested_count, channel, note, expires_at, created_by)
             .await
-            .insert(batch_id, batch.clone());
-        self.inner
-            .redeem_events
-            .write()
-            .await
-            .push(RedeemCodeEventRecord {
-                code_id: None,
-                user_id: Some(batch.created_by.clone()),
-                event_type: "generated".to_string(),
-                reason: Some(format!("batch {}", batch.batch_no)),
-                created_at: now,
-            });
-        Ok(batch)
+    }
+
+    pub async fn list_redeem_batches(&self) -> Vec<RedeemCodeBatchRecord> {
+        self.db.list_redeem_batches().await.unwrap_or_default()
     }
 
     pub async fn get_redeem_batch(&self, batch_id: &str) -> Option<RedeemCodeBatchRecord> {
-        self.inner
-            .redeem_batches
-            .read()
-            .await
-            .get(batch_id)
-            .cloned()
+        self.db.get_redeem_batch(batch_id, true).await.ok().flatten()
     }
 
-    pub async fn mark_redeem_batch_exported(&self, batch_id: &str) {
-        if let Some(batch) = self.inner.redeem_batches.write().await.get_mut(batch_id) {
-            batch.exported_count = batch.generated_count;
-        }
-        self.inner
-            .redeem_events
-            .write()
+    pub async fn get_redeem_batch_detail(&self, batch_id: &str) -> Option<RedeemCodeBatchRecord> {
+        self.db.get_redeem_batch(batch_id, true).await.ok().flatten()
+    }
+
+    pub async fn mark_redeem_batch_exported(&self, batch_id: &str) -> Result<(), String> {
+        self.db
+            .mark_redeem_batch_exported(batch_id)
             .await
-            .push(RedeemCodeEventRecord {
-                code_id: None,
-                user_id: None,
-                event_type: "exported".to_string(),
-                reason: Some(batch_id.to_string()),
-                created_at: now_timestamp(),
-            });
+            .map_err(|e| e.to_string())
     }
 
     pub async fn redeem_code(
@@ -558,273 +411,121 @@ impl ServerState {
         user_id: String,
         input_code: String,
     ) -> Result<RedeemCodeResult, RedeemFailure> {
-        let normalized = normalize_redeem_code(&input_code).ok_or(RedeemFailure::InvalidCode)?;
-        if !redeem_checksum_valid(&normalized) {
-            self.record_redeem_event(None, Some(user_id), "redeem_failed", Some("invalid_code"))
-                .await;
-            return Err(RedeemFailure::InvalidCode);
-        }
-        let hash = code_hash(&normalized);
-        let now = now_timestamp();
-
-        let snapshot = {
-            let mut codes = self.inner.redeem_codes.write().await;
-            let record = match codes.get_mut(&hash) {
-                Some(record) => record,
-                None => {
-                    drop(codes);
-                    self.record_redeem_event(
-                        None,
-                        Some(user_id),
-                        "redeem_failed",
-                        Some("invalid_code"),
-                    )
-                    .await;
-                    return Err(RedeemFailure::InvalidCode);
-                }
-            };
-            match record.status.as_str() {
-                "unused" => {}
-                "redeemed" => return Err(RedeemFailure::AlreadyRedeemed),
-                "voided" => return Err(RedeemFailure::Voided),
-                "expired" => return Err(RedeemFailure::Expired),
-                _ => return Err(RedeemFailure::InvalidCode),
-            }
-            if record
-                .expires_at
-                .as_deref()
-                .and_then(|value| value.parse::<u64>().ok())
-                .is_some_and(|expires_at| expires_at < now_secs())
-            {
-                record.status = "expired".to_string();
-                return Err(RedeemFailure::Expired);
-            }
-            record.status = "redeemed".to_string();
-            record.redeemed_by = Some(user_id.clone());
-            record.redeemed_at = Some(now.clone());
-            record.clone()
-        };
-
-        let recharge = self
-            .create_recharge_from_provider(
-                user_id.clone(),
-                snapshot.recharge_type.clone(),
-                snapshot.package_id.clone(),
-                snapshot.quantity,
-                0,
-                "redeem-code".to_string(),
-                snapshot.code_id.clone(),
-            )
-            .await;
-
-        {
-            let mut codes = self.inner.redeem_codes.write().await;
-            if let Some(record) = codes.get_mut(&hash) {
-                record.redeemed_recharge_id = Some(recharge.recharge_id.clone());
-            }
-        }
-        let entitlement = self.entitlement(&user_id).await;
-        self.record_redeem_event(
-            Some(snapshot.code_id.clone()),
-            Some(user_id),
-            "redeem_success",
-            None,
-        )
-        .await;
-        Ok(RedeemCodeResult {
-            redeem_id: snapshot.code_id,
-            recharge_id: recharge.recharge_id,
-            package_id: snapshot.package_id,
-            package_name: snapshot.package_name,
-            recharge_type: snapshot.recharge_type,
-            quantity: snapshot.quantity,
-            count_balance: entitlement.count_balance,
-            date_valid_until: entitlement.valid_until,
-            redeemed_at: now,
-        })
+        self.db.redeem_code(user_id, input_code).await
     }
 
     pub async fn list_redeem_records(&self, user_id: &str) -> Vec<RedeemCodeRecord> {
-        let mut records = self
-            .inner
-            .redeem_codes
-            .read()
-            .await
-            .values()
-            .filter(|record| record.redeemed_by.as_deref() == Some(user_id))
-            .cloned()
-            .collect::<Vec<_>>();
-        records.sort_by(|a, b| b.redeemed_at.cmp(&a.redeemed_at));
-        records
+        self.db.list_redeem_records(user_id).await.unwrap_or_default()
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {
-        let mut records = self
-            .inner
-            .recharges
-            .read()
-            .await
-            .get(user_id)
-            .cloned()
-            .unwrap_or_default();
-        records.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        records
+        self.db.list_recharges(user_id).await.unwrap_or_default()
     }
 
     pub async fn update_status(&self, job_id: &str, status: ConversionStatus) {
-        if let Some(job) = self.inner.jobs.write().await.get_mut(job_id) {
-            job.status = status;
-            job.updated_at = now_timestamp();
+        if let Err(error) = self.db.update_status(job_id, status).await {
+            tracing::error!("failed to update conversion status: {error}");
         }
     }
 
     pub async fn complete_job(&self, job_id: &str, docx: Vec<u8>, report: ConversionReportRecord) {
-        if let Some(job) = self.inner.jobs.write().await.get_mut(job_id) {
-            job.status = ConversionStatus::Completed;
-            job.updated_at = now_timestamp();
-            job.docx = Some(docx);
-            job.report = Some(report);
-            job.error = None;
+        let log = FileStorage::build_conversion_log(
+            job_id,
+            &report.job_id,
+            "",
+            &report.main_tex,
+            &report.profile,
+            "",
+            &report.executor,
+            "completed",
+            Some(docx.len()),
+            None,
+        );
+        match (
+            self.file_storage.store(job_id, "result.docx", &docx),
+            self.file_storage.store(job_id, "conversion.log", log.as_bytes()),
+        ) {
+            (Ok(_), Ok(_)) => {
+                let docx_key = self.file_storage.file_key(job_id, "result.docx");
+                let log_key = self.file_storage.file_key(job_id, "conversion.log");
+                if let Err(error) = self
+                    .db
+                    .complete_job(
+                        job_id,
+                        docx_key,
+                        docx.len() as u64,
+                        log_key,
+                        log.len() as u64,
+                        &report,
+                    )
+                    .await
+                {
+                    tracing::error!("failed to complete conversion job: {error}");
+                }
+            }
+            (docx_result, log_result) => {
+                tracing::error!(
+                    "failed to persist conversion files: docx={:?} log={:?}",
+                    docx_result.err(),
+                    log_result.err()
+                );
+            }
         }
     }
 
     pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
-        if let Some(job) = self.inner.jobs.write().await.get_mut(job_id) {
-            job.status = ConversionStatus::Failed;
-            job.updated_at = now_timestamp();
-            job.error_code = Some(error_code.to_string());
-            job.report = Some(ConversionReportRecord {
-                job_id: job.job_id.clone(),
-                status: ConversionStatus::Failed,
-                quality_score: 0,
-                profile: job.profile.clone(),
-                main_tex: job.main_tex.clone(),
-                executor: job.engine.clone(),
-                backend: "unavailable".to_string(),
-                quality_status: "Failed".to_string(),
-                compatibility_score: None,
-                docx_bytes: 0,
-                warnings: Vec::new(),
-                error_code: Some(error_code.to_string()),
-                message: error.clone(),
-            });
-            job.error = Some(error);
-        }
-    }
-
-    fn next_id(&self, prefix: &str) -> String {
-        let next = self.inner.seq.fetch_add(1, Ordering::Relaxed);
-        format!("{prefix}_{next:016x}")
-    }
-
-    async fn apply_recharge_entitlement(&self, record: &RechargeRecord) {
-        let mut entitlements = self.inner.entitlements.write().await;
-        let entitlement = entitlements
-            .entry(record.user_id.clone())
-            .or_insert_with(|| EntitlementRecord {
-                user_id: record.user_id.clone(),
-                updated_at: now_timestamp(),
-                ..EntitlementRecord::default()
-            });
-        match record.recharge_type.as_str() {
-            "count" => {
-                entitlement.count_balance =
-                    entitlement.count_balance.saturating_add(record.quantity);
-            }
-            "date" => {
-                let current_until = entitlement
-                    .valid_until
-                    .as_deref()
-                    .and_then(|value| value.parse::<u64>().ok())
-                    .unwrap_or_default();
-                let base = current_until.max(now_secs());
-                let next_until = base.saturating_add(record.quantity.saturating_mul(86_400));
-                entitlement.valid_until = Some(next_until.to_string());
-            }
-            _ => {}
-        }
-        entitlement.source_order_id = Some(record.recharge_id.clone());
-        entitlement.updated_at = now_timestamp();
-    }
-
-    async fn create_recharge_from_provider(
-        &self,
-        user_id: String,
-        recharge_type: String,
-        package_id: String,
-        quantity: u64,
-        amount_cents: u64,
-        provider: String,
-        provider_trade_id: String,
-    ) -> RechargeRecord {
-        let recharge_id = self.next_id("recharge");
-        let record = RechargeRecord {
-            recharge_id: recharge_id.clone(),
-            user_id: user_id.clone(),
-            recharge_type,
-            package_id,
-            quantity,
-            amount_cents,
-            currency: "CNY".to_string(),
-            status: "paid".to_string(),
-            provider,
-            provider_trade_id,
-            created_at: now_timestamp(),
+        let job = self.db.get_job(job_id).await.ok().flatten();
+        let report = ConversionReportRecord {
+            job_id: job_id.to_string(),
+            status: ConversionStatus::Failed,
+            quality_score: 0,
+            profile: job.as_ref().map(|j| j.profile.clone()).unwrap_or_default(),
+            main_tex: job.as_ref().map(|j| j.main_tex.clone()).unwrap_or_default(),
+            executor: job.as_ref().map(|j| j.engine.clone()).unwrap_or_default(),
+            backend: "unavailable".to_string(),
+            quality_status: "Failed".to_string(),
+            compatibility_score: None,
+            docx_bytes: 0,
+            warnings: Vec::new(),
+            error_code: Some(error_code.to_string()),
+            message: error.clone(),
         };
-        self.inner
-            .recharges
-            .write()
+        let log = FileStorage::build_conversion_log(
+            job_id,
+            job.as_ref().map(|j| j.user_id.as_str()).unwrap_or_default(),
+            job.as_ref().map(|j| j.upload_id.as_str()).unwrap_or_default(),
+            &report.main_tex,
+            &report.profile,
+            "",
+            &report.executor,
+            "failed",
+            None,
+            Some(&error),
+        );
+        let log_key = self.file_storage.file_key(job_id, "conversion.log");
+        if let Err(write_error) = self
+            .file_storage
+            .store(job_id, "conversion.log", log.as_bytes())
+        {
+            tracing::error!("failed to persist conversion failure log: {write_error}");
+        }
+        if let Err(db_error) = self
+            .db
+            .fail_job(job_id, error_code, &error, log_key, log.len() as u64, &report)
             .await
-            .entry(user_id)
-            .or_default()
-            .push(record.clone());
-        self.apply_recharge_entitlement(&record).await;
-        record
+        {
+            tracing::error!("failed to mark conversion job failed: {db_error}");
+        }
     }
 
-    async fn record_redeem_event(
-        &self,
-        code_id: Option<String>,
-        user_id: Option<String>,
-        event_type: &str,
-        reason: Option<&str>,
-    ) {
-        self.inner
-            .redeem_events
-            .write()
-            .await
-            .push(RedeemCodeEventRecord {
-                code_id,
-                user_id,
-                event_type: event_type.to_string(),
-                reason: reason.map(str::to_string),
-                created_at: now_timestamp(),
-            });
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // File storage helpers (session-based)
-    // ─────────────────────────────────────────────────────────────────────────
-
-    /// Load a session file for a conversion job.
     pub fn load_session_file(&self, job_id: &str, filename: &str) -> Option<Vec<u8>> {
-        self.inner.file_storage.load(job_id, filename).ok()
+        self.file_storage.load(job_id, filename).ok()
     }
-
-    /// Check if a session file exists for a conversion job.
-    pub fn session_file_exists(&self, job_id: &str, filename: &str) -> bool {
-        self.inner.file_storage.exists(job_id, filename)
-    }
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Feedback store passthrough methods
-    // ─────────────────────────────────────────────────────────────────────────
 
     pub fn feedback_store(&self) -> &FeedbackStore {
-        &self.inner.feedback_store
+        &self.feedback_store
     }
 
-    /// Build an Excel export for feedback threads.
     pub fn build_feedback_export(
         &self,
         threads: Vec<crate::feedback_service::FeedbackThreadSummary>,
@@ -856,19 +557,19 @@ pub fn redeem_packages() -> Vec<RedeemPackage> {
     ]
 }
 
-fn redeem_package(package_id: &str) -> Option<RedeemPackage> {
+pub fn redeem_package(package_id: &str) -> Option<RedeemPackage> {
     redeem_packages()
         .into_iter()
         .find(|package| package.id == package_id)
 }
 
-fn random_bytes(len: usize) -> Vec<u8> {
+pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = vec![0_u8; len];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     bytes
 }
 
-fn generate_redeem_code(batch_prefix: &str) -> String {
+pub fn generate_redeem_code(batch_prefix: &str) -> String {
     let payload = crockford_base32(&random_bytes(12));
     let body = format!("T2D{batch_prefix}{payload}");
     let check = redeem_checksum(&body);
@@ -876,7 +577,7 @@ fn generate_redeem_code(batch_prefix: &str) -> String {
     group_redeem_code(&raw)
 }
 
-fn normalize_redeem_code(code: &str) -> Option<String> {
+pub fn normalize_redeem_code(code: &str) -> Option<String> {
     let normalized = code
         .chars()
         .filter(|c| !c.is_whitespace() && *c != '-')
@@ -893,7 +594,7 @@ fn normalize_redeem_code(code: &str) -> Option<String> {
     }
 }
 
-fn redeem_checksum_valid(normalized: &str) -> bool {
+pub fn redeem_checksum_valid(normalized: &str) -> bool {
     if normalized.len() < 5 {
         return false;
     }
@@ -906,20 +607,24 @@ fn redeem_checksum(body: &str) -> String {
     crockford_base32(&digest[..2]).chars().take(2).collect()
 }
 
-fn code_hash(normalized: &str) -> String {
+pub fn code_hash(normalized: &str) -> String {
     let pepper = std::env::var("REDEEM_CODE_PEPPER")
         .unwrap_or_else(|_| "tex2doc-preview-pepper".to_string());
-    let mut hasher = Sha256::new();
-    hasher.update(pepper.as_bytes());
-    hasher.update(b":");
-    hasher.update(normalized.as_bytes());
-    hex_lower(&hasher.finalize())
+    hash_text(&format!("{pepper}:{normalized}"))
 }
 
-fn encrypt_code(normalized: &str, nonce: &[u8]) -> Vec<u8> {
+pub fn encrypt_code(normalized: &str, nonce: &[u8]) -> Vec<u8> {
+    xor_code_stream(normalized.as_bytes(), nonce)
+}
+
+pub fn decrypt_code(ciphertext: &[u8], nonce: &[u8]) -> Result<String, String> {
+    String::from_utf8(xor_code_stream(ciphertext, nonce)).map_err(|e| e.to_string())
+}
+
+fn xor_code_stream(input: &[u8], nonce: &[u8]) -> Vec<u8> {
     let key = std::env::var("REDEEM_CODE_MASTER_KEY")
         .unwrap_or_else(|_| "tex2doc-preview-master-key".to_string());
-    let mut out = normalized.as_bytes().to_vec();
+    let mut out = input.to_vec();
     let mut offset = 0_usize;
     while offset < out.len() {
         let mut hasher = Sha256::new();
@@ -938,7 +643,7 @@ fn encrypt_code(normalized: &str, nonce: &[u8]) -> Vec<u8> {
     out
 }
 
-fn code_preview(code: &str) -> String {
+pub fn code_preview(code: &str) -> String {
     let compact = code.replace('-', "");
     if compact.len() <= 12 {
         return compact;
@@ -946,7 +651,7 @@ fn code_preview(code: &str) -> String {
     format!("{}****{}", &compact[..8], &compact[compact.len() - 4..])
 }
 
-fn group_redeem_code(raw: &str) -> String {
+pub fn group_redeem_code(raw: &str) -> String {
     let mut out = String::new();
     for (idx, ch) in raw.chars().enumerate() {
         if idx > 0 && idx % 4 == 0 {
@@ -976,6 +681,14 @@ fn crockford_base32(bytes: &[u8]) -> String {
         out.push(ALPHABET[idx] as char);
     }
     out
+}
+
+pub fn hash_text(value: &str) -> String {
+    hex_lower(&Sha256::digest(value.as_bytes()))
+}
+
+pub fn hash_bytes(value: &[u8]) -> String {
+    hex_lower(&Sha256::digest(value))
 }
 
 fn hex_lower(bytes: &[u8]) -> String {

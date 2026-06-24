@@ -1,3 +1,5 @@
+// ignore_for_file: use_null_aware_elements
+
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -176,6 +178,30 @@ class CommercialApiClient {
       _adminUri('redeem-code-batches'),
       headers: _headers(accessToken: adminToken),
       body: jsonEncode(body),
+    );
+    return RedeemCodeBatch.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<List<RedeemCodeBatch>> redeemCodeBatches({
+    required String adminToken,
+  }) async {
+    final response = await _http.get(
+      _adminUri('redeem-code-batches'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => RedeemCodeBatch.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<RedeemCodeBatch> redeemCodeBatchDetail({
+    required String adminToken,
+    required String batchId,
+  }) async {
+    final response = await _http.get(
+      _adminUri('redeem-code-batches/$batchId'),
+      headers: _headers(accessToken: adminToken),
     );
     return RedeemCodeBatch.fromJson(_decode(response) as Map<String, dynamic>);
   }
@@ -1066,6 +1092,21 @@ class FeedbackThread {
   }
 
   String get typeLabel => feedbackType == 'issue' ? 'Issue' : 'Requirement';
+
+  String get priorityLabel {
+    switch (priority) {
+      case 'low':
+        return 'Low';
+      case 'high':
+        return 'High';
+      case 'urgent':
+        return 'Urgent';
+      case 'normal':
+        return 'Normal';
+      default:
+        return priority;
+    }
+  }
 }
 
 class FeedbackMessage {

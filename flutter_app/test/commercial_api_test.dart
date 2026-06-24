@@ -152,11 +152,52 @@ void main() {
       'http://localhost:2624/v1/',
       httpClient: MockClient((request) async {
         expect(request.headers['authorization'], 'Bearer demo-admin');
-        if (request.url.path == '/admin/v1/redeem-code-batches') {
+        if (request.url.path == '/admin/v1/redeem-code-batches' &&
+            request.method == 'POST') {
           expect(request.method, 'POST');
           final body = jsonDecode(request.body) as Map<String, dynamic>;
           expect(body['package_id'], 'count_10');
           expect(body['quantity'], 2);
+          return _json({
+            'batch_id': 'redeem_batch_1',
+            'batch_no': 'RC0001',
+            'package_id': 'count_10',
+            'package_name': '10 次转换包',
+            'recharge_type': 'count',
+            'quantity': 10,
+            'generated_count': 2,
+            'exported_count': 0,
+            'status': 'active',
+            'channel': 'web',
+            'note': 'demo',
+            'expires_at': null,
+            'created_at': '2026-06-24T12:00:00Z',
+            'codes': ['T2D-DEMO-0001', 'T2D-DEMO-0002'],
+          });
+        }
+        if (request.url.path == '/admin/v1/redeem-code-batches' &&
+            request.method == 'GET') {
+          return _json([
+            {
+              'batch_id': 'redeem_batch_1',
+              'batch_no': 'RC0001',
+              'package_id': 'count_10',
+              'package_name': '10 次转换包',
+              'recharge_type': 'count',
+              'quantity': 10,
+              'generated_count': 2,
+              'exported_count': 0,
+              'status': 'active',
+              'channel': 'web',
+              'note': 'demo',
+              'expires_at': null,
+              'created_at': '2026-06-24T12:00:00Z',
+              'codes': const [],
+            },
+          ]);
+        }
+        if (request.url.path ==
+            '/admin/v1/redeem-code-batches/redeem_batch_1') {
           return _json({
             'batch_id': 'redeem_batch_1',
             'batch_no': 'RC0001',
@@ -191,6 +232,16 @@ void main() {
     );
     expect(batch.batchNo, 'RC0001');
     expect(batch.codes, hasLength(2));
+
+    final batches = await client.redeemCodeBatches(adminToken: 'demo-admin');
+    expect(batches.single.batchId, 'redeem_batch_1');
+    expect(batches.single.codes, isEmpty);
+
+    final detail = await client.redeemCodeBatchDetail(
+      adminToken: 'demo-admin',
+      batchId: batch.batchId,
+    );
+    expect(detail.codes, hasLength(2));
 
     final bytes = await client.exportRedeemCodeBatch(
       adminToken: 'demo-admin',

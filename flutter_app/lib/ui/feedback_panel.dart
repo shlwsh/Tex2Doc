@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import '../commercial_api.dart';
-import 'app_theme.dart';
-import 'app_components.dart';
+import 'feedback_thread_panel.dart';
 
 class FeedbackPanel extends StatefulWidget {
   final String apiBaseUrl;
@@ -342,7 +341,6 @@ class _CreateFeedbackDialog extends StatefulWidget {
   final void Function(String threadId) onCreated;
 
   const _CreateFeedbackDialog({
-    super.key,
     required this.apiBaseUrl,
     required this.accessToken,
     this.recentJobs,
@@ -432,7 +430,7 @@ class _CreateFeedbackDialogState extends State<_CreateFeedbackDialog> {
                 children: [
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _feedbackType,
+                      initialValue: _feedbackType,
                       decoration: const InputDecoration(
                         labelText: 'Type',
                         border: OutlineInputBorder(),
@@ -447,7 +445,7 @@ class _CreateFeedbackDialogState extends State<_CreateFeedbackDialog> {
                   const SizedBox(width: 16),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _priority,
+                      initialValue: _priority,
                       decoration: const InputDecoration(
                         labelText: 'Priority',
                         border: OutlineInputBorder(),
@@ -466,7 +464,7 @@ class _CreateFeedbackDialogState extends State<_CreateFeedbackDialog> {
               const SizedBox(height: 16),
               if (widget.recentJobs != null && widget.recentJobs!.isNotEmpty) ...[
                 DropdownButtonFormField<String?>(
-                  value: _selectedJobId,
+                  initialValue: _selectedJobId,
                   decoration: const InputDecoration(
                     labelText: 'Related Conversion (optional)',
                     border: OutlineInputBorder(),

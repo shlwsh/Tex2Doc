@@ -21,7 +21,7 @@ const FIXTURE_ZIP: &str = concat!(
 
 /// 在当前 task 上下文里跑 server，shutdown 信号来时优雅退出。
 async fn run_server(listener: TcpListener, mut shutdown: tokio::sync::oneshot::Receiver<()>) {
-    let app = build_router();
+    let app = build_router().await.expect("build router with database");
     tokio::select! {
         result = axum::serve(listener, app) => {
             result.expect("axum::serve");
@@ -66,11 +66,16 @@ fn minimal_project_zip() -> Vec<u8> {
     cursor.into_inner()
 }
 
+fn assert_uuid(value: &str) {
+    uuid::Uuid::parse_str(value).expect("value should be a UUID");
+}
+
 async fn register_preview_token(client: &reqwest::Client, addr: SocketAddr) -> String {
+    let email = format!("demo-{}@example.com", uuid::Uuid::new_v4().simple());
     let auth: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/register"))
         .json(&serde_json::json!({
-            "email": "demo@example.com",
+            "email": email,
             "password": "secret",
             "display_name": "Demo User"
         }))
@@ -118,11 +123,12 @@ async fn version_returns_semver() {
 async fn p6_commercial_contract_endpoints_return_json() {
     let (addr, shutdown) = spawn_test_server().await;
     let client = test_client();
+    let email = format!("contract-{}@example.com", uuid::Uuid::new_v4().simple());
 
     let auth: serde_json::Value = client
         .post(format!("http://{addr}/v1/auth/register"))
         .json(&serde_json::json!({
-            "email": "demo@example.com",
+            "email": email,
             "password": "secret",
             "display_name": "Demo User"
         }))
@@ -175,7 +181,7 @@ async fn p6_commercial_contract_endpoints_return_json() {
         .await
         .expect("upload json");
     let upload_id = upload_resp["upload_id"].as_str().unwrap().to_string();
-    assert!(upload_id.starts_with("upload_"));
+    assert_uuid(&upload_id);
 
     let conversion: serde_json::Value = client
         .post(format!("http://{addr}/v1/conversions"))
@@ -193,7 +199,7 @@ async fn p6_commercial_contract_endpoints_return_json() {
         .await
         .expect("conversion json");
     let job_id = conversion["job_id"].as_str().unwrap().to_string();
-    assert!(job_id.starts_with("conv_"));
+    assert_uuid(&job_id);
     assert!(matches!(
         conversion["status"].as_str().unwrap(),
         "queued"
@@ -372,7 +378,7 @@ async fn p8_recharge_count_entitlement_is_consumed_before_preview_quota() {
         .json()
         .await
         .expect("conversion json");
-    assert!(conversion["job_id"].as_str().unwrap().starts_with("conv_"));
+    assert_uuid(conversion["job_id"].as_str().unwrap());
 
     let usage_after_conversion: serde_json::Value = client
         .get(format!("http://{addr}/v1/usage"))

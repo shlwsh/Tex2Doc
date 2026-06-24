@@ -1,14 +1,27 @@
 //! PostgreSQL-backed commercial state.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use sqlx::{postgres::PgPoolOptions, PgPool, Row};
+use serde_json::Value;
+use sqlx::{postgres::PgRow, PgPool, Postgres, Row, Transaction};
+use sqlx::postgres::PgPoolOptions;
 use uuid::Uuid;
 
+static SCHEMA_INIT_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+static SCHEMA_READY: AtomicBool = AtomicBool::new(false);
+
+use crate::feedback_service::{
+    FeedbackMessage, FeedbackPriority, FeedbackStatus, FeedbackThread, FeedbackThreadSummary,
+    FeedbackType, SenderType, ThreadFilters,
+};
 use crate::state::{
-    ConversionJobRecord, ConversionReportRecord, ConversionStatus, EntitlementRecord,
-    RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemFailure, UploadRecord,
-    PREVIEW_CLOUD_CONVERSION_LIMIT,
+    code_hash, decrypt_code, encrypt_code, generate_redeem_code, group_redeem_code, hash_bytes,
+    hash_text, normalize_redeem_code, now_timestamp, random_bytes, redeem_checksum_valid,
+    redeem_package, ConversionJobRecord, ConversionReportRecord, ConversionStatus,
+    EntitlementRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
+    RedeemFailure, UploadRecord, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 
 const BUSINESS_SCHEMA: &str = include_str!("../../../docs-zh/money/001_docdb_business_schema.sql");
@@ -18,6 +31,14 @@ const FEEDBACK_SCHEMA: &str =
 #[derive(Debug, Clone)]
 pub struct DbStore {
     pool: PgPool,
+}
+
+#[derive(Debug, Clone)]
+pub struct AppUser {
+    pub id: String,
+    pub email: String,
+    pub display_name: Option<String>,
+    pub plan_id: String,
 }
 
 impl DbStore {
@@ -30,12 +51,17 @@ impl DbStore {
             .connect(&database_url)
             .await?;
         let store = Self { pool };
-        store.init_schema().await?;
+        if !SCHEMA_READY.load(Ordering::Acquire) {
+            let _guard = SCHEMA_INIT_LOCK
+                .get_or_init(|| tokio::sync::Mutex::new(()))
+                .lock()
+                .await;
+            if !SCHEMA_READY.load(Ordering::Acquire) {
+                store.init_schema().await?;
+                SCHEMA_READY.store(true, Ordering::Release);
+            }
+        }
         Ok(store)
-    }
-
-    pub fn pool(&self) -> &PgPool {
-        &self.pool
     }
 
     async fn init_schema(&self) -> Result<(), sqlx::Error> {
@@ -50,6 +76,7 @@ impl DbStore {
                 source_order_id TEXT,
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
             );
+
             CREATE TABLE IF NOT EXISTS app_access_tokens (
                 token_hash TEXT PRIMARY KEY,
                 user_id UUID NOT NULL REFERENCES app_users(id) ON DELETE CASCADE,
@@ -69,34 +96,23 @@ impl DbStore {
         display_name: Option<&str>,
         password: &str,
     ) -> Result<AppUser, sqlx::Error> {
-        let password_hash = crate::state::hash_text(password);
         let row = sqlx::query(
             r#"
             INSERT INTO app_users (email, password_hash, display_name, default_plan_id)
             VALUES ($1, $2, $3, 'preview')
             ON CONFLICT (email) DO UPDATE SET
                 display_name = COALESCE(EXCLUDED.display_name, app_users.display_name),
+                password_hash = EXCLUDED.password_hash,
                 updated_at = now()
             RETURNING id::text, email, display_name, default_plan_id
             "#,
         )
         .bind(email)
-        .bind(password_hash)
+        .bind(hash_text(password))
         .bind(display_name)
         .fetch_one(&self.pool)
         .await?;
-        Ok(AppUser::from_row(&row))
-    }
-
-    pub async fn user_by_id(&self, user_id: &str) -> Result<Option<AppUser>, sqlx::Error> {
-        let user_id = parse_uuid(user_id)?;
-        let row = sqlx::query(
-            "SELECT id::text, email, display_name, default_plan_id FROM app_users WHERE id = $1",
-        )
-        .bind(user_id)
-        .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.as_ref().map(AppUser::from_row))
+        Ok(app_user_from_row(&row))
     }
 
     pub async fn ensure_demo_admin(&self) -> Result<AppUser, sqlx::Error> {
@@ -104,153 +120,74 @@ impl DbStore {
             .await
     }
 
-    pub async fn cloud_conversions_used(&self, user_id: &str) -> Result<u64, sqlx::Error> {
-        let user_id = parse_uuid(user_id)?;
-        let row = sqlx::query(
-            "SELECT COALESCE(SUM(quantity), 0)::bigint AS used FROM usage_events WHERE user_id = $1 AND event_type = 'cloud_conversion'",
+    pub async fn issue_token(&self, user_id: &str, prefix: &str) -> Result<String, sqlx::Error> {
+        let token = format!("{prefix}-{}", Uuid::new_v4().simple());
+        sqlx::query(
+            "INSERT INTO app_access_tokens (token_hash, user_id) VALUES ($1, $2)",
         )
-        .bind(user_id)
-        .fetch_one(&self.pool)
+        .bind(hash_text(&token))
+        .bind(parse_uuid(user_id)?)
+        .execute(&self.pool)
         .await?;
-        let used: i64 = row.get("used");
-        Ok(used.max(0) as u64)
+        Ok(token)
     }
 
-    pub async fn entitlement(&self, user_id: &str) -> Result<EntitlementRecord, sqlx::Error> {
-        let user_uuid = parse_uuid(user_id)?;
+    pub async fn user_for_token(&self, token: &str) -> Result<Option<AppUser>, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            INSERT INTO commercial_entitlements (user_id)
-            VALUES ($1)
-            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            RETURNING user_id::text, count_balance, EXTRACT(EPOCH FROM valid_until)::bigint AS valid_until_secs, source_order_id, EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+            SELECT u.id::text, u.email, u.display_name, u.default_plan_id
+            FROM app_access_tokens t
+            JOIN app_users u ON u.id = t.user_id
+            WHERE t.token_hash = $1
+              AND (t.expires_at IS NULL OR t.expires_at > now())
+              AND u.status = 'active'
             "#,
         )
-        .bind(user_uuid)
-        .fetch_one(&self.pool)
+        .bind(hash_text(token))
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(EntitlementRecord {
-            user_id: row.get("user_id"),
-            count_balance: row.get::<i64, _>("count_balance").max(0) as u64,
-            valid_until: row
-                .try_get::<Option<i64>, _>("valid_until_secs")
-                .ok()
-                .flatten()
-                .map(|value| value.to_string()),
-            source_order_id: row.get("source_order_id"),
-            updated_at: row
-                .try_get::<Option<i64>, _>("updated_at_secs")
-                .ok()
-                .flatten()
-                .map(|value| value.to_string())
-                .unwrap_or_else(now_timestamp),
-        })
-    }
-
-    pub async fn create_recharge(
-        &self,
-        user_id: String,
-        recharge_type: String,
-        package_id: String,
-        quantity: u64,
-        amount_cents: u64,
-        status: &str,
-        provider: &str,
-        provider_trade_id: &str,
-    ) -> Result<RechargeRecord, sqlx::Error> {
-        let user_uuid = parse_uuid(&user_id)?;
-        let mut tx = self.pool.begin().await?;
-        let row = sqlx::query(
-            r#"
-            INSERT INTO recharges (user_id, recharge_type, package_id, quantity, amount_cents, currency, status, provider, provider_trade_id)
-            VALUES ($1, $2, $3, $4, $5, 'CNY', $6, $7, $8)
-            RETURNING id::text, user_id::text, recharge_type, package_id, quantity, amount_cents, currency, status, provider, provider_trade_id, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
-            "#,
-        )
-        .bind(user_uuid)
-        .bind(&recharge_type)
-        .bind(&package_id)
-        .bind(quantity as i64)
-        .bind(amount_cents as i64)
-        .bind(status)
-        .bind(provider)
-        .bind(provider_trade_id)
-        .fetch_one(&mut *tx)
-        .await?;
-        let recharge = recharge_from_row(&row);
-        apply_entitlement_sql(&mut tx, user_uuid, &recharge).await?;
-        tx.commit().await?;
-        Ok(recharge)
+        Ok(row.as_ref().map(app_user_from_row))
     }
 
     pub async fn store_upload(
         &self,
+        upload_id: &str,
         user_id: &str,
         file_name: String,
-        bytes: Vec<u8>,
         object_key: String,
+        bytes: Vec<u8>,
     ) -> Result<UploadRecord, sqlx::Error> {
-        let user_uuid = parse_uuid(user_id)?;
-        let sha = crate::state::hash_bytes(&bytes);
         let row = sqlx::query(
             r#"
-            INSERT INTO uploads (user_id, file_name, object_key, bytes, sha256, status)
-            VALUES ($1, $2, $3, $4, $5, 'stored')
-            RETURNING id::text, file_name, object_key, bytes, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            INSERT INTO uploads (id, user_id, file_name, object_key, bytes, sha256, status)
+            VALUES ($1, $2, $3, $4, $5, $6, 'stored')
+            RETURNING id::text, file_name, object_key, bytes,
+                      EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
             "#,
         )
-        .bind(user_uuid)
+        .bind(parse_uuid(upload_id)?)
+        .bind(parse_uuid(user_id)?)
         .bind(&file_name)
         .bind(&object_key)
         .bind(bytes.len() as i64)
-        .bind(sha)
+        .bind(hash_bytes(&bytes))
         .fetch_one(&self.pool)
         .await?;
-        Ok(UploadRecord {
-            upload_id: row.get("id"),
-            file_name,
-            bytes,
-            storage_path: Some(object_key.clone()),
-            storage_key: Some(object_key),
-            bytes_size: row.get::<i64, _>("bytes").max(0) as u64,
-            created_at: row
-                .try_get::<Option<i64>, _>("created_at_secs")
-                .ok()
-                .flatten()
-                .map(|value| value.to_string())
-                .unwrap_or_else(now_timestamp),
-        })
+        Ok(upload_from_row(&row, bytes))
     }
 
-    pub async fn get_upload(
-        &self,
-        upload_id: &str,
-        bytes: Option<Vec<u8>>,
-    ) -> Result<Option<UploadRecord>, sqlx::Error> {
-        let upload_uuid = parse_uuid(upload_id)?;
+    pub async fn get_upload(&self, upload_id: &str) -> Result<Option<UploadRecord>, sqlx::Error> {
         let row = sqlx::query(
-            "SELECT id::text, file_name, object_key, bytes, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs FROM uploads WHERE id = $1",
+            r#"
+            SELECT id::text, file_name, object_key, bytes,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            FROM uploads WHERE id = $1 AND status = 'stored'
+            "#,
         )
-        .bind(upload_uuid)
+        .bind(parse_uuid(upload_id)?)
         .fetch_optional(&self.pool)
         .await?;
-        Ok(row.map(|row| {
-            let object_key: String = row.get("object_key");
-            UploadRecord {
-                upload_id: row.get("id"),
-                file_name: row.get("file_name"),
-                bytes: bytes.unwrap_or_default(),
-                storage_path: Some(object_key.clone()),
-                storage_key: Some(object_key),
-                bytes_size: row.get::<i64, _>("bytes").max(0) as u64,
-                created_at: row
-                    .try_get::<Option<i64>, _>("created_at_secs")
-                    .ok()
-                    .flatten()
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(now_timestamp),
-            }
-        }))
+        Ok(row.map(|row| upload_from_row(&row, Vec::new())))
     }
 
     pub async fn create_job(
@@ -262,8 +199,6 @@ impl DbStore {
         quality: String,
         engine: String,
     ) -> Result<ConversionJobRecord, sqlx::Error> {
-        let user_uuid = parse_uuid(&user_id)?;
-        let upload_uuid = parse_uuid(&upload_id)?;
         let row = sqlx::query(
             r#"
             INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status)
@@ -275,8 +210,8 @@ impl DbStore {
                       EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
             "#,
         )
-        .bind(user_uuid)
-        .bind(upload_uuid)
+        .bind(parse_uuid(&user_id)?)
+        .bind(parse_uuid(&upload_id)?)
         .bind(&main_tex)
         .bind(&profile)
         .bind(&quality)
@@ -286,47 +221,47 @@ impl DbStore {
         Ok(job_from_row(&row, None, None))
     }
 
-    pub async fn get_job(
+    pub async fn update_job_source_storage(
         &self,
         job_id: &str,
-        docx: Option<Vec<u8>>,
-    ) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
-        let job_uuid = parse_uuid(job_id)?;
-        let row = sqlx::query(
+        source_zip_key: String,
+        zip_bytes: u64,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
             r#"
-            SELECT id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
-                   result_docx_key, result_report_key, source_zip_key, result_log_key, storage_path,
-                   zip_bytes, docx_bytes, log_bytes, error_code, error_message,
-                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-                   EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
-            FROM conversion_jobs WHERE id = $1
+            UPDATE conversion_jobs
+            SET source_zip_key = $2, storage_path = $2, zip_bytes = $3, updated_at = now()
+            WHERE id = $1
             "#,
         )
-        .bind(job_uuid)
-        .fetch_optional(&self.pool)
+        .bind(parse_uuid(job_id)?)
+        .bind(source_zip_key)
+        .bind(zip_bytes as i64)
+        .execute(&self.pool)
         .await?;
-        Ok(row.map(|row| job_from_row(&row, docx, None)))
+        Ok(())
+    }
+
+    pub async fn get_job(&self, job_id: &str) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
+        let row = sqlx::query(&job_select_sql("WHERE id = $1"))
+            .bind(parse_uuid(job_id)?)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
     }
 
     pub async fn list_jobs_by_user(
         &self,
         user_id: &str,
     ) -> Result<Vec<ConversionJobRecord>, sqlx::Error> {
-        let user_uuid = parse_uuid(user_id)?;
-        let rows = sqlx::query(
-            r#"
-            SELECT id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
-                   result_docx_key, result_report_key, source_zip_key, result_log_key, storage_path,
-                   zip_bytes, docx_bytes, log_bytes, error_code, error_message,
-                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-                   EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
-            FROM conversion_jobs WHERE user_id = $1 ORDER BY created_at DESC
-            "#,
-        )
-        .bind(user_uuid)
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows.iter().map(|row| job_from_row(row, None, None)).collect())
+        let rows = sqlx::query(&job_select_sql("WHERE user_id = $1 ORDER BY created_at DESC"))
+            .bind(parse_uuid(user_id)?)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| job_from_row(row, None, report_from_row(row)))
+            .collect())
     }
 
     pub async fn update_status(
@@ -334,9 +269,8 @@ impl DbStore {
         job_id: &str,
         status: ConversionStatus,
     ) -> Result<(), sqlx::Error> {
-        let job_uuid = parse_uuid(job_id)?;
         sqlx::query("UPDATE conversion_jobs SET status = $2, updated_at = now() WHERE id = $1")
-            .bind(job_uuid)
+            .bind(parse_uuid(job_id)?)
             .bind(status.as_str())
             .execute(&self.pool)
             .await?;
@@ -346,13 +280,12 @@ impl DbStore {
     pub async fn complete_job(
         &self,
         job_id: &str,
-        docx_key: Option<String>,
-        docx_bytes: Option<u64>,
-        log_key: Option<String>,
-        log_bytes: Option<u64>,
+        docx_key: String,
+        docx_bytes: u64,
+        log_key: String,
+        log_bytes: u64,
         report: &ConversionReportRecord,
     ) -> Result<(), sqlx::Error> {
-        let job_uuid = parse_uuid(job_id)?;
         sqlx::query(
             r#"
             UPDATE conversion_jobs
@@ -369,12 +302,12 @@ impl DbStore {
             WHERE id = $1
             "#,
         )
-        .bind(job_uuid)
+        .bind(parse_uuid(job_id)?)
         .bind(docx_key)
         .bind(serde_json::to_string(report).unwrap_or_default())
         .bind(log_key)
-        .bind(docx_bytes.map(|value| value as i64))
-        .bind(log_bytes.map(|value| value as i64))
+        .bind(docx_bytes as i64)
+        .bind(log_bytes as i64)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -385,10 +318,10 @@ impl DbStore {
         job_id: &str,
         error_code: &str,
         error: &str,
-        log_key: Option<String>,
-        log_bytes: Option<u64>,
+        log_key: String,
+        log_bytes: u64,
+        report: &ConversionReportRecord,
     ) -> Result<(), sqlx::Error> {
-        let job_uuid = parse_uuid(job_id)?;
         sqlx::query(
             r#"
             UPDATE conversion_jobs
@@ -397,23 +330,57 @@ impl DbStore {
                 error_message = $3,
                 result_log_key = $4,
                 log_bytes = $5,
+                result_report_key = $6,
                 updated_at = now()
             WHERE id = $1
             "#,
         )
-        .bind(job_uuid)
+        .bind(parse_uuid(job_id)?)
         .bind(error_code)
         .bind(error)
         .bind(log_key)
-        .bind(log_bytes.map(|value| value as i64))
+        .bind(log_bytes as i64)
+        .bind(serde_json::to_string(report).unwrap_or_default())
         .execute(&self.pool)
         .await?;
         Ok(())
     }
 
+    pub async fn cloud_conversions_used(&self, user_id: &str) -> Result<u64, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            SELECT COALESCE(SUM(quantity), 0)::bigint AS used
+            FROM usage_events
+            WHERE user_id = $1 AND event_type = 'cloud_conversion'
+            "#,
+        )
+        .bind(parse_uuid(user_id)?)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(row.get::<i64, _>("used").max(0) as u64)
+    }
+
+    pub async fn entitlement(&self, user_id: &str) -> Result<EntitlementRecord, sqlx::Error> {
+        let row = sqlx::query(
+            r#"
+            INSERT INTO commercial_entitlements (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            RETURNING user_id::text, count_balance,
+                      EXTRACT(EPOCH FROM valid_until)::bigint AS valid_until_secs,
+                      source_order_id,
+                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+            "#,
+        )
+        .bind(parse_uuid(user_id)?)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(entitlement_from_row(&row))
+    }
+
     pub async fn try_consume_cloud_conversion(&self, user_id: &str) -> Result<u64, u64> {
-        let user_uuid = parse_uuid(user_id).map_err(|_| 0)?;
-        let mut tx = self.pool.begin().await.map_err(|_| 0)?;
+        let user_uuid = parse_uuid(user_id).map_err(|_| 0_u64)?;
+        let mut tx = self.pool.begin().await.map_err(|_| 0_u64)?;
         let entitlement = sqlx::query(
             r#"
             INSERT INTO commercial_entitlements (user_id)
@@ -425,14 +392,14 @@ impl DbStore {
         .bind(user_uuid)
         .fetch_one(&mut *tx)
         .await
-        .map_err(|_| 0)?;
+        .map_err(|_| 0_u64)?;
         let count_balance = entitlement.get::<i64, _>("count_balance");
         let valid_until_active = entitlement
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("valid_until")
             .ok()
             .flatten()
             .is_some_and(|value| value >= chrono::Utc::now());
-        let used = self.cloud_conversions_used(user_id).await.map_err(|_| 0)?;
+        let used = cloud_conversions_used_tx(&mut tx, user_uuid).await.map_err(|_| 0_u64)?;
         if valid_until_active {
             tx.commit().await.map_err(|_| used)?;
             return Ok(used);
@@ -465,17 +432,47 @@ impl DbStore {
         Ok(used + 1)
     }
 
+    pub async fn create_recharge(
+        &self,
+        user_id: String,
+        recharge_type: String,
+        package_id: String,
+        quantity: u64,
+        amount_cents: u64,
+        status: &str,
+        provider: &str,
+        provider_trade_id: String,
+    ) -> Result<RechargeRecord, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let recharge = insert_recharge(
+            &mut tx,
+            parse_uuid(&user_id)?,
+            &recharge_type,
+            &package_id,
+            quantity,
+            amount_cents,
+            status,
+            provider,
+            &provider_trade_id,
+        )
+        .await?;
+        apply_entitlement_sql(&mut tx, parse_uuid(&user_id)?, &recharge).await?;
+        tx.commit().await?;
+        Ok(recharge)
+    }
+
     pub async fn list_recharges(&self, user_id: &str) -> Result<Vec<RechargeRecord>, sqlx::Error> {
-        let user_uuid = parse_uuid(user_id)?;
         let rows = sqlx::query(
             r#"
-            SELECT id::text, user_id::text, recharge_type, package_id, quantity, amount_cents, currency, status, provider, provider_trade_id, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            SELECT id::text, user_id::text, recharge_type, package_id, quantity, amount_cents,
+                   currency, status, provider, provider_trade_id,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
             FROM recharges
             WHERE user_id = $1
             ORDER BY created_at DESC
             "#,
         )
-        .bind(user_uuid)
+        .bind(parse_uuid(user_id)?)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(recharge_from_row).collect())
@@ -493,15 +490,15 @@ impl DbStore {
         if requested_count == 0 || requested_count > 10_000 {
             return Err(RedeemFailure::InvalidCode);
         }
-        let package = crate::state::redeem_package(package_id).ok_or(RedeemFailure::InvalidCode)?;
-        let created_by_uuid = parse_uuid(&created_by).ok();
+        let package = redeem_package(package_id).ok_or(RedeemFailure::InvalidCode)?;
         let expires_sql = parse_optional_epoch(&expires_at).map_err(|_| RedeemFailure::InvalidCode)?;
-
+        let created_by_uuid = parse_uuid(&created_by).map_err(|_| RedeemFailure::InvalidCode)?;
         let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
         let batch_no = format!("RC{}", Uuid::new_v4().simple().to_string()[..10].to_uppercase());
         let batch_row = sqlx::query(
             r#"
-            INSERT INTO redeem_code_batches (batch_no, package_id, quantity, generated_count, exported_count, status, channel, note, expires_at, created_by)
+            INSERT INTO redeem_code_batches
+                (batch_no, package_id, quantity, generated_count, exported_count, status, channel, note, expires_at, created_by)
             VALUES ($1, $2, $3, $4, 0, 'active', $5, $6, to_timestamp($7), $8)
             RETURNING id::text, batch_no, EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
             "#,
@@ -517,41 +514,26 @@ impl DbStore {
         .fetch_one(&mut *tx)
         .await
         .map_err(|_| RedeemFailure::InvalidCode)?;
-
         let batch_id: String = batch_row.get("id");
-        let created_at = batch_row
-            .try_get::<Option<i64>, _>("created_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string())
-            .unwrap_or_else(now_timestamp);
-        let batch_prefix = batch_no
-            .chars()
-            .rev()
-            .take(4)
-            .collect::<Vec<_>>()
-            .into_iter()
-            .rev()
-            .collect::<String>();
+        let batch_prefix = batch_prefix(&batch_no);
+        let created_at = epoch_col(&batch_row, "created_at_secs").unwrap_or_else(now_timestamp);
         let mut codes = Vec::with_capacity(requested_count as usize);
 
         for _ in 0..requested_count {
-            let code = crate::state::generate_redeem_code(&batch_prefix);
-            let normalized = crate::state::normalize_redeem_code(&code)
-                .ok_or(RedeemFailure::InvalidCode)?;
-            let code_hash = crate::state::code_hash(&normalized);
-            let nonce = crate::state::random_bytes(12);
-            let ciphertext = crate::state::encrypt_code(&normalized, &nonce);
+            let code = generate_redeem_code(&batch_prefix);
+            let normalized = normalize_redeem_code(&code).ok_or(RedeemFailure::InvalidCode)?;
+            let nonce = random_bytes(12);
             sqlx::query(
                 r#"
-                INSERT INTO redeem_codes (batch_id, package_id, code_hash, code_ciphertext, code_nonce, code_preview, key_version, status, expires_at)
+                INSERT INTO redeem_codes
+                    (batch_id, package_id, code_hash, code_ciphertext, code_nonce, code_preview, key_version, status, expires_at)
                 VALUES ($1, $2, $3, $4, $5, $6, 'v1', 'unused', to_timestamp($7))
                 "#,
             )
             .bind(parse_uuid(&batch_id).map_err(|_| RedeemFailure::InvalidCode)?)
             .bind(&package.id)
-            .bind(code_hash)
-            .bind(ciphertext)
+            .bind(code_hash(&normalized))
+            .bind(encrypt_code(&normalized, &nonce))
             .bind(nonce)
             .bind(crate::state::code_preview(&code))
             .bind(expires_sql)
@@ -561,14 +543,9 @@ impl DbStore {
             codes.push(code);
         }
 
-        sqlx::query(
-            "INSERT INTO redeem_code_events (user_id, event_type, reason) VALUES ($1, 'generated', $2)",
-        )
-        .bind(created_by_uuid)
-        .bind(format!("batch {batch_no}"))
-        .execute(&mut *tx)
-        .await
-        .map_err(|_| RedeemFailure::InvalidCode)?;
+        insert_redeem_event(&mut tx, None, Some(created_by_uuid), "generated", Some(&format!("batch {batch_no}")))
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
         tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
 
         Ok(RedeemCodeBatchRecord {
@@ -591,24 +568,14 @@ impl DbStore {
         })
     }
 
-    pub async fn list_redeem_batches(
-        &self,
-    ) -> Result<Vec<RedeemCodeBatchRecord>, sqlx::Error> {
-        let rows = sqlx::query(
-            r#"
-            SELECT b.id::text, b.batch_no, b.package_id, p.name AS package_name, p.package_type,
-                   b.quantity, b.generated_count, b.exported_count, b.status, b.channel, b.note,
-                   EXTRACT(EPOCH FROM b.expires_at)::bigint AS expires_at_secs,
-                   COALESCE(b.created_by::text, '') AS created_by,
-                   EXTRACT(EPOCH FROM b.created_at)::bigint AS created_at_secs
-            FROM redeem_code_batches b
-            JOIN redeem_packages p ON p.id = b.package_id
-            ORDER BY b.created_at DESC
-            "#,
-        )
-        .fetch_all(&self.pool)
-        .await?;
-        Ok(rows.iter().map(|row| redeem_batch_from_row(row, Vec::new())).collect())
+    pub async fn list_redeem_batches(&self) -> Result<Vec<RedeemCodeBatchRecord>, sqlx::Error> {
+        let rows = sqlx::query(&redeem_batch_select_sql(""))
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|row| redeem_batch_from_row(row, Vec::new()))
+            .collect())
     }
 
     pub async fn get_redeem_batch(
@@ -616,22 +583,10 @@ impl DbStore {
         batch_id: &str,
         include_codes: bool,
     ) -> Result<Option<RedeemCodeBatchRecord>, sqlx::Error> {
-        let batch_uuid = parse_uuid(batch_id)?;
-        let row = sqlx::query(
-            r#"
-            SELECT b.id::text, b.batch_no, b.package_id, p.name AS package_name, p.package_type,
-                   b.quantity, b.generated_count, b.exported_count, b.status, b.channel, b.note,
-                   EXTRACT(EPOCH FROM b.expires_at)::bigint AS expires_at_secs,
-                   COALESCE(b.created_by::text, '') AS created_by,
-                   EXTRACT(EPOCH FROM b.created_at)::bigint AS created_at_secs
-            FROM redeem_code_batches b
-            JOIN redeem_packages p ON p.id = b.package_id
-            WHERE b.id = $1
-            "#,
-        )
-        .bind(batch_uuid)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row = sqlx::query(&redeem_batch_select_sql("WHERE b.id = $1"))
+            .bind(parse_uuid(batch_id)?)
+            .fetch_optional(&self.pool)
+            .await?;
         let Some(row) = row else {
             return Ok(None);
         };
@@ -644,11 +599,10 @@ impl DbStore {
     }
 
     pub async fn codes_for_batch(&self, batch_id: &str) -> Result<Vec<String>, sqlx::Error> {
-        let batch_uuid = parse_uuid(batch_id)?;
         let rows = sqlx::query(
             "SELECT code_ciphertext, code_nonce FROM redeem_codes WHERE batch_id = $1 ORDER BY created_at ASC",
         )
-        .bind(batch_uuid)
+        .bind(parse_uuid(batch_id)?)
         .fetch_all(&self.pool)
         .await?;
         Ok(rows
@@ -656,48 +610,475 @@ impl DbStore {
             .filter_map(|row| {
                 let ciphertext: Vec<u8> = row.get("code_ciphertext");
                 let nonce: Vec<u8> = row.get("code_nonce");
-                crate::state::decrypt_code(&ciphertext, &nonce).ok()
+                decrypt_code(&ciphertext, &nonce).ok()
             })
-            .map(crate::state::group_redeem_code)
+            .map(|code| group_redeem_code(&code))
             .collect())
     }
 
     pub async fn mark_redeem_batch_exported(&self, batch_id: &str) -> Result<(), sqlx::Error> {
-        let batch_uuid = parse_uuid(batch_id)?;
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "UPDATE redeem_code_batches SET exported_count = generated_count, updated_at = now() WHERE id = $1",
         )
-        .bind(batch_uuid)
+        .bind(parse_uuid(batch_id)?)
         .execute(&mut *tx)
         .await?;
-        sqlx::query(
-            "INSERT INTO redeem_code_events (event_type, reason) VALUES ('exported', $1)",
-        )
-        .bind(batch_id)
-        .execute(&mut *tx)
-        .await?;
+        insert_redeem_event(&mut tx, None, None, "exported", Some(batch_id)).await?;
         tx.commit().await?;
         Ok(())
     }
-}
 
-#[derive(Debug, Clone)]
-pub struct AppUser {
-    pub id: String,
-    pub email: String,
-    pub display_name: Option<String>,
-    pub plan_id: String,
-}
-
-impl AppUser {
-    fn from_row(row: &sqlx::postgres::PgRow) -> Self {
-        Self {
-            id: row.get("id"),
-            email: row.get("email"),
-            display_name: row.get("display_name"),
-            plan_id: row.get("default_plan_id"),
+    pub async fn redeem_code(
+        &self,
+        user_id: String,
+        input_code: String,
+    ) -> Result<RedeemCodeResult, RedeemFailure> {
+        let normalized = normalize_redeem_code(&input_code).ok_or(RedeemFailure::InvalidCode)?;
+        let user_uuid = parse_uuid(&user_id).map_err(|_| RedeemFailure::InvalidCode)?;
+        if !redeem_checksum_valid(&normalized) {
+            let _ = self.record_redeem_failure(user_uuid, "invalid_code").await;
+            return Err(RedeemFailure::InvalidCode);
         }
+        let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        let row = sqlx::query(
+            r#"
+            SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
+                   p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
+                   c.code_preview, c.key_version, c.status, c.redeemed_by::text,
+                   c.redeemed_recharge_id::text,
+                   EXTRACT(EPOCH FROM c.redeemed_at)::bigint AS redeemed_at_secs,
+                   EXTRACT(EPOCH FROM c.expires_at)::bigint AS expires_at_secs,
+                   EXTRACT(EPOCH FROM c.created_at)::bigint AS created_at_secs
+            FROM redeem_codes c
+            JOIN redeem_code_batches b ON b.id = c.batch_id
+            JOIN redeem_packages p ON p.id = c.package_id
+            WHERE c.code_hash = $1
+            FOR UPDATE OF c
+            "#,
+        )
+        .bind(code_hash(&normalized))
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(|_| RedeemFailure::InvalidCode)?;
+        let Some(row) = row else {
+            insert_redeem_event(&mut tx, None, Some(user_uuid), "redeem_failed", Some("invalid_code"))
+                .await
+                .ok();
+            tx.commit().await.ok();
+            return Err(RedeemFailure::InvalidCode);
+        };
+        let mut record = redeem_code_from_row(&row);
+        match record.status.as_str() {
+            "unused" => {}
+            "redeemed" => return Err(RedeemFailure::AlreadyRedeemed),
+            "voided" => return Err(RedeemFailure::Voided),
+            "expired" => return Err(RedeemFailure::Expired),
+            _ => return Err(RedeemFailure::InvalidCode),
+        }
+        if record
+            .expires_at
+            .as_deref()
+            .and_then(|value| value.parse::<u64>().ok())
+            .is_some_and(|expires_at| expires_at < now_secs())
+        {
+            sqlx::query("UPDATE redeem_codes SET status = 'expired', updated_at = now() WHERE id = $1")
+                .bind(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?)
+                .execute(&mut *tx)
+                .await
+                .map_err(|_| RedeemFailure::InvalidCode)?;
+            insert_redeem_event(&mut tx, Some(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?), Some(user_uuid), "expired", Some("expired"))
+                .await
+                .ok();
+            tx.commit().await.ok();
+            return Err(RedeemFailure::Expired);
+        }
+
+        let recharge = insert_recharge(
+            &mut tx,
+            user_uuid,
+            &record.recharge_type,
+            &record.package_id,
+            record.quantity,
+            0,
+            "paid",
+            "redeem-code",
+            &record.code_id,
+        )
+        .await
+        .map_err(|_| RedeemFailure::InvalidCode)?;
+        apply_entitlement_sql(&mut tx, user_uuid, &recharge)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+        sqlx::query(
+            "UPDATE redeem_codes SET status = 'redeemed', redeemed_by = $2, redeemed_recharge_id = $3, redeemed_at = now(), updated_at = now() WHERE id = $1",
+        )
+        .bind(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?)
+        .bind(user_uuid)
+        .bind(parse_uuid(&recharge.recharge_id).map_err(|_| RedeemFailure::InvalidCode)?)
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| RedeemFailure::InvalidCode)?;
+        insert_redeem_event(
+            &mut tx,
+            Some(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?),
+            Some(user_uuid),
+            "redeem_success",
+            None,
+        )
+        .await
+        .map_err(|_| RedeemFailure::InvalidCode)?;
+        tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
+
+        record.status = "redeemed".to_string();
+        let entitlement = self.entitlement(&user_id).await.map_err(|_| RedeemFailure::InvalidCode)?;
+        Ok(RedeemCodeResult {
+            redeem_id: record.code_id,
+            recharge_id: recharge.recharge_id,
+            package_id: record.package_id,
+            package_name: record.package_name,
+            recharge_type: record.recharge_type,
+            quantity: record.quantity,
+            count_balance: entitlement.count_balance,
+            date_valid_until: entitlement.valid_until,
+            redeemed_at: now_timestamp(),
+        })
+    }
+
+    pub async fn list_redeem_records(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<RedeemCodeRecord>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
+                   p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
+                   c.code_preview, c.key_version, c.status, c.redeemed_by::text,
+                   c.redeemed_recharge_id::text,
+                   EXTRACT(EPOCH FROM c.redeemed_at)::bigint AS redeemed_at_secs,
+                   EXTRACT(EPOCH FROM c.expires_at)::bigint AS expires_at_secs,
+                   EXTRACT(EPOCH FROM c.created_at)::bigint AS created_at_secs
+            FROM redeem_codes c
+            JOIN redeem_code_batches b ON b.id = c.batch_id
+            JOIN redeem_packages p ON p.id = c.package_id
+            WHERE c.redeemed_by = $1
+            ORDER BY c.redeemed_at DESC
+            "#,
+        )
+        .bind(parse_uuid(user_id)?)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(redeem_code_from_row).collect())
+    }
+
+    async fn record_redeem_failure(&self, user_id: Uuid, reason: &str) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "INSERT INTO redeem_code_events (user_id, event_type, reason) VALUES ($1, 'redeem_failed', $2)",
+        )
+        .bind(user_id)
+        .bind(reason)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    pub async fn create_feedback_thread(
+        &self,
+        user_id: String,
+        req: crate::feedback_service::CreateThreadRequest,
+    ) -> Result<(FeedbackThread, FeedbackMessage), crate::feedback_service::FeedbackError> {
+        if req.title.trim().is_empty() {
+            return Err(crate::feedback_service::FeedbackError::Validation("title is required".into()));
+        }
+        if req.content.trim().is_empty() {
+            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+        }
+        let feedback_type: FeedbackType = req.feedback_type.parse().map_err(crate::feedback_service::FeedbackError::Validation)?;
+        let priority: FeedbackPriority = req
+            .priority
+            .as_deref()
+            .unwrap_or("normal")
+            .parse()
+            .map_err(crate::feedback_service::FeedbackError::Validation)?;
+        let user_uuid = parse_uuid(&user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let job_uuid = req
+            .conversion_job_id
+            .as_deref()
+            .map(parse_uuid)
+            .transpose()
+            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid conversion_job_id".into()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let thread_row = sqlx::query(
+            r#"
+            INSERT INTO feedback_threads (user_id, conversion_job_id, title, feedback_type, priority)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id::text, user_id::text, conversion_job_id::text, title, feedback_type, status,
+                      priority, admin_assignee::text,
+                      EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
+                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+            "#,
+        )
+        .bind(user_uuid)
+        .bind(job_uuid)
+        .bind(&req.title)
+        .bind(feedback_type.as_str())
+        .bind(priority.as_str())
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let thread_id: String = thread_row.get("id");
+        let msg = insert_feedback_message(
+            &mut tx,
+            parse_uuid(&thread_id).map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid thread id".into()))?,
+            None,
+            Some(user_uuid),
+            SenderType::User,
+            &req.content,
+            false,
+        )
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let thread = feedback_thread_from_row(&thread_row, 1, Some(msg.created_at.clone()));
+        Ok((thread, msg))
+    }
+
+    pub async fn add_feedback_message(
+        &self,
+        user_id: String,
+        thread_id: &str,
+        req: crate::feedback_service::AddMessageRequest,
+    ) -> Result<FeedbackMessage, crate::feedback_service::FeedbackError> {
+        if req.content.trim().is_empty() {
+            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+        }
+        let user_uuid = parse_uuid(&user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let owner = sqlx::query("SELECT user_id FROM feedback_threads WHERE id = $1")
+            .bind(thread_uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let Some(owner) = owner else { return Err(crate::feedback_service::FeedbackError::NotFound); };
+        if owner.get::<Uuid, _>("user_id") != user_uuid {
+            return Err(crate::feedback_service::FeedbackError::Forbidden);
+        }
+        let parent_uuid = req
+            .parent_message_id
+            .as_deref()
+            .map(parse_uuid)
+            .transpose()
+            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid parent_message_id".into()))?;
+        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let msg = insert_feedback_message(
+            &mut tx,
+            thread_uuid,
+            parent_uuid,
+            Some(user_uuid),
+            SenderType::User,
+            &req.content,
+            false,
+        )
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        sqlx::query("UPDATE feedback_threads SET updated_at = now() WHERE id = $1")
+            .bind(thread_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        Ok(msg)
+    }
+
+    pub async fn admin_reply_feedback_message(
+        &self,
+        admin_id: String,
+        thread_id: &str,
+        req: crate::feedback_service::AdminReplyRequest,
+    ) -> Result<FeedbackMessage, crate::feedback_service::FeedbackError> {
+        if req.content.trim().is_empty() {
+            return Err(crate::feedback_service::FeedbackError::Validation("content is required".into()));
+        }
+        let admin_uuid = parse_uuid(&admin_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let mut tx = self.pool.begin().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let updated = sqlx::query(
+            "UPDATE feedback_threads SET status = CASE WHEN status = 'open' THEN 'in_progress' ELSE status END, updated_at = now() WHERE id = $1",
+        )
+        .bind(thread_uuid)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        if updated.rows_affected() == 0 {
+            return Err(crate::feedback_service::FeedbackError::NotFound);
+        }
+        let msg = insert_feedback_message(
+            &mut tx,
+            thread_uuid,
+            None,
+            Some(admin_uuid),
+            SenderType::Admin,
+            &req.content,
+            req.is_internal.unwrap_or(false),
+        )
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        tx.commit().await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        Ok(msg)
+    }
+
+    pub async fn admin_update_feedback_thread(
+        &self,
+        thread_id: &str,
+        req: crate::feedback_service::AdminUpdateThreadRequest,
+    ) -> Result<FeedbackThread, crate::feedback_service::FeedbackError> {
+        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let status = req
+            .status
+            .as_deref()
+            .map(str::parse::<FeedbackStatus>)
+            .transpose()
+            .map_err(crate::feedback_service::FeedbackError::Validation)?;
+        let priority = req
+            .priority
+            .as_deref()
+            .map(str::parse::<FeedbackPriority>)
+            .transpose()
+            .map_err(crate::feedback_service::FeedbackError::Validation)?;
+        let assignee = req
+            .admin_assignee
+            .as_deref()
+            .map(parse_uuid)
+            .transpose()
+            .map_err(|_| crate::feedback_service::FeedbackError::Validation("invalid admin_assignee".into()))?;
+        let row = sqlx::query(
+            r#"
+            UPDATE feedback_threads
+            SET status = COALESCE($2, status),
+                priority = COALESCE($3, priority),
+                admin_assignee = COALESCE($4, admin_assignee),
+                updated_at = now()
+            WHERE id = $1
+            RETURNING id::text, user_id::text, conversion_job_id::text, title, feedback_type, status,
+                      priority, admin_assignee::text,
+                      EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
+                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+            "#,
+        )
+        .bind(thread_uuid)
+        .bind(status.as_ref().map(FeedbackStatus::as_str))
+        .bind(priority.as_ref().map(FeedbackPriority::as_str))
+        .bind(assignee)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let Some(row) = row else { return Err(crate::feedback_service::FeedbackError::NotFound); };
+        let summary = self.feedback_counts(thread_uuid).await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        Ok(feedback_thread_from_row(&row, summary.0, summary.1))
+    }
+
+    pub async fn list_user_feedback_threads(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<FeedbackThreadSummary>, sqlx::Error> {
+        let rows = sqlx::query(&feedback_summary_sql("WHERE t.user_id = $1"))
+            .bind(parse_uuid(user_id)?)
+            .fetch_all(&self.pool)
+            .await?;
+        Ok(rows.iter().map(feedback_summary_from_row).collect())
+    }
+
+    pub async fn admin_list_feedback_threads(
+        &self,
+        filters: &ThreadFilters,
+    ) -> Result<Vec<FeedbackThreadSummary>, sqlx::Error> {
+        let mut rows = sqlx::query(&feedback_summary_sql(""))
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|row| feedback_summary_from_row(&row))
+            .collect::<Vec<_>>();
+        if let Some(status) = &filters.status {
+            rows.retain(|row| &row.status == status);
+        }
+        if let Some(feedback_type) = &filters.feedback_type {
+            rows.retain(|row| &row.feedback_type == feedback_type);
+        }
+        if let Some(date_from) = &filters.date_from {
+            rows.retain(|row| &row.created_at >= date_from);
+        }
+        if let Some(date_to) = &filters.date_to {
+            rows.retain(|row| &row.created_at <= date_to);
+        }
+        let page = filters.page.unwrap_or(1).max(1);
+        let page_size = filters.page_size.unwrap_or(20).min(100);
+        let start = ((page - 1) * page_size) as usize;
+        Ok(rows.into_iter().skip(start).take(page_size as usize).collect())
+    }
+
+    pub async fn get_feedback_thread_for_user(
+        &self,
+        user_id: &str,
+        thread_id: &str,
+    ) -> Result<(FeedbackThread, Vec<FeedbackMessage>), crate::feedback_service::FeedbackError> {
+        let user_uuid = parse_uuid(user_id).map_err(|_| crate::feedback_service::FeedbackError::Unauthorized)?;
+        let thread_uuid = parse_uuid(thread_id).map_err(|_| crate::feedback_service::FeedbackError::NotFound)?;
+        let row = sqlx::query(&feedback_thread_sql("WHERE id = $1"))
+            .bind(thread_uuid)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let Some(row) = row else { return Err(crate::feedback_service::FeedbackError::NotFound); };
+        if row.get::<Uuid, _>("user_id_raw") != user_uuid {
+            return Err(crate::feedback_service::FeedbackError::Forbidden);
+        }
+        let messages = self.feedback_messages(thread_uuid, false).await.map_err(|e| crate::feedback_service::FeedbackError::Validation(e.to_string()))?;
+        let thread = feedback_thread_from_row(&row, messages.len() as u32, messages.last().map(|m| m.created_at.clone()));
+        Ok((thread, messages))
+    }
+
+    async fn feedback_counts(&self, thread_id: Uuid) -> Result<(u32, Option<String>), sqlx::Error> {
+        let row = sqlx::query(
+            "SELECT COUNT(*)::bigint AS count, EXTRACT(EPOCH FROM MAX(created_at))::bigint AS latest_secs FROM feedback_messages WHERE thread_id = $1",
+        )
+        .bind(thread_id)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.get::<i64, _>("count").max(0) as u32,
+            epoch_col(&row, "latest_secs"),
+        ))
+    }
+
+    async fn feedback_messages(
+        &self,
+        thread_id: Uuid,
+        include_internal: bool,
+    ) -> Result<Vec<FeedbackMessage>, sqlx::Error> {
+        let rows = sqlx::query(
+            r#"
+            SELECT id::text, thread_id::text, parent_message_id::text, sender_user_id::text,
+                   sender_type, content, attachments, is_internal,
+                   EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+            FROM feedback_messages
+            WHERE thread_id = $1 AND ($2 OR is_internal = false)
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(thread_id)
+        .bind(include_internal)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.iter().map(feedback_message_from_row).collect())
+    }
+}
+
+fn app_user_from_row(row: &PgRow) -> AppUser {
+    AppUser {
+        id: row.get("id"),
+        email: row.get("email"),
+        display_name: row.get("display_name"),
+        plan_id: row.get("default_plan_id"),
     }
 }
 
@@ -713,14 +1094,83 @@ fn parse_optional_epoch(value: &Option<String>) -> Result<Option<f64>, String> {
         .transpose()
 }
 
-fn now_timestamp() -> String {
+fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
 }
 
-fn recharge_from_row(row: &sqlx::postgres::PgRow) -> RechargeRecord {
+fn epoch_col(row: &PgRow, name: &str) -> Option<String> {
+    row.try_get::<Option<i64>, _>(name)
+        .ok()
+        .flatten()
+        .map(|value| value.to_string())
+}
+
+fn upload_from_row(row: &PgRow, bytes: Vec<u8>) -> UploadRecord {
+    let object_key: String = row.get("object_key");
+    UploadRecord {
+        upload_id: row.get("id"),
+        file_name: row.get("file_name"),
+        bytes,
+        storage_key: Some(object_key.clone()),
+        storage_path: Some(object_key),
+        bytes_size: row.get::<i64, _>("bytes").max(0) as u64,
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+    }
+}
+
+fn job_select_sql(tail: &str) -> String {
+    format!(
+        r#"
+        SELECT id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
+               result_docx_key, result_report_key, source_zip_key, result_log_key, storage_path,
+               zip_bytes, docx_bytes, log_bytes, error_code, error_message,
+               EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
+               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+        FROM conversion_jobs {tail}
+        "#
+    )
+}
+
+fn job_from_row(
+    row: &PgRow,
+    docx: Option<Vec<u8>>,
+    report: Option<ConversionReportRecord>,
+) -> ConversionJobRecord {
+    let status_text: String = row.get("status");
+    ConversionJobRecord {
+        job_id: row.get("id"),
+        user_id: row.get("user_id"),
+        upload_id: row.get("upload_id"),
+        main_tex: row.get("main_tex"),
+        profile: row.get("profile"),
+        quality: row.get("quality"),
+        engine: row.get("engine"),
+        status: ConversionStatus::from_str(&status_text),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+        updated_at: epoch_col(row, "updated_at_secs").unwrap_or_else(now_timestamp),
+        docx,
+        report,
+        error_code: row.get("error_code"),
+        error: row.get("error_message"),
+        storage_path: row.get("storage_path"),
+        source_zip_key: row.get("source_zip_key"),
+        result_docx_key: row.get("result_docx_key"),
+        result_log_key: row.get("result_log_key"),
+        zip_bytes: row.try_get::<Option<i64>, _>("zip_bytes").ok().flatten().map(|v| v.max(0) as u64),
+        docx_bytes: row.try_get::<Option<i64>, _>("docx_bytes").ok().flatten().map(|v| v.max(0) as u64),
+        log_bytes: row.try_get::<Option<i64>, _>("log_bytes").ok().flatten().map(|v| v.max(0) as u64),
+    }
+}
+
+fn report_from_row(row: &PgRow) -> Option<ConversionReportRecord> {
+    let raw: Option<String> = row.get("result_report_key");
+    raw.and_then(|value| serde_json::from_str(&value).ok())
+}
+
+fn recharge_from_row(row: &PgRow) -> RechargeRecord {
     RechargeRecord {
         recharge_id: row.get("id"),
         user_id: row.get("user_id"),
@@ -732,17 +1182,46 @@ fn recharge_from_row(row: &sqlx::postgres::PgRow) -> RechargeRecord {
         status: row.get("status"),
         provider: row.get("provider"),
         provider_trade_id: row.get("provider_trade_id"),
-        created_at: row
-            .try_get::<Option<i64>, _>("created_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string())
-            .unwrap_or_else(now_timestamp),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
     }
 }
 
+async fn insert_recharge(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+    recharge_type: &str,
+    package_id: &str,
+    quantity: u64,
+    amount_cents: u64,
+    status: &str,
+    provider: &str,
+    provider_trade_id: &str,
+) -> Result<RechargeRecord, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        INSERT INTO recharges
+            (user_id, recharge_type, package_id, quantity, amount_cents, currency, status, provider, provider_trade_id)
+        VALUES ($1, $2, $3, $4, $5, 'CNY', $6, $7, $8)
+        RETURNING id::text, user_id::text, recharge_type, package_id, quantity, amount_cents,
+                  currency, status, provider, provider_trade_id,
+                  EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+        "#,
+    )
+    .bind(user_id)
+    .bind(recharge_type)
+    .bind(package_id)
+    .bind(quantity as i32)
+    .bind(amount_cents as i32)
+    .bind(status)
+    .bind(provider)
+    .bind(provider_trade_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(recharge_from_row(&row))
+}
+
 async fn apply_entitlement_sql(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
     record: &RechargeRecord,
 ) -> Result<(), sqlx::Error> {
@@ -786,111 +1265,31 @@ async fn apply_entitlement_sql(
     Ok(())
 }
 
-fn redeem_batch_from_row(row: &sqlx::postgres::PgRow, codes: Vec<String>) -> RedeemCodeBatchRecord {
-    let batch_no: String = row.get("batch_no");
-    let batch_prefix = batch_no
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect::<String>();
-    RedeemCodeBatchRecord {
-        batch_id: row.get("id"),
-        batch_no,
-        batch_prefix,
-        package_id: row.get("package_id"),
-        package_name: row.get("package_name"),
-        recharge_type: row.get("package_type"),
-        quantity: row.get::<i32, _>("quantity").max(0) as u64,
-        generated_count: row.get::<i32, _>("generated_count").max(0) as u64,
-        exported_count: row.get::<i32, _>("exported_count").max(0) as u64,
-        status: row.get("status"),
-        channel: row.get("channel"),
-        note: row.get("note"),
-        expires_at: row
-            .try_get::<Option<i64>, _>("expires_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string()),
-        created_by: row.get("created_by"),
-        created_at: row
-            .try_get::<Option<i64>, _>("created_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string())
-            .unwrap_or_else(now_timestamp),
-        codes,
+fn entitlement_from_row(row: &PgRow) -> EntitlementRecord {
+    EntitlementRecord {
+        user_id: row.get("user_id"),
+        count_balance: row.get::<i64, _>("count_balance").max(0) as u64,
+        valid_until: epoch_col(row, "valid_until_secs"),
+        source_order_id: row.get("source_order_id"),
+        updated_at: epoch_col(row, "updated_at_secs").unwrap_or_else(now_timestamp),
     }
 }
 
-fn job_from_row(
-    row: &sqlx::postgres::PgRow,
-    docx: Option<Vec<u8>>,
-    report: Option<ConversionReportRecord>,
-) -> ConversionJobRecord {
-    let status_text: String = row.get("status");
-    ConversionJobRecord {
-        job_id: row.get("id"),
-        user_id: row.get("user_id"),
-        upload_id: row.get("upload_id"),
-        main_tex: row.get("main_tex"),
-        profile: row.get("profile"),
-        quality: row.get("quality"),
-        engine: row.get("engine"),
-        status: match status_text.as_str() {
-            "normalizing" => ConversionStatus::Normalizing,
-            "detecting" => ConversionStatus::Detecting,
-            "analyzing" => ConversionStatus::Analyzing,
-            "compiling" => ConversionStatus::Compiling,
-            "rendering" => ConversionStatus::Rendering,
-            "verifying" => ConversionStatus::Verifying,
-            "completed" => ConversionStatus::Completed,
-            "failed" => ConversionStatus::Failed,
-            "expired" => ConversionStatus::Expired,
-            _ => ConversionStatus::Queued,
-        },
-        created_at: row
-            .try_get::<Option<i64>, _>("created_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string())
-            .unwrap_or_else(now_timestamp),
-        updated_at: row
-            .try_get::<Option<i64>, _>("updated_at_secs")
-            .ok()
-            .flatten()
-            .map(|value| value.to_string())
-            .unwrap_or_else(now_timestamp),
-        docx,
-        report,
-        error_code: row.get("error_code"),
-        error: row.get("error_message"),
-        storage_path: row.get("storage_path"),
-        source_zip_key: row.get("source_zip_key"),
-        result_docx_key: row.get("result_docx_key"),
-        result_log_key: row.get("result_log_key"),
-        zip_bytes: row
-            .try_get::<Option<i64>, _>("zip_bytes")
-            .ok()
-            .flatten()
-            .map(|value| value.max(0) as u64),
-        docx_bytes: row
-            .try_get::<Option<i64>, _>("docx_bytes")
-            .ok()
-            .flatten()
-            .map(|value| value.max(0) as u64),
-        log_bytes: row
-            .try_get::<Option<i64>, _>("log_bytes")
-            .ok()
-            .flatten()
-            .map(|value| value.max(0) as u64),
-    }
+async fn cloud_conversions_used_tx(
+    tx: &mut Transaction<'_, Postgres>,
+    user_id: Uuid,
+) -> Result<u64, sqlx::Error> {
+    let row = sqlx::query(
+        "SELECT COALESCE(SUM(quantity), 0)::bigint AS used FROM usage_events WHERE user_id = $1 AND event_type = 'cloud_conversion'",
+    )
+    .bind(user_id)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(row.get::<i64, _>("used").max(0) as u64)
 }
 
 async fn ensure_usage_period(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tx: &mut Transaction<'_, Postgres>,
     user_id: Uuid,
 ) -> Result<Uuid, sqlx::Error> {
     let row = sqlx::query(
@@ -906,4 +1305,219 @@ async fn ensure_usage_period(
     .fetch_one(&mut **tx)
     .await?;
     Ok(row.get("id"))
+}
+
+fn batch_prefix(batch_no: &str) -> String {
+    batch_no
+        .chars()
+        .rev()
+        .take(4)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect()
+}
+
+fn redeem_batch_select_sql(tail: &str) -> String {
+    format!(
+        r#"
+        SELECT b.id::text, b.batch_no, b.package_id, p.name AS package_name, p.package_type,
+               b.quantity, b.generated_count, b.exported_count, b.status, b.channel, b.note,
+               EXTRACT(EPOCH FROM b.expires_at)::bigint AS expires_at_secs,
+               COALESCE(b.created_by::text, '') AS created_by,
+               EXTRACT(EPOCH FROM b.created_at)::bigint AS created_at_secs
+        FROM redeem_code_batches b
+        JOIN redeem_packages p ON p.id = b.package_id
+        {tail}
+        ORDER BY b.created_at DESC
+        "#
+    )
+}
+
+fn redeem_batch_from_row(row: &PgRow, codes: Vec<String>) -> RedeemCodeBatchRecord {
+    let batch_no: String = row.get("batch_no");
+    RedeemCodeBatchRecord {
+        batch_id: row.get("id"),
+        batch_prefix: batch_prefix(&batch_no),
+        batch_no,
+        package_id: row.get("package_id"),
+        package_name: row.get("package_name"),
+        recharge_type: row.get("package_type"),
+        quantity: row.get::<i32, _>("quantity").max(0) as u64,
+        generated_count: row.get::<i32, _>("generated_count").max(0) as u64,
+        exported_count: row.get::<i32, _>("exported_count").max(0) as u64,
+        status: row.get("status"),
+        channel: row.get("channel"),
+        note: row.get("note"),
+        expires_at: epoch_col(row, "expires_at_secs"),
+        created_by: row.get("created_by"),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+        codes,
+    }
+}
+
+fn redeem_code_from_row(row: &PgRow) -> RedeemCodeRecord {
+    RedeemCodeRecord {
+        code_id: row.get("id"),
+        batch_id: row.get("batch_id"),
+        batch_no: row.get("batch_no"),
+        package_id: row.get("package_id"),
+        package_name: row.get("package_name"),
+        recharge_type: row.get("package_type"),
+        quantity: row.get::<i32, _>("quantity").max(0) as u64,
+        code_hash: row.get("code_hash"),
+        code_ciphertext: row.get("code_ciphertext"),
+        code_nonce: row.get("code_nonce"),
+        code_preview: row.get("code_preview"),
+        plaintext_code: String::new(),
+        key_version: row.get("key_version"),
+        status: row.get("status"),
+        redeemed_by: row.get("redeemed_by"),
+        redeemed_recharge_id: row.get("redeemed_recharge_id"),
+        redeemed_at: epoch_col(row, "redeemed_at_secs"),
+        expires_at: epoch_col(row, "expires_at_secs"),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+    }
+}
+
+async fn insert_redeem_event(
+    tx: &mut Transaction<'_, Postgres>,
+    code_id: Option<Uuid>,
+    user_id: Option<Uuid>,
+    event_type: &str,
+    reason: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO redeem_code_events (redeem_code_id, user_id, event_type, reason) VALUES ($1, $2, $3, $4)",
+    )
+    .bind(code_id)
+    .bind(user_id)
+    .bind(event_type)
+    .bind(reason)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+async fn insert_feedback_message(
+    tx: &mut Transaction<'_, Postgres>,
+    thread_id: Uuid,
+    parent_message_id: Option<Uuid>,
+    sender_user_id: Option<Uuid>,
+    sender_type: SenderType,
+    content: &str,
+    is_internal: bool,
+) -> Result<FeedbackMessage, sqlx::Error> {
+    let row = sqlx::query(
+        r#"
+        INSERT INTO feedback_messages
+            (thread_id, parent_message_id, sender_user_id, sender_type, content, attachments, is_internal)
+        VALUES ($1, $2, $3, $4, $5, '[]'::jsonb, $6)
+        RETURNING id::text, thread_id::text, parent_message_id::text, sender_user_id::text,
+                  sender_type, content, attachments, is_internal,
+                  EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs
+        "#,
+    )
+    .bind(thread_id)
+    .bind(parent_message_id)
+    .bind(sender_user_id)
+    .bind(sender_type.as_str())
+    .bind(content)
+    .bind(is_internal)
+    .fetch_one(&mut **tx)
+    .await?;
+    Ok(feedback_message_from_row(&row))
+}
+
+fn feedback_thread_sql(tail: &str) -> String {
+    format!(
+        r#"
+        SELECT id::text, user_id AS user_id_raw, user_id::text, conversion_job_id::text, title,
+               feedback_type, status, priority, admin_assignee::text,
+               EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
+               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+        FROM feedback_threads {tail}
+        "#
+    )
+}
+
+fn feedback_summary_sql(where_clause: &str) -> String {
+    format!(
+        r#"
+        SELECT t.id::text, t.conversion_job_id::text, t.title, t.feedback_type, t.status, t.priority,
+               COUNT(m.id)::bigint AS message_count,
+               EXTRACT(EPOCH FROM MAX(m.created_at))::bigint AS latest_message_at_secs,
+               EXTRACT(EPOCH FROM t.created_at)::bigint AS created_at_secs,
+               EXTRACT(EPOCH FROM t.updated_at)::bigint AS updated_at_secs
+        FROM feedback_threads t
+        LEFT JOIN feedback_messages m ON m.thread_id = t.id
+        {where_clause}
+        GROUP BY t.id
+        ORDER BY t.updated_at DESC
+        "#
+    )
+}
+
+fn feedback_thread_from_row(
+    row: &PgRow,
+    message_count: u32,
+    latest_message_at: Option<String>,
+) -> FeedbackThread {
+    FeedbackThread {
+        thread_id: row.get("id"),
+        user_id: row.get("user_id"),
+        conversion_job_id: row.get("conversion_job_id"),
+        title: row.get("title"),
+        feedback_type: row
+            .get::<String, _>("feedback_type")
+            .parse()
+            .unwrap_or(FeedbackType::Issue),
+        status: row
+            .get::<String, _>("status")
+            .parse()
+            .unwrap_or(FeedbackStatus::Open),
+        priority: row
+            .get::<String, _>("priority")
+            .parse()
+            .unwrap_or(FeedbackPriority::Normal),
+        admin_assignee: row.get("admin_assignee"),
+        message_count,
+        latest_message_at,
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+        updated_at: epoch_col(row, "updated_at_secs").unwrap_or_else(now_timestamp),
+    }
+}
+
+fn feedback_summary_from_row(row: &PgRow) -> FeedbackThreadSummary {
+    FeedbackThreadSummary {
+        thread_id: row.get("id"),
+        conversion_job_id: row.get("conversion_job_id"),
+        title: row.get("title"),
+        feedback_type: row.get("feedback_type"),
+        status: row.get("status"),
+        priority: row.get("priority"),
+        message_count: row.get::<i64, _>("message_count").max(0) as u32,
+        latest_message_at: epoch_col(row, "latest_message_at_secs"),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+        updated_at: epoch_col(row, "updated_at_secs").unwrap_or_else(now_timestamp),
+    }
+}
+
+fn feedback_message_from_row(row: &PgRow) -> FeedbackMessage {
+    let attachments: Value = row.get("attachments");
+    FeedbackMessage {
+        message_id: row.get("id"),
+        thread_id: row.get("thread_id"),
+        parent_message_id: row.get("parent_message_id"),
+        sender_user_id: row.get("sender_user_id"),
+        sender_type: match row.get::<String, _>("sender_type").as_str() {
+            "admin" => SenderType::Admin,
+            "system" => SenderType::System,
+            _ => SenderType::User,
+        },
+        content: row.get("content"),
+        attachments: serde_json::from_value(attachments).unwrap_or_default(),
+        is_internal: row.get("is_internal"),
+        created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
+    }
 }
