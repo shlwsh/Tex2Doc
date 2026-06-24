@@ -35,7 +35,7 @@ function commandExists(command) {
 
 run('cargo', ['fmt', '--all', '--', '--check']);
 run('cargo', ['clippy', '--workspace', '--all-targets', '--', '-D', 'warnings']);
-run('cargo', ['test', '--workspace', '--all-targets']);
+run('cargo', ['test', '--workspace', '--all-targets', '--', '--test-threads=1']);
 
 if (commandExists('flutter')) {
   run('flutter', ['pub', 'get'], { cwd: 'flutter_app' });

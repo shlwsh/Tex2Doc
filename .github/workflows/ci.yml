@@ -51,10 +51,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: >-
-            .
-            crates/core crates/utils crates/semantic-ast
-            crates/latex-reader crates/docx-writer crates/bib
+          workspaces: .
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -63,7 +60,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace --all-targets
+        run: cargo test --workspace --all-targets -- --test-threads=1
 
       - name: End-to-end artifact
         if: matrix.os == 'ubuntu-latest'
