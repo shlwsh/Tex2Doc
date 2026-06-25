@@ -2,10 +2,18 @@
 
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
-const defaultCommercialApiBaseUrl = 'http://127.0.0.1:2624/v1/';
+const localCommercialApiBaseUrl = 'http://127.0.0.1:2624/v1/';
 const legacyOnlineCommercialApiBaseUrl = 'https://api.tex2doc.cn/v1/';
+
+String get defaultCommercialApiBaseUrl {
+  if (kIsWeb && (Uri.base.scheme == 'http' || Uri.base.scheme == 'https')) {
+    return Uri.base.resolve('/v1/').toString();
+  }
+  return localCommercialApiBaseUrl;
+}
 
 class CommercialApiException implements Exception {
   final int statusCode;

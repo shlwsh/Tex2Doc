@@ -73,22 +73,31 @@
     // ================================================================
     // Doc-engine WASM 桥接
     // ================================================================
-    try {
-      const mod = await import('./wasm/doc_engine.js');
-      await mod.default('./wasm/doc_engine_bg.wasm');
-      window.docEngine = {
-        convert_zip: (zipBytes, mainPath, optionsJson) =>
-          mod.convert_zip(zipBytes, mainPath, optionsJson),
-        convert_zip_to_docx: (zipBytes, mainPath, optionsJson) =>
-          mod.convert_zip_to_docx(zipBytes, mainPath, optionsJson),
-        version: () => mod.version(),
-      };
-      console.log('[doc-engine] WASM 引擎就绪，版本:', mod.version());
-      window.dispatchEvent(new Event('doc-engine-ready'));
-    } catch (e) {
-      window.docEngineError = e;
-      console.error('[doc-engine] WASM 初始化失败：', e);
-      window.dispatchEvent(new Event('doc-engine-error'));
+    async function initDocEngine() {
+      try {
+        const mod = await import('./wasm/doc_engine.js');
+        await mod.default('./wasm/doc_engine_bg.wasm');
+        window.docEngine = {
+          convert_zip: (zipBytes, mainPath, optionsJson) =>
+            mod.convert_zip(zipBytes, mainPath, optionsJson),
+          convert_zip_to_docx: (zipBytes, mainPath, optionsJson) =>
+            mod.convert_zip_to_docx(zipBytes, mainPath, optionsJson),
+          version: () => mod.version(),
+        };
+        console.log('[doc-engine] WASM 引擎就绪，版本:', mod.version());
+        window.dispatchEvent(new Event('doc-engine-ready'));
+      } catch (e) {
+        window.docEngineError = e;
+        console.error('[doc-engine] WASM 初始化失败：', e);
+        window.dispatchEvent(new Event('doc-engine-error'));
+      }
+    }
+
+    const scheduleDocEngineInit = () => window.setTimeout(initDocEngine, 0);
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', scheduleDocEngineInit, { once: true });
+    } else {
+      scheduleDocEngineInit();
     }
   </script>
   <script src="flutter_bootstrap.js" async></script>
