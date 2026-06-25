@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "ci:preflight": "node scripts/ci/preflight.mjs",
+    "remote_backup": "pwsh -NoProfile -File scripts/remote_backup.ps1",
     "release:local": "pwsh -NoProfile -File scripts/release/package-local.ps1",
     "verify": "node scripts/verify_paper3.mjs",
     "verify:install": "node scripts/verify_install.mjs",
