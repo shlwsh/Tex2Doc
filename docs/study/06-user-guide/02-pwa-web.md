@@ -1,4 +1,8 @@
 # Flutter Web PWA 使用
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 **Flutter Web PWA** 形态的使用方式。最适合：浏览器内转换、无需安装。
 

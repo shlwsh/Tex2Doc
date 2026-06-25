@@ -1,4 +1,8 @@
 # 05 · WordprocessingML 写入
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 目标：把 §4 的 Block 列表，转换为一组合法的 OOXML 字符串。Rust 重构时**直接抄这些模板字符串**是最高效的做法——docx 的 XML schema 庞大，自己手写易错。
 

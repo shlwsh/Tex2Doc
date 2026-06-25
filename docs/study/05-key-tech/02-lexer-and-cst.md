@@ -1,4 +1,8 @@
 # 关键技术 2：Logos 词法 + Rowan 语法树
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节深入解析 `doc-latex-reader::lexer` 与 `doc-latex-reader::parser`（Pass-2）。解决的核心问题：把字符流变成有结构的语法树，同时保证**绝不 panic**。
 

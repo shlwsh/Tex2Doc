@@ -1,4 +1,8 @@
 # Semantic TeX Engine P5 Desktop Secure Token 开发进展报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **时间戳**：20260622-014516  
 **基准计划**：`docs-zh/plan-0621.md`  

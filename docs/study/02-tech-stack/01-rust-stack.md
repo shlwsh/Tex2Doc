@@ -1,4 +1,8 @@
 # 第二章 · Rust 技术栈
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > Tex2Doc 的核心转换逻辑完全用 Rust 实现，当前 15 个 crate 构成一个 Cargo Workspace。本节列出所有依赖、技术约束与构建配置。
 

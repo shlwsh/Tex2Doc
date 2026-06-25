@@ -1,4 +1,8 @@
 # Tex2Doc Desktop Slint 多 TAB 界面重构技术方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22  
 **范围**：`crates/desktop-slint` 前端界面与必要的 UI 绑定整理  

@@ -1,4 +1,8 @@
 # Doc-engine
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > LaTeX → DOCX 纯 Rust 核心 + Flutter 全平台转换工具（V1）。
 

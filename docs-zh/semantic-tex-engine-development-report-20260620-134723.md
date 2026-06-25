@@ -1,4 +1,8 @@
 # Semantic TeX Engine DOCX 引用链接开发报告（20260620-134723）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 ## 1. 本次目标
 

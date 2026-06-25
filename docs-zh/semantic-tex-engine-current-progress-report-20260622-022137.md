@@ -1,4 +1,8 @@
 # Semantic TeX Engine 当前开发进展报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **时间戳**：20260622-022137
 **基准计划**：`docs-zh/plan-0621.md`

@@ -1,4 +1,8 @@
 # `docs/to-docx` — p3-microservice TeX→DOCX 转换技术文档
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 目标受众：希望**用 Rust 重写** `scripts/build_docx.sh` 这条管线的开发者。
 > 阅读完这一系列文档后，你应该能不参考现有 Python 源码、仅依赖本文档与《软件学报》2025 样例的格式定义 JSON，独立实现一个能生成版心、字体、版式与样本完全一致的 `.docx` 文件的程序。

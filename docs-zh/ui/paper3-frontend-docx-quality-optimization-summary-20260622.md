@@ -1,4 +1,8 @@
 # paper3 前端 DOCX 转换质量优化小结
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22  
 **范围**：`doc-desktop-slint` 前端本地转换路径、`doc-docx-writer` DOCX 写出层、`doc-mathml` 数学解析与 OMML 写出。  

@@ -1,4 +1,8 @@
 # 服务端部署
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 `doc-server` 的生产部署流程：二进制部署、Docker 容器、Kubernetes。
 
@@ -17,8 +21,9 @@
 
 ### 1.2 依赖
 
-* 仅需 C 标准库 + 操作系统 glibc。
-* 无外部 runtime 依赖（无 Node.js / Python / JVM）。
+* 运行环境：C 标准库 + 操作系统 glibc。
+* 数据库：PostgreSQL (v15+)，用于计费和充值功能持久化（`doc-server` 默认使用 `sqlx` 驱动）。
+* 无外部 runtime 依赖（无需安装 Node.js / Python / JVM 在服务器）。
 
 ---
 
@@ -41,50 +46,48 @@ DOC_SERVER_ADDR=0.0.0.0:2624 RUST_LOG=info ./doc-server
 
 ### 2.2 systemd 服务
 
+创建 `/etc/systemd/system/tex2doc-server.service`：
+
 ```ini
-# /etc/systemd/system/doc-server.service
 [Unit]
-Description=Doc-engine HTTP server
-Documentation=https://example.com/doc-engine
-After=network.target
+Description=Tex2Doc Rust API server
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
-User=doc-engine
-Group=doc-engine
-Environment=DOC_SERVER_ADDR=0.0.0.0:2624
-Environment=RUST_LOG=info,doc_server=info
-ExecStart=/opt/doc-engine/doc-server
-Restart=on-failure
-RestartSec=5
-LimitNOFILE=65536
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/tex2doc/current
+EnvironmentFile=/opt/tex2doc/shared/env/doc-server.env
+ExecStart=/opt/tex2doc/current/server/doc-server
+Restart=always
+RestartSec=3
 
 # 安全加固
 NoNewPrivileges=true
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=true
-ReadWritePaths=/var/log/doc-engine
+ReadWritePaths=/opt/tex2doc/shared
 
 [Install]
 WantedBy=multi-user.target
 ```
 
 ```bash
-# 1. 创建用户
-sudo useradd -r -s /bin/false doc-engine
+# 1. 准备配置与共享目录
+sudo mkdir -p /opt/tex2doc/shared/env /opt/tex2doc/shared/sessions /opt/tex2doc/shared/logs
+sudo chown -R ubuntu:ubuntu /opt/tex2doc
 
-# 2. 准备日志目录
-sudo mkdir -p /var/log/doc-engine
-sudo chown doc-engine:doc-engine /var/log/doc-engine
+# 2. 配置环境文件（/opt/tex2doc/shared/env/doc-server.env）
+# 内容参照 docs-zh/install/github-auto-deploy-flutter-web-and-server.md 中定义
 
 # 3. 启用服务
 sudo systemctl daemon-reload
-sudo systemctl enable --now doc-server
-sudo systemctl status doc-server
+sudo systemctl enable --now tex2doc-server
+sudo systemctl status tex2doc-server
 
 # 4. 查看日志
-sudo journalctl -u doc-server -f
+sudo journalctl -u tex2doc-server -f
 ```
 
 ### 2.3 Docker
@@ -343,6 +346,8 @@ curl https://doc-engine.example.com/api/v1/health
 
 ### 3.1 Nginx
 
+配置 `/etc/nginx/sites-available/tex2doc` 以承载 Flutter Home、User、Admin 多段 Web，并反代 Rust 服务端 API：
+
 ```nginx
 upstream doc_server {
     server 127.0.0.1:2624;
@@ -351,26 +356,32 @@ upstream doc_server {
 
 server {
     listen 80;
-    server_name doc-engine.example.com;
-    return 301 https://$server_name$request_uri;
-}
+    server_name doc-engine.example.com; # 替换为实际域名或 IP
 
-server {
-    listen 443 ssl http2;
-    server_name doc-engine.example.com;
+    client_max_body_size 60m;
 
-    ssl_certificate /etc/letsencrypt/live/doc-engine.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/doc-engine.example.com/privkey.pem;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-
-    client_max_body_size 60M;
-    client_body_timeout 120s;
-
-    access_log /var/log/nginx/doc-server-access.log;
-    error_log /var/log/nginx/doc-server-error.log;
+    # 1. Flutter 主端 / Home 路由
+    root /opt/tex2doc/current/static/home;
+    index index.html;
 
     location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 2. Flutter 用户端 / User 路由
+    location /user/ {
+        alias /opt/tex2doc/current/static/user/;
+        try_files $uri $uri/ /user/index.html;
+    }
+
+    # 3. Flutter 管理端 / Admin 路由
+    location /admin/ {
+        alias /opt/tex2doc/current/static/admin/;
+        try_files $uri $uri/ /admin/index.html;
+    }
+
+    # 4. API 反代 (doc-server)
+    location /api/ {
         proxy_pass http://doc_server;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -381,12 +392,25 @@ server {
         proxy_read_timeout 120s;
         proxy_send_timeout 120s;
         proxy_buffering off;
-        proxy_request_buffering off;  # 大文件流式
+        proxy_request_buffering off;  # 允许大文件流式上传
     }
 
-    location /api/v1/health {
+    location /v1/ {
         proxy_pass http://doc_server;
-        access_log off;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location /admin/v1/ {
+        proxy_pass http://doc_server;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
 }
 ```
@@ -547,26 +571,33 @@ V2 路线：用 `sentry::init` 集成。
 
 ### 6.1 备份内容
 
-* **配置**：环境变量 / `.env` 文件。
+* **配置文件**：`/opt/tex2doc/shared/env/doc-server.env` 环境变量文件。
 * **TLS 证书**：`/etc/letsencrypt/`。
-* **日志**：`/var/log/doc-server/`。
+* **日志**：`/opt/tex2doc/shared/logs/` 目录以及 systemd journal 日志。
+* **数据库持久数据**：PostgreSQL 生产数据库 `docdb`（包含用户与账目信息）。
 
-> 服务**无状态**——无需备份数据库。
+#### 备份数据库命令 (pg_dump)
+
+```bash
+pg_dump -U postgres -d docdb -F c -b -v -f /opt/tex2doc/shared/backups/docdb_$(date +%Y%m%d).backup
+```
 
 ### 6.2 灾难恢复
 
 ```bash
-# 在新服务器上
-1. 复制 doc-server binary
-2. 配置 systemd / Docker
-3. 复制环境变量
-4. 启动
-5. 配置 Nginx / 反代
-6. 申请证书
+# 1. 还原数据库
+createdb -U postgres docdb
+pg_restore -U postgres -d docdb -v /opt/tex2doc/shared/backups/docdb_xxxx.backup
+
+# 2. 还原配置文件与证书
+# 3. 重新激活应用和静态资源（通过 GitHub CD 触发或手动部署）
+sudo systemctl restart tex2doc-server
+sudo nginx -t
+sudo systemctl reload nginx
 ```
 
 RTO（恢复时间目标）：< 30 分钟。
-RPO（恢复点目标）：N/A（无状态）。
+RPO（恢复点目标）：根据 pg_dump 定时任务的频率而定（推荐每 12 小时备份一次）。
 
 ---
 
@@ -598,12 +629,9 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 ### 7.4 用户与权限
 
 ```bash
-# doc-engine 用户（无 shell、无 home）
-sudo useradd -r -s /usr/sbin/nologin -M doc-engine
-
-# 限制 doc-server binary
-sudo chown root:doc-engine /opt/doc-engine/doc-server
-sudo chmod 750 /opt/doc-engine/doc-server
+# 限制 doc-server binary 权限
+sudo chown root:ubuntu /opt/tex2doc/current/server/doc-server
+sudo chmod 750 /opt/tex2doc/current/server/doc-server
 ```
 
 ### 7.5 容器安全
@@ -612,7 +640,6 @@ sudo chmod 750 /opt/doc-engine/doc-server
 * 用户 `doc-engine`（UID 1001，非 root）。
 * `readOnlyRootFilesystem: true`。
 * 禁用所有 capabilities。
-* 定期 `docker scan` / `trivy`。
 
 ---
 
@@ -643,7 +670,32 @@ sudo chmod 750 /opt/doc-engine/doc-server
 
 ---
 
-## 9. 进一步阅读
+## 9. GitHub Actions 自动化 CD 部署
+
+在 GitHub 配置生产环境的 Secrets 之后，每次 push 或 merge 到 `main` 分支时，会触发自动部署工作流 `.github/workflows/deploy-production.yml`。
+
+### 9.1 GitHub Secrets 配置
+
+在 GitHub 仓库 `Settings -> Secrets and variables -> Actions` 中配置以下 secrets：
+
+| Secret | 示例 | 说明 |
+| --- | --- | --- |
+| `PROD_SSH_HOST` | `82.156.234.59` | 生产服务器 IP |
+| `PROD_SSH_USER` | `ubuntu` | SSH 登录用户 |
+| `PROD_SSH_KEY` | 私钥全文 | 与服务器 `authorized_keys` 匹配的部署私钥 |
+| `PROD_SSH_PORT` | `22` | 可选，默认 22 |
+| `PROD_DEPLOY_DIR` | `/opt/tex2doc` | 部署目标根目录 |
+
+### 9.2 服务器免密 sudo 权限
+
+为了让 GitHub Actions 能够无交互地重启服务和重载 Nginx，需在 `/etc/sudoers.d/tex2doc-deploy` 配置文件中添加免密 sudo 规则：
+```sudoers
+ubuntu ALL=(root) NOPASSWD: /bin/systemctl restart tex2doc-server, /bin/systemctl reload nginx, /usr/sbin/nginx -t
+```
+
+---
+
+## 10. 进一步阅读
 
 * [01-rust-build.md](./01-rust-build.md) — Rust 构建
 * [06-ci-and-hooks.md](./06-ci-and-hooks.md) — CI / 钩子
