@@ -28,16 +28,6 @@ jobs:
             archive: tar
             server_bin: target/release/doc-server
             client_bin: target/release/doc-desktop-slint
-          - name: macos-intel
-            os: macos-13
-            archive: tar
-            server_bin: target/release/doc-server
-            client_bin: target/release/doc-desktop-slint
-          - name: macos-arm
-            os: macos-14
-            archive: tar
-            server_bin: target/release/doc-server
-            client_bin: target/release/doc-desktop-slint
 
     steps:
       - uses: actions/checkout@v4

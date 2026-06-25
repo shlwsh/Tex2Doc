@@ -23,6 +23,15 @@ Host my-server
 
 ## 推荐部署形态
 
+### 当前发布范围
+
+当前生产发布优先保证：
+
+- Linux 生产服务端部署。
+- Windows 与 Linux 的 CI 检查和原生包构建。
+
+macOS intel / macOS arm 打包暂时从必过发布要求中移除，避免 GitHub macOS runner 长时间排队阻塞 PR 合并与生产部署。后续 runner 稳定后，再恢复 `macos-13` 与 `macos-14` 矩阵。
+
 ### 端口规划
 
 延续项目此前端口约束：除数据库端口外，项目服务端口统一使用 `2624-2634`。
