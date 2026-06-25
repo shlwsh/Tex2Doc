@@ -146,7 +146,7 @@ impl DocxToPdf {
     pub async fn convert(&self, docx: &Path, outdir: &Path) -> Result<DocxToPdfRun> {
         let backend = self
             .first_available()
-            .ok_or_else(|| crate::error::PdfError::NoBackend)?;
+            .ok_or(crate::error::PdfError::NoBackend)?;
 
         // 全局串行：soffice 默认 user profile 不可并发。
         let _permit = self.sem.lock().await;

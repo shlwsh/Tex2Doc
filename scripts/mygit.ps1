@@ -46,6 +46,27 @@ if ($LASTEXITCODE -ne 0) {
 function Resolve-Python {
     param([string]$Override)
 
+    function Test-PythonCommand {
+        param(
+            [string]$Exe,
+            [string[]]$CommandArgs
+        )
+
+        $oldPreference = $ErrorActionPreference
+        try {
+            # Some Python installs write import failures to stderr. With
+            # $ErrorActionPreference=Stop PowerShell can promote that probe
+            # output into a NativeCommandError, so keep probes non-terminating.
+            $ErrorActionPreference = "Continue"
+            $safeArgs = @($CommandArgs | Where-Object { $_ -ne $null })
+            & $Exe @safeArgs >$null 2>$null
+            $exitCode = $LASTEXITCODE
+            return $exitCode -eq 0
+        } finally {
+            $ErrorActionPreference = $oldPreference
+        }
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($Override)) {
         if (-not (Test-Path -LiteralPath $Override)) {
             throw ("Python not found: " + $Override)
@@ -59,11 +80,16 @@ function Resolve-Python {
         "$env:ProgramFiles\Python"
         "$env:ProgramFiles(x86)\Python"
         "$env:USERPROFILE\AppData\Local\Programs\Python"
+        "D:\Python"
     )
     $found = @()
 
     foreach ($root in $searchRoots) {
         if (-not (Test-Path -LiteralPath $root)) { continue }
+        $rootExe = Join-Path $root "python.exe"
+        if ((Test-Path -LiteralPath $rootExe) -and -not ($found -contains $rootExe)) {
+            $found += $rootExe
+        }
         Get-ChildItem -LiteralPath $root -Directory -ErrorAction SilentlyContinue | ForEach-Object {
             $exe = Join-Path $_.FullName "python.exe"
             if (Test-Path -LiteralPath $exe) {
@@ -72,15 +98,28 @@ function Resolve-Python {
         }
     }
 
+    # Include PATH python before py launcher so project-ready installs outside
+    # the common roots (for example D:\Python) are preferred over stale userspace
+    # installs that lack dependencies.
+    $pythonCmd = (Get-Command "python" -ErrorAction SilentlyContinue)
+    if ($pythonCmd) {
+        $src = $pythonCmd.Source
+        $parentDir = Split-Path -Parent $src
+        if (-not ($parentDir -like "*WindowsApps*") -and
+            -not ($found -contains $src)) {
+            $found += $src
+        }
+    }
+
     # Verify each found python.exe and check it has requests
     foreach ($exe in $found) {
         # Verify python runs at all
-        & $exe -c "pass" 2>$null | Out-Null
-        if ($LASTEXITCODE -ne 0) { continue }
+        if (-not (Test-PythonCommand -Exe $exe -CommandArgs @("-c", "pass"))) {
+            continue
+        }
 
         # Check requests library (our main dependency)
-        & $exe -c "import requests" 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        if (Test-PythonCommand -Exe $exe -CommandArgs @("-c", "import requests")) {
             return @{ Exe = $exe; Args = @() }
         }
     }
@@ -89,20 +128,19 @@ function Resolve-Python {
     # a better error message than "Python not found")
     $pyLauncher = (Get-Command "py" -ErrorAction SilentlyContinue)
     if ($pyLauncher) {
-        & $pyLauncher.Source -3 -c "pass" 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) {
+        if ((Test-PythonCommand -Exe $pyLauncher.Source -CommandArgs @("-3", "-c", "pass")) -and
+            (Test-PythonCommand -Exe $pyLauncher.Source -CommandArgs @("-3", "-c", "import requests"))) {
             return @{ Exe = $pyLauncher.Source; Args = @("-3") }
         }
     }
 
     # Last resort: try Get-Command python but skip WindowsApps stubs
-    $pythonCmd = (Get-Command "python" -ErrorAction SilentlyContinue)
     if ($pythonCmd) {
         $src = $pythonCmd.Source
         $parentDir = Split-Path -Parent $src
         if (-not ($parentDir -like "*WindowsApps*")) {
-            & $src -c "pass" 2>$null | Out-Null
-            if ($LASTEXITCODE -eq 0) {
+            if ((Test-PythonCommand -Exe $src -CommandArgs @("-c", "pass")) -and
+                (Test-PythonCommand -Exe $src -CommandArgs @("-c", "import requests"))) {
                 return @{ Exe = $src; Args = @() }
             }
         }
@@ -121,7 +159,13 @@ if ($py -is [string]) {
 }
 
 # 3. Check requests library (double-check; Resolve-Python already verified this)
-$reqCheck = & $pyExe @pyArgs -c "import requests; print(requests.__version__)" 2>&1
+$oldPreference = $ErrorActionPreference
+try {
+    $ErrorActionPreference = "Continue"
+    $reqCheck = & $pyExe @pyArgs -c "import requests; print(requests.__version__)" 2>&1
+} finally {
+    $ErrorActionPreference = $oldPreference
+}
 if ($LASTEXITCODE -ne 0) {
     Write-Host "ERROR: requests library not installed." -ForegroundColor Red
     Write-Host ("Run: " + $pyExe + " -m pip install requests")
@@ -161,6 +205,11 @@ Write-Host ("  workspace : {0}" -f $TargetDir)
 Write-Host ("  scriptDir : {0}" -f $ScriptDir)
 Write-Host ("  python    : {0}" -f $pyExe)
 Write-Host ""
+
+if ($env:MYGIT_FORCE_AI -ne "1" -and [string]::IsNullOrWhiteSpace($env:MYGIT_NO_AI)) {
+    $env:MYGIT_NO_AI = "1"
+    Write-Host "AI summary disabled by default; using rule-based commit message. Set MYGIT_FORCE_AI=1 to enable AI." -ForegroundColor Yellow
+}
 
 & $pyExe @pyArgs $pyFile $TargetDir $ScriptDir
 exit $LASTEXITCODE

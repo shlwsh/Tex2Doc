@@ -6,6 +6,7 @@ use clap::Args;
 
 // P4.2: Standardized exit codes for CLI commands.
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum CliExitCode {
     Success = 0,
     EInputInvalid = 1,
@@ -23,17 +24,12 @@ impl CliExitCode {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub enum QualityLevel {
     Preview,
+    #[default]
     Standard,
     Strict,
-}
-
-impl Default for QualityLevel {
-    fn default() -> Self {
-        Self::Standard
-    }
 }
 
 impl std::str::FromStr for QualityLevel {

@@ -7,8 +7,12 @@ import 'app_tokens.dart';
 
 class AuthWindow extends StatefulWidget {
   final String apiBaseUrl;
-  final void Function(String apiBaseUrl, String accessToken, UserProfile profile)
-      onSignedIn;
+  final void Function(
+    String apiBaseUrl,
+    String accessToken,
+    UserProfile profile,
+  )
+  onSignedIn;
 
   const AuthWindow({
     super.key,
@@ -36,6 +40,9 @@ class _AuthWindowState extends State<AuthWindow>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     _baseUrlController.text = widget.apiBaseUrl;
+    _emailController.text = _defaultRegisterEmail();
+    _passwordController.text = '123456';
+    _confirmPasswordController.text = '123456';
   }
 
   @override
@@ -95,13 +102,29 @@ class _AuthWindowState extends State<AuthWindow>
       return;
     }
     await _run((client) async {
-      final auth = await client.register(
-        email: _emailController.text.trim(),
-        password: password,
-      );
+      final email = _emailController.text.trim();
+      final AuthResponse auth;
+      try {
+        auth = await client.register(email: email, password: password);
+      } on CommercialApiException catch (error) {
+        if (error.statusCode == 409) {
+          if (mounted) {
+            _tabController.animateTo(0);
+          }
+          throw Exception(
+            'Account already exists. Please sign in or use another email.',
+          );
+        }
+        rethrow;
+      }
       if (!mounted) return;
       widget.onSignedIn(_baseUrlController.text, auth.accessToken, auth.user);
     });
+  }
+
+  String _defaultRegisterEmail() {
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    return 'demo+$timestamp@example.com';
   }
 
   @override
@@ -126,8 +149,7 @@ class _AuthWindowState extends State<AuthWindow>
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       ClipRRect(
-                        borderRadius:
-                            BorderRadius.circular(AppRadius.sm),
+                        borderRadius: BorderRadius.circular(AppRadius.sm),
                         child: Image.asset(
                           'assets/app_icon.jpg',
                           width: 48,

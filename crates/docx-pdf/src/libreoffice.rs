@@ -21,6 +21,7 @@ use crate::error::PdfError;
 pub struct LibreOfficeBackend {
     pub soffice: PathBuf,
     /// `--version` 探测超时（默认 10s）。
+    #[allow(dead_code)]
     pub spawn_timeout: Duration,
 }
 
@@ -179,7 +180,7 @@ impl DocxToPdfBackend for LibreOfficeBackend {
             })
             .await
             .map_err(|e| anyhow::anyhow!("spawn_blocking join 失败：{e}"))?
-            .with_context(|| format!("启动 soffice 失败"))?
+            .with_context(|| "启动 soffice 失败".to_string())?
         };
         #[cfg(not(windows))]
         let output = tokio::task::spawn_blocking(move || {
@@ -192,7 +193,7 @@ impl DocxToPdfBackend for LibreOfficeBackend {
         })
         .await
         .map_err(|e| anyhow::anyhow!("spawn_blocking join 失败：{e}"))?
-        .with_context(|| format!("启动 soffice 失败"))?;
+        .with_context(|| "启动 soffice 失败".to_string())?;
 
         if !output.status.success() {
             return Err(PdfError::LibreOfficeFailed {

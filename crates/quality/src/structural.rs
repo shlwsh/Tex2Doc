@@ -93,7 +93,7 @@ fn quick_count(reader: &mut Reader<&[u8]>, local_name: &[u8], nsm: &[(&[u8], &[u
     loop {
         match reader.read_event_into(&mut buf) {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                if local_eq(&e.name().as_ref(), local_name, nsm) {
+                if local_eq(e.name().as_ref(), local_name, nsm) {
                     count += 1;
                 }
             }

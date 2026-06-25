@@ -338,7 +338,7 @@ fn run_verify(args: semantic_cmd::SemanticVerifyArgs) -> Result<()> {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 let name = e.name();
                 let raw = std::str::from_utf8(name.as_ref()).unwrap_or("");
-                let local = raw.split(':').last().unwrap_or(raw);
+                let local = raw.split(':').next_back().unwrap_or(raw);
                 match local {
                     "tbl" => table_count += 1,
                     "drawing" | "pict" => image_count += 1,

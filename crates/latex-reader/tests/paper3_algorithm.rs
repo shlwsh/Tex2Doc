@@ -2,13 +2,8 @@
 
 use std::path::Path;
 
-use doc_latex_reader::algorithm::parse_algorithm_rows;
 use doc_semantic_ast::Block;
 use doc_utils::VirtualFs;
-
-fn read_file(p: &Path) -> String {
-    std::fs::read_to_string(p).unwrap_or_else(|_| panic!("read {}", p.display()))
-}
 
 #[test]
 fn paper3_algorithms() {

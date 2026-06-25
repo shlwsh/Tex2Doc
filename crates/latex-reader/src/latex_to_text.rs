@@ -200,15 +200,13 @@ fn bib_body_to_text(body: &str) -> String {
     while i < body.len() {
         let c = body[i..].chars().next().unwrap();
         if c == '{' {
-            if depth == 0 {
-                if current_key.is_none() {
-                    if let Some(eq) = body[current_value_start..i].find('=') {
-                        let k = body[current_value_start..current_value_start + eq]
-                            .trim()
-                            .to_string();
-                        if !k.is_empty() {
-                            current_key = Some(k);
-                        }
+            if depth == 0 && current_key.is_none() {
+                if let Some(eq) = body[current_value_start..i].find('=') {
+                    let k = body[current_value_start..current_value_start + eq]
+                        .trim()
+                        .to_string();
+                    if !k.is_empty() {
+                        current_key = Some(k);
                     }
                 }
             }
@@ -285,7 +283,7 @@ fn bib_body_to_text(body: &str) -> String {
     let pages = by_key.get("pages").cloned().unwrap_or_default();
 
     let author_str = bib_author_to_text(&author);
-    let title_clean = title.replace('{', "").replace('}', "");
+    let title_clean = title.replace(['{', '}'], "");
     let title_clean = title_clean
         .replace("``", "\u{201C}")
         .replace("''", "\u{201D}");
@@ -299,7 +297,7 @@ fn bib_body_to_text(body: &str) -> String {
     }
     let mut venue = String::new();
     if !journal.is_empty() {
-        venue.push_str(&journal.replace('{', "").replace('}', ""));
+        venue.push_str(&journal.replace(['{', '}'], ""));
     }
     if !volume.is_empty() {
         if !venue.is_empty() {
@@ -330,7 +328,7 @@ fn bib_body_to_text(body: &str) -> String {
 /// 转成英文引用格式："Last, First, Last2, First2, ..."。
 fn bib_author_to_text(s: &str) -> String {
     s.split(" and ")
-        .map(|a| a.trim().replace('{', "").replace('}', ""))
+        .map(|a| a.trim().replace(['{', '}'], ""))
         .filter(|a| !a.is_empty())
         .collect::<Vec<_>>()
         .join(", ")
@@ -382,7 +380,7 @@ fn replace_named_group(text: &str, cmd: &str) -> String {
     let bytes = text.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        if i + token.len() <= bytes.len() && &text[i..i + token.len()] == token {
+        if i + token.len() <= bytes.len() && text[i..i + token.len()] == token {
             // {…} 跟随
             let mut p = i + token.len();
             while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
@@ -563,9 +561,11 @@ pub fn extract_front_matter(
     expanded_main: &str,
     macros: &HashMap<String, String>,
 ) -> FrontMatter {
-    let mut fm = FrontMatter::default();
-    fm.title_zh = command_arg_pure(main_tex, "rjtitle").unwrap_or_default();
-    fm.authors_zh = command_arg_pure(main_tex, "rjauthor").unwrap_or_default();
+    let mut fm = FrontMatter {
+        title_zh: command_arg_pure(main_tex, "rjtitle").unwrap_or_default(),
+        authors_zh: command_arg_pure(main_tex, "rjauthor").unwrap_or_default(),
+        ..Default::default()
+    };
     let infor = command_arg_pure(main_tex, "rjinfor").unwrap_or_default();
     // V2：latex_to_text 把 `\\` 替换为空格，所以按 "通讯" 关键字分两行
     // 兼容两种格式：`\\` 分行 / 原始换行 / "通讯作者" 作为行 2 起点
@@ -831,7 +831,7 @@ fn extract_english_front_matter(text: &str) -> (String, String, String) {
 
 /// 英文作者行：保留逗号，仅将 `~` 转为空格（不走完整 latex_to_text）。
 fn normalize_author_en(s: &str) -> String {
-    let s = s.replace('~', " ").replace('\n', " ");
+    let s = s.replace(['~', '\n'], " ");
     crate::normalize::collapse_whitespace_pub(s.trim())
 }
 
@@ -924,8 +924,7 @@ fn skip_list_param_lines(body: &str) -> &str {
         }
         let line = &body[i..eol];
         let trimmed = line.trim_start();
-        if trimmed.starts_with("\\item") {
-            let after = &trimmed[5..];
+        if let Some(after) = trimmed.strip_prefix("\\item") {
             if after.is_empty()
                 || after.starts_with(' ')
                 || after.starts_with('\t')
@@ -951,7 +950,7 @@ fn clean_bio_item(s: &str) -> String {
     let mut text =
         crate::normalize::latex_to_text(&item_tex, &empty_cite, &empty_label).join_plain();
 
-    text = text.replace('{', "").replace('}', "");
+    text = text.replace(['{', '}'], "");
     crate::normalize::collapse_whitespace_pub(&text)
         .trim()
         .to_string()

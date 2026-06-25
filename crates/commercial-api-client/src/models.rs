@@ -117,7 +117,9 @@ pub struct UsageSummary {
     pub entitlement_source_order_id: Option<String>,
     pub storage_bytes_used: u64,
     pub storage_bytes_limit: u64,
+    #[serde(default)]
     pub period_start: String,
+    #[serde(default)]
     pub period_end: String,
 }
 
@@ -244,6 +246,8 @@ pub struct ConversionJob {
     pub report_ready: bool,
     pub error_code: Option<String>,
     pub error: Option<String>,
+    #[serde(default, alias = "storage")]
+    pub storage_info: Option<ConversionStorageInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -271,4 +275,158 @@ pub struct ReleaseManifest {
     pub sha256: String,
     pub signature: String,
     pub release_notes: String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Feedback module models
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackThread {
+    pub thread_id: String,
+    pub user_id: Option<String>,
+    pub conversion_job_id: Option<String>,
+    pub title: String,
+    pub feedback_type: String,
+    pub status: String,
+    pub priority: String,
+    pub admin_assignee: Option<String>,
+    pub message_count: Option<u32>,
+    pub latest_message_at: Option<String>,
+    pub created_at: String,
+    pub updated_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackMessage {
+    pub message_id: String,
+    pub thread_id: String,
+    pub parent_message_id: Option<String>,
+    pub sender_user_id: Option<String>,
+    pub sender_type: String,
+    pub content: String,
+    pub attachments: Vec<FeedbackAttachment>,
+    pub is_internal: bool,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeedbackAttachment {
+    pub filename: String,
+    pub url: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateFeedbackRequest {
+    pub title: String,
+    pub feedback_type: String,
+    pub content: String,
+    pub conversion_job_id: Option<String>,
+    pub priority: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CreateFeedbackResponse {
+    pub thread_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub message_id: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct AddMessageRequest {
+    pub content: String,
+    pub parent_message_id: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct FeedbackThreadDetail {
+    pub thread: FeedbackThread,
+    pub messages: Vec<FeedbackMessage>,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Session file storage models
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ConversionStorageInfo {
+    pub path: Option<String>,
+    #[serde(default)]
+    pub source_zip: Option<FileMeta>,
+    #[serde(default)]
+    pub source_zip_key: Option<String>,
+    #[serde(default)]
+    pub zip_bytes: Option<u64>,
+    #[serde(default)]
+    pub result_docx: Option<FileMeta>,
+    #[serde(default)]
+    pub result_docx_key: Option<String>,
+    #[serde(default)]
+    pub docx_bytes: Option<u64>,
+    #[serde(default)]
+    pub conversion_log: Option<FileMeta>,
+    #[serde(default, alias = "result_log_key")]
+    pub conversion_log_key: Option<String>,
+    #[serde(default)]
+    pub log_bytes: Option<u64>,
+}
+
+impl ConversionStorageInfo {
+    #[inline]
+    #[allow(dead_code)]
+    pub fn has_docx(&self) -> bool {
+        self.result_docx.is_some() || self.result_docx_key.is_some()
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn has_zip(&self) -> bool {
+        self.source_zip.is_some() || self.source_zip_key.is_some()
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn has_log(&self) -> bool {
+        self.conversion_log.is_some() || self.conversion_log_key.is_some()
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn docx_size(&self) -> Option<u64> {
+        self.result_docx
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.docx_bytes)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn zip_size(&self) -> Option<u64> {
+        self.source_zip
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.zip_bytes)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn log_size(&self) -> Option<u64> {
+        self.conversion_log
+            .as_ref()
+            .and_then(|d| d.bytes)
+            .or(self.log_bytes)
+    }
+
+    #[inline]
+    #[allow(dead_code)]
+    pub fn has_any(&self) -> bool {
+        self.has_zip() || self.has_docx() || self.has_log()
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FileMeta {
+    pub key: String,
+    pub bytes: Option<u64>,
 }

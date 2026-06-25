@@ -63,12 +63,10 @@ pub fn read_pdf_meta(pdf: &std::path::Path) -> Result<PdfMetaSnapshot, QualityEr
     let doc = lopdf::Document::load(pdf)
         .map_err(|e| QualityError::PdfMeta(format!("lopdf load 失败：{e}")))?;
     let page_count = doc.get_pages().len() as u32;
-    let file_size = std::fs::metadata(pdf)
-        .map_err(|e| QualityError::Io(e))?
-        .len();
+    let file_size = std::fs::metadata(pdf).map_err(QualityError::Io)?.len();
     let mut fonts: std::collections::BTreeSet<String> = Default::default();
     let mut tounicode = false;
-    for (_id, obj) in &doc.objects {
+    for obj in doc.objects.values() {
         if let Ok(dict) = obj.as_dict() {
             if let Ok(name) = dict.get(b"BaseFont") {
                 if let Ok(name) = name.as_name() {

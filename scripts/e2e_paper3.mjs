@@ -11,7 +11,7 @@
  *   6) 输出 preview 截图
  *
  * 假设：
- *   - http://127.0.0.1:4173/ 已 serve flutter_app/build/web
+ *   - http://127.0.0.1:2627/ 已 serve flutter_app/build/web
  *   - examples/paper3/upload.zip 存在
  *   - Playwright Chromium 已下载
  *
@@ -27,7 +27,7 @@ import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
-const BASE_URL = process.env.DOC_ENGINE_URL ?? 'http://127.0.0.1:4173/';
+const BASE_URL = process.env.DOC_ENGINE_URL ?? 'http://127.0.0.1:2627/';
 const ZIP_PATH = join(ROOT, 'examples', 'paper3', 'upload.zip');
 const OUT_DIR = join(ROOT, 'examples', 'paper3', 'output');
 const FLUTTER_PNG = join(OUT_DIR, 'flutter-app.png');

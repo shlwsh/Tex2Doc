@@ -120,15 +120,15 @@ pub fn compute_exit_code(layers: &[LayerResult]) -> i32 {
     let structural_fail = layers
         .iter()
         .find(|l| l.layer == Layer::Structural)
-        .map_or(false, |l| !l.passed);
+        .is_some_and(|l| !l.passed);
     let textual_fail = layers
         .iter()
         .find(|l| l.layer == Layer::Textual)
-        .map_or(false, |l| !l.passed);
+        .is_some_and(|l| !l.passed);
     let visual_fail = layers
         .iter()
         .find(|l| l.layer == Layer::Visual)
-        .map_or(false, |l| !l.passed);
+        .is_some_and(|l| !l.passed);
     if structural_fail || textual_fail {
         1
     } else if visual_fail {

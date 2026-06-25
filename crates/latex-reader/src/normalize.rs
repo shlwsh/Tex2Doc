@@ -393,7 +393,7 @@ pub fn wrap_styled_command(text: &str, command: &str, sentinel: char, style: cha
         }
         if i + token.len() <= bytes.len()
             && text.is_char_boundary(i + token.len())
-            && &text[i..i + token.len()] == token
+            && text[i..i + token.len()] == token
         {
             let mut p = i + token.len();
             while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
@@ -437,20 +437,21 @@ pub fn replace_command_arg<F: Fn(&str) -> String>(text: &str, command: &str, f: 
             i += 1;
             continue;
         }
-        if i + token.len() <= bytes.len() && text.is_char_boundary(i + token.len()) {
-            if &text[i..i + token.len()] == token {
-                // 检查命令名后是空白 + `{`
-                let mut p = i + token.len();
-                while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
-                    p += 1;
-                }
-                if p < bytes.len() && bytes[p] == b'{' {
-                    if let Some(end) = find_matching_brace(text, p) {
-                        let inner = &text[p + 1..end];
-                        out.push_str(&f(inner));
-                        i = end + 1;
-                        continue;
-                    }
+        if i + token.len() <= bytes.len()
+            && text.is_char_boundary(i + token.len())
+            && text[i..i + token.len()] == token
+        {
+            // 检查命令名后是空白 + `{`
+            let mut p = i + token.len();
+            while p < bytes.len() && (bytes[p] == b' ' || bytes[p] == b'\t') {
+                p += 1;
+            }
+            if p < bytes.len() && bytes[p] == b'{' {
+                if let Some(end) = find_matching_brace(text, p) {
+                    let inner = &text[p + 1..end];
+                    out.push_str(&f(inner));
+                    i = end + 1;
+                    continue;
                 }
             }
         }
@@ -879,17 +880,18 @@ fn strip_command(text: &str, command: &str) -> String {
             i += 1;
             continue;
         }
-        if i + token.len() <= bytes.len() && text.is_char_boundary(i + token.len()) {
-            if &text[i..i + token.len()] == token {
-                let next = if i + token.len() < bytes.len() {
-                    bytes[i + token.len()]
-                } else {
-                    b' '
-                };
-                if !next.is_ascii_alphabetic() && next != b'@' {
-                    i += token.len();
-                    continue;
-                }
+        if i + token.len() <= bytes.len()
+            && text.is_char_boundary(i + token.len())
+            && text[i..i + token.len()] == token
+        {
+            let next = if i + token.len() < bytes.len() {
+                bytes[i + token.len()]
+            } else {
+                b' '
+            };
+            if !next.is_ascii_alphabetic() && next != b'@' {
+                i += token.len();
+                continue;
             }
         }
         if let Some(ch) = text[i..].chars().next() {
@@ -1135,7 +1137,7 @@ pub fn split_runs_with_sup_sub(
                         // v13.2.7a: 中文标点（`。！？；：`等）和非 ASCII 也视为安全——
                         // 中文学术段落的 `\cite` 输出 `[N]` 后几乎总是紧跟 `。` 或汉字
                         // （如 "重要[1-6]。" 或 "研究[7]。"）。
-                        let followed_by_safe = text[end + 1..].chars().next().map_or(true, |c| {
+                        let followed_by_safe = text[end + 1..].chars().next().is_none_or(|c| {
                             c.is_whitespace()
                                 || matches!(c, ',' | '.' | ';' | ':' | ')' | ']' | '}' | '(')
                                 || !c.is_ascii()
@@ -1404,7 +1406,7 @@ mod tests {
     }
 
     #[test]
-    fn clean_math_inline_trend_Freq() {
+    fn clean_math_inline_trend_freq() {
         // v13.2 F12: 完整公式 sigma\bigl((F_t-F_{t-1})/.../bigr)
         // 与 sh oracle `sigma bigl((F_t-F_{t-1})/max(F_{t-1},varepsilon)bigr)` 对齐
         let input = r"\sigma\bigl((F_t-F_{t-1})/max(F_{t-1},\varepsilon)\bigr)";

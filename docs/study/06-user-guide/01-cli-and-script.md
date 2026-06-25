@@ -168,7 +168,7 @@ node scripts/e2e_paper3.mjs
 
 行为：
 1. 启 Playwright Chromium。
-2. 访问 `http://127.0.0.1:4173/`。
+2. 访问 `http://127.0.0.1:2627/`。
 3. 等 Flutter 容器挂载 + 2s 渲染 → 截图 `flutter-app.png`。
 4. 等 `window.docEngine` 就绪 → 读 `version()`。
 5. 上传 `examples/paper3/upload.zip` → 调 `window.docEngine.convert_zip_to_docx`。
@@ -225,20 +225,20 @@ dart run bin/native_smoke.dart
 ### 8.1 启动
 
 ```bash
-DOC_SERVER_ADDR=0.0.0.0:8080 cargo run --release -p doc-server
+DOC_SERVER_ADDR=0.0.0.0:2624 cargo run --release -p doc-server
 ```
 
 ### 8.2 健康检查
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/health
+curl http://127.0.0.1:2624/api/v1/health
 # {"status":"ok"}
 ```
 
 ### 8.3 转换
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/convert \
+curl -X POST http://127.0.0.1:2624/api/v1/convert \
   -F "file=@examples/paper3/upload.zip" \
   -F "main_tex=main-jos.tex" \
   -o out.docx
@@ -321,7 +321,7 @@ pub struct ConvertResult {
 | `scripts/build_paper3_compiler_engine_docx.sh` | 用 `doc-compiler-engine` 直接把 paper3 转为 DOCX |
 | `scripts/build_paper3_dual_docx.sh` | 生成 sh/rust 双版本 DOCX，并在可用时生成 pandoc 对照 |
 | `scripts/build_paper3_pandoc_docx.sh` | 用 pandoc 生成 paper3 DOCX 对照基线 |
-| `scripts/serve_flutter_web.mjs` | 静态服务器（端口 4173） |
+| `scripts/serve_flutter_web.mjs` | 静态服务器（端口 2627） |
 | `scripts/verify_install.mjs` | 环境自检 |
 | `scripts/verify_paper3.mjs` | 端到端验证（Playwright + 报告） |
 | `scripts/e2e_paper3.mjs` | Playwright 验证 Flutter Web |

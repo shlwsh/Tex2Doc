@@ -10,8 +10,17 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
-import 'workspace_app.dart';
+import 'admin/admin_app.dart';
+import 'product/product_home_app.dart';
+import 'user/user_app.dart';
 
 void main() {
-  runApp(DocEngineApp(isWeb: kIsWeb));
+  final path = Uri.base.path;
+  if (kIsWeb && path.startsWith('/admin')) {
+    runApp(const AdminApp(isWeb: true));
+  } else if (!kIsWeb || path.startsWith('/app')) {
+    runApp(UserApp(isWeb: kIsWeb));
+  } else {
+    runApp(const ProductHomeApp());
+  }
 }

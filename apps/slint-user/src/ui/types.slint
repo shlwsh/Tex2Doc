@@ -1,0 +1,62 @@
+// Phase D: shared structured types used by pages and main window.
+
+export struct PlanEntry {
+    id: string,
+    name: string,
+    price: string,
+    quota: int,
+    features: string,
+}
+
+export struct JobRow {
+    id: string,
+    kind: string,
+    input: string,
+    output: string,
+    status: string,
+    opened-at: string,
+    error: string,
+    html-report: string,
+}
+
+export struct RechargeRow {
+    id: string,
+    kind: string,
+    package: string,
+    quantity: string,
+    status: string,
+    provider: string,
+    created-at: string,
+}
+
+export struct CloudConversionRow {
+    id: string,
+    main-tex: string,
+    profile: string,
+    status: string,
+    updated-at: string,
+    error: string,
+    has-zip: bool,
+    has-docx: bool,
+    has-log: bool,
+    docx-size: string,
+    zip-size: string,
+    log-size: string,
+}
+
+export struct FeedbackThreadRow {
+    thread-id: string,
+    title: string,
+    feedback-type: string,
+    status: string,
+    priority: string,
+    message-count: int,
+    latest-message-at: string,
+    created-at: string,
+    conversion-job-id: string,
+}
+
+export enum ConversionMode {
+    local,
+    cloud,
+}

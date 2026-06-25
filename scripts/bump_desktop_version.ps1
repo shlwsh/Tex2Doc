@@ -1,5 +1,5 @@
 param(
-    [string]$VersionPath = "crates/desktop-slint/VERSION",
+    [string]$VersionPath = "apps/slint-user/VERSION",
     [datetime]$DateOverride,
     [switch]$NoGitAdd
 )

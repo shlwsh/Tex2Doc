@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 
 use doc_compiler_engine::{CompileOptions, EngineProfile, SemanticBackendKind, SemanticTexEngine};
-use serde::Serialize;
 
 fn main() {
     if let Err(err) = run() {
@@ -170,7 +169,7 @@ fn parse_profile(raw: &str) -> Result<EngineProfile, String> {
     match raw {
         "generic" | "generic-article" => Ok(EngineProfile::GenericArticle),
         "chinese" | "chinese-academic" => Ok(EngineProfile::ChineseAcademic),
-        "jos" | "jos-paper" | "jos" => Ok(EngineProfile::JosPaper),
+        "jos" | "jos-paper" => Ok(EngineProfile::JosPaper),
         "medical" | "medical-journal" => Ok(EngineProfile::MedicalJournal),
         // New profile IDs — map to closest enum variant for verification purposes.
         // Full dynamic profile support (P1) will make these first-class.

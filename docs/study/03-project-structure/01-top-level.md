@@ -299,7 +299,7 @@ scripts/
 ├── install_commit_push_hook.ps1 # 启用 post-commit 钩子
 ├── link_cursor_skills.sh        # 链接 .cursor/skills 到 .agent/skills
 ├── mygit.ps1 / mygit.sh / mygit.py  # 通用 mygit 工具
-├── serve_flutter_web.mjs        # 静态服务器（端口 4173）
+├── serve_flutter_web.mjs        # 静态服务器（端口 2627）
 ├── test_proxy.py                # Python 测试代理
 ├── verify_install.mjs           # 环境自检
 ├── verify_paper3.mjs            # 旧版 verify（保留）

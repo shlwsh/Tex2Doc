@@ -11,7 +11,7 @@
 ```bash
 # 仓库根
 cargo run -p doc-server
-# 默认监听 0.0.0.0:8080
+# 默认监听 0.0.0.0:2624
 ```
 
 ### 1.2 生产模式（release）
@@ -52,7 +52,7 @@ RUST_LOG=info,doc_server=debug cargo run -p doc-server --release
 健康检查。
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/health
+curl http://127.0.0.1:2624/api/v1/health
 ```
 
 响应：
@@ -65,7 +65,7 @@ curl http://127.0.0.1:8080/api/v1/health
 版本信息。
 
 ```bash
-curl http://127.0.0.1:8080/api/v1/version
+curl http://127.0.0.1:2624/api/v1/version
 ```
 
 响应：
@@ -83,7 +83,7 @@ curl http://127.0.0.1:8080/api/v1/version
 #### curl
 
 ```bash
-curl -X POST http://127.0.0.1:8080/api/v1/convert \
+curl -X POST http://127.0.0.1:2624/api/v1/convert \
   -F "file=@examples/paper3/upload.zip" \
   -F "main_tex=main-jos.tex" \
   -o out.docx
@@ -103,7 +103,7 @@ const form = new FormData();
 form.append('file', fs.createReadStream('project.zip'));
 form.append('main_tex', 'main.tex');
 
-axios.post('http://127.0.0.1:8080/api/v1/convert', form, {
+axios.post('http://127.0.0.1:2624/api/v1/convert', form, {
   headers: form.getHeaders(),
   responseType: 'arraybuffer',
   maxContentLength: 50 * 1024 * 1024,
@@ -121,7 +121,7 @@ axios.post('http://127.0.0.1:8080/api/v1/convert', form, {
 import requests
 with open('project.zip', 'rb') as f:
     r = requests.post(
-        'http://127.0.0.1:8080/api/v1/convert',
+        'http://127.0.0.1:2624/api/v1/convert',
         files={'file': ('project.zip', f, 'application/zip')},
         data={'main_tex': 'main.tex'},
     )
@@ -154,7 +154,7 @@ func main() {
     writer.WriteField("main_tex", "main.tex")
     writer.Close()
 
-    r, _ := http.Post("http://127.0.0.1:8080/api/v1/convert", writer.FormDataContentType(), body)
+    r, _ := http.Post("http://127.0.0.1:2624/api/v1/convert", writer.FormDataContentType(), body)
     defer r.Body.Close()
     out, _ := os.Create("out.docx")
     io.Copy(out, r.Body)
@@ -229,7 +229,7 @@ async function convertInBrowser(zipFile: File, mainTex: string) {
     ./target/release/doc-server &
     SERVER_PID=$!
     sleep 2
-    curl -X POST http://127.0.0.1:8080/api/v1/convert \
+    curl -X POST http://127.0.0.1:2624/api/v1/convert \
       -F "file=@examples/paper3/upload.zip" \
       -F "main_tex=main-jos.tex" \
       -o out.docx
@@ -252,7 +252,7 @@ After=network.target
 [Service]
 Type=simple
 User=doc-engine
-Environment=DOC_SERVER_ADDR=0.0.0.0:8080
+Environment=DOC_SERVER_ADDR=0.0.0.0:2624
 Environment=RUST_LOG=info
 ExecStart=/opt/doc-engine/doc-server
 Restart=on-failure
@@ -280,21 +280,21 @@ RUN cargo build --release -p doc-server
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=builder /app/target/release/doc-server /usr/local/bin/doc-server
-ENV DOC_SERVER_ADDR=0.0.0.0:8080
-EXPOSE 8080
+ENV DOC_SERVER_ADDR=0.0.0.0:2624
+EXPOSE 2624
 CMD ["/usr/local/bin/doc-server"]
 ```
 
 ```bash
 docker build -t doc-engine/server:0.1.0 .
-docker run -d -p 8080:8080 --name doc-server doc-engine/server:0.1.0
+docker run -d -p 2624:2624 --name doc-server doc-engine/server:0.1.0
 ```
 
 ### 4.3 反向代理（Nginx）
 
 ```nginx
 upstream doc_server {
-    server 127.0.0.1:8080;
+    server 127.0.0.1:2624;
     keepalive 32;
 }
 
@@ -337,10 +337,10 @@ spec:
         - name: doc-server
           image: doc-engine/server:0.1.0
           ports:
-            - containerPort: 8080
+            - containerPort: 2624
           env:
             - name: DOC_SERVER_ADDR
-              value: "0.0.0.0:8080"
+              value: "0.0.0.0:2624"
             - name: RUST_LOG
               value: "info"
           resources:
@@ -359,7 +359,7 @@ spec:
   selector: { app: doc-server }
   ports:
     - port: 80
-      targetPort: 8080
+      targetPort: 2624
 ```
 
 ---
@@ -371,7 +371,7 @@ spec:
 ```bash
 # Kubernetes liveness probe
 livenessProbe:
-  httpGet: { path: /api/v1/health, port: 8080 }
+  httpGet: { path: /api/v1/health, port: 2624 }
   initialDelaySeconds: 5
   periodSeconds: 10
 ```
@@ -381,7 +381,7 @@ livenessProbe:
 `tracing-subscriber` 输出到 stderr：
 
 ```
-2026-06-14T12:00:00Z  INFO doc_server: doc-server listening on http://0.0.0.0:8080
+2026-06-14T12:00:00Z  INFO doc_server: doc-server listening on http://0.0.0.0:2624
 2026-06-14T12:00:01Z  INFO request{method=POST path=/api/v1/convert}: doc_server::routes: 200 OK
 ```
 

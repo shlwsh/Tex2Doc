@@ -197,105 +197,91 @@ fn profile_package_compat(
 
     match profile {
         // Generic / arXiv: no specific package warnings.
-        ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => {
-            return None
-        }
+        ProfileKind::Generic | ProfileKind::GenericArticle | ProfileKind::MedicalJournal => None,
 
-        ProfileKind::JosPaper => {
-            return Some(match package {
-                "IEEEtran" => (Supported, "IEEEtran is the primary class for JOS papers"),
-                "amsmath" => (Supported, "amsmath is fully supported for JOS papers"),
-                "graphicx" => (Supported, "graphicx is fully supported"),
-                "algorithm2e" => (
-                    Warning,
-                    "algorithm2e may lose fine styling in IEEE JOS format",
-                ),
-                "tabularx" => (Warning, "tabularx advanced layout may be simplified"),
-                _ => return None,
-            });
-        }
+        ProfileKind::JosPaper => Some(match package {
+            "IEEEtran" => (Supported, "IEEEtran is the primary class for JOS papers"),
+            "amsmath" => (Supported, "amsmath is fully supported for JOS papers"),
+            "graphicx" => (Supported, "graphicx is fully supported"),
+            "algorithm2e" => (
+                Warning,
+                "algorithm2e may lose fine styling in IEEE JOS format",
+            ),
+            "tabularx" => (Warning, "tabularx advanced layout may be simplified"),
+            _ => return None,
+        }),
 
-        ProfileKind::Tacl => {
-            return Some(match package {
-                "acl" => (Supported, "acl class is the primary class for TACL papers"),
-                "natbib" => (Supported, "natbib is fully supported for ACL/TACL"),
-                "biblatex" => (
-                    Warning,
-                    "biblatex is not recommended for TACL; use natbib instead",
-                ),
-                "tikz" => (
-                    Warning,
-                    "TikZ may need rasterization fallback in TACL papers",
-                ),
-                _ => return None,
-            });
-        }
+        ProfileKind::Tacl => Some(match package {
+            "acl" => (Supported, "acl class is the primary class for TACL papers"),
+            "natbib" => (Supported, "natbib is fully supported for ACL/TACL"),
+            "biblatex" => (
+                Warning,
+                "biblatex is not recommended for TACL; use natbib instead",
+            ),
+            "tikz" => (
+                Warning,
+                "TikZ may need rasterization fallback in TACL papers",
+            ),
+            _ => return None,
+        }),
 
-        ProfileKind::Cvpr => {
-            return Some(match package {
-                "IEEEtran" => (
-                    Supported,
-                    "IEEEtran[conference] is the primary class for CVPR",
-                ),
-                "amsmath" => (Supported, "amsmath is fully supported for CVPR papers"),
-                "algorithmicx" => (Warning, "algorithmicx may lose styling in CVPR format"),
-                "subcaption" => (Warning, "subcaption support is limited in CVPR papers"),
-                _ => return None,
-            });
-        }
+        ProfileKind::Cvpr => Some(match package {
+            "IEEEtran" => (
+                Supported,
+                "IEEEtran[conference] is the primary class for CVPR",
+            ),
+            "amsmath" => (Supported, "amsmath is fully supported for CVPR papers"),
+            "algorithmicx" => (Warning, "algorithmicx may lose styling in CVPR format"),
+            "subcaption" => (Warning, "subcaption support is limited in CVPR papers"),
+            _ => return None,
+        }),
 
-        ProfileKind::Nature => {
-            return Some(match package {
-                "nature" => (Supported, "nature class is fully supported"),
-                "natbib" => (Supported, "natbib is fully supported for Nature articles"),
-                "biblatex" => (
-                    Warning,
-                    "biblatex is not recommended for Nature; use natbib",
-                ),
-                "pstricks" => (Unsupported, "PSTricks is not supported for Nature articles"),
-                _ => return None,
-            });
-        }
+        ProfileKind::Nature => Some(match package {
+            "nature" => (Supported, "nature class is fully supported"),
+            "natbib" => (Supported, "natbib is fully supported for Nature articles"),
+            "biblatex" => (
+                Warning,
+                "biblatex is not recommended for Nature; use natbib",
+            ),
+            "pstricks" => (Unsupported, "PSTricks is not supported for Nature articles"),
+            _ => return None,
+        }),
 
-        ProfileKind::Springer => {
-            return Some(match package {
-                "springer" => (Supported, "springer class is fully supported"),
-                "svjour3" => (Supported, "svjour3 class is fully supported for Springer"),
-                "llncs" => (Supported, "LLNCS class is supported for Springer"),
-                "algorithm2e" => (Warning, "algorithm2e may conflict with Springer style"),
-                "longtable" => (Warning, "longtable is not recommended in Springer articles"),
-                "beamer" => (
-                    Unsupported,
-                    "beamer is not supported in Springer journal articles",
-                ),
-                _ => return None,
-            });
-        }
+        ProfileKind::Springer => Some(match package {
+            "springer" => (Supported, "springer class is fully supported"),
+            "svjour3" => (Supported, "svjour3 class is fully supported for Springer"),
+            "llncs" => (Supported, "LLNCS class is supported for Springer"),
+            "algorithm2e" => (Warning, "algorithm2e may conflict with Springer style"),
+            "longtable" => (Warning, "longtable is not recommended in Springer articles"),
+            "beamer" => (
+                Unsupported,
+                "beamer is not supported in Springer journal articles",
+            ),
+            _ => return None,
+        }),
 
-        ProfileKind::ChineseAcademic => {
-            return Some(match package {
-                "ctex" => (
-                    Supported,
-                    "CTeX suite is fully supported for Chinese academic",
-                ),
-                "xeCJK" => (Supported, "xeCJK is fully supported"),
-                "fontspec" => (Supported, "fontspec is fully supported"),
-                "gbt7714" => (
-                    Warning,
-                    "gbt7714 has partial compatibility; verify bibliography format",
-                ),
-                "biblatex" => (
-                    Warning,
-                    "biblatex has limited support for Chinese academic papers",
-                ),
-                "minted" => (
-                    Unsupported,
-                    "minted is not supported for Chinese academic papers",
-                ),
-                _ => return None,
-            });
-        }
-    };
+        ProfileKind::ChineseAcademic => Some(match package {
+            "ctex" => (
+                Supported,
+                "CTeX suite is fully supported for Chinese academic",
+            ),
+            "xeCJK" => (Supported, "xeCJK is fully supported"),
+            "fontspec" => (Supported, "fontspec is fully supported"),
+            "gbt7714" => (
+                Warning,
+                "gbt7714 has partial compatibility; verify bibliography format",
+            ),
+            "biblatex" => (
+                Warning,
+                "biblatex has limited support for Chinese academic papers",
+            ),
+            "minted" => (
+                Unsupported,
+                "minted is not supported for Chinese academic papers",
+            ),
+            _ => return None,
+        }),
+    }
 }
 
 fn apply_profile_package_checks(
@@ -421,7 +407,7 @@ fn analyze_compatibility_impl(
     report.packages = sorted_packages.clone();
 
     // Check document classes.
-    let classes_to_check: Vec<String> = report.document_classes.iter().cloned().collect();
+    let classes_to_check: Vec<String> = report.document_classes.to_vec();
     for class_str in classes_to_check {
         if matches!(class_str.as_str(), "beamer" | "standalone") {
             add_compatibility_issue(
@@ -587,16 +573,17 @@ fn count_custom_macro_definitions(source: &str) -> usize {
     let mut i = 0usize;
 
     while i < bytes.len().saturating_sub(3) {
-        if bytes[i] == b'\\' && bytes[i + 1] == b'd' && bytes[i + 2] == b'e' && bytes[i + 3] == b'f'
-        {
-            if !bytes[i + 4..]
+        if bytes[i] == b'\\'
+            && bytes[i + 1] == b'd'
+            && bytes[i + 2] == b'e'
+            && bytes[i + 3] == b'f'
+            && !bytes[i + 4..]
                 .first()
                 .is_some_and(|b| b.is_ascii_alphabetic())
-            {
-                count += 1;
-                i += 4;
-                continue;
-            }
+        {
+            count += 1;
+            i += 4;
+            continue;
         }
         if bytes[i] == b'\\'
             && bytes[i + 1] == b'c'
@@ -606,15 +593,13 @@ fn count_custom_macro_definitions(source: &str) -> usize {
             && bytes[i + 5] == b'a'
             && bytes[i + 6] == b'n'
             && bytes[i + 7] == b'd'
-        {
-            if !bytes[i + 8..]
+            && !bytes[i + 8..]
                 .first()
                 .is_some_and(|b| b.is_ascii_alphabetic())
-            {
-                count += 1;
-                i += 8;
-                continue;
-            }
+        {
+            count += 1;
+            i += 8;
+            continue;
         }
         if bytes[i] == b'\\'
             && bytes[i + 1] == b'n'
@@ -627,15 +612,13 @@ fn count_custom_macro_definitions(source: &str) -> usize {
             && bytes[i + 8] == b'a'
             && bytes[i + 9] == b'n'
             && bytes[i + 10] == b'd'
-        {
-            if !bytes[i + 11..]
+            && !bytes[i + 11..]
                 .first()
                 .is_some_and(|b| b.is_ascii_alphabetic())
-            {
-                count += 1;
-                i += 11;
-                continue;
-            }
+        {
+            count += 1;
+            i += 11;
+            continue;
         }
         i += 1;
     }

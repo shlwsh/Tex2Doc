@@ -1,6 +1,11 @@
+// ignore_for_file: use_null_aware_elements
+
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
+
+const defaultCommercialApiBaseUrl = 'http://127.0.0.1:2624/v1/';
+const legacyOnlineCommercialApiBaseUrl = 'https://api.tex2doc.cn/v1/';
 
 class CommercialApiException implements Exception {
   final int statusCode;
@@ -74,6 +79,29 @@ class CommercialApiClient {
     );
   }
 
+  Future<AdminProfile> adminMe(String accessToken) async {
+    final response = await _http.get(
+      _adminUri('me'),
+      headers: _headers(accessToken: accessToken),
+    );
+    return AdminProfile.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<AdminDashboardSummary> adminDashboard(String accessToken) async {
+    final response = await _http.get(
+      _adminUri('dashboard'),
+      headers: _headers(accessToken: accessToken),
+    );
+    return AdminDashboardSummary.fromJson(
+      _decode(response) as Map<String, dynamic>,
+    );
+  }
+
+  Future<Map<String, dynamic>> downloads() async {
+    return _decode(await _http.get(baseUri.resolve('downloads')))
+        as Map<String, dynamic>;
+  }
+
   Future<BillingSession> checkout({
     required String accessToken,
     required String planId,
@@ -123,6 +151,25 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Future<Map<String, dynamic>> createWaitlistLead({
+    required String email,
+    String? displayName,
+    String? company,
+    String? scenario,
+    String? source,
+  }) async {
+    return _postJson('waitlist', {
+      'email': email,
+      if (displayName != null && displayName.trim().isNotEmpty)
+        'display_name': displayName.trim(),
+      if (company != null && company.trim().isNotEmpty)
+        'company': company.trim(),
+      if (scenario != null && scenario.trim().isNotEmpty)
+        'scenario': scenario.trim(),
+      if (source != null && source.trim().isNotEmpty) 'source': source.trim(),
+    });
+  }
+
   Future<RedeemCodeOptions> redeemCodeOptions(String accessToken) async {
     return RedeemCodeOptions.fromJson(
       await _getJson('redeem-codes/options', accessToken: accessToken)
@@ -149,6 +196,72 @@ class CommercialApiClient {
     return (value as List<dynamic>)
         .map((item) => RedeemCodeRecord.fromJson(item as Map<String, dynamic>))
         .toList(growable: false);
+  }
+
+  Future<RedeemCodeBatch> createRedeemCodeBatch({
+    required String adminToken,
+    required String packageId,
+    required int quantity,
+    String? channel,
+    String? note,
+    String? expiresAt,
+  }) async {
+    final body = <String, dynamic>{
+      'package_id': packageId,
+      'quantity': quantity,
+      if (channel != null && channel.trim().isNotEmpty)
+        'channel': channel.trim(),
+      if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      if (expiresAt != null && expiresAt.trim().isNotEmpty)
+        'expires_at': expiresAt.trim(),
+    };
+    final response = await _http.post(
+      _adminUri('redeem-code-batches'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode(body),
+    );
+    return RedeemCodeBatch.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<List<RedeemCodeBatch>> redeemCodeBatches({
+    required String adminToken,
+  }) async {
+    final response = await _http.get(
+      _adminUri('redeem-code-batches'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => RedeemCodeBatch.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<RedeemCodeBatch> redeemCodeBatchDetail({
+    required String adminToken,
+    required String batchId,
+  }) async {
+    final response = await _http.get(
+      _adminUri('redeem-code-batches/$batchId'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return RedeemCodeBatch.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<List<int>> exportRedeemCodeBatch({
+    required String adminToken,
+    required String batchId,
+  }) async {
+    final response = await _http.get(
+      _adminUri('redeem-code-batches/$batchId/export.xlsx'),
+      headers: _headers(accessToken: adminToken),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw CommercialApiException(
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
+      );
+    }
+    return response.bodyBytes;
   }
 
   Future<UploadResponse> uploadProjectZip({
@@ -229,6 +342,284 @@ class CommercialApiClient {
     );
   }
 
+  // ─── Feedback ────────────────────────────────────────────────────────────
+
+  Future<List<FeedbackThread>> feedbackThreads(String accessToken) async {
+    final value = await _getJson('feedback/threads', accessToken: accessToken);
+    return (value as List<dynamic>)
+        .map((item) => FeedbackThread.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<List<FeedbackThread>> adminFeedbackThreads(String adminToken) async {
+    final response = await _http.get(
+      _adminUri('feedback/threads'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => FeedbackThread.fromJson(item as Map<String, dynamic>))
+        .toList(growable: false);
+  }
+
+  Future<FeedbackThread> adminUpdateFeedbackThread({
+    required String adminToken,
+    required String threadId,
+    String? status,
+    String? priority,
+  }) async {
+    final body = <String, dynamic>{
+      if (status != null) 'status': status,
+      if (priority != null) 'priority': priority,
+    };
+    final response = await _http.patch(
+      _adminUri('feedback/threads/$threadId'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode(body),
+    );
+    return FeedbackThread.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<FeedbackMessage> adminReplyFeedbackThread({
+    required String adminToken,
+    required String threadId,
+    required String content,
+    bool isInternal = false,
+  }) async {
+    final response = await _http.post(
+      _adminUri('feedback/threads/$threadId/messages'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({'content': content, 'is_internal': isInternal}),
+    );
+    return FeedbackMessage.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  Future<List<Map<String, dynamic>>> adminUsers(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('users'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminUsageLedger(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('usage-ledger'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminManualOrders(
+    String adminToken,
+  ) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('manual-orders'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> adminCreateManualOrder({
+    required String adminToken,
+    required String userId,
+    required String rechargeType,
+    required String packageId,
+    required int quantity,
+    required int amountCents,
+    String currency = 'CNY',
+    String? note,
+  }) async {
+    final response = await _http.post(
+      _adminUri('manual-orders'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        'user_id': userId,
+        'recharge_type': rechargeType,
+        'package_id': packageId,
+        'quantity': quantity,
+        'amount_cents': amountCents,
+        'currency': currency,
+        if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> adminWaitlist(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('waitlist'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> adminReleases(String adminToken) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('releases'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<Map<String, dynamic>> adminPublishRelease({
+    required String adminToken,
+    required String channel,
+    required String platform,
+    required String version,
+    required String downloadUrl,
+    required String sha256,
+    String arch = 'x64',
+    String? minAppVersion,
+    String? signature,
+    String? signatureAlgorithm,
+    int? fileSizeBytes,
+    String? releaseTitle,
+    bool isPrerelease = false,
+    Map<String, dynamic>? strategy,
+  }) async {
+    final response = await _http.post(
+      _adminUri('releases'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        'channel': channel,
+        'platform': platform,
+        'arch': arch,
+        'version': version,
+        'download_url': downloadUrl,
+        'sha256': sha256,
+        if (minAppVersion != null && minAppVersion.trim().isNotEmpty)
+          'min_app_version': minAppVersion.trim(),
+        if (signature != null && signature.trim().isNotEmpty)
+          'signature': signature.trim(),
+        if (signatureAlgorithm != null && signatureAlgorithm.trim().isNotEmpty)
+          'signature_algorithm': signatureAlgorithm.trim(),
+        if (fileSizeBytes != null) 'file_size_bytes': fileSizeBytes,
+        if (releaseTitle != null && releaseTitle.trim().isNotEmpty)
+          'release_title': releaseTitle.trim(),
+        'is_prerelease': isPrerelease,
+        if (strategy != null) 'strategy': strategy,
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<Map<String, dynamic>> adminRollbackRelease({
+    required String adminToken,
+    required String releaseId,
+    String? reason,
+  }) async {
+    final response = await _http.post(
+      _adminUri('releases/$releaseId/rollback'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      }),
+    );
+    return _decode(response) as Map<String, dynamic>;
+  }
+
+  Future<List<Map<String, dynamic>>> adminReleaseAudit(
+    String adminToken,
+  ) async {
+    return _decodeMapList(
+      await _http.get(
+        _adminUri('release-audit'),
+        headers: _headers(accessToken: adminToken),
+      ),
+    );
+  }
+
+  Future<FeedbackThreadDetail> feedbackThread(
+    String accessToken,
+    String threadId,
+  ) async {
+    return FeedbackThreadDetail.fromJson(
+      await _getJson('feedback/threads/$threadId', accessToken: accessToken)
+          as Map<String, dynamic>,
+    );
+  }
+
+  Future<CreateFeedbackResponse> createFeedbackThread({
+    required String accessToken,
+    required String title,
+    required String feedbackType,
+    required String content,
+    String? conversionJobId,
+    String? priority,
+  }) async {
+    final body = <String, dynamic>{
+      'title': title,
+      'feedback_type': feedbackType,
+      'content': content,
+      if (conversionJobId != null) 'conversion_job_id': conversionJobId,
+      if (priority != null) 'priority': priority,
+    };
+    return CreateFeedbackResponse.fromJson(
+      await _postJson('feedback/threads', body, accessToken: accessToken),
+    );
+  }
+
+  Future<FeedbackMessage> addFeedbackMessage({
+    required String accessToken,
+    required String threadId,
+    required String content,
+    String? parentMessageId,
+  }) async {
+    final body = <String, dynamic>{
+      'content': content,
+      if (parentMessageId != null) 'parent_message_id': parentMessageId,
+    };
+    return FeedbackMessage.fromJson(
+      await _postJson(
+        'feedback/threads/$threadId/messages',
+        body,
+        accessToken: accessToken,
+      ),
+    );
+  }
+
+  // ─── Session file downloads ──────────────────────────────────────────────
+
+  Future<List<int>> downloadConversionZip({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final response = await _http.get(
+      baseUri.resolve('conversions/$jobId/download/zip'),
+      headers: _headers(accessToken: accessToken),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw CommercialApiException(
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
+      );
+    }
+    return response.bodyBytes;
+  }
+
+  Future<List<int>> downloadConversionLog({
+    required String accessToken,
+    required String jobId,
+  }) async {
+    final response = await _http.get(
+      baseUri.resolve('conversions/$jobId/download/log'),
+      headers: _headers(accessToken: accessToken),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw CommercialApiException(
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
+      );
+    }
+    return response.bodyBytes;
+  }
+
   Future<dynamic> _getJson(String path, {String? accessToken}) async {
     final response = await _http.get(
       baseUri.resolve(path),
@@ -259,6 +650,11 @@ class CommercialApiClient {
     };
   }
 
+  Uri _adminUri(String path) {
+    final normalized = path.startsWith('/') ? path.substring(1) : path;
+    return baseUri.replace(path: '/admin/v1/$normalized', query: null);
+  }
+
   dynamic _decode(http.Response response) {
     final text = utf8.decode(response.bodyBytes);
     if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -270,10 +666,19 @@ class CommercialApiClient {
     return jsonDecode(text);
   }
 
+  List<Map<String, dynamic>> _decodeMapList(http.Response response) {
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList(growable: false);
+  }
+
   static Uri _normalizeBaseUrl(String value) {
-    final trimmed = value.trim().isEmpty
-        ? 'http://127.0.0.1:8080/v1/'
-        : value.trim();
+    final valueTrimmed = value.trim();
+    final trimmed =
+        valueTrimmed.isEmpty || valueTrimmed == legacyOnlineCommercialApiBaseUrl
+        ? defaultCommercialApiBaseUrl
+        : valueTrimmed;
     final withSlash = trimmed.endsWith('/') ? trimmed : '$trimmed/';
     return Uri.parse(withSlash);
   }
@@ -304,13 +709,18 @@ class UserProfile {
   final String email;
   final String? displayName;
   final String planId;
+  final String role;
 
   UserProfile({
     required this.id,
     required this.email,
     required this.displayName,
     required this.planId,
+    required this.role,
   });
+
+  bool get isAdminRole =>
+      role == 'admin' || role == 'operator' || role == 'support';
 
   factory UserProfile.fromJson(Map<String, dynamic> json) {
     return UserProfile(
@@ -318,6 +728,60 @@ class UserProfile {
       email: json['email'] as String,
       displayName: json['display_name'] as String?,
       planId: json['plan_id'] as String,
+      role: json['role'] as String? ?? 'user',
+    );
+  }
+}
+
+class AdminProfile {
+  final UserProfile user;
+  final List<String> permissions;
+
+  AdminProfile({required this.user, required this.permissions});
+
+  factory AdminProfile.fromJson(Map<String, dynamic> json) {
+    return AdminProfile(
+      user: UserProfile.fromJson(json['user'] as Map<String, dynamic>),
+      permissions: (json['permissions'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
+    );
+  }
+}
+
+class AdminDashboardSummary {
+  final int billingPlans;
+  final int redeemBatches;
+  final int feedbackThreads;
+  final int openFeedback;
+  final List<String> releaseChannels;
+  final List<String> modules;
+  final String generatedAt;
+
+  AdminDashboardSummary({
+    required this.billingPlans,
+    required this.redeemBatches,
+    required this.feedbackThreads,
+    required this.openFeedback,
+    required this.releaseChannels,
+    required this.modules,
+    required this.generatedAt,
+  });
+
+  factory AdminDashboardSummary.fromJson(Map<String, dynamic> json) {
+    final counts = json['counts'] as Map<String, dynamic>? ?? const {};
+    return AdminDashboardSummary(
+      billingPlans: (counts['billing_plans'] as num?)?.toInt() ?? 0,
+      redeemBatches: (counts['redeem_batches'] as num?)?.toInt() ?? 0,
+      feedbackThreads: (counts['feedback_threads'] as num?)?.toInt() ?? 0,
+      openFeedback: (counts['open_feedback'] as num?)?.toInt() ?? 0,
+      releaseChannels: (json['release_channels'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      modules: (json['modules'] as List<dynamic>? ?? const [])
+          .map((item) => item.toString())
+          .toList(growable: false),
+      generatedAt: json['generated_at']?.toString() ?? '',
     );
   }
 }
@@ -416,7 +880,7 @@ class RechargeOptions {
     final date = json['date'] as Map<String, dynamic>? ?? const {};
     return RechargeOptions(
       currency: json['currency'] as String? ?? 'CNY',
-      provider: json['provider'] as String? ?? 'mock-pay',
+      provider: json['provider'] as String? ?? 'manual-order',
       countPackages: ((count['packages'] as List<dynamic>?) ?? const [])
           .map((item) => RechargePackage.fromJson(item as Map<String, dynamic>))
           .toList(growable: false),
@@ -640,16 +1104,103 @@ class RedeemCodeRecord {
   String get label => '$codePreview: $packageName, $status';
 }
 
+class RedeemCodeBatch {
+  final String batchId;
+  final String batchNo;
+  final String packageId;
+  final String packageName;
+  final String rechargeType;
+  final int quantity;
+  final int generatedCount;
+  final int exportedCount;
+  final String status;
+  final String? channel;
+  final String? note;
+  final String? expiresAt;
+  final String createdAt;
+  final List<String> codes;
+
+  RedeemCodeBatch({
+    required this.batchId,
+    required this.batchNo,
+    required this.packageId,
+    required this.packageName,
+    required this.rechargeType,
+    required this.quantity,
+    required this.generatedCount,
+    required this.exportedCount,
+    required this.status,
+    required this.channel,
+    required this.note,
+    required this.expiresAt,
+    required this.createdAt,
+    required this.codes,
+  });
+
+  factory RedeemCodeBatch.fromJson(Map<String, dynamic> json) {
+    return RedeemCodeBatch(
+      batchId: json['batch_id'] as String,
+      batchNo: json['batch_no'] as String,
+      packageId: json['package_id'] as String,
+      packageName: json['package_name'] as String,
+      rechargeType: json['recharge_type'] as String,
+      quantity: json['quantity'] as int,
+      generatedCount: json['generated_count'] as int,
+      exportedCount: json['exported_count'] as int,
+      status: json['status'] as String,
+      channel: json['channel'] as String?,
+      note: json['note'] as String?,
+      expiresAt: json['expires_at'] as String?,
+      createdAt: json['created_at'] as String,
+      codes: ((json['codes'] as List<dynamic>?) ?? const <dynamic>[])
+          .map((item) => item.toString())
+          .toList(growable: false),
+    );
+  }
+
+  String get label => '$batchNo: $packageName x $generatedCount';
+}
+
 class BillingSession {
   final String url;
   final String expiresAt;
+  final String provider;
+  final String phase;
+  final String status;
+  final String? message;
+  final String? planId;
+  final String? userId;
+  final String? returnUrl;
+  final String? successUrl;
+  final String? cancelUrl;
 
-  BillingSession({required this.url, required this.expiresAt});
+  BillingSession({
+    required this.url,
+    required this.expiresAt,
+    required this.provider,
+    required this.phase,
+    required this.status,
+    this.message,
+    this.planId,
+    this.userId,
+    this.returnUrl,
+    this.successUrl,
+    this.cancelUrl,
+  });
 
   factory BillingSession.fromJson(Map<String, dynamic> json) {
     return BillingSession(
-      url: json['url'] as String,
-      expiresAt: json['expires_at'] as String,
+      url: json['url'] as String? ?? '',
+      expiresAt: json['expires_at'] as String? ?? '',
+      provider: json['provider'] as String? ?? 'manual-order',
+      phase: json['phase'] as String? ?? 'phase_a',
+      status: json['status'] as String? ?? 'pending_manual',
+      message: json['message'] as String?,
+      planId: json['plan_id'] as String?,
+      userId: json['user_id'] as String?,
+      returnUrl: json['return_url'] as String?,
+      successUrl: json['success_url'] as String?,
+      cancelUrl: json['cancel_url'] as String?,
     );
   }
 }
@@ -713,14 +1264,15 @@ class ConversionJob {
   final bool reportReady;
   final String? errorCode;
   final String? error;
+  final ConversionStorageInfo? storageInfo;
 
   ConversionJob({
     required this.jobId,
-    required this.uploadId,
-    required this.mainTex,
-    required this.profile,
-    required this.quality,
-    required this.engine,
+    this.uploadId,
+    this.mainTex,
+    this.profile,
+    this.quality,
+    this.engine,
     required this.status,
     required this.createdAt,
     required this.updatedAt,
@@ -728,6 +1280,7 @@ class ConversionJob {
     required this.reportReady,
     required this.errorCode,
     required this.error,
+    this.storageInfo,
   });
 
   bool get isTerminal =>
@@ -736,6 +1289,7 @@ class ConversionJob {
       status == ConversionStatus.expired;
 
   factory ConversionJob.fromJson(Map<String, dynamic> json) {
+    final storage = json['storage_info'] ?? json['storage'];
     return ConversionJob(
       jobId: json['job_id'] as String,
       uploadId: json['upload_id'] as String?,
@@ -750,6 +1304,9 @@ class ConversionJob {
       reportReady: json['report_ready'] as bool,
       errorCode: json['error_code'] as String?,
       error: json['error'] as String?,
+      storageInfo: storage is Map<String, dynamic>
+          ? ConversionStorageInfo.fromJson(storage)
+          : null,
     );
   }
 }
@@ -804,4 +1361,245 @@ class ConversionReport {
       message: json['message'] as String,
     );
   }
+}
+
+// ─── Feedback models ────────────────────────────────────────────────────────────
+
+class FeedbackThread {
+  final String threadId;
+  final String? conversionJobId;
+  final String title;
+  final String feedbackType;
+  final String status;
+  final String priority;
+  final int messageCount;
+  final String? latestMessageAt;
+  final String createdAt;
+  final String updatedAt;
+
+  FeedbackThread({
+    required this.threadId,
+    this.conversionJobId,
+    required this.title,
+    required this.feedbackType,
+    required this.status,
+    required this.priority,
+    required this.messageCount,
+    this.latestMessageAt,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory FeedbackThread.fromJson(Map<String, dynamic> json) {
+    return FeedbackThread(
+      threadId: json['thread_id'] as String,
+      conversionJobId: json['conversion_job_id'] as String?,
+      title: json['title'] as String,
+      feedbackType: json['feedback_type'] as String,
+      status: json['status'] as String,
+      priority: json['priority'] as String,
+      messageCount: (json['message_count'] as num?)?.toInt() ?? 0,
+      latestMessageAt: json['latest_message_at'] as String?,
+      createdAt: json['created_at'] as String,
+      updatedAt:
+          (json['updated_at'] as String?) ?? json['created_at'] as String,
+    );
+  }
+
+  String get statusLabel {
+    switch (status) {
+      case 'open':
+        return 'Open';
+      case 'in_progress':
+        return 'In Progress';
+      case 'resolved':
+        return 'Resolved';
+      case 'closed':
+        return 'Closed';
+      default:
+        return status;
+    }
+  }
+
+  String get typeLabel => feedbackType == 'issue' ? 'Issue' : 'Requirement';
+
+  String get priorityLabel {
+    switch (priority) {
+      case 'low':
+        return 'Low';
+      case 'high':
+        return 'High';
+      case 'urgent':
+        return 'Urgent';
+      case 'normal':
+        return 'Normal';
+      default:
+        return priority;
+    }
+  }
+}
+
+class FeedbackMessage {
+  final String messageId;
+  final String threadId;
+  final String? parentMessageId;
+  final String? senderUserId;
+  final String senderType;
+  final String content;
+  final bool isInternal;
+  final String createdAt;
+
+  FeedbackMessage({
+    required this.messageId,
+    required this.threadId,
+    this.parentMessageId,
+    this.senderUserId,
+    required this.senderType,
+    required this.content,
+    required this.isInternal,
+    required this.createdAt,
+  });
+
+  factory FeedbackMessage.fromJson(Map<String, dynamic> json) {
+    return FeedbackMessage(
+      messageId: json['message_id'] as String,
+      threadId: json['thread_id'] as String,
+      parentMessageId: json['parent_message_id'] as String?,
+      senderUserId: json['sender_user_id'] as String?,
+      senderType: json['sender_type'] as String,
+      content: json['content'] as String,
+      isInternal: json['is_internal'] as bool? ?? false,
+      createdAt: json['created_at'] as String,
+    );
+  }
+
+  String get senderLabel {
+    switch (senderType) {
+      case 'user':
+        return 'You';
+      case 'admin':
+        return 'Support';
+      case 'system':
+        return 'System';
+      default:
+        return senderType;
+    }
+  }
+
+  bool get isFromUser => senderType == 'user';
+  bool get isFromAdmin => senderType == 'admin';
+}
+
+class FeedbackThreadDetail {
+  final FeedbackThread thread;
+  final List<FeedbackMessage> messages;
+
+  FeedbackThreadDetail({required this.thread, required this.messages});
+
+  factory FeedbackThreadDetail.fromJson(Map<String, dynamic> json) {
+    return FeedbackThreadDetail(
+      thread: FeedbackThread.fromJson(json['thread'] as Map<String, dynamic>),
+      messages: ((json['messages'] as List<dynamic>?) ?? const <dynamic>[])
+          .map((item) => FeedbackMessage.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+    );
+  }
+}
+
+class CreateFeedbackResponse {
+  final String threadId;
+  final String status;
+  final String createdAt;
+  final String messageId;
+
+  CreateFeedbackResponse({
+    required this.threadId,
+    required this.status,
+    required this.createdAt,
+    required this.messageId,
+  });
+
+  factory CreateFeedbackResponse.fromJson(Map<String, dynamic> json) {
+    return CreateFeedbackResponse(
+      threadId: json['thread_id'] as String,
+      status: json['status'] as String,
+      createdAt: json['created_at'] as String,
+      messageId: json['message_id'] as String,
+    );
+  }
+}
+
+class FileMeta {
+  final String key;
+  final int? bytes;
+
+  FileMeta({required this.key, this.bytes});
+
+  factory FileMeta.fromJson(Map<String, dynamic> json) {
+    return FileMeta(
+      key: json['key'] as String,
+      bytes: (json['bytes'] as num?)?.toInt(),
+    );
+  }
+
+  factory FileMeta.fromKey(String? key, int? bytes) {
+    return FileMeta(key: key ?? '', bytes: bytes);
+  }
+
+  String get sizeLabel {
+    if (bytes == null) return '';
+    if (bytes! < 1024) return '$bytes B';
+    if (bytes! < 1024 * 1024) return '${(bytes! / 1024).toStringAsFixed(1)} KB';
+    return '${(bytes! / 1024 / 1024).toStringAsFixed(1)} MB';
+  }
+}
+
+class ConversionStorageInfo {
+  final String? path;
+  final FileMeta? sourceZip;
+  final FileMeta? resultDocx;
+  final FileMeta? conversionLog;
+
+  ConversionStorageInfo({
+    this.path,
+    this.sourceZip,
+    this.resultDocx,
+    this.conversionLog,
+  });
+
+  factory ConversionStorageInfo.fromJson(Map<String, dynamic> json) {
+    final sourceZipKey = json['source_zip_key'] as String?;
+    final resultDocxKey = json['result_docx_key'] as String?;
+    final conversionLogKey =
+        (json['conversion_log_key'] ?? json['result_log_key']) as String?;
+    return ConversionStorageInfo(
+      path: json['path'] as String?,
+      sourceZip: (json['source_zip'] as Map<String, dynamic>?) != null
+          ? FileMeta.fromJson(json['source_zip'] as Map<String, dynamic>)
+          : sourceZipKey != null
+          ? FileMeta.fromKey(sourceZipKey, (json['zip_bytes'] as num?)?.toInt())
+          : null,
+      resultDocx: (json['result_docx'] as Map<String, dynamic>?) != null
+          ? FileMeta.fromJson(json['result_docx'] as Map<String, dynamic>)
+          : resultDocxKey != null
+          ? FileMeta.fromKey(
+              resultDocxKey,
+              (json['docx_bytes'] as num?)?.toInt(),
+            )
+          : null,
+      conversionLog: (json['conversion_log'] as Map<String, dynamic>?) != null
+          ? FileMeta.fromJson(json['conversion_log'] as Map<String, dynamic>)
+          : conversionLogKey != null
+          ? FileMeta.fromKey(
+              conversionLogKey,
+              (json['log_bytes'] as num?)?.toInt(),
+            )
+          : null,
+    );
+  }
+
+  bool get hasZip => sourceZip != null;
+  bool get hasDocx => resultDocx != null;
+  bool get hasLog => conversionLog != null;
+  bool get hasAny => hasZip || hasDocx || hasLog;
 }

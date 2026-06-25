@@ -1,0 +1,139 @@
+name: Release Packages
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  rust-packages:
+    name: Native packages · ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            archive: zip
+            server_bin: target/release/doc-server.exe
+            client_bin: target/release/doc-desktop-slint.exe
+          - name: linux-x64
+            os: ubuntu-latest
+            archive: tar
+            server_bin: target/release/doc-server
+            client_bin: target/release/doc-desktop-slint
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Linux GUI dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libfontconfig1-dev libfreetype6-dev libx11-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Build doc-server
+        run: cargo build -p doc-server --release
+
+      - name: Build desktop client
+        run: cargo build -p doc-desktop-slint --release
+
+      - name: Stage native package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = "dist/tex2doc-${{ matrix.name }}"
+          New-Item -ItemType Directory -Force -Path "$stage/server" | Out-Null
+          New-Item -ItemType Directory -Force -Path "$stage/client" | Out-Null
+          Copy-Item "${{ matrix.server_bin }}" "$stage/server/"
+          Copy-Item "${{ matrix.client_bin }}" "$stage/client/"
+          Copy-Item "README.md" "$stage/"
+          Copy-Item "apps/rust-service/README.md" "$stage/server/"
+
+      - name: Archive native package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          if ("${{ matrix.archive }}" -eq "zip") {
+            Compress-Archive -Path "dist/tex2doc-${{ matrix.name }}" -DestinationPath "dist/tex2doc-${{ matrix.name }}.zip" -Force
+          } else {
+            tar -czf "dist/tex2doc-${{ matrix.name }}.tar.gz" -C dist "tex2doc-${{ matrix.name }}"
+          }
+
+      - name: Upload native package
+        uses: actions/upload-artifact@v4
+        with:
+          name: tex2doc-${{ matrix.name }}
+          path: |
+            dist/tex2doc-${{ matrix.name }}.zip
+            dist/tex2doc-${{ matrix.name }}.tar.gz
+          if-no-files-found: error
+
+  web-static:
+    name: Web service static bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build home web
+        working-directory: flutter_app
+        run: flutter build web --target lib/main.dart
+
+      - name: Stage home web
+        run: |
+          mkdir -p dist/tex2doc-web-static/static/home
+          cp -R flutter_app/build/web/. dist/tex2doc-web-static/static/home/
+
+      - name: Build user web
+        working-directory: flutter_app
+        run: flutter build web --target lib/main_user.dart
+
+      - name: Stage user web
+        run: |
+          mkdir -p dist/tex2doc-web-static/static/user
+          cp -R flutter_app/build/web/. dist/tex2doc-web-static/static/user/
+
+      - name: Build admin web
+        working-directory: flutter_app
+        run: flutter build web --target lib/main_admin.dart
+
+      - name: Stage admin web
+        run: |
+          mkdir -p dist/tex2doc-web-static/static/admin
+          cp -R flutter_app/build/web/. dist/tex2doc-web-static/static/admin/
+          cp apps/rust-service/README.md dist/tex2doc-web-static/
+          tar -czf dist/tex2doc-web-static.tar.gz -C dist tex2doc-web-static
+
+      - name: Upload web static bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tex2doc-web-static
+          path: dist/tex2doc-web-static.tar.gz
+          if-no-files-found: error

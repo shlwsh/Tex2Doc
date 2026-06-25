@@ -5,6 +5,8 @@
   "description": "Playwright-driven end-to-end verification for Tex2Doc .docx outputs.",
   "type": "module",
   "scripts": {
+    "ci:preflight": "node scripts/ci/preflight.mjs",
+    "release:local": "pwsh -NoProfile -File scripts/release/package-local.ps1",
     "verify": "node scripts/verify_paper3.mjs",
     "verify:install": "node scripts/verify_install.mjs",
     "build:paper3-zip": "node scripts/build_paper3_zip.mjs",

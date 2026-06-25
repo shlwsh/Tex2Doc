@@ -86,7 +86,7 @@ fn strip_remaining_math_macros(s: &str) -> String {
         let mut matched = false;
         for tok in &tokens {
             let token = format!("\\{tok}");
-            if i + token.len() + 1 <= bytes.len() && s[i..].starts_with(&token) {
+            if i + token.len() < bytes.len() && s[i..].starts_with(&token) {
                 let after = i + token.len();
                 if bytes[after] == b'{' {
                     // 找配对的 }
@@ -155,7 +155,7 @@ fn strip_cmd(s: &str, cmd: &str) -> String {
             continue;
         }
         // 检查前缀 "\cmd{"
-        if i + prefix.len() + 1 <= bytes.len()
+        if i + prefix.len() < bytes.len()
             && s[i..].starts_with(&prefix)
             && bytes[i + prefix.len()] == b'{'
         {
@@ -248,6 +248,7 @@ fn extract_brace_arg_inline(line: &str, cmd: &str) -> Option<String> {
 /// 1. 剥 `\caption` `\label` `\KwIn` `\KwOut` 等元数据
 /// 2. 把 body 切成"逻辑行"（`\;` 或换行作为行终止）
 /// 3. 每行识别前缀关键字：`\ForEach` / `\If` / `\Return` / `else` 等
+///
 /// 剥掉算法行内的元数据命令（`\KwIn` `\KwOut` 等）。
 fn strip_algorithm_line_meta(line: LogicLine) -> LogicLine {
     let mut s = line.text;
@@ -265,9 +266,8 @@ fn strip_algorithm_line_meta(line: LogicLine) -> LogicLine {
 /// 4. 计算缩进级数（嵌套 ForEach/If +1）
 pub fn parse_algorithm_rows(body: &str) -> Vec<AlgLine> {
     let mut out: Vec<AlgLine> = Vec::new();
-    let mut iter = LogicLineIter::new(body);
     let mut indent_stack: Vec<u8> = vec![0];
-    while let Some(line) = iter.next() {
+    for line in LogicLineIter::new(body) {
         // V2 归一化：剥算法元数据命令
         let line = strip_algorithm_line_meta(line);
         let keyword = detect_keyword(&line.text);

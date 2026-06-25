@@ -347,10 +347,10 @@ Future<int> main(List<String> args) async {
 ### 3.3 启动
 
 ```bash
-DOC_SERVER_ADDR=0.0.0.0:8080 cargo run --release -p doc-server
+DOC_SERVER_ADDR=0.0.0.0:2624 cargo run --release -p doc-server
 ```
 
-默认监听 `0.0.0.0:8080`。日志由 `tracing-subscriber` 控制，env filter 默认 `info`。
+默认监听 `0.0.0.0:2624`。日志由 `tracing-subscriber` 控制，env filter 默认 `info`。
 
 ### 3.4 API
 
@@ -399,10 +399,10 @@ Content-Type: application/json
 
 ```bash
 # 1) 健康检查
-curl http://127.0.0.1:8080/api/v1/health
+curl http://127.0.0.1:2624/api/v1/health
 
 # 2) 转换
-curl -X POST http://127.0.0.1:8080/api/v1/convert \
+curl -X POST http://127.0.0.1:2624/api/v1/convert \
   -F "file=@examples/paper3/upload.zip" \
   -F "main_tex=main-jos.tex" \
   -o out.docx
@@ -484,7 +484,7 @@ async fn convert(request: Request) -> Result<Response, ApiError> {
   ```ini
   [Service]
   ExecStart=/opt/doc-engine/doc-server
-  Environment=DOC_SERVER_ADDR=0.0.0.0:8080
+  Environment=DOC_SERVER_ADDR=0.0.0.0:2624
   Restart=on-failure
   ```
 * Docker：参见 [07-deployment/04-server-deploy.md](../07-deployment/04-server-deploy.md)。

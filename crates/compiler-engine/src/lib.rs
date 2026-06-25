@@ -498,7 +498,6 @@ impl ProfileSpecReport {
 ///
 /// `Auto` scans template features and available TeX runtimes before selecting
 /// a concrete semantic backend.
-
 /// Options controlling semantic collection and DOCX rendering.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CompileOptions {
@@ -4542,7 +4541,7 @@ fn extract_macro_args(text: &str, arity: usize) -> Vec<String> {
             chars.next(); // skip opening brace
             let mut depth = 1;
             let mut arg_chars = Vec::new();
-            while let Some(c) = chars.next() {
+            for c in chars.by_ref() {
                 if c == '{' {
                     depth += 1;
                 } else if c == '}' {
@@ -4859,7 +4858,7 @@ Body.
             semantic_backend: SemanticBackendKind::XeLaTeXHook,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile.clone());
+        let mut report = CompileReport::new(options.profile);
         let artifact = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
@@ -4891,7 +4890,7 @@ Body.
             allow_backend_fallback: false,
             ..CompileOptions::default()
         };
-        let mut report = CompileReport::new(options.profile.clone());
+        let mut report = CompileReport::new(options.profile);
         let err = collect_runtime_or_fallback(
             MissingRuntimeBackend,
             "missing runtime backend for deterministic test",
@@ -5078,7 +5077,7 @@ Body text.
             semantic_backend: SemanticBackendKind::RuleBased,
             ..CompileOptions::default()
         };
-        let profile = options.profile.clone();
+        let profile = options.profile;
         let mut vfs = VirtualFs::new();
         vfs.insert("main.tex", SAMPLE.as_bytes().to_vec());
         let mut input = SemanticCollectorInput {

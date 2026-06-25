@@ -238,14 +238,12 @@ fn collect_event_references(
                     source: source.clone(),
                 });
             }
-            SemanticEvent::Citation { keys, .. } => {
-                if !keys.is_empty() {
-                    graph.citations.push(CitationReference {
-                        command: "cite".to_string(),
-                        keys: keys.clone(),
-                        source: source.clone(),
-                    });
-                }
+            SemanticEvent::Citation { keys, .. } if !keys.is_empty() => {
+                graph.citations.push(CitationReference {
+                    command: "cite".to_string(),
+                    keys: keys.clone(),
+                    source: source.clone(),
+                });
             }
             _ => {}
         }

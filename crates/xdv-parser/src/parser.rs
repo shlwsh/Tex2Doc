@@ -457,7 +457,7 @@ impl XdvParser {
         let font_num = match n_bytes {
             1 => r.read_u1()? as u32,
             2 => r.read_u2()? as u32,
-            3 => r.read_u3()? as u32,
+            3 => r.read_u3()?,
             4 => r.read_u4()?,
             _ => unreachable!(),
         };

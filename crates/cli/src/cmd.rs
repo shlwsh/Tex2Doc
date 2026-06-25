@@ -89,11 +89,13 @@ pub fn run_convert(a: ConvertArgs) -> Result<()> {
             || a.first_header_text.is_some()
             || a.first_footer_text.is_some()
         {
-            let mut ps2 = doc_docx_writer::PageSetup::default();
-            ps2.header_text = a.header_text.clone();
-            ps2.footer_text = a.footer_text.clone();
-            ps2.first_header_text = a.first_header_text.clone();
-            ps2.first_footer_text = a.first_footer_text.clone();
+            let ps2 = doc_docx_writer::PageSetup {
+                header_text: a.header_text.clone(),
+                footer_text: a.footer_text.clone(),
+                first_header_text: a.first_header_text.clone(),
+                first_footer_text: a.first_footer_text.clone(),
+                ..doc_docx_writer::PageSetup::default()
+            };
             ps = Some(ps2);
         }
     }
@@ -273,13 +275,11 @@ fn days_to_ymd(days: u64) -> (u64, u64, u64) {
         30,
         31,
     ];
-    let mut m = 1u64;
-    for &dm in &months {
+    for (m, &dm) in (1u64..).zip(months.iter()) {
         if remaining < dm {
             return (y, m, remaining + 1);
         }
         remaining -= dm;
-        m += 1;
     }
     (y, 12, 31)
 }

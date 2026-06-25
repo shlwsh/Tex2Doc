@@ -6,14 +6,14 @@
  *
  * 特性：
  * - 零依赖（仅用 Node 内置 http / fs / path）
- * - 默认端口 4173（与 Vite preview 接近，便于 Playwright 默认配置）
+ * - 默认端口 2627（与项目本地服务端口段保持一致）
  * - 简单 MIME 推断
  * - CORS 头（开放，避免 Flutter web + WASM 在跨源场景被拦）
  * - 支持目录默认 index.html
  *
  * 用法：
  *   node scripts/serve_flutter_web.mjs
- *   PORT=8080 node scripts/serve_flutter_web.mjs
+ *   PORT=2627 node scripts/serve_flutter_web.mjs
  */
 import { createServer } from 'node:http';
 import { readFile, stat } from 'node:fs/promises';
@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..', 'flutter_app', 'build', 'web');
-const PORT = Number(process.env.PORT ?? 4173);
+const PORT = Number(process.env.PORT ?? 2627);
 const HOST = process.env.HOST ?? '127.0.0.1';
 
 const MIME = {

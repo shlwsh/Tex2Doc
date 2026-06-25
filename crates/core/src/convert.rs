@@ -464,15 +464,14 @@ fn parse_tex_with_vfs(
 
 /// v13.2 F13: 在 vfs 中找 main_tex 同目录的 `references.bib` 或 `<stem>.bib`。
 fn find_bib_in_vfs(vfs: &VirtualFs, main_dir: &Path) -> Option<PathBuf> {
-    for name in ["references.bib"] {
-        let p = if main_dir.as_os_str().is_empty() {
-            PathBuf::from(name)
-        } else {
-            main_dir.join(name)
-        };
-        if vfs.read(&p).is_ok() {
-            return Some(p);
-        }
+    let name = "references.bib";
+    let p = if main_dir.as_os_str().is_empty() {
+        PathBuf::from(name)
+    } else {
+        main_dir.join(name)
+    };
+    if vfs.read(&p).is_ok() {
+        return Some(p);
     }
     None
 }

@@ -274,8 +274,15 @@ impl<'a> Parser<'a> {
         // v13.2.6 R8: 字体命令 → 只取内容，不加 \? 前缀
         if matches!(
             cmd,
-            "mathrm" | "mathbf" | "mathsf" | "mathtt" | "mathcal" | "mathit"
-            | "operatorname" | "textbf" | "textit"
+            "mathrm"
+                | "mathbf"
+                | "mathsf"
+                | "mathtt"
+                | "mathcal"
+                | "mathit"
+                | "operatorname"
+                | "textbf"
+                | "textit"
         ) {
             return Some(self.parse_group_or_single());
         }
@@ -304,15 +311,74 @@ impl<'a> Parser<'a> {
 
         // 已知命令列表
         let known = [
-            "frac", "sqrt", "text", "sin", "cos", "tan", "log", "ln", "exp", "min", "max", "sum",
-            "alpha", "beta", "gamma", "delta", "epsilon", "varepsilon", "zeta", "eta", "theta",
-            "iota", "kappa", "lambda", "mu", "nu", "xi", "pi", "rho", "sigma", "tau", "phi",
-            "chi", "psi", "omega",
-            "Gamma", "Delta", "Theta", "Lambda", "Xi", "Pi", "Sigma", "Phi", "Psi", "Omega",
-            "cdot", "times", "div", "pm", "mp", "leq", "geq", "neq", "approx", "infty", "int",
+            "frac",
+            "sqrt",
+            "text",
+            "sin",
+            "cos",
+            "tan",
+            "log",
+            "ln",
+            "exp",
+            "min",
+            "max",
+            "sum",
+            "alpha",
+            "beta",
+            "gamma",
+            "delta",
+            "epsilon",
+            "varepsilon",
+            "zeta",
+            "eta",
+            "theta",
+            "iota",
+            "kappa",
+            "lambda",
+            "mu",
+            "nu",
+            "xi",
+            "pi",
+            "rho",
+            "sigma",
+            "tau",
+            "phi",
+            "chi",
+            "psi",
+            "omega",
+            "Gamma",
+            "Delta",
+            "Theta",
+            "Lambda",
+            "Xi",
+            "Pi",
+            "Sigma",
+            "Phi",
+            "Psi",
+            "Omega",
+            "cdot",
+            "times",
+            "div",
+            "pm",
+            "mp",
+            "leq",
+            "geq",
+            "neq",
+            "approx",
+            "infty",
+            "int",
             "prod",
-            "rightarrow", "leftarrow", "emptyset", "in", "notin", "subset", "subseteq",
-            "ldots", "dots", "percent", "underscore",
+            "rightarrow",
+            "leftarrow",
+            "emptyset",
+            "in",
+            "notin",
+            "subset",
+            "subseteq",
+            "ldots",
+            "dots",
+            "percent",
+            "underscore",
         ];
         if known.contains(&cmd) {
             return Some(self.lower_command(cmd));

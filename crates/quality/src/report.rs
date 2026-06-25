@@ -125,8 +125,7 @@ pub fn write_markdown(report: &QualityReport, out: &Path) -> std::io::Result<()>
 }
 
 pub fn write_json(report: &QualityReport, out: &Path) -> std::io::Result<()> {
-    let json = serde_json::to_string_pretty(report)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+    let json = serde_json::to_string_pretty(report).map_err(std::io::Error::other)?;
     let mut f = fs::File::create(out)?;
     f.write_all(json.as_bytes())?;
     Ok(())
