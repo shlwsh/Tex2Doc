@@ -1,0 +1,5 @@
+      path: '/admin/v1/redeem-codes',
+      queryParameters: query.isEmpty ? null : query,
+    );
+    final response = await _http.get(uri, headers: _headers(accessToken: adminToken));
+    return AdminRedeemCodeListResult.fromJson(_decode(response) as Map<String, dynamic>);

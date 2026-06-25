@@ -981,7 +981,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     out
 }
 
-fn now_secs() -> u64 {
+pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

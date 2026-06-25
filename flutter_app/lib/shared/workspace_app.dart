@@ -8,6 +8,7 @@ import '../admin/pages/audit/admin_audit_panel.dart';
 import '../admin/pages/dashboard/admin_dashboard_panel.dart';
 import '../admin/pages/feedback/admin_feedback_panel.dart';
 import '../admin/pages/releases/admin_releases_panel.dart';
+import '../admin/pages/redeem/admin_redeem_codes_panel.dart';
 import '../commercial_api.dart';
 import '../file_web_stub.dart'
     if (dart.library.js_interop) '../file_web_utils_web.dart'
@@ -126,6 +127,7 @@ enum _NavSection {
   recharge,
   redeemManage,
   redeemRecords,
+  redeemCodes,
   convert,
   convertRecords,
   rechargeRecords,
@@ -142,6 +144,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.recharge => Icons.payments_outlined,
     _NavSection.redeemManage => Icons.confirmation_number_outlined,
     _NavSection.redeemRecords => Icons.fact_check_outlined,
+    _NavSection.redeemCodes => Icons.qr_code_2_outlined,
     _NavSection.convert => Icons.sync_alt,
     _NavSection.convertRecords => Icons.history,
     _NavSection.rechargeRecords => Icons.receipt_long,
@@ -157,6 +160,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.recharge => s.t('nav.recharge'),
     _NavSection.redeemManage => s.t('nav.redeemManage'),
     _NavSection.redeemRecords => s.t('nav.redeemRecords'),
+    _NavSection.redeemCodes => s.t('nav.redeemCodes'),
     _NavSection.convert => s.t('nav.convert'),
     _NavSection.convertRecords => s.t('nav.convertRecords'),
     _NavSection.rechargeRecords => s.t('nav.rechargeRecords'),
@@ -211,6 +215,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _NavSection.account,
       _NavSection.redeemManage,
       _NavSection.redeemRecords,
+      _NavSection.redeemCodes,
       _NavSection.feedback,
       _NavSection.releases,
       _NavSection.audit,
@@ -1034,6 +1039,12 @@ class _NavContent extends StatelessWidget {
       ],
       _NavSection.redeemRecords => <Widget>[
         AdminRedeemRecordsPanel(
+          apiBaseUrl: apiBaseUrl,
+          adminToken: accessToken,
+        ),
+      ],
+      _NavSection.redeemCodes => <Widget>[
+        AdminRedeemCodesPanel(
           apiBaseUrl: apiBaseUrl,
           adminToken: accessToken,
         ),

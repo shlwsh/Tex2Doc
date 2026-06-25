@@ -1670,12 +1670,18 @@ impl DbStore {
         limit: Option<u32>,
         offset: Option<u32>,
     ) -> Result<Vec<RedeemCodeRecord>, sqlx::Error> {
-        let mut sql = String::from(
+        // Always bind 6 positional params; use COALESCE so absent filters match all rows.
+        let s_status = stock_status.unwrap_or("");
+        let b_id = batch_id.unwrap_or("");
+        let p_id = package_id.unwrap_or("");
+        let search_term = search.unwrap_or("");
+
+        let rows = sqlx::query(
             r#"
             SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
                    p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
                    c.code_preview, c.key_version, c.status,
-                   c.stock_status,
+                   COALESCE(c.stock_status, 'new') AS stock_status,
                    c.stocked_by::text,
                    EXTRACT(EPOCH FROM c.stocked_at)::bigint AS stocked_at_secs,
                    c.redeemed_by::text,
@@ -1688,64 +1694,24 @@ impl DbStore {
             FROM redeem_codes c
             JOIN redeem_code_batches b ON b.id = c.batch_id
             JOIN redeem_packages p ON p.id = c.package_id
-            WHERE 1 = 1
+            WHERE ($1 = '' OR c.stock_status = $1)
+              AND ($2 = '' OR c.batch_id::text = $2)
+              AND ($3 = '' OR c.package_id = $3)
+              AND ($4 = '' OR c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')
+            ORDER BY c.created_at DESC
+            LIMIT $5 OFFSET $6
             "#,
-        );
-        if stock_status.is_some() {
-            sql.push_str(" AND c.stock_status = $1");
-        }
-        if batch_id.is_some() {
-            sql.push_str(" AND c.batch_id::text = $2");
-        }
-        if package_id.is_some() {
-            sql.push_str(" AND c.package_id = $3");
-        }
-        if search.is_some() {
-            sql.push_str(
-                " AND (c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')",
-            );
-        }
-        sql.push_str(" ORDER BY c.created_at DESC LIMIT $5 OFFSET $6");
+        )
+        .bind(s_status)
+        .bind(b_id)
+        .bind(p_id)
+        .bind(search_term)
+        .bind(limit.unwrap_or(100).clamp(1, 1000) as i64)
+        .bind(offset.unwrap_or(0) as i64)
+        .fetch_all(&self.pool)
+        .await?;
 
-        let mut query = sqlx::query(&sql);
-        if let Some(s) = stock_status {
-            query = query.bind(s);
-        } else {
-            // placeholder for positional consistency (None -> ''), but we
-            // use the same bound indices regardless of presence below
-            query = query.bind(String::new());
-        }
-        if let Some(b) = batch_id {
-            query = query.bind(b);
-        } else {
-            query = query.bind(String::new());
-        }
-        if let Some(p) = package_id {
-            query = query.bind(p);
-        } else {
-            query = query.bind(String::new());
-        }
-        if let Some(s) = search {
-            query = query.bind(s);
-        } else {
-            query = query.bind(String::new());
-        }
-        query = query
-            .bind(limit.unwrap_or(100).clamp(1, 1000) as i64)
-            .bind(offset.unwrap_or(0) as i64);
-
-        let rows = query.fetch_all(&self.pool).await?;
-        Ok(rows
-            .iter()
-            .filter_map(|row| {
-                let stock_status: String = row.try_get("stock_status").ok()?;
-                let mut record = redeem_code_from_row(row);
-                if stock_status.is_empty() {
-                    record.stock_status = "new".to_string();
-                }
-                Some(record)
-            })
-            .collect())
+        Ok(rows.iter().map(redeem_code_from_row).collect())
     }
 
     pub async fn admin_count_redeem_codes(
@@ -1755,28 +1721,28 @@ impl DbStore {
         package_id: Option<&str>,
         search: Option<&str>,
     ) -> Result<u64, sqlx::Error> {
-        let mut sql = String::from(
-            "SELECT COUNT(*)::bigint AS total FROM redeem_codes c \
-             JOIN redeem_code_batches b ON b.id = c.batch_id WHERE 1 = 1",
-        );
-        if stock_status.is_some() {
-            sql.push_str(" AND c.stock_status = $1");
-        }
-        if batch_id.is_some() {
-            sql.push_str(" AND c.batch_id::text = $2");
-        }
-        if package_id.is_some() {
-            sql.push_str(" AND c.package_id = $3");
-        }
-        if search.is_some() {
-            sql.push_str(" AND (c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')");
-        }
-        let mut q = sqlx::query(&sql);
-        q = q.bind(stock_status.unwrap_or(""));
-        q = q.bind(batch_id.unwrap_or(""));
-        q = q.bind(package_id.unwrap_or(""));
-        q = q.bind(search.unwrap_or(""));
-        let row = q.fetch_one(&self.pool).await?;
+        let s_status = stock_status.unwrap_or("");
+        let b_id = batch_id.unwrap_or("");
+        let p_id = package_id.unwrap_or("");
+        let search_term = search.unwrap_or("");
+
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(*)::bigint AS total
+            FROM redeem_codes c
+            JOIN redeem_code_batches b ON b.id = c.batch_id
+            WHERE ($1 = '' OR c.stock_status = $1)
+              AND ($2 = '' OR c.batch_id::text = $2)
+              AND ($3 = '' OR c.package_id = $3)
+              AND ($4 = '' OR c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')
+            "#,
+        )
+        .bind(&s_status)
+        .bind(&b_id)
+        .bind(&p_id)
+        .bind(&search_term)
+        .fetch_one(&self.pool)
+        .await?;
         let total: i64 = row.try_get("total").unwrap_or(0);
         Ok(total.max(0) as u64)
     }

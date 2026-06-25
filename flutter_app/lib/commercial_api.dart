@@ -272,6 +272,88 @@ class CommercialApiClient {
     return response.bodyBytes;
   }
 
+  /// Admin: paginated redeem-codes list with optional filters.
+  Future<AdminRedeemCodeListResult> adminListRedeemCodes({
+    required String adminToken,
+    String? stockStatus,
+    String? batchId,
+    String? packageId,
+    String? search,
+    int page = 1,
+    int pageSize = 50,
+  }) async {
+    final q = <String, String>{
+      if (stockStatus != null) 'stock_status': stockStatus,
+      if (batchId != null) 'batch_id': batchId,
+      if (packageId != null) 'package_id': packageId,
+      if (search != null && search.isNotEmpty) 'search': search,
+      'page': page.toString(),
+      'page_size': pageSize.toString(),
+    };
+    final uri = baseUri.replace(path: '/admin/v1/redeem-codes', queryParameters: q);
+    final response = await _http.get(
+      uri,
+      headers: _headers(accessToken: adminToken),
+    );
+    return AdminRedeemCodeListResult.fromJson(_decode(response) as Map<String, dynamic>);
+  }
+
+  /// Admin: bulk mark codes as "stocked" (上货).
+  Future<int> adminBulkStockRedeemCodes({
+    required String adminToken,
+    required List<String> codeIds,
+  }) async {
+    final response = await _http.post(
+      _adminUri('redeem-codes'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({'code_ids': codeIds}),
+    );
+    final data = _decode(response) as Map<String, dynamic>;
+    return (data['affected'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Admin: restock (reset) codes to "new" from plaintext codes in a text file.
+  Future<int> adminRestockRedeemCodes({
+    required String adminToken,
+    required String codes,
+  }) async {
+    final response = await _http.post(
+      _adminUri('redeem-codes/restock'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({'codes': codes}),
+    );
+    final data = _decode(response) as Map<String, dynamic>;
+    return (data['affected'] as num?)?.toInt() ?? 0;
+  }
+
+  /// Admin: export redeem-codes list as Excel with current filter.
+  Future<List<int>> adminExportRedeemCodesExcel({
+    required String adminToken,
+    String? stockStatus,
+    String? batchId,
+    String? packageId,
+    String? search,
+  }) async {
+    final q = <String, String>{
+      if (stockStatus != null) 'stock_status': stockStatus,
+      if (batchId != null) 'batch_id': batchId,
+      if (packageId != null) 'package_id': packageId,
+      if (search != null && search.isNotEmpty) 'search': search,
+    };
+    final uri = baseUri.replace(path: '/admin/v1/redeem-codes/export.xlsx', queryParameters: q.isEmpty ? null : q);
+    final response = await _http.get(
+      uri,
+      headers: _headers(accessToken: adminToken),
+    );
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw CommercialApiException(
+        response.statusCode,
+        utf8.decode(response.bodyBytes),
+      );
+    }
+    return response.bodyBytes;
+  }
+
   Future<UploadResponse> uploadProjectZip({
     required String accessToken,
     required List<int> bytes,
@@ -1076,8 +1158,14 @@ class RedeemCodeRecord {
   final String rechargeType;
   final int quantity;
   final String status;
+  final String stockStatus;
+  final String? stockedBy;
+  final String? stockedAt;
   final String? redeemedRechargeId;
   final String? redeemedAt;
+  final String? restockedBy;
+  final String? restockedAt;
+  final String createdAt;
 
   RedeemCodeRecord({
     required this.redeemId,
@@ -1089,13 +1177,19 @@ class RedeemCodeRecord {
     required this.rechargeType,
     required this.quantity,
     required this.status,
-    required this.redeemedRechargeId,
-    required this.redeemedAt,
+    required this.stockStatus,
+    this.stockedBy,
+    this.stockedAt,
+    this.redeemedRechargeId,
+    this.redeemedAt,
+    this.restockedBy,
+    this.restockedAt,
+    required this.createdAt,
   });
 
   factory RedeemCodeRecord.fromJson(Map<String, dynamic> json) {
     return RedeemCodeRecord(
-      redeemId: json['redeem_id'] as String,
+      redeemId: json['redeem_id'] as String? ?? (json['code_id'] as String? ?? ''),
       batchId: json['batch_id'] as String,
       batchNo: json['batch_no'] as String,
       codePreview: json['code_preview'] as String,
@@ -1104,12 +1198,18 @@ class RedeemCodeRecord {
       rechargeType: json['recharge_type'] as String,
       quantity: json['quantity'] as int,
       status: json['status'] as String,
+      stockStatus: json['stock_status'] as String? ?? 'new',
+      stockedBy: json['stocked_by'] as String?,
+      stockedAt: json['stocked_at'] as String?,
       redeemedRechargeId: json['redeemed_recharge_id'] as String?,
       redeemedAt: json['redeemed_at'] as String?,
+      restockedBy: json['restocked_by'] as String?,
+      restockedAt: json['restocked_at'] as String?,
+      createdAt: json['created_at'] as String? ?? DateTime.now().toUtc().toIso8601String(),
     );
   }
 
-  String get label => '$codePreview: $packageName, $status';
+  String get label => '$codePreview: $packageName, $stockStatus';
 }
 
 class RedeemCodeBatch {
@@ -1610,4 +1710,34 @@ class ConversionStorageInfo {
   bool get hasDocx => resultDocx != null;
   bool get hasLog => conversionLog != null;
   bool get hasAny => hasZip || hasDocx || hasLog;
+}
+
+/// Paginated result from the admin redeem-codes list endpoint.
+class AdminRedeemCodeListResult {
+  final List<RedeemCodeRecord> records;
+  final int total;
+  final int page;
+  final int pageSize;
+
+  AdminRedeemCodeListResult({
+    required this.records,
+    required this.total,
+    required this.page,
+    required this.pageSize,
+  });
+
+  factory AdminRedeemCodeListResult.fromJson(Map<String, dynamic> json) {
+    return AdminRedeemCodeListResult(
+      records: ((json['records'] as List<dynamic>?) ?? const [])
+          .map((item) => RedeemCodeRecord.fromJson(item as Map<String, dynamic>))
+          .toList(growable: false),
+      total: (json['total'] as num?)?.toInt() ?? 0,
+      page: (json['page'] as num?)?.toInt() ?? 1,
+      pageSize: (json['page_size'] as num?)?.toInt() ?? 50,
+    );
+  }
+
+  int get totalPages => (total / pageSize).ceil();
+  bool get hasNextPage => page < totalPages;
+  bool get hasPrevPage => page > 1;
 }

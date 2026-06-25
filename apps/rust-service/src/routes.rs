@@ -28,6 +28,7 @@ use crate::state::{
     ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
     RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
+use crate::excel_export::write_xml_part;
 use crate::worker_service;
 
 /// 默认主 tex 路径（与 paper3 e2e 一致）。
@@ -89,12 +90,25 @@ pub fn router_with_state(state: ServerState) -> Router {
             get(admin_list_redeem_batches).post(admin_create_redeem_batch),
         )
         .route(
-            "/admin/v1/redeem-code-batches/:id",
-            get(admin_get_redeem_batch),
-        )
-        .route(
             "/admin/v1/redeem-code-batches/:id/export.xlsx",
             get(admin_export_redeem_batch),
+        )
+        // Admin: redeem codes list (上货管理)
+        .route(
+            "/admin/v1/redeem-codes",
+            get(admin_list_redeem_codes).post(admin_bulk_stock_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-codes/export.xlsx",
+            get(admin_export_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-codes/restock",
+            post(admin_restock_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-code-batches/:id",
+            get(admin_get_redeem_batch),
         )
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/api/v1/billing/checkout", post(billing_checkout))
@@ -347,6 +361,30 @@ struct AdminRedeemBatchBody {
     channel: Option<String>,
     note: Option<String>,
     expires_at: Option<String>,
+}
+
+/// Request body for the admin redeem-code list endpoint.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeListQuery {
+    stock_status: Option<String>,
+    batch_id: Option<String>,
+    package_id: Option<String>,
+    search: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
+/// Request body for bulk stocking redeem codes.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeStockBody {
+    code_ids: Vec<String>,
+}
+
+/// Request body for restocking (resetting) redeem codes by plaintext codes.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeRestockBody {
+    /// Plain-text redeem codes, one per line (may include dashes / whitespace).
+    codes: String,
 }
 
 async fn auth_register(
@@ -745,6 +783,218 @@ async fn admin_export_redeem_batch(
         .header(header::CONTENT_LENGTH, body.len())
         .body(axum::body::Body::from(body))
         .map_err(|e| ApiError::Io(e.to_string()))
+}
+
+// ─── Admin: redeem-codes (上货列表) ─────────────────────────────────────────
+
+fn redeem_code_record_json(record: &RedeemCodeRecord) -> serde_json::Value {
+    json!({
+        "code_id": record.code_id,
+        "batch_id": record.batch_id,
+        "batch_no": record.batch_no,
+        "code_preview": record.code_preview,
+        "package_id": record.package_id,
+        "package_name": record.package_name,
+        "recharge_type": record.recharge_type,
+        "quantity": record.quantity,
+        "status": record.status,
+        "stock_status": record.stock_status,
+        "stocked_by": record.stocked_by,
+        "stocked_at": record.stocked_at,
+        "redeemed_by": record.redeemed_by,
+        "redeemed_recharge_id": record.redeemed_recharge_id,
+        "redeemed_at": record.redeemed_at,
+        "restocked_by": record.restocked_by,
+        "restocked_at": record.restocked_at,
+        "expires_at": record.expires_at,
+        "created_at": record.created_at,
+    })
+}
+
+async fn admin_list_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<AdminRedeemCodeListQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let page = params.page.unwrap_or(1).max(1);
+    let page_size = params.page_size.unwrap_or(50).clamp(1, 200);
+    let offset = (page - 1) * page_size;
+
+    let records = state
+        .admin_list_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+            Some(page_size),
+            Some(offset),
+        )
+        .await;
+
+    let total = state
+        .admin_count_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+        )
+        .await;
+
+    Ok(Json(json!({
+        "records": records.iter().map(redeem_code_record_json).collect::<Vec<_>>(),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    })))
+}
+
+async fn admin_bulk_stock_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminRedeemCodeStockBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let affected = state
+        .admin_stock_redeem_codes(&admin.id, &payload.code_ids)
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(json!({ "affected": affected })))
+}
+
+async fn admin_restock_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminRedeemCodeRestockBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let codes: Vec<String> = payload
+        .codes
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let affected = state
+        .admin_restock_redeem_codes(&admin.id, &codes)
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(json!({ "affected": affected })))
+}
+
+async fn admin_export_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<AdminRedeemCodeListQuery>,
+) -> Result<Response, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let records = state
+        .admin_list_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+            Some(10000),
+            Some(0),
+        )
+        .await;
+    let body = build_redeem_codes_list_xlsx(&records);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"redeem-codes-list.xlsx\"")
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Io(e.to_string()))
+}
+
+fn build_redeem_codes_list_xlsx(records: &[RedeemCodeRecord]) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        write_xml_part(&mut zip, opts, "[Content_Types].xml", content_types_xml());
+        write_xml_part(&mut zip, opts, "_rels/.rels", rels_xml());
+        write_xml_part(&mut zip, opts, "xl/workbook.xml", workbook_xml_codes_list());
+        write_xml_part(&mut zip, opts, "xl/_rels/workbook.xml.rels", workbook_rels_xml_codes_list());
+        write_xml_part(&mut zip, opts, "xl/worksheets/sheet1.xml", redeem_codes_list_sheet_xml(records));
+        zip.finish().expect("zip finish should not fail");
+    }
+    cursor.into_inner()
+}
+
+fn workbook_xml_codes_list() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="兑换码列表" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#
+}
+
+fn workbook_rels_xml_codes_list() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#
+}
+
+fn redeem_codes_list_sheet_xml(records: &[RedeemCodeRecord]) -> String {
+    let headers = [
+        "批次号",
+        "兑换码预览",
+        "套餐 ID",
+        "套餐名称",
+        "转换次数",
+        "上货状态",
+        "上货时间",
+        "使用时间",
+        "重置时间",
+        "过期时间",
+        "创建时间",
+    ];
+
+    let mut sheet = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    sheet.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#);
+    sheet.push_str("<sheetData>");
+    let mut header_row = String::from(r#"<row r="1">"#);
+    for (col, h) in headers.iter().enumerate() {
+        let col_letter = (b'A' + col as u8) as char;
+        header_row.push_str(&format!(r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#, col_letter, 1, xml_escape(h)));
+    }
+    header_row.push_str("</row>");
+    sheet.push_str(&header_row);
+
+    for (idx, r) in records.iter().enumerate() {
+        let row_num = (idx + 2) as u32;
+        let mut row = format!(r#"<row r="{row_num}">"#);
+        let stock_label = match r.stock_status.as_str() {
+            "new" => "new（新建）",
+            "stocked" => "stocked（已上货）",
+            "redeemed" => "redeemed（已使用）",
+            "restocked" => "restocked（已恢复）",
+            _ => r.stock_status.as_str(),
+        };
+        let vals = [
+            r.batch_no.as_str(),
+            r.code_preview.as_str(),
+            r.package_id.as_str(),
+            r.package_name.as_str(),
+            &r.quantity.to_string(),
+            stock_label,
+            r.stocked_at.as_deref().unwrap_or("-"),
+            r.redeemed_at.as_deref().unwrap_or("-"),
+            r.restocked_at.as_deref().unwrap_or("-"),
+            r.expires_at.as_deref().unwrap_or("-"),
+            r.created_at.as_str(),
+        ];
+        for (col, val) in vals.iter().enumerate() {
+            let col_letter = (b'A' + col as u8) as char;
+            row.push_str(&format!(r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#, col_letter, row_num, xml_escape(val)));
+        }
+        row.push_str("</row>");
+        sheet.push_str(&row);
+    }
+    sheet.push_str("</sheetData></worksheet>");
+    sheet
 }
 
 async fn create_recharge(
