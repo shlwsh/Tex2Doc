@@ -170,11 +170,39 @@ pub struct RedeemCodeRecord {
     pub plaintext_code: String,
     pub key_version: String,
     pub status: String,
+    pub stock_status: String,
+    pub stocked_by: Option<String>,
+    pub stocked_at: Option<String>,
     pub redeemed_by: Option<String>,
     pub redeemed_recharge_id: Option<String>,
     pub redeemed_at: Option<String>,
+    pub restocked_by: Option<String>,
+    pub restocked_at: Option<String>,
     pub expires_at: Option<String>,
     pub created_at: String,
+}
+
+impl RedeemCodeRecord {
+    /// Three independent lifecycle fields — exposed for admin views & auditing.
+    pub fn lifecycle_summary(&self) -> String {
+        let mut parts: Vec<String> = Vec::new();
+        let stock = if self.stock_status.is_empty() {
+            "new".to_string()
+        } else {
+            self.stock_status.clone()
+        };
+        parts.push(format!("state={stock}"));
+        if let Some(at) = &self.stocked_at {
+            parts.push(format!("stocked_at={at}"));
+        }
+        if let Some(at) = &self.redeemed_at {
+            parts.push(format!("redeemed_at={at}"));
+        }
+        if let Some(at) = &self.restocked_at {
+            parts.push(format!("restocked_at={at}"));
+        }
+        parts.join(", ")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -599,6 +627,58 @@ impl ServerState {
             .list_redeem_records(user_id)
             .await
             .unwrap_or_default()
+    }
+
+    /// Admin: list redeem codes with optional filters.
+    pub async fn admin_list_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<RedeemCodeRecord> {
+        self.db
+            .admin_list_redeem_codes(stock_status, batch_id, package_id, search, limit, offset)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// Admin: count redeem codes matched by filters (for pagination).
+    pub async fn admin_count_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+    ) -> u64 {
+        self.db
+            .admin_count_redeem_codes(stock_status, batch_id, package_id, search)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// Admin: bulk mark given codes as "stocked" (上货).
+    pub async fn admin_stock_redeem_codes(
+        &self,
+        admin_id: &str,
+        code_ids: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        self.db
+            .admin_stock_redeem_codes(admin_id, code_ids)
+            .await
+    }
+
+    /// Admin: reset codes back to "new" (恢复/重置). 文本导入时使用。
+    pub async fn admin_restock_redeem_codes(
+        &self,
+        admin_id: &str,
+        codes: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        self.db
+            .admin_restock_redeem_codes(admin_id, codes)
+            .await
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {

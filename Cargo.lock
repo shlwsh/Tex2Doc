@@ -1600,6 +1600,7 @@ dependencies = [
  "sha2",
  "slint",
  "slint-build",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "url",

@@ -6,28 +6,31 @@ use crate::ui_bindings::helpers;
 use slint::ComponentHandle;
 
 pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
-    // Convert button
+    // Convert button (local engine, upload-based)
     let app_state_clone = Arc::clone(&app_state);
     let ui_weak = ui.as_weak();
     ui.on_convert_clicked(
-        move |project_path: slint::SharedString,
+        move |upload_path: slint::SharedString,
+              main_tex: slint::SharedString,
               detected_profile: slint::SharedString,
               quality_level: slint::SharedString,
-              output_path: slint::SharedString| {
+              output_dir: slint::SharedString| {
             log::info!(
-                "Convert clicked: project={}, profile={}, quality={}",
-                project_path,
+                "Convert clicked: upload={}, main_tex={}, profile={}, quality={}",
+                upload_path,
+                main_tex,
                 detected_profile,
                 quality_level
             );
 
-            let proj = std::path::PathBuf::from(project_path.as_str());
-            let out = std::path::PathBuf::from(output_path.as_str());
+            let upload = upload_path.to_string();
+            let main_tex_str = main_tex.to_string();
             let profile = detected_profile.to_string();
             let quality = quality_level.to_string();
+            let out_dir = output_dir.to_string();
             helpers::persist_settings(
-                Some(project_path.as_str()),
-                Some(output_path.as_str()),
+                Some(&upload),
+                Some(&out_dir),
                 Some(&profile),
                 Some(&quality),
                 None,
@@ -37,187 +40,258 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
             let ui_weak = ui_weak.clone();
 
             std::thread::spawn(move || {
-                log::info!("Starting conversion in background thread");
+                log::info!("Starting local conversion in background thread");
 
-                crate::job::start_job(
-                    proj.display().to_string(),
-                    out.display().to_string(),
-                    profile,
-                    quality,
-                    Arc::clone(&app),
-                    move |result| {
-                        helpers::persist_recent_jobs(&app);
-                        let recent_jobs = helpers::recent_jobs_for_ui(&app);
+                // Read upload file bytes
+                let bytes = match std::fs::read(&upload) {
+                    Ok(b) => b,
+                    Err(e) => {
                         let invoke_result = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
                                 ui.set_is_converting(false);
-                                ui.set_conversion_progress(1.0);
-                                ui.set_recent_jobs(recent_jobs.into());
-
-                                match result {
-                                    Ok(result) => {
-                                        log::info!(
-                                            "Conversion succeeded: {} bytes, profile={}",
-                                            result.docx_bytes,
-                                            result.profile
-                                        );
-                                        ui.set_detected_profile(result.profile.into());
-                                        ui.set_compatibility_score(
-                                            result.compatibility_score.to_string().into(),
-                                        );
-                                        ui.set_quality_status(
-                                            format!(
-                                                "{} ({})",
-                                                result.quality_status, result.quality_score
-                                            )
-                                            .into(),
-                                        );
-                                        ui.set_profile_confidence(helpers::confidence_text(
-                                            result.profile_confidence,
-                                        ));
-                                        ui.set_status_text(result.report_text.into());
-                                    }
-                                    Err(error) => {
-                                        log::error!("Conversion failed: {}", error);
-                                        ui.set_conversion_progress(0.0);
-                                        ui.set_quality_status("Failed".into());
-                                        ui.set_status_text(
-                                            format!("Conversion failed:\n{}", error).into(),
-                                        );
-                                    }
-                                }
+                                ui.set_conversion_progress(0.0);
+                                ui.set_quality_status("Failed".into());
+                                ui.set_status_text(format!("Failed to read upload file: {}", e).into());
                             }
                         });
+                        let _ = invoke_result;
+                        return;
+                    }
+                };
 
-                        if let Err(error) = invoke_result {
-                            log::error!("Failed to update UI after conversion: {}", error);
-                        }
-                    },
-                );
-            });
-        },
-    );
+                let file_name = std::path::Path::new(&upload)
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("upload");
 
-    // Cloud Convert button
-    let app_state_clone = Arc::clone(&app_state);
-    let ui_weak = ui.as_weak();
-    ui.on_cloud_convert_clicked(
-        move |api_base_url: slint::SharedString,
-              project_path: slint::SharedString,
-              main_tex: slint::SharedString,
-              detected_profile: slint::SharedString,
-              quality_level: slint::SharedString,
-              output_path: slint::SharedString| {
-            let base_url = api_base_url.to_string();
-            let project = std::path::PathBuf::from(project_path.as_str());
-            let main_tex_value = main_tex.to_string();
-            let main_tex_option = if main_tex_value.trim().is_empty() {
-                None
-            } else {
-                Some(main_tex_value)
-            };
-            let profile = detected_profile.to_string();
-            let quality = quality_level.to_string();
-            let output = std::path::PathBuf::from(output_path.as_str());
-            let token = app_state_clone.auth_token();
-            let app = Arc::clone(&app_state_clone);
-            let cloud_job_id = crate::job::register_external_job(
-                project.display().to_string(),
-                profile.clone(),
-                &app,
-            );
-            app.update_job(&cloud_job_id, JobUpdate::Running);
-            helpers::persist_settings(
-                Some(project_path.as_str()),
-                Some(output_path.as_str()),
-                Some(&profile),
-                Some(&quality),
-                Some(&base_url),
-                None,
-            );
-            let ui_weak = ui_weak.clone();
-
-            std::thread::spawn(move || {
-                let result = crate::cloud_convert::convert_project_blocking(
-                    &base_url,
-                    token,
-                    &project,
-                    main_tex_option.as_deref(),
-                    &output,
+                let result = crate::cloud_convert::convert_local_blocking(
+                    &bytes,
+                    file_name,
+                    &main_tex_str,
+                    std::path::Path::new(&out_dir),
                     &profile,
                     &quality,
                 );
+
+                let job_id = crate::commands::generate_job_id();
                 match &result {
-                    Ok(result) => app.update_job(
-                        &cloud_job_id,
+                    Ok(r) => app.update_job(
+                        &job_id,
                         JobUpdate::Succeeded {
-                            remote_job_id: Some(result.job_id.clone()),
-                            output_path: result.docx_path.display().to_string(),
-                            report_path: Some(result.report_path.display().to_string()),
+                            remote_job_id: None,
+                            output_path: r.docx_path.display().to_string(),
+                            report_path: Some(r.report_path.display().to_string()),
                         },
                     ),
-                    Err(error) => {
-                        app.update_job(&cloud_job_id, JobUpdate::Failed(error.to_string()))
+                    Err(e) => {
+                        app.update_job(&job_id, JobUpdate::Failed(e.to_string()));
                     }
                 }
                 helpers::persist_recent_jobs(&app);
                 let recent_jobs = helpers::recent_jobs_for_ui(&app);
+
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
                         ui.set_is_converting(false);
                         ui.set_conversion_progress(1.0);
                         ui.set_recent_jobs(recent_jobs.into());
-                        match result {
-                            Ok(result) => {
-                                ui.set_status_text(
-                                    format!(
-                                        "{}\nJob: {}\nDOCX: {} ({} bytes)\nReport: {}",
-                                        result.report_text,
-                                        result.job_id,
-                                        result.docx_path.display(),
-                                        result.docx_bytes,
-                                        result.report_path.display()
-                                    )
-                                    .into(),
+
+                        match &result {
+                            Ok(r) => {
+                                log::info!(
+                                    "Local conversion succeeded: {} bytes, profile={}",
+                                    r.docx_bytes,
+                                    r.profile
                                 );
-                                ui.set_quality_status("Cloud completed".into());
-                                ui.set_compatibility_score("--".into());
-                                ui.set_profile_confidence("cloud report".into());
+                                ui.set_detected_profile(r.profile.clone().into());
+                                ui.set_quality_status(
+                                    format!("{} ({})", r.quality_status, r.quality_score).into(),
+                                );
+                                ui.set_quality_progress(
+                                    r.quality_score
+                                        .parse::<f32>()
+                                        .map(|s| (s / 100.0).clamp(0.0, 1.0))
+                                        .unwrap_or(0.0),
+                                );
+                                ui.set_status_text(r.report_text.clone().into());
                             }
                             Err(error) => {
+                                log::error!("Local conversion failed: {}", error);
                                 ui.set_conversion_progress(0.0);
-                                ui.set_quality_status("Cloud failed".into());
+                                ui.set_quality_status("Failed".into());
+                                ui.set_quality_progress(0.0);
                                 ui.set_status_text(
-                                    format!("Cloud conversion failed:\n{}", error).into(),
+                                    format!("Conversion failed:\n{}", error).into(),
                                 );
                             }
                         }
                     }
                 });
-                if let Err(error) = invoke_result {
-                    log::error!("Failed to update UI after cloud conversion: {}", error);
+
+                if let Err(e) = invoke_result {
+                    log::error!("Failed to update UI after conversion: {}", e);
                 }
             });
         },
     );
 
-    // Detect Profile button
+    // Cloud Convert button (upload-based cloud flow)
+    let app_state_clone = Arc::clone(&app_state);
     let ui_weak = ui.as_weak();
-    ui.on_detect_profile_clicked(move |project_path: slint::SharedString| {
-        log::info!("Detect profile: {}", project_path);
-        let proj = std::path::PathBuf::from(project_path.as_str());
-        let project_for_settings = project_path.to_string();
+    ui.on_cloud_convert_clicked(
+        move |api_base_url: slint::SharedString,
+              upload_path: slint::SharedString,
+              main_tex: slint::SharedString,
+              detected_profile: slint::SharedString,
+              quality_level: slint::SharedString,
+              output_dir: slint::SharedString| {
+            let base_url = api_base_url.to_string();
+            let upload = upload_path.to_string();
+            let main_tex_str = main_tex.to_string();
+            let profile = detected_profile.to_string();
+            let quality = quality_level.to_string();
+            let out_dir = std::path::PathBuf::from(output_dir.as_str());
+            let token = app_state_clone.auth_token();
+
+            let file_name = std::path::Path::new(&upload)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("upload")
+                .to_string();
+
+            let cloud_job_id = crate::commands::generate_job_id();
+            let entry = crate::app_state::JobEntry {
+                id: cloud_job_id.clone(),
+                remote_job_id: None,
+                project_path: upload.clone(),
+                profile: profile.clone(),
+                status: crate::app_state::JobStatus::Pending,
+                output_path: None,
+                report_path: None,
+                error: None,
+                created_at: crate::job::chrono_now_simple(),
+            };
+            app_state_clone.add_job(entry);
+            app_state_clone.update_job(&cloud_job_id, JobUpdate::Running);
+
+            helpers::persist_settings(
+                Some(&upload),
+                Some(output_dir.as_str()),
+                Some(&profile),
+                Some(&quality),
+                Some(&base_url),
+                None,
+            );
+
+            let ui_weak = ui_weak.clone();
+            let app_for_thread = Arc::clone(&app_state_clone);
+
+            std::thread::spawn(move || {
+                // Read upload file bytes
+                let bytes = match std::fs::read(&upload) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        app_for_thread.update_job(&cloud_job_id, JobUpdate::Failed(format!("Failed to read upload file: {}", e)));
+                        let _ = slint::invoke_from_event_loop(move || {
+                            if let Some(ui) = ui_weak.upgrade() {
+                                ui.set_is_converting(false);
+                                ui.set_conversion_progress(0.0);
+                                ui.set_quality_status("Failed".into());
+                                ui.set_status_text(format!("Failed to read upload file: {}", e).into());
+                            }
+                        });
+                        return;
+                    }
+                };
+
+                let main_tex_value = if main_tex_str.trim().is_empty() {
+                    "main.tex".to_string()
+                } else {
+                    main_tex_str.trim().to_string()
+                };
+
+                let result = crate::cloud_convert::convert_upload_blocking(
+                    &base_url,
+                    token,
+                    bytes,
+                    &file_name,
+                    &main_tex_value,
+                    &out_dir,
+                    &profile,
+                    &quality,
+                );
+
+                match &result {
+                    Ok(r) => app_for_thread.update_job(
+                        &cloud_job_id,
+                        JobUpdate::Succeeded {
+                            remote_job_id: Some(r.job_id.clone()),
+                            output_path: r.docx_path.display().to_string(),
+                            report_path: Some(r.report_path.display().to_string()),
+                        },
+                    ),
+                    Err(e) => {
+                        app_for_thread.update_job(&cloud_job_id, JobUpdate::Failed(e.to_string()));
+                    }
+                }
+                helpers::persist_recent_jobs(&app_for_thread);
+                let recent_jobs = helpers::recent_jobs_for_ui(&app_for_thread);
+
+                let invoke_result = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_converting(false);
+                        ui.set_conversion_progress(1.0);
+                        ui.set_recent_jobs(recent_jobs.into());
+
+                        match &result {
+                            Ok(r) => {
+                                ui.set_status_text(
+                                    format!(
+                                        "{}\nJob: {}\nDOCX: {} ({} bytes)\nReport: {}",
+                                        r.report_text,
+                                        r.job_id,
+                                        r.docx_path.display(),
+                                        r.docx_bytes,
+                                        r.report_path.display()
+                                    )
+                                    .into(),
+                                );
+                                ui.set_quality_status("Cloud completed".into());
+                                ui.set_quality_progress(1.0);
+                            }
+                            Err(e) => {
+                                ui.set_conversion_progress(0.0);
+                                ui.set_quality_status("Cloud failed".into());
+                                ui.set_quality_progress(0.0);
+                                ui.set_status_text(format!("Cloud conversion failed:\n{}", e).into());
+                            }
+                        }
+                    }
+                });
+
+                if let Err(e) = invoke_result {
+                    log::error!("Failed to update UI after cloud conversion: {}", e);
+                }
+            });
+        },
+    );
+
+    // Detect Profile button — now works on upload file
+    let ui_weak = ui.as_weak();
+    ui.on_detect_profile_clicked(move |upload_path: slint::SharedString| {
+        log::info!("Detect profile: {}", upload_path);
+        let upload = upload_path.to_string();
         let ui_weak = ui_weak.clone();
 
         std::thread::spawn(move || {
-            let result = crate::commands::detect_profile(&proj);
+            let result = crate::commands::detect_profile_from_upload(&upload);
             let invoke_result = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
                     match result {
                         Ok(profile) => {
                             log::info!("Detected profile: {}", profile);
                             helpers::persist_settings(
-                                Some(&project_for_settings),
+                                Some(&upload),
                                 None,
                                 Some(&profile),
                                 None,
@@ -226,28 +300,25 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                             );
                             ui.set_detected_profile(profile.clone().into());
                             ui.set_status_text(format!("Detected profile: {}", profile).into());
-                            ui.set_profile_confidence("see conversion report".into());
                         }
-                        Err(error) => {
-                            log::error!("Profile detection failed: {}", error);
-                            ui.set_status_text(
-                                format!("Profile detection failed:\n{}", error).into(),
-                            );
+                        Err(e) => {
+                            log::error!("Profile detection failed: {}", e);
+                            ui.set_status_text(format!("Profile detection failed:\n{}", e).into());
                         }
                     }
                 }
             });
 
-            if let Err(error) = invoke_result {
-                log::error!("Failed to update UI after profile detection: {}", error);
+            if let Err(e) = invoke_result {
+                log::error!("Failed to update UI after profile detection: {}", e);
             }
         });
     });
 
     // Open Output button
     ui.on_open_output_clicked(|output_path: slint::SharedString| {
-        if let Err(error) = helpers::open_output_path(output_path.as_str()) {
-            log::error!("Failed to open output path: {}", error);
+        if let Err(e) = helpers::open_output_path(output_path.as_str()) {
+            log::error!("Failed to open output path: {}", e);
         }
     });
 
@@ -260,10 +331,44 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 Ok(path) => {
                     ui.set_status_text(format!("Opened report:\n{}", path.display()).into())
                 }
-                Err(error) => {
-                    log::error!("Failed to open report path: {}", error);
-                    ui.set_status_text(format!("Open report failed:\n{}", error).into());
+                Err(e) => {
+                    log::error!("Failed to open report path: {}", e);
+                    ui.set_status_text(format!("Open report failed:\n{}", e).into());
                 }
+            }
+        }
+    });
+
+    // Choose upload file button — opens native file dialog filtered to archives
+    let ui_weak = ui.as_weak();
+    ui.on_choose_upload_file_clicked(
+        move |upload_path: slint::SharedString, _output_path: slint::SharedString| {
+            let initial = helpers::path_for_dialog(upload_path.as_str());
+            let selected = crate::desktop_dialog::pick_project_zip(initial.as_deref());
+            if let Some(selected) = selected {
+                helpers::persist_settings(Some(&selected), None, None, None, None, None);
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_upload_path(selected.clone().into());
+                    ui.set_status_text(
+                        format!("Selected upload file: {}", selected).into(),
+                    );
+                }
+            }
+        },
+    );
+
+    // Choose output directory button — opens native folder dialog
+    let ui_weak = ui.as_weak();
+    ui.on_choose_output_dir_clicked(move |output_dir: slint::SharedString| {
+        let initial = helpers::path_for_dialog(output_dir.as_str());
+        let selected = crate::desktop_dialog::pick_output_dir(initial.as_deref());
+        if let Some(selected) = selected {
+            helpers::persist_settings(None, Some(&selected), None, None, None, None);
+            if let Some(ui) = ui_weak.upgrade() {
+                ui.set_output_path(selected.clone().into());
+                ui.set_status_text(
+                    format!("Selected output directory: {}", selected).into(),
+                );
             }
         }
     });

@@ -19,6 +19,7 @@ thiserror = "2"
 sha2 = "0.10"
 url = "2"
 zip = { version = "2.2", default-features = false, features = ["deflate"] }
+tempfile = "3"
 
 [build-dependencies]
 slint-build = "1"

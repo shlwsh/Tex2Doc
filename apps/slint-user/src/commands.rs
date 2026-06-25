@@ -1,11 +1,8 @@
 //! P5: CLI command wrappers for the desktop client.
 //!
-//! Wraps `SemanticTexEngine` and `doc-core` conversion functions
-//! for use by the UI layer.
+//! Provides profile detection and ID generation helpers used by the UI layer.
 
-use crate::app_state::AppState;
-use crate::report::ReportSummary;
-use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
+use std::io::Cursor;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -31,38 +28,81 @@ impl From<doc_compiler_engine::EngineError> for CommandError {
     }
 }
 
-impl From<crate::local_convert::LocalConvertError> for CommandError {
-    fn from(e: crate::local_convert::LocalConvertError) -> Self {
-        Self::ConversionFailed(e.to_string())
+impl From<std::io::Error> for CommandError {
+    fn from(e: std::io::Error) -> Self {
+        Self::OutputWriteFailed(e.to_string())
+    }
+}
+
+impl From<zip::result::ZipError> for CommandError {
+    fn from(e: zip::result::ZipError) -> Self {
+        Self::ConversionFailed(format!("zip error: {}", e))
     }
 }
 
 /// P5: Result type for desktop commands.
 pub type CommandResult<T> = Result<T, CommandError>;
 
-/// P5: Result of a local conversion.
-#[derive(Debug, Clone)]
-pub struct LocalConvertResult {
-    pub docx_path: PathBuf,
-    pub report_path: PathBuf,
-    pub profile: String,
-    pub profile_confidence: Option<f32>,
-    pub compatibility_score: u8,
-    pub quality_status: String,
-    pub quality_score: String,
-    pub report_text: String,
-    pub docx_bytes: usize,
+/// P5: Detect the journal/profile for an uploaded TeX archive.
+/// Reads the upload file, extracts it to a temp directory if it's a zip,
+/// then runs the profile detection engine.
+pub fn detect_profile_from_upload(upload_path: &str) -> CommandResult<String> {
+    if upload_path.trim().is_empty() {
+        return Err(CommandError::ProjectNotFound("(empty upload path)".to_string()));
+    }
+    let path = Path::new(upload_path);
+    if !path.is_file() {
+        return Err(CommandError::ProjectNotFound(upload_path.to_string()));
+    }
+
+    let bytes = std::fs::read(path)
+        .map_err(|e| CommandError::ProjectNotFound(format!("{}: {}", upload_path, e)))?;
+
+    // Determine if it's a zip by checking magic bytes
+    let is_zip = bytes.len() >= 2 && bytes[0] == 0x50 && bytes[1] == 0x4b;
+
+    let temp_dir = tempfile::tempdir()
+        .map_err(|e| CommandError::ConversionFailed(format!("temp dir: {}", e)))?;
+
+    if is_zip {
+        let reader = Cursor::new(&bytes);
+        let mut archive = zip::ZipArchive::new(reader)?;
+        for i in 0..archive.len() {
+            let mut file = archive.by_index(i)?;
+            let outpath = temp_dir.path().join(file.name());
+            if file.name().ends_with('/') {
+                std::fs::create_dir_all(&outpath)?;
+            } else {
+                if let Some(parent) = outpath.parent() {
+                    std::fs::create_dir_all(parent)?;
+                }
+                let mut outfile = std::fs::File::create(&outpath)?;
+                std::io::copy(&mut file, &mut outfile)?;
+            }
+        }
+    } else {
+        // Single file - write with original name in temp
+        let dest = temp_dir.path().join(
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("main.tex"),
+        );
+        std::fs::write(&dest, &bytes)?;
+    }
+
+    detect_profile(temp_dir.path())
 }
 
-/// P5: Detect the journal/profile for a TeX project.
+/// P5: Detect the journal/profile for a TeX project directory.
 pub fn detect_profile(project_root: &Path) -> CommandResult<String> {
+    use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
+
     if !project_root.is_dir() {
         return Err(CommandError::ProjectNotFound(
             project_root.display().to_string(),
         ));
     }
 
-    // Look for main.tex or minimal.tex
     let main_tex = find_main_tex(project_root)?;
 
     let options = CompileOptions {
@@ -82,68 +122,6 @@ pub fn detect_profile(project_root: &Path) -> CommandResult<String> {
         .unwrap_or_else(|| artifact.report.profile.id().to_string());
 
     Ok(profile)
-}
-
-/// P5: Run a local conversion.
-pub fn run_local_convert(
-    project_root: &Path,
-    output_path: &Path,
-    profile: &str,
-    quality: &str,
-    _app_state: &AppState,
-) -> CommandResult<LocalConvertResult> {
-    if !project_root.is_dir() {
-        return Err(CommandError::ProjectNotFound(
-            project_root.display().to_string(),
-        ));
-    }
-
-    let main_tex = find_main_tex(project_root)?;
-
-    let report_path = report_path_for(output_path);
-    let artifact = crate::local_convert::convert(
-        project_root,
-        &main_tex,
-        output_path,
-        Some(&report_path),
-        profile,
-        quality,
-    )?;
-
-    let profile = artifact
-        .report
-        .active_profile
-        .as_ref()
-        .map(|ap| ap.id.clone())
-        .unwrap_or_else(|| artifact.report.profile.id().to_string());
-
-    let quality_status = artifact
-        .report
-        .quality_gate
-        .as_ref()
-        .map(|qg| qg.status.as_str().to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
-    let quality_score = artifact
-        .report
-        .quality_gate
-        .as_ref()
-        .map(|qg| qg.score.to_string())
-        .unwrap_or_else(|| "N/A".to_string());
-    let summary = ReportSummary::from_report(&artifact.report);
-    let profile_confidence = summary.confidence;
-    let report_text = summary.format_for_ui();
-
-    Ok(LocalConvertResult {
-        docx_path: output_path.to_path_buf(),
-        report_path,
-        profile,
-        profile_confidence,
-        compatibility_score: artifact.report.compatibility.score,
-        quality_status,
-        quality_score,
-        report_text,
-        docx_bytes: artifact.report.docx_bytes,
-    })
 }
 
 /// P5: Generate a job ID.
@@ -256,16 +234,6 @@ fn walkdir(root: &Path) -> CommandResult<Vec<PathBuf>> {
     Ok(results)
 }
 
-fn report_path_for(output_docx: &Path) -> PathBuf {
-    let mut path = output_docx.to_path_buf();
-    let stem = output_docx
-        .file_stem()
-        .and_then(|stem| stem.to_str())
-        .unwrap_or("conversion");
-    path.set_file_name(format!("{stem}.report.json"));
-    path
-}
-
 /// Simple UUID-like ID generator.
 fn uuid_simple() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -281,35 +249,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_convert_writes_docx_and_report_for_generic_fixture() {
+    fn detect_profile_from_directory_resolves_main_tex() {
         let repo_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let project_root = repo_root.join("examples/journals/generic");
-        let output_dir = std::env::temp_dir().join(format!(
-            "tex2doc-desktop-local-convert-{}",
-            std::process::id()
-        ));
-        std::fs::create_dir_all(&output_dir).unwrap();
-        let output_docx = output_dir.join("generic-minimal.docx");
-
-        let result = run_local_convert(
-            &project_root,
-            &output_docx,
-            "generic-article",
-            "preview",
-            &AppState::default(),
-        )
-        .unwrap();
-
-        assert!(result.docx_path.is_file());
-        assert!(result.report_path.is_file());
-        assert!(result.docx_bytes > 0);
-        assert_eq!(
-            result.report_path,
-            output_dir.join("generic-minimal.report.json")
-        );
-
-        let _ = std::fs::remove_file(result.docx_path);
-        let _ = std::fs::remove_file(result.report_path);
-        let _ = std::fs::remove_dir_all(output_dir);
+        let profile = detect_profile(&project_root).unwrap();
+        assert!(!profile.is_empty());
     }
 }

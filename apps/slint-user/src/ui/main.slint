@@ -83,26 +83,6 @@ component MetricTile inherits Rectangle {
     }
 }
 
-component SectionPanel inherits Rectangle {
-    in property <string> title;
-    in property <string> subtitle;
-    in property <color> surface: #ffffff;
-    in property <color> border: #d7dee8;
-    in property <color> text-primary: #172033;
-    in property <color> text-muted: #6b778c;
-
-    border-radius: 8px;
-    border-color: border;
-    background: surface;
-
-    VerticalBox {
-        padding: 18px;
-        spacing: 4px;
-        Text { text: root.title; font-size: 18px; font-weight: 700; color: root.text-primary; }
-        Text { text: root.subtitle; font-size: 12px; color: root.text-muted; wrap: word-wrap; }
-    }
-}
-
 component StatusPill inherits Rectangle {
     in property <string> text;
     in property <color> bg: #eff6ff;
@@ -207,6 +187,7 @@ export component MainWindow inherits Window {
     in-out property <string> toast-level: "info";
 
     in-out property <string> project-path;
+    in-out property <string> upload-path;
     in-out property <string> api-base-url;
     in-out property <string> login-email: "demo@example.com";
     in-out property <string> login-password: "demo";
@@ -290,6 +271,12 @@ export component MainWindow inherits Window {
     in-out property <string> t-convert-local: "Local";
     in-out property <string> t-convert-cloud: "Cloud";
     in-out property <string> t-convert-cloud-requires-sign-in: "Cloud engine requires sign-in.";
+    in-out property <string> t-convert-upload: "Upload";
+    in-out property <string> t-convert-upload-placeholder: "Select a project zip or archive...";
+    in-out property <string> t-convert-choose-upload: "Choose File";
+    in-out property <string> t-convert-output-dir: "Output Directory";
+    in-out property <string> t-convert-output-dir-placeholder: "Folder where the DOCX will be saved...";
+    in-out property <string> t-convert-choose-output-dir: "Choose Folder";
     in-out property <string> t-convert-project: "Project";
     in-out property <string> t-convert-project-placeholder: "TeX project path or project zip...";
     in-out property <string> t-convert-folder: "Folder";
@@ -444,7 +431,7 @@ export component MainWindow inherits Window {
     in-out property <string> t-dialog-cancel: "Cancel";
     in-out property <string> t-dialog-confirm: "Confirm";
 
-    callback convert-clicked(string, string, string, string);
+    callback convert-clicked(string, string, string, string, string);
     callback cloud-convert-clicked(string, string, string, string, string, string);
     callback detect-profile-clicked(string);
     callback login-clicked(string, string, string);
@@ -464,9 +451,8 @@ export component MainWindow inherits Window {
     callback change-plan-clicked(string);
     callback check-update-clicked(string, string);
     callback apply-appearance-clicked(string, string);
-    callback choose-project-folder-clicked(string, string);
-    callback choose-project-zip-clicked(string, string);
-    callback choose-output-clicked(string);
+    callback choose-upload-file-clicked(string, string);
+    callback choose-output-dir-clicked(string);
     callback save-settings-clicked();
     callback open-output-clicked(string);
     callback open-report-clicked(string);
@@ -478,62 +464,62 @@ export component MainWindow inherits Window {
         background: color-window-bg;
 
         VerticalBox {
-            padding: 24px;
-            spacing: 14px;
+            padding: 32px;
+            spacing: 0px;
 
             Rectangle {
                 horizontal-stretch: 1;
-                max-height: 420px;
-                border-radius: 8px;
+                max-height: 580px;
+                border-radius: 12px;
                 border-color: color-border;
                 background: color-surface;
 
-                HorizontalBox {
-                    padding: 22px;
-                    spacing: 22px;
+                VerticalBox {
+                    padding: 28px;
+                    spacing: 0px;
 
-                    Rectangle {
-                        width: 340px;
-                        background: color-surface-alt;
-                        border-radius: 8px;
-
+                    // ---- Header ----
+                    HorizontalBox {
+                        spacing: 14px;
+                        Image { source: @image-url("assets/app_icon.png"); width: 44px; height: 44px; image-fit: contain; }
                         VerticalBox {
-                            padding: 24px;
-                            spacing: 14px;
-                            Image { source: @image-url("assets/app_icon.png"); width: 52px; height: 52px; image-fit: contain; }
-                            Text { text: t-auth-required-title; font-size: 26px; font-weight: 700; color: color-text-primary; wrap: word-wrap; }
-                            Text { text: t-auth-required-subtitle; font-size: 14px; color: color-text-secondary; wrap: word-wrap; }
-                            StatusPill { text: t-auth-demo-hint; bg: #eff6ff; fg: color-accent; }
-                            Text { text: account-status; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
-                            Rectangle { vertical-stretch: 1; }
-                            Text { text: t-auth-api-hint; font-size: 11px; color: color-text-muted; wrap: word-wrap; }
+                            spacing: 2px;
+                            Text { text: "Tex2Doc"; font-size: 22px; font-weight: 700; color: color-text-primary; }
+                            Text { text: "启哲科技 · 智能文档转换工作台"; font-size: 12px; color: color-text-muted; }
                         }
                     }
 
-                    VerticalBox {
-                        horizontal-stretch: 1;
-                        spacing: 12px;
+                    Rectangle { height: 1px; background: color-border; }
+                    Rectangle { height: 8px; }
 
-                        HorizontalBox {
-                            spacing: 10px;
-                            ComboBox {
-                                width: 132px;
-                                current-value <=> ui-locale;
-                                model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
-                                selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
-                            }
-                            ComboBox {
-                                width: 132px;
-                                current-value <=> ui-theme;
-                                model: ["default", "blue", "green", "purple", "orange", "dark"];
-                                selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
-                            }
+                    // ---- Demo Account ----
+                    Rectangle {
+                        border-radius: 8px;
+                        border-color: color-border;
+                        background: color-surface-alt;
+                        VerticalBox {
+                            padding: 14px;
+                            spacing: 6px;
+                            Text { text: "Demo 账号"; font-size: 12px; font-weight: 700; color: color-accent; }
+                            Text { text: "Email:  demo@example.com"; font-size: 12px; color: color-text-secondary; }
+                            Text { text: "Password:  demo"; font-size: 12px; color: color-text-secondary; }
                         }
+                    }
 
-                        Text { text: t-account-sign-in-register; font-size: 20px; font-weight: 700; color: color-text-primary; }
-                        LineEdit { placeholder-text: t-settings-api-base-url-placeholder; text <=> api-base-url; }
-                        LineEdit { placeholder-text: t-account-email; text <=> login-email; }
-                        LineEdit { placeholder-text: t-account-password; text <=> login-password; }
+                    Rectangle { height: 1px; background: color-border; }
+                    Rectangle { height: 6px; }
+
+                    // ---- Sign In Form ----
+                    VerticalBox {
+                        spacing: 10px;
+
+                        Text { text: "登录 / 注册"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+
+                        LineEdit { placeholder-text: "API Base URL (http://localhost:...)"; text <=> api-base-url; height: 36px; }
+                        LineEdit { placeholder-text: "Email"; text <=> login-email; height: 36px; }
+                        LineEdit { placeholder-text: "Password"; text <=> login-password; height: 36px; }
+
+                        if is-account-busy: ProgressIndicator { progress: 0.5; }
 
                         HorizontalBox {
                             spacing: 10px;
@@ -570,8 +556,29 @@ export component MainWindow inherits Window {
                             }
                         }
 
-                        if is-account-busy: ProgressIndicator { progress: 0.5; }
                         Text { text: account-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                    }
+
+                    Rectangle { height: 1px; background: color-border; }
+                    Rectangle { height: 4px; }
+
+                    // ---- Language / Theme ----
+                    HorizontalBox {
+                        spacing: 10px;
+                        Text { text: "Language"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
+                        ComboBox {
+                            width: 120px;
+                            current-value <=> ui-locale;
+                            model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
+                            selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                        }
+                        Text { text: "Theme"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
+                        ComboBox {
+                            width: 110px;
+                            current-value <=> ui-theme;
+                            model: ["default", "blue", "green", "purple", "orange", "dark"];
+                            selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                        }
                     }
                 }
             }
@@ -596,7 +603,7 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         spacing: 1px;
                         Text { text: "Tex2Doc"; font-size: 20px; font-weight: 700; color: color-text-primary; }
-                        Text { text: "启哲科技出品"; font-size: 11px; color: color-text-muted; overflow: elide; }
+                        Text { text: is-signed-in ? account-display-name : "Guest · 启哲科技"; font-size: 11px; color: color-text-muted; overflow: elide; }
                     }
                 }
 
@@ -609,15 +616,6 @@ export component MainWindow inherits Window {
                 NavButton { label: t-tab-about; detail: "Qizhe Technology"; selected: selected-page == 6; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 6; } }
 
                 Rectangle { vertical-stretch: 1; }
-
-                SectionPanel {
-                    title: is-signed-in ? account-display-name : "Guest";
-                    subtitle: is-signed-in ? usage-status : account-status;
-                    surface: color-surface;
-                    border: color-border;
-                    text-primary: color-text-primary;
-                    text-muted: color-text-muted;
-                }
             }
         }
 
@@ -643,12 +641,6 @@ export component MainWindow inherits Window {
                             font-weight: 700;
                             color: color-text-primary;
                             vertical-alignment: bottom;
-                        }
-                        Text {
-                            text: app-version == "" ? "LaTeX to DOCX commercial workspace" : "Version " + app-version;
-                            font-size: 11px;
-                            color: color-text-muted;
-                            vertical-alignment: top;
                         }
                     }
 
@@ -697,8 +689,6 @@ export component MainWindow inherits Window {
                         padding: 22px;
                         spacing: 16px;
 
-                        SectionPanel { subtitle: is-signed-in ? account-display-name : t-account-guest-mode; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
-
                         HorizontalBox {
                             spacing: 14px;
                             MetricTile { label: t-account-account; value: account-display-name; note: login-email; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
@@ -741,8 +731,6 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         padding: 22px;
                         spacing: 16px;
-
-                        SectionPanel { subtitle: t-recharge-subtitle; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
 
                         Rectangle {
                             border-radius: 8px;
@@ -813,8 +801,6 @@ export component MainWindow inherits Window {
                         padding: 22px;
                         spacing: 14px;
 
-                        SectionPanel { subtitle: "Upload a complete LaTeX project, choose the main TeX file, and run the semantic conversion engine."; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
-
                         Rectangle {
                             border-radius: 8px;
                             border-color: color-border;
@@ -825,9 +811,8 @@ export component MainWindow inherits Window {
 
                                 HorizontalBox {
                                     spacing: 8px;
-                                    LineEdit { placeholder-text: t-convert-project-placeholder; text <=> project-path; }
-                                    Button { text: t-convert-folder; enabled: !is-converting; clicked => { choose-project-folder-clicked(project-path, output-path); } }
-                                    Button { text: t-convert-zip; enabled: !is-converting; clicked => { choose-project-zip-clicked(project-path, output-path); } }
+                                    LineEdit { placeholder-text: t-convert-upload-placeholder; text <=> upload-path; }
+                                    Button { text: t-convert-choose-upload; enabled: !is-converting; clicked => { choose-upload-file-clicked(upload-path, output-path); } }
                                 }
 
                                 LineEdit { placeholder-text: t-convert-main-tex-placeholder; text <=> main-tex; }
@@ -841,24 +826,24 @@ export component MainWindow inherits Window {
 
                                 HorizontalBox {
                                     spacing: 8px;
-                                    LineEdit { placeholder-text: t-convert-output-placeholder; text <=> output-path; }
-                                    Button { text: t-convert-save-as; clicked => { choose-output-clicked(output-path); } }
+                                    LineEdit { placeholder-text: t-convert-output-dir-placeholder; text <=> output-path; }
+                                    Button { text: t-convert-choose-output-dir; clicked => { choose-output-dir-clicked(output-path); } }
                                 }
 
                                 HorizontalBox {
                                     spacing: 10px;
-                                    Button { text: t-convert-detect-profile; enabled: project-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + project-path; detect-profile-clicked(project-path); } }
+                                    Button { text: t-convert-detect-profile; enabled: upload-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + upload-path; detect-profile-clicked(upload-path); } }
                                     Button {
                                         text: is-converting ? t-convert-converting : (use-cloud-engine ? t-convert-cloud-convert : t-convert-convert);
                                         primary: true;
-                                        enabled: !is-converting && project-path != "" && output-path != "" && (!use-cloud-engine || is-signed-in);
+                                        enabled: !is-converting && upload-path != "" && output-path != "" && (!use-cloud-engine || is-signed-in);
                                         clicked => {
                                             is-converting = true;
                                             conversion-progress = 0.15;
                                             if use-cloud-engine {
-                                                cloud-convert-clicked(api-base-url, project-path, main-tex, detected-profile, quality-level, output-path);
+                                                cloud-convert-clicked(api-base-url, upload-path, main-tex, detected-profile, quality-level, output-path);
                                             } else {
-                                                convert-clicked(project-path, detected-profile, quality-level, output-path);
+                                                convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
                                             }
                                         }
                                     }
@@ -885,7 +870,6 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         padding: 22px;
                         spacing: 14px;
-                        SectionPanel { subtitle: t-records-conversion-subtitle; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
                         Rectangle {
                             border-radius: 8px;
                             border-color: color-border;
@@ -896,7 +880,6 @@ export component MainWindow inherits Window {
                                 HorizontalBox {
                                     spacing: 10px;
                                     Button { text: t-records-query-conversions; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-conversion-records-clicked(api-base-url); } }
-                                    Text { text: t-records-cloud-source; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
                                 }
                                 ConversionRecordsTable {
                                     rows: cloud-conversion-records;
@@ -926,7 +909,6 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         padding: 22px;
                         spacing: 14px;
-                        SectionPanel { subtitle: t-records-recharge-subtitle; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
                         Rectangle {
                             border-radius: 8px;
                             border-color: color-border;
@@ -986,7 +968,6 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         padding: 22px;
                         spacing: 14px;
-                        SectionPanel { subtitle: t-feedback-subtitle; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
                         Rectangle {
                             border-radius: 8px;
                             border-color: color-border;
@@ -1049,7 +1030,6 @@ export component MainWindow inherits Window {
                     VerticalBox {
                         padding: 22px;
                         spacing: 14px;
-                        SectionPanel { subtitle: t-about-subtitle; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
                         Rectangle {
                             border-radius: 8px;
                             border-color: color-border;

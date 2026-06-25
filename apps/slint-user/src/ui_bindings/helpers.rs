@@ -1,7 +1,6 @@
 use crate::app_state::AppState;
 use crate::cloud_account::{self, CloudAccountSession};
 use crate::ui::{JobRow, MainWindow};
-use slint::SharedString;
 use std::path::PathBuf;
 
 pub(crate) fn apply_account_session(
@@ -151,26 +150,6 @@ pub(crate) fn path_for_dialog(value: &str) -> Option<PathBuf> {
     }
 }
 
-pub(crate) fn default_output_for_project(project_path: &str) -> String {
-    let path = std::path::Path::new(project_path);
-    let project_dir = if path.extension().and_then(|ext| ext.to_str()) == Some("zip") {
-        path.parent().unwrap_or_else(|| std::path::Path::new("."))
-    } else {
-        path
-    };
-    let stem = path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("tex2doc-output");
-    project_dir
-        .join("output")
-        .join("to-docx")
-        .join(format!("{stem}.docx"))
-        .display()
-        .to_string()
-}
-
 pub(crate) fn report_path_for_output(output_path: &str) -> Option<PathBuf> {
     let output = std::path::Path::new(output_path.trim());
     if output.as_os_str().is_empty() {
@@ -258,10 +237,4 @@ pub(crate) fn open_external_url(url: &str) -> std::io::Result<()> {
     };
 
     command.spawn().map(|_| ())
-}
-
-pub(crate) fn confidence_text(confidence: Option<f32>) -> SharedString {
-    confidence
-        .map(|value| format!("{:.0}%", value * 100.0).into())
-        .unwrap_or_else(|| "--".into())
 }

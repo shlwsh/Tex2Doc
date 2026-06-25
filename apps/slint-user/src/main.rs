@@ -14,7 +14,6 @@ mod diagnostics;
 mod i18n;
 mod job;
 mod job_history;
-mod local_convert;
 mod report;
 mod settings;
 mod theme;
@@ -22,9 +21,9 @@ mod ui;
 mod ui_bindings;
 mod updater;
 
-use app_state::{AppState, JobUpdate};
+use app_state::AppState;
 use settings::Settings;
-use slint::{Color, ComponentHandle, SharedString};
+use slint::{Color, ComponentHandle};
 use std::sync::Arc;
 use ui::MainWindow;
 
@@ -96,7 +95,7 @@ fn main() {
         }
     }
     if let Some(path) = settings.last_project_path.clone() {
-        ui.set_project_path(path.into());
+        ui.set_upload_path(path.into());
     }
     if !account_status_set {
         ui.set_account_status(i18n::translate(&settings.locale, "account.not_signed_in").into());
@@ -154,224 +153,6 @@ fn main() {
             }
         });
     }
-
-    // Wire up the Convert button callback
-    let app_state_clone = Arc::clone(&app_state);
-    let ui_weak = ui.as_weak();
-    ui.on_convert_clicked(
-        move |project_path: slint::SharedString,
-              detected_profile: slint::SharedString,
-              quality_level: slint::SharedString,
-              output_path: slint::SharedString| {
-            log::info!(
-                "Convert clicked: project={}, profile={}, quality={}",
-                project_path,
-                detected_profile,
-                quality_level
-            );
-
-            let proj = std::path::PathBuf::from(project_path.as_str());
-            let out = std::path::PathBuf::from(output_path.as_str());
-            let profile = detected_profile.to_string();
-            let quality = quality_level.to_string();
-            persist_settings(
-                Some(project_path.as_str()),
-                Some(output_path.as_str()),
-                Some(&profile),
-                Some(&quality),
-                None,
-                None,
-            );
-            let app = Arc::clone(&app_state_clone);
-            let ui_weak = ui_weak.clone();
-
-            std::thread::spawn(move || {
-                log::info!("Starting conversion in background thread");
-
-                job::start_job(
-                    proj.display().to_string(),
-                    out.display().to_string(),
-                    profile,
-                    quality,
-                    Arc::clone(&app),
-                    move |result| {
-                        persist_recent_jobs(&app);
-                        let recent_jobs = recent_jobs_for_ui(&app, i18n::DEFAULT_LOCALE);
-                        let invoke_result = slint::invoke_from_event_loop(move || {
-                            if let Some(ui) = ui_weak.upgrade() {
-                                ui.set_is_converting(false);
-                                ui.set_conversion_progress(1.0);
-                                ui.set_recent_jobs(recent_jobs.into());
-
-                                match result {
-                                    Ok(result) => {
-                                        log::info!(
-                                            "Conversion succeeded: {} bytes, profile={}",
-                                            result.docx_bytes,
-                                            result.profile
-                                        );
-                                        ui.set_detected_profile(result.profile.into());
-                                        ui.set_compatibility_score(
-                                            result.compatibility_score.to_string().into(),
-                                        );
-                                        ui.set_compatibility_progress(
-                                            (result.compatibility_score as f32 / 100.0)
-                                                .clamp(0.0, 1.0),
-                                        );
-                                        ui.set_quality_status(
-                                            format!(
-                                                "{} ({})",
-                                                result.quality_status, result.quality_score
-                                            )
-                                            .into(),
-                                        );
-                                        ui.set_quality_progress(
-                                            result
-                                                .quality_score
-                                                .parse::<f32>()
-                                                .map(|score| (score / 100.0).clamp(0.0, 1.0))
-                                                .unwrap_or(0.0),
-                                        );
-                                        ui.set_profile_confidence(confidence_text(
-                                            result.profile_confidence,
-                                        ));
-                                        ui.set_profile_confidence_progress(
-                                            result
-                                                .profile_confidence
-                                                .unwrap_or(0.0)
-                                                .clamp(0.0, 1.0),
-                                        );
-                                        ui.set_status_text(result.report_text.into());
-                                    }
-                                    Err(error) => {
-                                        log::error!("Conversion failed: {}", error);
-                                        ui.set_conversion_progress(0.0);
-                                        ui.set_quality_status("Failed".into());
-                                        ui.set_compatibility_progress(0.0);
-                                        ui.set_quality_progress(0.0);
-                                        ui.set_profile_confidence_progress(0.0);
-                                        ui.set_status_text(
-                                            format!("Conversion failed:\n{}", error).into(),
-                                        );
-                                    }
-                                }
-                            }
-                        });
-
-                        if let Err(error) = invoke_result {
-                            log::error!("Failed to update UI after conversion: {}", error);
-                        }
-                    },
-                );
-            });
-        },
-    );
-
-    // Wire up the Cloud Convert button callback.
-    let app_state_clone = Arc::clone(&app_state);
-    let ui_weak = ui.as_weak();
-    ui.on_cloud_convert_clicked(
-        move |api_base_url: slint::SharedString,
-              project_path: slint::SharedString,
-              main_tex: slint::SharedString,
-              detected_profile: slint::SharedString,
-              quality_level: slint::SharedString,
-              output_path: slint::SharedString| {
-            let base_url = api_base_url.to_string();
-            let project = std::path::PathBuf::from(project_path.as_str());
-            let main_tex_value = main_tex.to_string();
-            let main_tex_option = if main_tex_value.trim().is_empty() {
-                None
-            } else {
-                Some(main_tex_value)
-            };
-            let profile = detected_profile.to_string();
-            let quality = quality_level.to_string();
-            let output = std::path::PathBuf::from(output_path.as_str());
-            let token = app_state_clone.auth_token();
-            let app = Arc::clone(&app_state_clone);
-            let cloud_job_id =
-                job::register_external_job(project.display().to_string(), profile.clone(), &app);
-            app.update_job(&cloud_job_id, JobUpdate::Running);
-            persist_settings(
-                Some(project_path.as_str()),
-                Some(output_path.as_str()),
-                Some(&profile),
-                Some(&quality),
-                Some(&base_url),
-                None,
-            );
-            let ui_weak = ui_weak.clone();
-
-            std::thread::spawn(move || {
-                let result = cloud_convert::convert_project_blocking(
-                    &base_url,
-                    token,
-                    &project,
-                    main_tex_option.as_deref(),
-                    &output,
-                    &profile,
-                    &quality,
-                );
-                match &result {
-                    Ok(result) => app.update_job(
-                        &cloud_job_id,
-                        JobUpdate::Succeeded {
-                            remote_job_id: Some(result.job_id.clone()),
-                            output_path: result.docx_path.display().to_string(),
-                            report_path: Some(result.report_path.display().to_string()),
-                        },
-                    ),
-                    Err(error) => {
-                        app.update_job(&cloud_job_id, JobUpdate::Failed(error.to_string()))
-                    }
-                }
-                persist_recent_jobs(&app);
-                let recent_jobs = recent_jobs_for_ui(&app, i18n::DEFAULT_LOCALE);
-                let invoke_result = slint::invoke_from_event_loop(move || {
-                    if let Some(ui) = ui_weak.upgrade() {
-                        ui.set_is_converting(false);
-                        ui.set_conversion_progress(1.0);
-                        ui.set_recent_jobs(recent_jobs.into());
-                        match result {
-                            Ok(result) => {
-                                ui.set_status_text(
-                                    format!(
-                                        "{}\nJob: {}\nDOCX: {} ({} bytes)\nReport: {}",
-                                        result.report_text,
-                                        result.job_id,
-                                        result.docx_path.display(),
-                                        result.docx_bytes,
-                                        result.report_path.display()
-                                    )
-                                    .into(),
-                                );
-                                ui.set_quality_status("Cloud completed".into());
-                                ui.set_compatibility_score("--".into());
-                                ui.set_profile_confidence("cloud report".into());
-                                ui.set_compatibility_progress(0.0);
-                                ui.set_quality_progress(1.0);
-                                ui.set_profile_confidence_progress(0.0);
-                            }
-                            Err(error) => {
-                                ui.set_conversion_progress(0.0);
-                                ui.set_quality_status("Cloud failed".into());
-                                ui.set_compatibility_progress(0.0);
-                                ui.set_quality_progress(0.0);
-                                ui.set_profile_confidence_progress(0.0);
-                                ui.set_status_text(
-                                    format!("Cloud conversion failed:\n{}", error).into(),
-                                );
-                            }
-                        }
-                    }
-                });
-                if let Err(error) = invoke_result {
-                    log::error!("Failed to update UI after cloud conversion: {}", error);
-                }
-            });
-        },
-    );
 
     // Wire up the cloud account login button.
     let app_state_clone = Arc::clone(&app_state);
@@ -701,110 +482,10 @@ fn main() {
         },
     );
 
-    let ui_weak = ui.as_weak();
-    ui.on_choose_project_folder_clicked(
-        move |project_path: slint::SharedString, output_path: slint::SharedString| {
-            let initial = path_for_dialog(project_path.as_str());
-            let selected = desktop_dialog::pick_project_folder(initial.as_deref());
-            if let Some(selected) = selected {
-                let default_output = default_output_for_project(&selected);
-                let should_set_output = output_path.trim().is_empty();
-                persist_settings(Some(&selected), None, None, None, None, None);
-                if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_project_path(selected.clone().into());
-                    if should_set_output {
-                        ui.set_output_path(default_output.into());
-                    }
-                    ui.set_status_text(
-                        format!("{} {}", tr_ui(&ui, "project.selected"), selected).into(),
-                    );
-                }
-            }
-        },
-    );
-
-    let ui_weak = ui.as_weak();
-    ui.on_choose_project_zip_clicked(
-        move |project_path: slint::SharedString, output_path: slint::SharedString| {
-            let initial = path_for_dialog(project_path.as_str());
-            let selected = desktop_dialog::pick_project_zip(initial.as_deref());
-            if let Some(selected) = selected {
-                let default_output = default_output_for_project(&selected);
-                let should_set_output = output_path.trim().is_empty();
-                persist_settings(Some(&selected), None, None, None, None, None);
-                if let Some(ui) = ui_weak.upgrade() {
-                    ui.set_project_path(selected.clone().into());
-                    if should_set_output {
-                        ui.set_output_path(default_output.into());
-                    }
-                    ui.set_status_text(
-                        format!("{} {}", tr_ui(&ui, "project_zip.selected"), selected).into(),
-                    );
-                }
-            }
-        },
-    );
-
-    let ui_weak = ui.as_weak();
-    ui.on_choose_output_clicked(move |output_path: slint::SharedString| {
-        let initial = path_for_dialog(output_path.as_str());
-        if let Some(selected) = desktop_dialog::pick_output_docx(initial.as_deref()) {
-            persist_settings(None, Some(&selected), None, None, None, None);
-            if let Some(ui) = ui_weak.upgrade() {
-                ui.set_output_path(selected.clone().into());
-                ui.set_status_text(
-                    format!("{} {}", tr_ui(&ui, "output.selected"), selected).into(),
-                );
-            }
-        }
-    });
-
-    // Wire up the Detect Profile button
-    let ui_weak = ui.as_weak();
-    ui.on_detect_profile_clicked(move |project_path: slint::SharedString| {
-        log::info!("Detect profile: {}", project_path);
-        let proj = std::path::PathBuf::from(project_path.as_str());
-        let project_for_settings = project_path.to_string();
-        let ui_weak = ui_weak.clone();
-
-        std::thread::spawn(move || {
-            let result = commands::detect_profile(&proj);
-            let invoke_result = slint::invoke_from_event_loop(move || {
-                if let Some(ui) = ui_weak.upgrade() {
-                    match result {
-                        Ok(profile) => {
-                            log::info!("Detected profile: {}", profile);
-                            persist_settings(
-                                Some(&project_for_settings),
-                                None,
-                                Some(&profile),
-                                None,
-                                None,
-                                None,
-                            );
-                            ui.set_detected_profile(profile.clone().into());
-                            ui.set_status_text(
-                                format!("{} {}", tr_ui(&ui, "convert.detected_profile"), profile)
-                                    .into(),
-                            );
-                            ui.set_profile_confidence("see conversion report".into());
-                            ui.set_profile_confidence_progress(0.0);
-                        }
-                        Err(error) => {
-                            log::error!("Profile detection failed: {}", error);
-                            ui.set_status_text(
-                                format!("Profile detection failed:\n{}", error).into(),
-                            );
-                        }
-                    }
-                }
-            });
-
-            if let Err(error) = invoke_result {
-                log::error!("Failed to update UI after profile detection: {}", error);
-            }
-        });
-    });
+    // Note: `choose-project-folder`, `choose-project-zip`, `choose-output`,
+    // `detect-profile`, `convert`, `cloud-convert` callbacks are now wired
+    // exclusively by `ui_bindings::wire_all` at the end of this function.
+    // Keeping a single source of truth avoids callback re-entry issues.
 
     ui.on_open_output_clicked(|output_path: slint::SharedString| {
         if let Err(error) = open_output_path(output_path.as_str()) {
@@ -889,12 +570,6 @@ fn main() {
     ui.run().unwrap();
 }
 
-fn confidence_text(confidence: Option<f32>) -> SharedString {
-    confidence
-        .map(|value| format!("{:.0}%", value * 100.0).into())
-        .unwrap_or_else(|| "--".into())
-}
-
 fn apply_account_session(
     app: &AppState,
     ui: &MainWindow,
@@ -967,12 +642,6 @@ fn recent_jobs_for_ui(app_state: &AppState, locale: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-fn persist_recent_jobs(app_state: &AppState) {
-    if let Err(error) = job_history::save_recent_jobs(&app_state.recent_jobs()) {
-        log::warn!("Failed to persist recent jobs: {}", error);
-    }
 }
 
 fn persist_settings(
@@ -1053,9 +722,21 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_convert_engine, "convert.engine");
     set_text!(set_t_convert_local, "convert.local");
     set_text!(set_t_convert_cloud, "convert.cloud");
+    set_text!(set_t_convert_cloud_requires_sign_in, "convert.cloud_requires_sign_in");
+    set_text!(set_t_convert_upload, "convert.upload");
     set_text!(
-        set_t_convert_cloud_requires_sign_in,
-        "convert.cloud_requires_sign_in"
+        set_t_convert_upload_placeholder,
+        "convert.upload_placeholder"
+    );
+    set_text!(set_t_convert_choose_upload, "convert.choose_upload");
+    set_text!(set_t_convert_output_dir, "convert.output_dir");
+    set_text!(
+        set_t_convert_output_dir_placeholder,
+        "convert.output_dir_placeholder"
+    );
+    set_text!(
+        set_t_convert_choose_output_dir,
+        "convert.choose_output_dir"
     );
     set_text!(set_t_convert_project, "convert.project");
     set_text!(
@@ -1287,35 +968,6 @@ fn parse_color(hex: &str) -> Color {
     )
 }
 
-fn path_for_dialog(value: &str) -> Option<std::path::PathBuf> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(std::path::PathBuf::from(trimmed))
-    }
-}
-
-fn default_output_for_project(project_path: &str) -> String {
-    let path = std::path::Path::new(project_path);
-    let project_dir = if path.extension().and_then(|ext| ext.to_str()) == Some("zip") {
-        path.parent().unwrap_or_else(|| std::path::Path::new("."))
-    } else {
-        path
-    };
-    let stem = path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("tex2doc-output");
-    project_dir
-        .join("output")
-        .join("to-docx")
-        .join(format!("{stem}.docx"))
-        .display()
-        .to_string()
-}
-
 fn report_path_for_output(output_path: &str) -> Option<std::path::PathBuf> {
     let output = std::path::Path::new(output_path.trim());
     if output.as_os_str().is_empty() {
@@ -1430,26 +1082,6 @@ fn open_external_url(url: &str) -> std::io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn default_output_for_directory_uses_to_docx_folder() {
-        let output = default_output_for_project("/tmp/paper3");
-        assert!(
-            output.contains("paper3/output/to-docx/paper3.docx")
-                || output.contains("paper3\\output\\to-docx\\paper3.docx")
-                || output.ends_with("paper3.docx")
-        );
-    }
-
-    #[test]
-    fn default_output_for_zip_uses_parent_to_docx_folder() {
-        let output = default_output_for_project("/tmp/paper3.zip");
-        assert!(
-            output.contains("output/to-docx/paper3.docx")
-                || output.contains("output\\to-docx\\paper3.docx")
-                || output.ends_with("paper3.docx")
-        );
-    }
 
     #[test]
     fn report_path_for_output_uses_docx_stem() {
