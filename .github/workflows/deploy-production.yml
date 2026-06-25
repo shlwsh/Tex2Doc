@@ -1,0 +1,149 @@
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+
+jobs:
+  build:
+    name: Build production bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Linux native dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libinput-dev
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: .
+
+      - name: Build doc-server
+        run: cargo build -p doc-server --release
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Build Flutter home
+        working-directory: flutter_app
+        run: flutter build web --release --target lib/main.dart --base-href /
+
+      - name: Stage Flutter home
+        run: |
+          mkdir -p dist/static/home
+          cp -R flutter_app/build/web/. dist/static/home/
+
+      - name: Build Flutter user
+        working-directory: flutter_app
+        run: flutter build web --release --target lib/main_user.dart --base-href /user/
+
+      - name: Stage Flutter user
+        run: |
+          mkdir -p dist/static/user
+          cp -R flutter_app/build/web/. dist/static/user/
+
+      - name: Build Flutter admin
+        working-directory: flutter_app
+        run: flutter build web --release --target lib/main_admin.dart --base-href /admin/
+
+      - name: Stage production bundle
+        run: |
+          mkdir -p dist/server dist/static/admin
+          cp -R flutter_app/build/web/. dist/static/admin/
+          cp target/release/doc-server dist/server/doc-server
+          chmod +x dist/server/doc-server
+          tar -czf tex2doc-production.tar.gz -C dist .
+
+      - name: Upload production bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: tex2doc-production
+          path: tex2doc-production.tar.gz
+          if-no-files-found: error
+
+  deploy:
+    name: Deploy to Tencent Cloud
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    env:
+      SSH_PORT: ${{ secrets.PROD_SSH_PORT || '22' }}
+      DEPLOY_DIR: ${{ secrets.PROD_DEPLOY_DIR || '/opt/tex2doc' }}
+    steps:
+      - name: Download production bundle
+        uses: actions/download-artifact@v4
+        with:
+          name: tex2doc-production
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          printf '%s\n' "${{ secrets.PROD_SSH_KEY }}" > ~/.ssh/prod_deploy_key
+          chmod 600 ~/.ssh/prod_deploy_key
+          ssh-keyscan -p "$SSH_PORT" "${{ secrets.PROD_SSH_HOST }}" >> ~/.ssh/known_hosts
+          cat > ~/.ssh/config <<EOF
+          Host tex2doc-production
+            HostName ${{ secrets.PROD_SSH_HOST }}
+            User ${{ secrets.PROD_SSH_USER }}
+            Port $SSH_PORT
+            IdentityFile ~/.ssh/prod_deploy_key
+            KexAlgorithms curve25519-sha256
+            StrictHostKeyChecking yes
+          EOF
+
+      - name: Upload bundle
+        run: |
+          scp tex2doc-production.tar.gz tex2doc-production:/tmp/tex2doc-production.tar.gz
+
+      - name: Activate release
+        run: |
+          ssh tex2doc-production "DEPLOY_DIR='$DEPLOY_DIR' bash -s" <<'REMOTE'
+          set -euo pipefail
+          RELEASE_ID="$(date +%Y%m%d-%H%M%S)"
+          RELEASE_DIR="$DEPLOY_DIR/releases/$RELEASE_ID"
+          mkdir -p "$RELEASE_DIR"
+          tar -xzf /tmp/tex2doc-production.tar.gz -C "$RELEASE_DIR"
+          chmod +x "$RELEASE_DIR/server/doc-server"
+          ln -sfn "$RELEASE_DIR" "$DEPLOY_DIR/current"
+          sudo systemctl restart tex2doc-server
+          sudo nginx -t
+          sudo systemctl reload nginx
+          curl -fsS http://127.0.0.1:2624/api/v1/health >/dev/null
+          rm -f /tmp/tex2doc-production.tar.gz
+          ls -1dt "$DEPLOY_DIR"/releases/* | tail -n +6 | xargs -r rm -rf
+          REMOTE
