@@ -31,7 +31,9 @@ Future<(Uint8List bytes, String fileName)?> pickZipFile() async {
       final base64 = detail.getProperty<JSString>('data'.toJS).toDart;
       final bytes = base64Decode(base64);
       // ignore: avoid_print
-      print('[doc-engine] 文件已选: $name, ${(bytes.length / 1024).toStringAsFixed(1)} KB');
+      print(
+        '[doc-engine] 文件已选: $name, ${(bytes.length / 1024).toStringAsFixed(1)} KB',
+      );
       completer.complete((Uint8List.fromList(bytes), name));
     } catch (e) {
       // ignore: avoid_print
@@ -63,7 +65,10 @@ Future<(Uint8List bytes, String fileName)?> pickZipFile() async {
 void downloadBlob(Uint8List bytes, String filename) {
   final blob = web.Blob(
     [bytes.toJS].toJS,
-    web.BlobPropertyBag(type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'),
+    web.BlobPropertyBag(
+      type:
+          'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ),
   );
   final url = web.URL.createObjectURL(blob);
   final web.HTMLAnchorElement anchor = web.HTMLAnchorElement();
@@ -72,5 +77,12 @@ void downloadBlob(Uint8List bytes, String filename) {
   anchor.click();
   web.URL.revokeObjectURL(url);
   // ignore: avoid_print
-  print('[doc-engine] 下载触发: $filename (${(bytes.length / 1024).toStringAsFixed(1)} KB)');
+  print(
+    '[doc-engine] 下载触发: $filename (${(bytes.length / 1024).toStringAsFixed(1)} KB)',
+  );
+}
+
+/// Opens an external URL in a new browser tab.
+void openExternalUrl(String url) {
+  web.window.open(url, '_blank');
 }

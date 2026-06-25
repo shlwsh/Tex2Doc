@@ -7,9 +7,9 @@ use std::time::Duration;
 
 use doc_commercial_api_client::{
     ApiClient, ApiError, AuthResponse, BillingPortalRequest, BillingSession, CheckoutRequest,
-    ClientConfig, ConversionJob, LoginRequest, PlanSummary, RechargeRecord, RedeemCodeRecord,
-    RedeemCodeRequest, RedeemCodeResult, RefreshRequest, RegisterRequest, UsageSummary,
-    UserProfile,
+    ClientConfig, ConversionJob, CreateFeedbackRequest, FeedbackThread, LoginRequest, PlanSummary,
+    RechargeRecord, RedeemCodeRecord, RedeemCodeRequest, RedeemCodeResult, RefreshRequest,
+    RegisterRequest, UsageSummary, UserProfile,
 };
 use thiserror::Error;
 
@@ -272,6 +272,70 @@ pub fn fetch_conversion_table_blocking(
     })
 }
 
+pub fn fetch_feedback_threads_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+) -> Result<Vec<FeedbackTableRow>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before querying feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        let mut rows = client
+            .feedback_threads()
+            .await?
+            .into_iter()
+            .map(FeedbackTableRow::from_thread)
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| b.latest_message_at.cmp(&a.latest_message_at));
+        Ok(rows)
+    })
+}
+
+pub fn create_feedback_thread_blocking(
+    base_url: &str,
+    access_token: Option<String>,
+    feedback_type: &str,
+    title: &str,
+    content: &str,
+    conversion_job_id: &str,
+) -> Result<Vec<FeedbackTableRow>> {
+    let access_token = access_token.ok_or_else(|| {
+        CloudAccountError::Api(ApiError::Api {
+            code: "missing_access_token".to_string(),
+            message: "sign in before submitting feedback".to_string(),
+        })
+    })?;
+    let base_url = parse_base_url(base_url)?;
+    let request = CreateFeedbackRequest {
+        title: title.trim().to_string(),
+        feedback_type: normalize_feedback_type(feedback_type).to_string(),
+        content: content.trim().to_string(),
+        conversion_job_id: optional_trimmed(conversion_job_id),
+        priority: Some("normal".to_string()),
+    };
+    let runtime = runtime()?;
+
+    runtime.block_on(async move {
+        let client = authenticated_client(base_url, &access_token)?;
+        client.create_feedback_thread(&request).await?;
+        let mut rows = client
+            .feedback_threads()
+            .await?
+            .into_iter()
+            .map(FeedbackTableRow::from_thread)
+            .collect::<Vec<_>>();
+        rows.sort_by(|a, b| b.latest_message_at.cmp(&a.latest_message_at));
+        Ok(rows)
+    })
+}
+
 pub fn usage_line(usage: &UsageSummary) -> String {
     let remaining = usage
         .cloud_conversions_limit
@@ -305,6 +369,22 @@ pub fn plans_line(plans: &[PlanSummary]) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+fn normalize_feedback_type(value: &str) -> &str {
+    match value.trim() {
+        "feature" | "requirement" => "requirement",
+        _ => "issue",
+    }
+}
+
+fn optional_trimmed(value: &str) -> Option<String> {
+    let value = value.trim();
+    if value.is_empty() {
+        None
+    } else {
+        Some(value.to_string())
+    }
 }
 
 fn session_from_auth(auth: AuthResponse, usage: UsageSummary) -> CloudAccountSession {
@@ -436,6 +516,40 @@ impl ConversionTableRow {
                 .and_then(|s| s.log_size())
                 .map(format_size)
                 .unwrap_or_default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FeedbackTableRow {
+    pub thread_id: String,
+    pub title: String,
+    pub feedback_type: String,
+    pub status: String,
+    pub priority: String,
+    pub message_count: i32,
+    pub latest_message_at: String,
+    pub created_at: String,
+    pub conversion_job_id: String,
+}
+
+impl FeedbackTableRow {
+    fn from_thread(thread: FeedbackThread) -> Self {
+        let latest_message_at = thread
+            .latest_message_at
+            .clone()
+            .or(thread.updated_at.clone())
+            .unwrap_or_else(|| thread.created_at.clone());
+        Self {
+            thread_id: thread.thread_id,
+            title: thread.title,
+            feedback_type: thread.feedback_type,
+            status: thread.status,
+            priority: thread.priority,
+            message_count: thread.message_count.unwrap_or(0) as i32,
+            latest_message_at,
+            created_at: thread.created_at,
+            conversion_job_id: thread.conversion_job_id.unwrap_or_else(|| "-".to_string()),
         }
     }
 }

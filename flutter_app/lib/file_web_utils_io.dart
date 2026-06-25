@@ -56,3 +56,19 @@ void downloadBlob(Uint8List bytes, String filename) {
     print('[doc-engine] 下载失败: $e');
   }
 }
+
+// Opens an external URL with the desktop default browser.
+void openExternalUrl(String url) {
+  try {
+    if (Platform.isWindows) {
+      Process.runSync('cmd', ['/c', 'start', '', url]);
+    } else if (Platform.isMacOS) {
+      Process.runSync('open', [url]);
+    } else {
+      Process.runSync('xdg-open', [url]);
+    }
+  } on Object catch (e) {
+    // ignore: avoid_print
+    print('[doc-engine] 打开链接失败: $e');
+  }
+}

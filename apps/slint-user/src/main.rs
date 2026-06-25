@@ -29,6 +29,7 @@ use std::sync::Arc;
 use ui::MainWindow;
 
 const DESKTOP_VERSION: &str = env!("TEX2DOC_DESKTOP_VERSION");
+const REDEEM_CODE_PURCHASE_URL: &str = "https://pay.ldxp.cn/item/ns8i2g";
 
 fn main() {
     // Initialize logger
@@ -653,6 +654,22 @@ fn main() {
     });
 
     let ui_weak = ui.as_weak();
+    ui.on_purchase_redeem_code_clicked(move || {
+        if let Some(ui) = ui_weak.upgrade() {
+            match open_external_url(REDEEM_CODE_PURCHASE_URL) {
+                Ok(()) => ui.set_billing_status(REDEEM_CODE_PURCHASE_URL.into()),
+                Err(error) => ui.set_billing_status(
+                    format!(
+                        "Purchase page open failed: {}\n{}",
+                        error, REDEEM_CODE_PURCHASE_URL
+                    )
+                    .into(),
+                ),
+            }
+        }
+    });
+
+    let ui_weak = ui.as_weak();
     ui.on_check_update_clicked(
         move |api_base_url: slint::SharedString, channel: slint::SharedString| {
             let base_url = api_base_url.to_string();
@@ -1029,6 +1046,10 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_common_quota, "common.quota");
     set_text!(set_t_common_compatibility, "common.compatibility");
     set_text!(set_t_common_confidence, "common.confidence");
+    set_text!(set_t_common_refresh, "common.refresh");
+    set_text!(set_t_common_ready, "common.ready");
+    set_text!(set_t_common_working, "common.working");
+    set_text!(set_t_common_idle, "common.idle");
     set_text!(set_t_convert_engine, "convert.engine");
     set_text!(set_t_convert_local, "convert.local");
     set_text!(set_t_convert_cloud, "convert.cloud");
@@ -1166,11 +1187,20 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_account_guest_mode, "account.guest_mode");
     set_text!(set_t_account_signed_in_short, "account.signed_in_short");
     set_text!(set_t_account_status, "account.status");
+    set_text!(set_t_account_login_note, "account.login_note");
+    set_text!(set_t_account_remaining, "account.remaining");
+    set_text!(set_t_account_cloud_quota, "account.cloud_quota");
     set_text!(set_t_recharge_title, "recharge.title");
     set_text!(set_t_recharge_subtitle, "recharge.subtitle");
     set_text!(set_t_recharge_by_count, "recharge.by_count");
     set_text!(set_t_recharge_by_date, "recharge.by_date");
     set_text!(set_t_recharge_mock_pay, "recharge.mock_pay");
+    set_text!(set_t_recharge_purchase_title, "recharge.purchase_title");
+    set_text!(set_t_recharge_purchase_note, "recharge.purchase_note");
+    set_text!(set_t_recharge_purchase_button, "recharge.purchase_button");
+    set_text!(set_t_recharge_code_placeholder, "recharge.code_placeholder");
+    set_text!(set_t_recharge_redeeming, "recharge.redeeming");
+    set_text!(set_t_recharge_records_action, "recharge.records_action");
     set_text!(set_t_records_conversion_title, "records.conversion_title");
     set_text!(
         set_t_records_conversion_subtitle,
@@ -1179,6 +1209,46 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_records_recharge_title, "records.recharge_title");
     set_text!(set_t_records_recharge_subtitle, "records.recharge_subtitle");
     set_text!(set_t_records_no_recharge, "records.no_recharge");
+    set_text!(set_t_records_query_conversions, "records.query_conversions");
+    set_text!(set_t_records_query_recharges, "records.query_recharges");
+    set_text!(set_t_records_cloud_source, "records.cloud_source");
+    set_text!(set_t_records_local_source, "records.local_source");
+    set_text!(set_t_records_status, "records.status");
+    set_text!(set_t_records_main_input, "records.main_input");
+    set_text!(set_t_records_profile, "records.profile");
+    set_text!(set_t_records_updated, "records.updated");
+    set_text!(set_t_records_error, "records.error");
+    set_text!(set_t_records_type, "records.type");
+    set_text!(set_t_records_package_code, "records.package_code");
+    set_text!(set_t_records_quantity, "records.quantity");
+    set_text!(set_t_records_provider, "records.provider");
+    set_text!(set_t_records_created, "records.created");
+    set_text!(set_t_records_remove, "records.remove");
+    set_text!(set_t_records_clear, "records.clear");
+    set_text!(set_t_records_go_recharge, "records.go_recharge");
+    set_text!(set_t_feedback_subtitle, "feedback.subtitle");
+    set_text!(set_t_feedback_new, "feedback.new");
+    set_text!(set_t_feedback_type, "feedback.type");
+    set_text!(set_t_feedback_title, "feedback.title");
+    set_text!(
+        set_t_feedback_title_placeholder,
+        "feedback.title_placeholder"
+    );
+    set_text!(set_t_feedback_job_id, "feedback.job_id");
+    set_text!(
+        set_t_feedback_job_placeholder,
+        "feedback.job_placeholder"
+    );
+    set_text!(set_t_feedback_message, "feedback.message");
+    set_text!(
+        set_t_feedback_message_placeholder,
+        "feedback.message_placeholder"
+    );
+    set_text!(set_t_feedback_submit, "feedback.submit");
+    set_text!(set_t_feedback_threads, "feedback.threads");
+    set_text!(set_t_feedback_refresh, "feedback.refresh");
+    set_text!(set_t_feedback_empty, "feedback.empty");
+    set_text!(set_t_about_subtitle, "about.subtitle");
     set_text!(set_t_dialog_view_profile, "dialog.view_profile");
     set_text!(set_t_dialog_change_password, "dialog.change_password");
     set_text!(set_t_dialog_account_details, "dialog.account_details");

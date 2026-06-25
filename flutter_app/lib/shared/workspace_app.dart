@@ -24,6 +24,7 @@ import '../ui/feedback_panel.dart';
 import '../ui/recharge_records_panel.dart';
 
 const _appIconAsset = 'assets/app_icon.png';
+const _redeemCodePurchaseUrl = 'https://pay.ldxp.cn/item/ns8i2g';
 
 // ─── App entry ────────────────────────────────────────────────────────────────
 
@@ -1486,6 +1487,66 @@ class _RechargePanelState extends State<_RechargePanel> {
         AppSectionHeader(
           title: strings.t('nav.recharge'),
           description: strings.t('recharge.description'),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        AppCard(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compactPurchaseCard = constraints.maxWidth < 520;
+              final copy = Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.shopping_bag_outlined,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          strings.t('recharge.purchaseTitle'),
+                          style: theme.textTheme.titleSmall,
+                        ),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          strings.t('recharge.purchaseNote'),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              );
+              final action = FilledButton.icon(
+                onPressed: () => openExternalUrl(_redeemCodePurchaseUrl),
+                icon: const Icon(Icons.open_in_new),
+                label: Text(strings.t('recharge.purchaseButton')),
+              );
+
+              if (compactPurchaseCard) {
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    copy,
+                    const SizedBox(height: AppSpacing.md),
+                    action,
+                  ],
+                );
+              }
+
+              return Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: copy),
+                  const SizedBox(width: AppSpacing.md),
+                  action,
+                ],
+              );
+            },
+          ),
         ),
         const SizedBox(height: AppSpacing.md),
         Row(
