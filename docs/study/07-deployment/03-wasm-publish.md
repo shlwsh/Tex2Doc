@@ -1,4 +1,8 @@
 # WASM 产物发布
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 `doc-wasm` 产物的构建、复制、发布流程。WASM 是 Flutter Web 和 Chrome 扩展的共享底层。
 

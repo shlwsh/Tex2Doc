@@ -1,4 +1,8 @@
 # Tex2Doc 本轮会话变更恢复报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22  
 **范围**：`crates/desktop-slint` 前端 UI/UX 方案、Windows 构建脚本、paper3 前端 DOCX 转换质量修复、验证脚本与后续多语言/主题/版本号规划。  

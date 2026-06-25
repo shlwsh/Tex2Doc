@@ -1,4 +1,8 @@
 # 04 · 块构造（front matter + body blocks）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 上一章我们把 LaTeX 文本压平成"富文本字符串"，本章把所有内容**重新组合**为结构化 `Block` 列表，再交给 `populate` 写出 OOXML。
 >

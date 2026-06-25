@@ -1,4 +1,8 @@
 # GitHub 自动部署 Flutter Web 与 Rust 服务端实施方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 ## 目标
 

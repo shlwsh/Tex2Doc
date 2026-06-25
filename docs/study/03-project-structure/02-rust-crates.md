@@ -1,13 +1,18 @@
 # `crates/` 详尽说明
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节按 crate 列出：**作用、入口、关键文件、依赖、测试**。每个 crate 末尾给出「修改前的最小 checklist」。
 
 ---
 
-## 0. 当前 Workspace 总览（2026-06-20）
+## 0. 当前 Workspace 总览（2026-06-26）
 
-当前根 `Cargo.toml` 声明 15 个 crate：
+当前根 `Cargo.toml` 声明 19 个 crate 及 2 个 APP：
 
+### 0.1 核心依赖与公共库 (crates/)
 | crate 目录 | 包名 | 定位 |
 |---|---|---|
 | `crates/core` | `doc-core` | FFI/WASM/HTTP 兼容门面，保留旧 `convert_*` API |
@@ -20,11 +25,21 @@
 | `crates/mathml` | `doc-mathml` | LaTeX math → MathML/OMML |
 | `crates/wasm` | `doc-wasm` | Web/扩展 WASM 入口 |
 | `crates/native` | `doc-native` | 桌面端 FFI 入口 |
-| `crates/server` | `doc-server` | HTTP 服务入口 |
 | `crates/tex-facade` | `doc-tex-facade` | xelatex/tectonic/latexmk oracle 编译封装 |
 | `crates/docx-pdf` | `doc-docx-pdf` | LibreOffice headless DOCX → PDF |
 | `crates/quality` | `doc-quality` | 结构/文本/视觉质量对比 |
-| `crates/cli` | `doc-engine` | 统一 CLI：convert、tex-compile、docx-to-pdf、verify-pdf、build、AST/render dump、docx diff |
+| `crates/cli` | `doc-engine` | 统一 CLI：12 个子命令入口（含语义检测/分析/转换/验证） |
+| `crates/xdv-parser` | `doc-xdv-parser` | XDV/DVI 解析，提取坐标及字体（用于视觉对比） |
+| `crates/semantic-collector` | `doc-semantic-collector` | 语义特征收集与转换接口模块（从 compiler-engine 分离） |
+| `crates/compatibility-analyzer` | `doc-compatibility-analyzer` | LaTeX 宏包与命令的兼容性静态分析与打分 |
+| `crates/rule-engine` | `doc-rule-engine` | 自定义规则引擎与 AI 降级处理 |
+| `crates/commercial-api-client` | `doc-commercial-api-client` | 商业接口与翻译代理层（骨架） |
+
+### 0.2 应用及桌面端单位 (apps/)
+| APP 目录 | 包名 | 定位 |
+|---|---|---|
+| `apps/rust-service` | `doc-server` | Axum HTTP 服务，引入 PostgreSQL 进行用户与订单持久化 |
+| `apps/slint-user` | `doc-desktop-slint` | 基于 Slint 框架开发的本地桌面应用 (集成自动升级、报告机制) |
 
 最新新增的战略入口是 `doc-compiler-engine`。它目前复用 `doc-latex-reader` 和 `doc-docx-writer`，但把语义采集、Document Graph、DOCX 渲染阶段显式暴露出来，后续可替换为 LuaHook/XDV collector 或新增 HTML/Markdown renderer。
 
@@ -714,60 +729,138 @@ crates/native/
 
 ---
 
-## 10. `crates/server/` — `doc-server`
+## 10. `apps/rust-service/` — `doc-server`
 
 ### 10.1 作用
-**Axum HTTP 服务端**。提供 `/api/v1/health` / `/api/v1/version` / `/api/v1/convert`。
+**Axum HTTP 服务端**。相比于 V1 版本，目前已不是完全的无状态服务，引入了 `sqlx` 与 PostgreSQL 数据库以支持用户管理、计费记录、账单以及充值和兑换码功能的持久化。
+提供路由：
+- `/api/v1/health`：健康检查
+- `/api/v1/version`：获取服务版本
+- `/api/v1/convert`：旧版兼容 multipart 上传 zip 转换 DOCX
+- `/api/v1/feedback`：用户反馈接口
+- `/api/v1/user/*` / `/api/v1/admin/*` 等：用户及管理员计费、授权相关接口
 
 ### 10.2 目录树
 
 ```
-crates/server/
-├── Cargo.toml                   # 依赖 doc-core / axum / tower / tower-http / tokio / tokio-util / memchr / http / bytes / serde / serde_json / thiserror / tracing / tracing-subscriber / mime / async-trait
+apps/rust-service/
+├── Cargo.toml                   # 依赖 doc-core / doc-compiler-engine / axum / sqlx (postgres) / tokio / serde 等
 ├── src/
-│   ├── lib.rs                   # 模块声明 + build_router re-export
-│   ├── main.rs                  # 二进制入口（tokio::main）
-│   ├── routes.rs                # HTTP 路由
-│   ├── error.rs                 # ServerError + HTTP 状态码映射
-│   └── limits.rs                # MAX_BODY = 50 MiB
+│   ├── lib.rs                   # 模块声明
+│   ├── main.rs                  # 服务端入口，包含 tokio 运行时初始化与数据库连接池创建
+│   ├── routes.rs                # 核心 HTTP API 路由与业务控制器
+│   ├── error.rs                 # 异常及 HTTP 状态码映射
+│   ├── state.rs                 # 共享 AppState (包含连接池与文件存储)
+│   ├── db_store.rs              # 核心数据库操作 (兑换订单、用户余额、计费规则、任务管理)
+│   ├── file_storage.rs          # 转换文件、上传文件的本地或分布式存储抽象
+│   └── feedback_service.rs      # 用户反馈处理与存储
 └── tests/
-    └── api.rs                   # HTTP API 集成测试（reqwest）
+    └── api.rs                   # 集成 API 冒烟测试
 ```
 
-### 10.3 关键 API
+### 10.3 核心依赖与配置
+- 数据库连接通过 `DATABASE_URL` 环境变量配置，例如 `postgres://postgres:postgres@127.0.0.1:5432/docdb`。
+- 使用 `sqlx` 异步连接池。
 
-* `GET /api/v1/health` → `{"status":"ok"}`
-* `GET /api/v1/version` → `{"name":..., "version":...}`
-* `POST /api/v1/convert`（multipart）：
-  * `file`：项目 zip 字节（≤ 50 MiB）
-  * `main_tex`：可选，缺省 `main-jos.tex`
-  * 返回：`application/vnd.openxmlformats-officedocument.wordprocessingml.document`
-
-### 10.4 限制
-* 单请求体 50 MiB（`tower_http::RequestBodyLimitLayer` + `axum::body::to_bytes(_, MAX_BODY)`）
-* docx 至少 4 KiB + `PK\x03\x04` 魔数（routes.rs 内部断言）
-
-### 10.5 测试
-
-* `tests/api.rs`：使用 `reqwest` + `rustls-tls` 测三接口
-
-### 10.6 修改前 checklist
-
-* [ ] `cargo test -p doc-server` 全过
-* [ ] 跑 `cargo run -p doc-server` + `node scripts/e2e_server.mjs`
+### 10.4 修改前最小 checklist
+* [ ] 本地开启 PostgreSQL，创建测试库 `docdb`
+* [ ] 运行数据库迁移脚本或导入结构
+* [ ] `DATABASE_URL=postgres://... cargo test -p doc-server` 全部通过
+* [ ] 跑 `cargo run -p doc-server` 配合 `node scripts/e2e_server.mjs` 测试主要转换及接口链路
 
 ---
 
-## 11. `crates/cli/`（占位）
+## 11. `crates/cli/` — `doc-engine`
 
-* 当前**未实现**（`exclude` 自 workspace）。
-* V2 计划：用 `clap` 提供 `tex2doc convert ...` CLI 工具。
+### 11.1 作用
+**统一 CLI 工具**。通过 `clap` 提供项目的一站式命令行入口，不仅用于支持传统的 `zip` -> `docx` 转换，还整合了 V2 语义编译器、PDF 质量对比及编译闭环流程。
+
+### 11.2 支持的 12 个子命令
+
+| 子命令 | 参数 | 用途 |
+|---|---|---|
+| `convert` | `--zip <path> --main-tex <tex>` | `doc-core` 兼容转换入口 |
+| `tex-compile` | `--tex <path>` | 编译 TeX 生成 oracle 真实 PDF |
+| `docx-to-pdf` | `--docx <path>` | 使用本地 LibreOffice headless 进行二次 PDF 渲染 |
+| `verify-pdf` | `--oracle <path> --output <path>` | 进行结构/文本/视觉三层质量对比，计算得分 |
+| `build` | `--zip <path> --outdir <dir>` | 串联转换、TeX 编译、docx 转 PDF 及验证的完整质量闭环 |
+| `ast-dump` | `--tex <path>` | 导出 TeX 的 Rowan CST 及语义 AST 模型 |
+| `render-dump` | `--docx <path>` | 导出 DOCX 底层渲染布局树 |
+| `docx-diff` | `<docx1> <docx2>` | 对比两个 DOCX 的内容、样式结构和 ooxml 哈希 |
+| `semantic-detect`| `--project-root <path>` | 启发式自动检测 LaTeX 项目所使用的期刊/样式模板 Profile |
+| `semantic-analyze`| `--project-root <path>` | 静态扫描 LaTeX 宏包与命令的兼容性，计算迁移得分 |
+| `semantic-convert`| `--project-root <path>` | 使用 V2 语义引擎将整个项目目录编译为 DOCX |
+| `semantic-verify` | `--docx <path>` | 验证 DOCX 的物理结构、参考文献和图表编号一致性 |
+
+### 11.3 目录树
+
+```
+crates/cli/
+├── Cargo.toml
+└── src/
+    ├── main.rs                  # CLI 主入口，参数解析与命令分发
+    ├── cmd.rs                   # convert 与 build 命令的具体控制逻辑
+    ├── ast_dump.rs              # CST 与 AST 信息打印
+    ├── render_dump.rs           # DOCX 渲染树提取
+    ├── docx_diff.rs             # DOCX 布局与差异对比
+    ├── docx2pdf.rs              # 驱动 LibreOffice 进行转换
+    ├── pdf_verify.rs            # 计算三层比对得分
+    ├── tex_compile.rs           # 调用系统 TeX 编译器生成对比 PDF
+    └── semantic_cmd.rs          # 包装 compiler-engine 暴露的检测/分析/编译接口
+```
+
+### 11.4 修改前最小 checklist
+* [ ] 运行 `cargo run -p doc-engine -- --help` 验证参数定义无误
+* [ ] `cargo check -p doc-engine` 成功
+* [ ] 测试重要子命令的整合调用（如 `convert` 与 `build`）
 
 ---
 
-## 12. 跨 crate 改动优先级
+## 12. `crates/xdv-parser/` — `doc-xdv-parser`
 
-| 改动类型 | 影响 | 应同步更新的 crate |
+### 12.1 作用
+**XDV/DVI 解析器**。读取 XeLaTeX 编译产生的 `.xdv` 文件，解析其字符排版流、物理定位坐标（x, y）以及所用字体。主要用于对齐 TeX 物理排版与 DOCX 转换产物，在视觉质量验证环节提供高精度的坐标提取。
+
+---
+
+## 13. `crates/semantic-collector/` — `doc-semantic-collector`
+
+### 13.1 作用
+**语义采集组件**。定义了将 Rowan 语法树进行语义信息提取时的 `Collector` 特征（Trait）和基础通用结构。它是将文本流向语义 AST `doc-semantic-ast` 模型映射的执行核心，从 `compiler-engine` 压扁并抽离以增强解耦性。
+
+---
+
+## 14. `crates/compatibility-analyzer/` — `doc-compatibility-analyzer`
+
+### 14.1 作用
+**兼容性静态分析工具**。分析 LaTeX 工程中所引用的宏包（`\usepackage`）和自定义命令是否在当前 Rust 语法解析器的受支持列表中。计算总的兼容性分值，帮助用户评估在无需人工干预的情况下实现完美转换的可能性。
+
+---
+
+## 15. `crates/rule-engine/` — `doc-rule-engine`
+
+### 15.1 作用
+**规则处理引擎**。处理用户自定义的降级及回退逻辑。当某些 LaTeX 宏或环境暂时无法被 Rowan CST 降级器很好处理时，提供基于特定模板规则的预处理和 fallback 处理能力。
+
+---
+
+## 16. `crates/commercial-api-client/` — `doc-commercial-api-client`
+
+### 16.1 作用
+**商业接口适配客户端**。负责与云端商业翻译服务、云转换网关进行数据加密通信与请求代理，提供闭源转换环境下的 API 连接骨架。
+
+---
+
+## 17. `apps/slint-user/` — `doc-desktop-slint`
+
+### 17.1 作用
+**基于 Slint 的原生桌面应用**。提供轻量化的桌面 GUI 界面，内嵌了客户端静默自动升级、转换报告渲染以及转换队列管理功能。
+
+---
+
+## 18. 跨 crate 改动优先级
+
+| 改动类型 | 影响 | 应同步更新的 crate / APP |
 |----------|------|---------------------|
 | `doc-semantic-ast` 新增枚举变体 | 全部 | `doc-latex-reader::lower` + `doc-docx-writer::serializer` + `doc-wasm` / `doc-native` / `doc-server` |
 | `doc-core` API 变更 | 全部前端 | `doc-wasm` + `doc-native` + `doc-server` + `flutter_app/lib/*` |
@@ -777,6 +870,6 @@ crates/server/
 
 ---
 
-## 13. 进一步阅读
+## 19. 进一步阅读
 
 * [05-key-tech/](../05-key-tech/) — 深入解析每个 crate 的关键模块

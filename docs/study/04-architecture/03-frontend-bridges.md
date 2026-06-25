@@ -1,4 +1,8 @@
 # 三种前端集成模式
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节详细描述 Tex2Doc 的三种集成模式：**WASM（Web/Chrome 扩展）**、**Native FFI（桌面端）**、**HTTP（服务端）**。读完应能独立把 `doc-core` 集成到任何前端。
 

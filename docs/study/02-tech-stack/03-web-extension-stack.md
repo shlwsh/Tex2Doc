@@ -1,4 +1,8 @@
 # 浏览器 / 扩展 / Node 工具栈
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > Tex2Doc 在浏览器端有两条独立路径：**Chrome MV3 扩展**和**Flutter Web PWA**（共享同一 WASM 产物）。Node.js 侧负责构建、端到端测试、CI 验证。
 

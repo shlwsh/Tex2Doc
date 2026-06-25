@@ -1,4 +1,8 @@
 # 多期刊 Profile：paper2/paper3 DOCX 泛化验证报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22
 **依据方案**：`docs-zh/verify/journal-profile-paper2-paper3-docx-generalization-verification-plan-20260622.md`

@@ -1,4 +1,8 @@
 # 第六章 · CLI 与脚本使用
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 **命令行 / Node 脚本** 形式的使用方式。最适合：CI 验证、本地一次性转换、批量处理。
 
@@ -57,34 +61,53 @@ cargo run -p doc-engine -- --help
 
 | 子命令 | 用途 |
 |---|---|
-| `convert` | zip → DOCX，兼容 `doc-core` |
-| `tex-compile` | TeX → oracle PDF |
-| `docx-to-pdf` | DOCX → PDF，默认 LibreOffice headless |
-| `verify-pdf` | 结构/文本/视觉三层质量对比 |
-| `build` | 串联 convert、tex-compile、docx-to-pdf、verify-pdf |
-| `ast-dump` | 输出标准文档 AST |
-| `render-dump` | 输出 DOCX 渲染树 |
-| `docx-diff` | 对比两个 DOCX 的内容、样式和 OOXML hash |
+| `convert` | zip → DOCX，兼容 `doc-core` 转换逻辑 |
+| `tex-compile` | TeX → oracle PDF（编译获取对比 PDF） |
+| `docx-to-pdf` | DOCX → PDF，默认驱动本地 LibreOffice headless 进程进行转换 |
+| `verify-pdf` | 进行结构/文本/视觉三层质量对比评估 |
+| `build` | 串联 convert、tex-compile、docx-to-pdf、verify-pdf 完整编译环 |
+| `ast-dump` | 输出标准文档 CST 与语义 AST 信息 |
+| `render-dump` | 输出 DOCX 底层渲染布局树 |
+| `docx-diff` | 对比两个 DOCX 的内容、样式和 OOXML hash 结构 |
+| `semantic-detect`| 自动检测项目使用的期刊/样式 Profile（如 tacl, cvpr, jos-paper3 等） |
+| `semantic-analyze`| 静态分析项目的命令/宏包兼容性，计算迁移可行性得分 |
+| `semantic-convert`| 使用 V2 语义编译器引擎进行目录转换 |
+| `semantic-verify` | 验证生成的 DOCX 文档的一致性（结构与引用） |
 
 示例：
 
 ```bash
+# 传统兼容转换
 cargo run -p doc-engine -- convert \
   --zip examples/paper3/upload.zip \
   --main-tex main-jos.tex \
   --page-setup jos-paper3 \
   --out examples/paper3/output/to-docx/paper3-rust.docx
-```
 
-完整质量闭环：
-
-```bash
+# 完整质量闭环一键构建
 cargo run -p doc-engine -- build \
   --zip examples/paper3/upload.zip \
   --main-tex main-jos.tex \
   --latex-main main-jos.tex \
   --page-setup jos-paper3 \
   --outdir examples/paper3/output/to-docx
+
+# 自动检测模板 profile
+cargo run -p doc-engine -- semantic-detect \
+  --project-root examples/paper3/latex
+
+# 进行静态兼容性分析（输出 JSON 报告）
+cargo run -p doc-engine -- semantic-analyze \
+  --project-root examples/paper3/latex \
+  --profile jos-paper3 \
+  --json
+
+# 使用 V2 语义引擎编译本地目录为 Word
+cargo run -p doc-engine -- semantic-convert \
+  --project-root examples/paper3/latex \
+  --main-tex main-jos.tex \
+  --profile jos-paper3 \
+  --out examples/paper3/output/to-docx/paper3-semantic.docx
 ```
 
 ---

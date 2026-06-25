@@ -1,4 +1,8 @@
 # PostgreSQL 持久化主链路规划设计与实现方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 生成日期：2026-06-24  
 适用范围：Tex2Doc `doc-server` 商业化主链路  

@@ -1,4 +1,8 @@
 # 第三章 · 工程目录详解
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章是项目最权威的「地图」。每个目录都给出：作用、关键文件、注意事项。
 
@@ -7,7 +11,7 @@
 ## 1. 仓库根目录
 
 ```
-E:\work\Tex2Doc\
+d:\work\Tex2Doc\
 ├── .agent/                      # Cursor Agent 技能源
 │   └── skills/
 │       ├── README.md
@@ -25,11 +29,15 @@ E:\work\Tex2Doc\
 │   └── post-commit              # 自动 push
 ├── .github/                     # GitHub 配置
 │   └── workflows/
-│       └── ci.yml               # Rust CI（ubuntu/windows/macos）
+│       ├── ci.yml               # Rust CI（包含 DB 集成测试与 Flutter 检查）
+│       └── deploy-production.yml # 生产环境腾讯云一键自动部署工作流
 ├── .gitnexus/                   # GitNexus 索引（自动生成）
 │   ├── run.cjs                  # 索引运行器
 │   └── ...
-├── crates/                      # Rust workspace（15 个 crate）
+├── apps/                        # 应用目录
+│   ├── rust-service/            # doc-server：HTTP 服务端（支持 PostgreSQL 持久化）
+│   └── slint-user/              # doc-desktop-slint：基于 Slint 的桌面端客户端
+├── crates/                      # Rust workspace（19 个 crate）
 ├── docs/                        # 项目文档（已有）
 │   ├── *.md                     # 技术方案 / 任务清单 / 进展报告
 │   └── study/                   # 【本目录】学习文档
@@ -113,11 +121,15 @@ crates/
 ├── mathml/                      # doc-mathml：公式管道
 ├── wasm/                        # doc-wasm：WASM 桥接
 ├── native/                      # doc-native：原生 cdylib
-├── server/                      # doc-server：HTTP 服务
 ├── tex-facade/                  # doc-tex-facade：TeX oracle 封装
-├── docx-pdf/                    # doc-docx-pdf：DOCX -> PDF
+├── docx-pdf/                    # doc-docx-pdf：LibreOffice headless DOCX -> PDF
 ├── quality/                     # doc-quality：结构/文本/视觉质量对比
-└── cli/                         # doc-engine：统一 CLI
+├── cli/                         # doc-engine：统一 CLI
+├── xdv-parser/                  # doc-xdv-parser：DVI/XDV 布局与字体提取解析器
+├── semantic-collector/          # doc-semantic-collector：语义特征收集与转换模块
+├── compatibility-analyzer/      # doc-compatibility-analyzer：LaTeX 宏包/命令兼容性检测
+├── rule-engine/                 # doc-rule-engine：AI 降级备用与规则处理引擎
+└── commercial-api-client/       # doc-commercial-api-client：商业接口适配代理
 ```
 
 > 详细到文件级的说明见 [02-rust-crates.md](./02-rust-crates.md)。

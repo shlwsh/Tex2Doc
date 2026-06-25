@@ -1,4 +1,8 @@
 # Semantic TeX Engine P7 云端转换 Worker 开发进展报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **时间戳**：20260621-233323  
 **基准计划**：`docs-zh/plan-0621.md`  

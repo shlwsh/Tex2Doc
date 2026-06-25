@@ -1,4 +1,8 @@
 # 02 · `crates/tex-facade` 设计
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章回答：在 V1「不调用 TeX」的边界下，如何用 Rust 端**可插拔地**封装外部 TeX 进程，
 > 生成 oracle PDF、抽取 oracle 文本，并提供缓存与并发控制。

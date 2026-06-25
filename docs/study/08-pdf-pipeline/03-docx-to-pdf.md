@@ -1,4 +1,8 @@
 # 03 · `crates/docx-pdf` 设计
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章回答：在 V1 端产出的 docx 之上，**用 LibreOffice headless 做二次转换**得到 PDF。
 > 不重新发明排版引擎——直接复用 LibreOffice 的 docx→pdf 能力，并把它封装成可替换的 Rust trait。

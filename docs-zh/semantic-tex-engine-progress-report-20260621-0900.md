@@ -1,4 +1,8 @@
 # Semantic TeX Engine 进展报告与商业化规划（20260621-0900）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **基准版本**：`docs-zh/semantic-tex-engine-progress-report-20260621-083000.md`
 **当前版本**：2026-06-21 上午（整合 3 路探索代理精确发现）

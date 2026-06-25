@@ -1,4 +1,8 @@
 # Doc-engine：LaTeX → DOCX 纯 Rust 核心 + Flutter 全平台转换工具 —— 细化技术方案（V2.0）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 版本：V2.0（细化自 V1 方案）
 > 基线文档：`Doc-engine：LaTeX → DOCX 纯 Rust 核心 + Flutter 全平台转换工具完整技术实现方案（V1）.md`

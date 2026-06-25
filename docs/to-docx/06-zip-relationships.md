@@ -1,4 +1,8 @@
 # 06 · docx 物理包结构（zip + relationships）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 一个 `.docx` 文件就是一份 ZIP。本章复刻 ZIP 内部每一个 entry 的命名、内容、关系，Rust 重构时**严格按本表的路径与 XML 字面**写文件。
 
