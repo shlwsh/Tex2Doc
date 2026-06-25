@@ -39,6 +39,17 @@ pub struct LocalConvertResult {
     pub report_text: String,
 }
 
+pub struct CloudUploadRequest<'a> {
+    pub base_url: &'a str,
+    pub access_token: Option<String>,
+    pub zip_bytes: Vec<u8>,
+    pub file_name: &'a str,
+    pub main_tex: &'a str,
+    pub output_dir: &'a Path,
+    pub profile: &'a str,
+    pub quality: &'a str,
+}
+
 #[derive(Debug, Error)]
 pub enum CloudConvertError {
     #[error("invalid API base URL: {0}")]
@@ -76,16 +87,17 @@ pub type Result<T> = std::result::Result<T, CloudConvertError>;
 /// Upload a project archive (bytes), create a cloud conversion job, poll until
 /// completion, then download the result DOCX to `output_dir/<file_stem>.docx`.
 /// Also fetches and saves a `.report.json` next to the output docx.
-pub fn convert_upload_blocking(
-    base_url: &str,
-    access_token: Option<String>,
-    zip_bytes: Vec<u8>,
-    file_name: &str,
-    main_tex: &str,
-    output_dir: &Path,
-    profile: &str,
-    quality: &str,
-) -> Result<CloudConvertResult> {
+pub fn convert_upload_blocking(request: CloudUploadRequest<'_>) -> Result<CloudConvertResult> {
+    let CloudUploadRequest {
+        base_url,
+        access_token,
+        zip_bytes,
+        file_name,
+        main_tex,
+        output_dir,
+        profile,
+        quality,
+    } = request;
     let access_token = access_token.ok_or(CloudConvertError::MissingAccessToken)?;
     let base_url = parse_base_url(base_url)?;
     let output_dir = output_dir.to_path_buf();

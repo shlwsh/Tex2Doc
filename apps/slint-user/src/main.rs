@@ -722,7 +722,10 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_convert_engine, "convert.engine");
     set_text!(set_t_convert_local, "convert.local");
     set_text!(set_t_convert_cloud, "convert.cloud");
-    set_text!(set_t_convert_cloud_requires_sign_in, "convert.cloud_requires_sign_in");
+    set_text!(
+        set_t_convert_cloud_requires_sign_in,
+        "convert.cloud_requires_sign_in"
+    );
     set_text!(set_t_convert_upload, "convert.upload");
     set_text!(
         set_t_convert_upload_placeholder,
@@ -734,10 +737,7 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
         set_t_convert_output_dir_placeholder,
         "convert.output_dir_placeholder"
     );
-    set_text!(
-        set_t_convert_choose_output_dir,
-        "convert.choose_output_dir"
-    );
+    set_text!(set_t_convert_choose_output_dir, "convert.choose_output_dir");
     set_text!(set_t_convert_project, "convert.project");
     set_text!(
         set_t_convert_project_placeholder,
@@ -916,10 +916,7 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
         "feedback.title_placeholder"
     );
     set_text!(set_t_feedback_job_id, "feedback.job_id");
-    set_text!(
-        set_t_feedback_job_placeholder,
-        "feedback.job_placeholder"
-    );
+    set_text!(set_t_feedback_job_placeholder, "feedback.job_placeholder");
     set_text!(set_t_feedback_message, "feedback.message");
     set_text!(
         set_t_feedback_message_placeholder,

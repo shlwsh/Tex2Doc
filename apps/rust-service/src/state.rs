@@ -182,29 +182,6 @@ pub struct RedeemCodeRecord {
     pub created_at: String,
 }
 
-impl RedeemCodeRecord {
-    /// Three independent lifecycle fields — exposed for admin views & auditing.
-    pub fn lifecycle_summary(&self) -> String {
-        let mut parts: Vec<String> = Vec::new();
-        let stock = if self.stock_status.is_empty() {
-            "new".to_string()
-        } else {
-            self.stock_status.clone()
-        };
-        parts.push(format!("state={stock}"));
-        if let Some(at) = &self.stocked_at {
-            parts.push(format!("stocked_at={at}"));
-        }
-        if let Some(at) = &self.redeemed_at {
-            parts.push(format!("redeemed_at={at}"));
-        }
-        if let Some(at) = &self.restocked_at {
-            parts.push(format!("restocked_at={at}"));
-        }
-        parts.join(", ")
-    }
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[allow(dead_code)]
 pub struct RedeemCodeResult {
@@ -665,9 +642,7 @@ impl ServerState {
         admin_id: &str,
         code_ids: &[String],
     ) -> Result<u64, RedeemFailure> {
-        self.db
-            .admin_stock_redeem_codes(admin_id, code_ids)
-            .await
+        self.db.admin_stock_redeem_codes(admin_id, code_ids).await
     }
 
     /// Admin: reset codes back to "new" (恢复/重置). 文本导入时使用。
@@ -676,9 +651,7 @@ impl ServerState {
         admin_id: &str,
         codes: &[String],
     ) -> Result<u64, RedeemFailure> {
-        self.db
-            .admin_restock_redeem_codes(admin_id, codes)
-            .await
+        self.db.admin_restock_redeem_codes(admin_id, codes).await
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {

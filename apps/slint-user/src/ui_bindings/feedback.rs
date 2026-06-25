@@ -20,7 +20,9 @@ pub fn wire_feedback(ui: &MainWindow, app_state: Arc<AppState>) {
                         Ok(rows) => {
                             let count = rows.len();
                             ui.set_feedback_threads(ModelRc::new(VecModel::from(
-                                rows.into_iter().map(feedback_row_for_ui).collect::<Vec<_>>(),
+                                rows.into_iter()
+                                    .map(feedback_row_for_ui)
+                                    .collect::<Vec<_>>(),
                             )));
                             ui.set_feedback_status(
                                 format!("Loaded {} feedback thread(s).", count).into(),
@@ -70,7 +72,9 @@ pub fn wire_feedback(ui: &MainWindow, app_state: Arc<AppState>) {
                             Ok(rows) => {
                                 let count = rows.len();
                                 ui.set_feedback_threads(ModelRc::new(VecModel::from(
-                                    rows.into_iter().map(feedback_row_for_ui).collect::<Vec<_>>(),
+                                    rows.into_iter()
+                                        .map(feedback_row_for_ui)
+                                        .collect::<Vec<_>>(),
                                 )));
                                 ui.set_feedback_title("".into());
                                 ui.set_feedback_job_id("".into());

@@ -96,7 +96,9 @@ impl DbStore {
 
     async fn init_schema(&self) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(BUSINESS_SCHEMA).execute(&self.pool).await?;
-        sqlx::raw_sql(REDEEM_STOCK_SCHEMA).execute(&self.pool).await?;
+        sqlx::raw_sql(REDEEM_STOCK_SCHEMA)
+            .execute(&self.pool)
+            .await?;
         sqlx::raw_sql(FEEDBACK_SCHEMA).execute(&self.pool).await?;
         self.seed_admin_from_env().await?;
         Ok(())
@@ -1737,10 +1739,10 @@ impl DbStore {
               AND ($4 = '' OR c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')
             "#,
         )
-        .bind(&s_status)
-        .bind(&b_id)
-        .bind(&p_id)
-        .bind(&search_term)
+        .bind(s_status)
+        .bind(b_id)
+        .bind(p_id)
+        .bind(search_term)
         .fetch_one(&self.pool)
         .await?;
         let total: i64 = row.try_get("total").unwrap_or(0);
@@ -1755,7 +1757,11 @@ impl DbStore {
         if code_ids.is_empty() {
             return Ok(0);
         }
-        let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
         let mut affected: u64 = 0;
         for code_id in code_ids {
             let uuid = parse_uuid(code_id).map_err(|_| RedeemFailure::InvalidCode)?;
@@ -1795,7 +1801,11 @@ impl DbStore {
         if codes.is_empty() {
             return Ok(0);
         }
-        let mut tx = self.pool.begin().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
         let mut affected: u64 = 0;
         let admin_uuid = parse_uuid(admin_id).map_err(|_| RedeemFailure::InvalidCode)?;
         for raw in codes {

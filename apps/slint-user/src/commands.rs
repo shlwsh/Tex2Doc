@@ -48,7 +48,9 @@ pub type CommandResult<T> = Result<T, CommandError>;
 /// then runs the profile detection engine.
 pub fn detect_profile_from_upload(upload_path: &str) -> CommandResult<String> {
     if upload_path.trim().is_empty() {
-        return Err(CommandError::ProjectNotFound("(empty upload path)".to_string()));
+        return Err(CommandError::ProjectNotFound(
+            "(empty upload path)".to_string(),
+        ));
     }
     let path = Path::new(upload_path);
     if !path.is_file() {

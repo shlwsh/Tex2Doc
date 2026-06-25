@@ -16,6 +16,7 @@ use doc_core::{convert_zip, ConvertOptions};
 
 use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
+use crate::excel_export::write_xml_part;
 use crate::feedback_service::{
     AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
     FeedbackError, ThreadFilters,
@@ -28,7 +29,6 @@ use crate::state::{
     ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
     RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
-use crate::excel_export::write_xml_part;
 use crate::worker_service;
 
 /// 默认主 tex 路径（与 paper3 e2e 一致）。
@@ -900,8 +900,14 @@ async fn admin_export_redeem_codes(
     let body = build_redeem_codes_list_xlsx(&records);
     Response::builder()
         .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-        .header(header::CONTENT_DISPOSITION, "attachment; filename=\"redeem-codes-list.xlsx\"")
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"redeem-codes-list.xlsx\"",
+        )
         .header(header::CONTENT_LENGTH, body.len())
         .body(axum::body::Body::from(body))
         .map_err(|e| ApiError::Io(e.to_string()))
@@ -916,8 +922,18 @@ fn build_redeem_codes_list_xlsx(records: &[RedeemCodeRecord]) -> Vec<u8> {
         write_xml_part(&mut zip, opts, "[Content_Types].xml", content_types_xml());
         write_xml_part(&mut zip, opts, "_rels/.rels", rels_xml());
         write_xml_part(&mut zip, opts, "xl/workbook.xml", workbook_xml_codes_list());
-        write_xml_part(&mut zip, opts, "xl/_rels/workbook.xml.rels", workbook_rels_xml_codes_list());
-        write_xml_part(&mut zip, opts, "xl/worksheets/sheet1.xml", redeem_codes_list_sheet_xml(records));
+        write_xml_part(
+            &mut zip,
+            opts,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml_codes_list(),
+        );
+        write_xml_part(
+            &mut zip,
+            opts,
+            "xl/worksheets/sheet1.xml",
+            redeem_codes_list_sheet_xml(records),
+        );
         zip.finish().expect("zip finish should not fail");
     }
     cursor.into_inner()
@@ -953,12 +969,19 @@ fn redeem_codes_list_sheet_xml(records: &[RedeemCodeRecord]) -> String {
     ];
 
     let mut sheet = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
-    sheet.push_str(r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#);
+    sheet.push_str(
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+    );
     sheet.push_str("<sheetData>");
     let mut header_row = String::from(r#"<row r="1">"#);
     for (col, h) in headers.iter().enumerate() {
         let col_letter = (b'A' + col as u8) as char;
-        header_row.push_str(&format!(r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#, col_letter, 1, xml_escape(h)));
+        header_row.push_str(&format!(
+            r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
+            col_letter,
+            1,
+            xml_escape(h)
+        ));
     }
     header_row.push_str("</row>");
     sheet.push_str(&header_row);
@@ -988,7 +1011,12 @@ fn redeem_codes_list_sheet_xml(records: &[RedeemCodeRecord]) -> String {
         ];
         for (col, val) in vals.iter().enumerate() {
             let col_letter = (b'A' + col as u8) as char;
-            row.push_str(&format!(r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#, col_letter, row_num, xml_escape(val)));
+            row.push_str(&format!(
+                r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
+                col_letter,
+                row_num,
+                xml_escape(val)
+            ));
         }
         row.push_str("</row>");
         sheet.push_str(&row);

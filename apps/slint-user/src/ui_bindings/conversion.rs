@@ -51,7 +51,9 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                                 ui.set_is_converting(false);
                                 ui.set_conversion_progress(0.0);
                                 ui.set_quality_status("Failed".into());
-                                ui.set_status_text(format!("Failed to read upload file: {}", e).into());
+                                ui.set_status_text(
+                                    format!("Failed to read upload file: {}", e).into(),
+                                );
                             }
                         });
                         let _ = invoke_result;
@@ -120,9 +122,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                                 ui.set_conversion_progress(0.0);
                                 ui.set_quality_status("Failed".into());
                                 ui.set_quality_progress(0.0);
-                                ui.set_status_text(
-                                    format!("Conversion failed:\n{}", error).into(),
-                                );
+                                ui.set_status_text(format!("Conversion failed:\n{}", error).into());
                             }
                         }
                     }
@@ -191,13 +191,18 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 let bytes = match std::fs::read(&upload) {
                     Ok(b) => b,
                     Err(e) => {
-                        app_for_thread.update_job(&cloud_job_id, JobUpdate::Failed(format!("Failed to read upload file: {}", e)));
+                        app_for_thread.update_job(
+                            &cloud_job_id,
+                            JobUpdate::Failed(format!("Failed to read upload file: {}", e)),
+                        );
                         let _ = slint::invoke_from_event_loop(move || {
                             if let Some(ui) = ui_weak.upgrade() {
                                 ui.set_is_converting(false);
                                 ui.set_conversion_progress(0.0);
                                 ui.set_quality_status("Failed".into());
-                                ui.set_status_text(format!("Failed to read upload file: {}", e).into());
+                                ui.set_status_text(
+                                    format!("Failed to read upload file: {}", e).into(),
+                                );
                             }
                         });
                         return;
@@ -211,14 +216,16 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 };
 
                 let result = crate::cloud_convert::convert_upload_blocking(
-                    &base_url,
-                    token,
-                    bytes,
-                    &file_name,
-                    &main_tex_value,
-                    &out_dir,
-                    &profile,
-                    &quality,
+                    crate::cloud_convert::CloudUploadRequest {
+                        base_url: &base_url,
+                        access_token: token,
+                        zip_bytes: bytes,
+                        file_name: &file_name,
+                        main_tex: &main_tex_value,
+                        output_dir: &out_dir,
+                        profile: &profile,
+                        quality: &quality,
+                    },
                 );
 
                 match &result {
@@ -263,7 +270,9 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                                 ui.set_conversion_progress(0.0);
                                 ui.set_quality_status("Cloud failed".into());
                                 ui.set_quality_progress(0.0);
-                                ui.set_status_text(format!("Cloud conversion failed:\n{}", e).into());
+                                ui.set_status_text(
+                                    format!("Cloud conversion failed:\n{}", e).into(),
+                                );
                             }
                         }
                     }
@@ -349,9 +358,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 helpers::persist_settings(Some(&selected), None, None, None, None, None);
                 if let Some(ui) = ui_weak.upgrade() {
                     ui.set_upload_path(selected.clone().into());
-                    ui.set_status_text(
-                        format!("Selected upload file: {}", selected).into(),
-                    );
+                    ui.set_status_text(format!("Selected upload file: {}", selected).into());
                 }
             }
         },
@@ -366,9 +373,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
             helpers::persist_settings(None, Some(&selected), None, None, None, None);
             if let Some(ui) = ui_weak.upgrade() {
                 ui.set_output_path(selected.clone().into());
-                ui.set_status_text(
-                    format!("Selected output directory: {}", selected).into(),
-                );
+                ui.set_status_text(format!("Selected output directory: {}", selected).into());
             }
         }
     });
