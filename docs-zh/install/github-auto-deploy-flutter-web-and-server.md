@@ -374,12 +374,16 @@ jobs:
             Port ${{ secrets.PROD_SSH_PORT || 22 }}
             IdentityFile ~/.ssh/prod_deploy_key
             KexAlgorithms curve25519-sha256
+            ServerAliveInterval 30
+            ServerAliveCountMax 6
             StrictHostKeyChecking yes
           EOF
 
       - name: Upload bundle
         run: |
-          scp tex2doc-production.tar.gz tex2doc-production:/tmp/tex2doc-production.tar.gz
+          ssh tex2doc-production 'cat > /tmp/tex2doc-production.tar.gz.tmp && mv /tmp/tex2doc-production.tar.gz.tmp /tmp/tex2doc-production.tar.gz' \
+            < tex2doc-production.tar.gz
+          ssh tex2doc-production 'test -s /tmp/tex2doc-production.tar.gz && ls -lh /tmp/tex2doc-production.tar.gz'
 
       - name: Activate release
         run: |
