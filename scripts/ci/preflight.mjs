@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Local pre-submit checks mirroring GitHub CI.
+ * Local pre-submit checks for development.
  *
- * Keep this script in sync with .github/workflows/ci.yml so PR failures are
- * caught before pushing. Use:
+ * GitHub CI intentionally runs only fast formatting/static checks. Keep the
+ * full test suite here so regressions are caught before pushing. Use:
  *   npm run ci:preflight
  */
 import { spawnSync } from 'node:child_process';

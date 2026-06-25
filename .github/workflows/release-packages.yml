@@ -24,7 +24,7 @@ jobs:
             server_bin: target/release/doc-server.exe
             client_bin: target/release/doc-desktop-slint.exe
           - name: linux-x64
-            os: ubuntu-latest
+            os: ubuntu-22.04
             archive: tar
             server_bin: target/release/doc-server
             client_bin: target/release/doc-desktop-slint

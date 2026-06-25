@@ -19,7 +19,10 @@ env:
 jobs:
   build:
     name: Build production bundle
-    runs-on: ubuntu-latest
+    # The Tencent Cloud production server currently runs Ubuntu 22.04
+    # with glibc 2.35. Build on the same LTS base so the doc-server
+    # binary does not depend on a newer runner glibc such as 2.39.
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
         with:

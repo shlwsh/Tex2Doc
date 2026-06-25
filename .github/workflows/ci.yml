@@ -44,16 +44,7 @@ jobs:
             libegl1-mesa-dev \
             libgl1-mesa-dev \
             libudev-dev \
-            libinput-dev \
-            postgresql \
-            postgresql-contrib
-
-      - name: Start PostgreSQL test database
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          sudo systemctl start postgresql
-          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
-          sudo -u postgres createdb -O postgres docdb || true
+            libinput-dev
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -70,29 +61,6 @@ jobs:
 
       - name: cargo clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-
-      - name: cargo test
-        run: |
-          cargo test --workspace --all-targets --exclude doc-server -- --test-threads=1
-          cargo test -p doc-server --lib --bin doc-server -- --test-threads=1
-
-      - name: doc-server API integration tests
-        if: matrix.os == 'ubuntu-latest'
-        env:
-          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/docdb
-        run: cargo test -p doc-server --test api -- --test-threads=1
-
-      - name: End-to-end artifact
-        if: matrix.os == 'ubuntu-latest'
-        run: |
-          mkdir -p artifacts
-          cp crates/core/tests/output/hello.docx artifacts/hello.docx 2>/dev/null || true
-      - uses: actions/upload-artifact@v4
-        if: matrix.os == 'ubuntu-latest'
-        with:
-          name: hello-docx
-          path: artifacts/hello.docx
-          if-no-files-found: ignore
 
   flutter:
     name: Flutter web/client checks
@@ -115,7 +83,3 @@ jobs:
       - name: Flutter analyze
         working-directory: flutter_app
         run: flutter analyze
-
-      - name: Flutter test
-        working-directory: flutter_app
-        run: flutter test

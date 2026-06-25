@@ -29,8 +29,11 @@ Host my-server
 
 - Linux 生产服务端部署。
 - Windows 与 Linux 的 CI 检查和原生包构建。
+- GitHub CI 暂时只执行格式与静态检查；Rust/Flutter 测试和数据库集成测试集中在本地 `npm run ci:preflight` 开发预检中执行。
 
 macOS intel / macOS arm 打包暂时从必过发布要求中移除，避免 GitHub macOS runner 长时间排队阻塞 PR 合并与生产部署。后续 runner 稳定后，再恢复 `macos-13` 与 `macos-14` 矩阵。
+
+生产服务器当前是 Ubuntu 22.04，因此生产部署和 Linux release 包固定使用 `ubuntu-22.04` runner 构建，避免在 `ubuntu-latest` 上生成依赖更高 glibc 版本的二进制。
 
 ### 端口规划
 
