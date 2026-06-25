@@ -151,7 +151,7 @@ class _AuthWindowState extends State<AuthWindow>
                       ClipRRect(
                         borderRadius: BorderRadius.circular(AppRadius.sm),
                         child: Image.asset(
-                          'assets/app_icon.jpg',
+                          'assets/app_icon.png',
                           width: 48,
                           height: 48,
                           fit: BoxFit.cover,

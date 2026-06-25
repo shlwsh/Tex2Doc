@@ -1023,6 +1023,7 @@ fn apply_i18n(ui: &MainWindow, locale: &str) {
     set_text!(set_t_tab_account, "tab.account");
     set_text!(set_t_tab_billing, "tab.billing");
     set_text!(set_t_tab_history, "tab.history");
+    set_text!(set_t_tab_about, "tab.about");
     set_text!(set_t_app_title_signed_out, "app.title.signed_out");
     set_text!(set_t_common_account, "common.account");
     set_text!(set_t_common_quota, "common.quota");

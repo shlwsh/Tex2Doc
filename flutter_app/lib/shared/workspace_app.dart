@@ -23,7 +23,7 @@ import '../ui/convert_records_panel.dart';
 import '../ui/feedback_panel.dart';
 import '../ui/recharge_records_panel.dart';
 
-const _appIconAsset = 'assets/app_icon.jpg';
+const _appIconAsset = 'assets/app_icon.png';
 
 // ─── App entry ────────────────────────────────────────────────────────────────
 
@@ -129,6 +129,7 @@ enum _NavSection {
   convertRecords,
   rechargeRecords,
   feedback,
+  about,
   releases,
   audit,
 }
@@ -144,6 +145,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.convertRecords => Icons.history,
     _NavSection.rechargeRecords => Icons.receipt_long,
     _NavSection.feedback => Icons.feedback_outlined,
+    _NavSection.about => Icons.info_outline,
     _NavSection.releases => Icons.rocket_launch_outlined,
     _NavSection.audit => Icons.manage_search_outlined,
   };
@@ -158,6 +160,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.convertRecords => s.t('nav.convertRecords'),
     _NavSection.rechargeRecords => s.t('nav.rechargeRecords'),
     _NavSection.feedback => s.t('nav.feedback'),
+    _NavSection.about => s.t('nav.about'),
     _NavSection.releases => s.t('nav.releases'),
     _NavSection.audit => s.t('nav.audit'),
   };
@@ -200,6 +203,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _NavSection.convertRecords,
       _NavSection.rechargeRecords,
       _NavSection.feedback,
+      _NavSection.about,
     ],
     DocEngineAppMode.admin => const [
       _NavSection.adminDashboard,
@@ -209,6 +213,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _NavSection.feedback,
       _NavSection.releases,
       _NavSection.audit,
+      _NavSection.about,
     ],
   };
 
@@ -1047,6 +1052,7 @@ class _NavContent extends StatelessWidget {
         else
           FeedbackPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
+      _NavSection.about => const <Widget>[_AboutPanel()],
       _NavSection.releases => <Widget>[
         AdminReleasesPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
@@ -1105,6 +1111,94 @@ class _CompactSectionTabs extends StatelessWidget {
       onSelectionChanged: (sections) {
         if (sections.isNotEmpty) onSectionChanged(sections.first);
       },
+    );
+  }
+}
+
+class _AboutPanel extends StatelessWidget {
+  const _AboutPanel();
+
+  @override
+  Widget build(BuildContext context) {
+    final strings = AppStrings.of(context);
+    final theme = Theme.of(context);
+    final features = [
+      strings.t('about.feature.convert'),
+      strings.t('about.feature.quality'),
+      strings.t('about.feature.records'),
+      strings.t('about.feature.commercial'),
+    ];
+
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: Image.asset(
+                  _appIconAsset,
+                  width: 72,
+                  height: 72,
+                  fit: BoxFit.cover,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Tex2Doc', style: theme.textTheme.headlineSmall),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      strings.t('about.company'),
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Text(
+                      strings.t('about.description'),
+                      style: theme.textTheme.bodyMedium,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            strings.t('about.goalTitle'),
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(strings.t('about.goal'), style: theme.textTheme.bodyMedium),
+          const SizedBox(height: AppSpacing.lg),
+          Text(
+            strings.t('about.featuresTitle'),
+            style: theme.textTheme.titleMedium,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          for (final feature in features)
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.check_circle_outline,
+                    size: 18,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(child: Text(feature)),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }

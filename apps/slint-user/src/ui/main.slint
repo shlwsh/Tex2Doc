@@ -125,7 +125,7 @@ component StatusPill inherits Rectangle {
 
 export component MainWindow inherits Window {
     title: t-app-title-signed-out + " " + app-version;
-    icon: @image-url("assets/app_icon.jpg");
+    icon: @image-url("assets/app_icon.png");
     preferred-width: 1220px;
     preferred-height: 790px;
     background: color-window-bg;
@@ -206,6 +206,7 @@ export component MainWindow inherits Window {
     in-out property <string> t-tab-billing: "Billing";
     in-out property <string> t-tab-history: "History";
     in-out property <string> t-tab-feedback: "Feedback";
+    in-out property <string> t-tab-about: "About";
     in-out property <string> t-app-title-signed-out: "Tex2Doc Desktop";
     in-out property <string> t-common-account: "Account";
     in-out property <string> t-common-quota: "Quota";
@@ -384,7 +385,7 @@ export component MainWindow inherits Window {
                         VerticalBox {
                             padding: 28px;
                             spacing: 18px;
-                            Image { source: @image-url("assets/app_icon.jpg"); width: 58px; height: 58px; image-fit: cover; }
+                            Image { source: @image-url("assets/app_icon.png"); width: 58px; height: 58px; image-fit: contain; }
                             Text { text: t-auth-required-title; font-size: 30px; font-weight: 700; color: color-text-primary; wrap: word-wrap; }
                             Text { text: t-auth-required-subtitle; font-size: 14px; color: color-text-secondary; wrap: word-wrap; }
                             StatusPill { text: t-auth-demo-hint; bg: #eff6ff; fg: color-accent; }
@@ -478,11 +479,11 @@ export component MainWindow inherits Window {
 
                 HorizontalBox {
                     spacing: 10px;
-                    Image { source: @image-url("assets/app_icon.jpg"); width: 38px; height: 38px; image-fit: cover; }
+                    Image { source: @image-url("assets/app_icon.png"); width: 38px; height: 38px; image-fit: contain; }
                     VerticalBox {
                         spacing: 1px;
                         Text { text: "Tex2Doc"; font-size: 20px; font-weight: 700; color: color-text-primary; }
-                        Text { text: "Commercial workspace"; font-size: 11px; color: color-text-muted; overflow: elide; }
+                        Text { text: "启哲科技出品"; font-size: 11px; color: color-text-muted; overflow: elide; }
                     }
                 }
 
@@ -492,6 +493,7 @@ export component MainWindow inherits Window {
                 NavButton { label: t-nav-conversion-records; detail: t-nav-jobs-reports; selected: selected-page == 3; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 3; } }
                 NavButton { label: t-nav-recharge-records; detail: t-nav-mock-payment-history; selected: selected-page == 4; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 4; } }
                 NavButton { label: t-tab-feedback; detail: t-nav-jobs-reports; selected: selected-page == 5; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 5; } }
+                NavButton { label: t-tab-about; detail: "Qizhe Technology"; selected: selected-page == 6; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 6; } }
 
                 Rectangle { vertical-stretch: 1; }
 
@@ -523,7 +525,7 @@ export component MainWindow inherits Window {
                         horizontal-stretch: 1;
                         spacing: 1px;
                         Text {
-                            text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : (selected-page == 4 ? t-records-recharge-title : t-tab-feedback))));
+                            text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : (selected-page == 4 ? t-records-recharge-title : (selected-page == 5 ? t-tab-feedback : t-tab-about)))));
                             font-size: 20px;
                             font-weight: 700;
                             color: color-text-primary;
@@ -914,6 +916,39 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                if selected-page == 6: Rectangle {
+                    background: color-window-bg;
+                    VerticalBox {
+                        padding: 22px;
+                        spacing: 14px;
+                        SectionPanel { title: t-tab-about; subtitle: "Tex2Doc by Qizhe Technology"; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; }
+                        Rectangle {
+                            border-radius: 8px;
+                            border-color: color-border;
+                            background: color-surface;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 16px;
+                                HorizontalBox {
+                                    spacing: 18px;
+                                    Image { source: @image-url("assets/app_icon.png"); width: 76px; height: 76px; image-fit: contain; }
+                                    VerticalBox {
+                                        spacing: 5px;
+                                        Text { text: "Tex2Doc"; font-size: 26px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "开发公司：启哲科技"; font-size: 14px; font-weight: 600; color: color-accent; }
+                                        Text { text: "面向科研写作、期刊投稿、机构归档和企业文档流转的智能文档转换产品。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                    }
+                                }
+                                Rectangle { height: 1px; background: color-border; }
+                                Text { text: "项目目标"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                Text { text: "将复杂 TeX/LaTeX 项目稳定转换为可编辑、可审阅、可交付的 Word 文档，并提供转换、质检、记录追溯和商业化运营的一体化工作台。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                Text { text: "主要功能"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                Text { text: "• TeX/LaTeX 项目路径或 ZIP 输入，生成 DOCX 与报告。\n• 云端语义转换、本地桌面转换和任务历史记录。\n• 兼容性分析、期刊模板适配、转换日志和诊断导出。\n• 账号、套餐、兑换码、用量额度、反馈和管理端运营能力。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
                             }
                         }
                     }

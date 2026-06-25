@@ -77,6 +77,7 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'nav.convertRecords': '转换记录',
     'nav.rechargeRecords': '充值记录',
     'nav.feedback': '反馈',
+    'nav.about': '关于',
     'nav.releases': '发布',
     'nav.audit': '审计',
     'settings.theme': '主题',
@@ -222,6 +223,17 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'metrics.document': '文档产物',
     'empty.noData': '暂无数据。完成一次操作后这里会显示结果。',
     'error.network': '网络或服务异常，请检查 API 地址。',
+    'about.title': '关于 Tex2Doc',
+    'about.company': '开发公司：启哲科技',
+    'about.description': 'Tex2Doc 是启哲科技打造的智能文档转换产品，服务科研写作、期刊投稿、机构归档和企业文档流转。',
+    'about.goalTitle': '项目目标',
+    'about.goal':
+        '让复杂 TeX/LaTeX 项目稳定转换为可编辑、可审阅、可交付的 Word 文档，并提供从转换、质检到记录追溯的一体化工作台。',
+    'about.featuresTitle': '主要功能',
+    'about.feature.convert': 'TeX/LaTeX 项目 ZIP 上传、主文件识别与 DOCX 生成。',
+    'about.feature.quality': '兼容性分析、期刊模板适配、转换日志与结构化报告。',
+    'about.feature.records': '本地与云端转换记录、产物下载、失败原因和诊断导出。',
+    'about.feature.commercial': '账号、套餐、兑换码、用量额度、反馈与管理端运营能力。',
   },
   AppLocale.enUs: {
     'app.title': 'Tex2Doc',
@@ -237,6 +249,7 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'nav.convertRecords': 'Conversion Records',
     'nav.rechargeRecords': 'Recharge Records',
     'nav.feedback': 'Feedback',
+    'nav.about': 'About',
     'nav.releases': 'Releases',
     'nav.audit': 'Audit',
     'settings.theme': 'Theme',
@@ -396,6 +409,22 @@ const Map<AppLocale, Map<String, String>> _localized = {
     'metrics.document': 'Document output',
     'empty.noData': 'No data yet. Results will appear here after an operation.',
     'error.network': 'Network or service error. Check the API base URL.',
+    'about.title': 'About Tex2Doc',
+    'about.company': 'Developer: Qizhe Technology',
+    'about.description':
+        'Tex2Doc is an intelligent document conversion product from Qizhe Technology for academic writing, journal submission, institutional archiving, and business document workflows.',
+    'about.goalTitle': 'Project Goal',
+    'about.goal':
+        'Convert complex TeX/LaTeX projects into editable, reviewable, and deliverable Word documents with an integrated workspace for conversion, quality checks, and traceable records.',
+    'about.featuresTitle': 'Key Features',
+    'about.feature.convert':
+        'TeX/LaTeX project ZIP upload, main-file selection, and DOCX generation.',
+    'about.feature.quality':
+        'Compatibility analysis, journal template adaptation, conversion logs, and structured reports.',
+    'about.feature.records':
+        'Local and cloud conversion history, artifact download, failure details, and diagnostics export.',
+    'about.feature.commercial':
+        'Accounts, plans, redeem codes, usage quotas, feedback, and admin operations.',
   },
 };
 

@@ -8,7 +8,7 @@ import '../admin/admin_app.dart';
 import '../shared/workspace_app.dart';
 import '../user/user_app.dart';
 
-const _appIconAsset = 'assets/app_icon.jpg';
+const _appIconAsset = 'assets/app_icon.png';
 
 class ProductHomeApp extends StatelessWidget {
   const ProductHomeApp({super.key});
@@ -109,25 +109,63 @@ class _HomeNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Row(
+    final brand = Row(
+      mainAxisSize: MainAxisSize.min,
       children: [
         ClipRRect(
           borderRadius: BorderRadius.circular(AppRadius.sm),
           child: Image.asset(_appIconAsset, width: 42, height: 42),
         ),
         const SizedBox(width: AppSpacing.sm),
-        Text('Tex2Doc', style: theme.textTheme.titleLarge),
-        const Spacer(),
+        Flexible(child: Text('Tex2Doc', style: theme.textTheme.titleLarge)),
+        const SizedBox(width: AppSpacing.sm),
+        Flexible(
+          child: Text(
+            '启哲科技出品',
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+    final actions = Wrap(
+      spacing: AppSpacing.xs,
+      runSpacing: AppSpacing.xs,
+      children: [
         TextButton(
           onPressed: () => _openWorkspace(context, DocEngineAppMode.admin),
           child: const Text('管理端'),
         ),
-        const SizedBox(width: AppSpacing.xs),
         FilledButton(
           onPressed: () => _openWorkspace(context, DocEngineAppMode.user),
           child: const Text('用户登录'),
         ),
       ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 560) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              brand,
+              const SizedBox(height: AppSpacing.sm),
+              actions,
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            Expanded(child: brand),
+            const SizedBox(width: AppSpacing.md),
+            actions,
+          ],
+        );
+      },
     );
   }
 }
@@ -141,6 +179,8 @@ class _HeroCopy extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Image.asset(_appIconAsset, width: 96, height: 96),
+        const SizedBox(height: AppSpacing.lg),
         Text(
           'Tex2Doc',
           style: theme.textTheme.displayMedium?.copyWith(
@@ -149,7 +189,7 @@ class _HeroCopy extends StatelessWidget {
         ),
         const SizedBox(height: AppSpacing.md),
         Text(
-          '面向论文、期刊投稿和机构文档流转的 TeX/LaTeX 到 Word 转换平台。',
+          '启哲科技开发的 TeX/LaTeX 到 Word 转换平台，面向论文、期刊投稿和机构文档流转。',
           style: theme.textTheme.headlineSmall?.copyWith(
             color: theme.colorScheme.onSurfaceVariant,
           ),
@@ -196,6 +236,7 @@ class _HeroPanel extends StatelessWidget {
           _MetricLine(label: '本地桌面端', value: 'Slint 跨平台用户端'),
           _MetricLine(label: '商业化', value: '套餐、兑换码、用量与反馈闭环'),
           _MetricLine(label: '管理端', value: '运营与客服独立后台入口'),
+          _MetricLine(label: '开发公司', value: '启哲科技'),
         ],
       ),
     );

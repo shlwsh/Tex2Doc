@@ -3,12 +3,13 @@ pub const DEFAULT_LOCALE: &str = "en";
 const SUPPORTED_LOCALES: [&str; 6] = ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
 
 #[cfg(test)]
-const KEYS: [&str; 139] = [
+const KEYS: [&str; 140] = [
     "tab.convert",
     "tab.settings",
     "tab.account",
     "tab.billing",
     "tab.history",
+    "tab.about",
     "app.title.signed_out",
     "common.account",
     "common.quota",
@@ -188,6 +189,7 @@ fn en(key: &str) -> Option<&'static str> {
         "tab.account" => Some("Account"),
         "tab.billing" => Some("Billing"),
         "tab.history" => Some("History"),
+        "tab.about" => Some("About"),
         "app.title.signed_out" => Some("Tex2Doc Desktop"),
         "common.account" => Some("Account"),
         "common.quota" => Some("Quota"),
@@ -342,6 +344,7 @@ fn zh_hans(key: &str) -> Option<&'static str> {
         "tab.account" => Some("账号"),
         "tab.billing" => Some("套餐"),
         "tab.history" => Some("历史"),
+        "tab.about" => Some("关于"),
         "app.title.signed_out" => Some("Tex2Doc 桌面版"),
         "common.account" => Some("账号"),
         "common.quota" => Some("配额"),
@@ -482,6 +485,7 @@ fn zh_hant(key: &str) -> Option<&'static str> {
         "tab.account" => Some("帳號"),
         "tab.billing" => Some("方案"),
         "tab.history" => Some("歷史"),
+        "tab.about" => Some("關於"),
         "app.title.signed_out" => Some("Tex2Doc 桌面版"),
         "common.account" => Some("帳號"),
         "common.quota" => Some("配額"),
@@ -564,6 +568,7 @@ fn fr(key: &str) -> Option<&'static str> {
         "tab.account" => Some("Compte"),
         "tab.billing" => Some("Offres"),
         "tab.history" => Some("Historique"),
+        "tab.about" => Some("À propos"),
         "common.account" => Some("Compte"),
         "common.quota" => Some("Quota"),
         "common.compatibility" => Some("Compatibilité"),
@@ -610,6 +615,7 @@ fn ja(key: &str) -> Option<&'static str> {
         "tab.account" => Some("アカウント"),
         "tab.billing" => Some("プラン"),
         "tab.history" => Some("履歴"),
+        "tab.about" => Some("概要"),
         "common.account" => Some("アカウント"),
         "common.quota" => Some("クォータ"),
         "common.compatibility" => Some("互換性"),
@@ -673,6 +679,7 @@ fn de(key: &str) -> Option<&'static str> {
         "tab.account" => Some("Konto"),
         "tab.billing" => Some("Tarife"),
         "tab.history" => Some("Verlauf"),
+        "tab.about" => Some("Über"),
         "common.account" => Some("Konto"),
         "common.quota" => Some("Kontingent"),
         "common.compatibility" => Some("Kompatibilität"),
