@@ -99,3 +99,6 @@ incremental = true
 
 [workspace.lints.rust]
 unsafe-op-in-unsafe-fn = "allow"
+
+[patch.crates-io]
+i-slint-backend-winit = { path = "third_party/slint/i-slint-backend-winit-1.16.1" }
