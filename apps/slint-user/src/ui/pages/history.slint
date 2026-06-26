@@ -1,4 +1,4 @@
-import { Button, VerticalBox, HorizontalBox, GroupBox, TextEdit, ListView } from "std-widgets.slint";
+import { Button, VerticalBox, HorizontalBox, GroupBox, TextEdit, ListView, ComboBox } from "std-widgets.slint";
 import { JobRow } from "../types.slint";
 import { EmptyState } from "../components/empty-state.slint";
 import { StatusBadge } from "../components/status-badge.slint";
@@ -15,6 +15,12 @@ export component HistoryTab inherits Rectangle {
     in-out property <bool> is-converting: false;
     in-out property <[JobRow]> job-history;
     in-out property <int> selected-job-index: -1;
+    in-out property <string> history-filter: "all";
+    in-out property <int> history-success-count: 0;
+    in-out property <int> history-warning-count: 0;
+    in-out property <int> history-failed-count: 0;
+    in-out property <float> history-success-rate: 0.0;
+    in-out property <float> history-avg-quality: 0.0;
 
     in property <color> surface-color: #FFFFFF;
     in property <color> surface-alt-color: #F1F5F9;
@@ -24,6 +30,7 @@ export component HistoryTab inherits Rectangle {
     in property <color> text-muted-color: #6B778C;
     in property <color> accent-color: #2563EB;
     in property <color> success-color: #0F8A5F;
+    in property <color> warning-color: #B7791F;
     in property <color> danger-color: #C2413A;
 
     in property <string> t-history-recent-jobs: "Recent Jobs";
@@ -32,12 +39,33 @@ export component HistoryTab inherits Rectangle {
     in property <string> t-history-open-report: "Open Report";
     in property <string> t-history-export-diagnostics: "Export Diagnostics";
     in property <string> t-history-exporting-diagnostics: "Exporting diagnostics...";
+    in property <string> t-history-quality: "Quality";
+    in property <string> t-history-filter-all: "All";
+    in property <string> t-history-filter-success: "Success";
+    in property <string> t-history-filter-warning: "Warning";
+    in property <string> t-history-filter-failed: "Failed";
 
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
     callback remove-job-clicked(string);
     callback clear-jobs-clicked();
     callback open-output-clicked(string);
     callback open-report-clicked(string);
+    callback view-quality-report(string);
+
+    // Compute filtered jobs based on current filter
+    property <[JobRow]> filtered-jobs: {
+        if (root.history-filter == "all") return root.job-history;
+        if (root.history-filter == "success") {
+            return root.job-history.filter(j => j.status == "Succeeded");
+        }
+        if (root.history-filter == "warning") {
+            return root.job-history.filter(j => j.warnings-count > 0 && j.status == "Succeeded");
+        }
+        if (root.history-filter == "failed") {
+            return root.job-history.filter(j => j.status == "Failed");
+        }
+        return root.job-history;
+    }
 
     background: surface-alt-color;
 
@@ -45,8 +73,138 @@ export component HistoryTab inherits Rectangle {
         padding: 16px;
         spacing: 12px;
 
+        // Statistics bar
+        Rectangle {
+            height: 44px;
+            border-radius: 8px;
+            background: surface-color;
+            border-color: border-color-token;
+            border-width: 1px;
+
+            HorizontalBox {
+                padding-left: 14px;
+                padding-right: 14px;
+                spacing: 24px;
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Success Rate"; font-size: 10px; color: text-muted-color; }
+                    Text { text: Math.round(history-success-rate * 100) + "%"; font-size: 16px; font-weight: 700; color: success-color; }
+                }
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Avg Quality"; font-size: 10px; color: text-muted-color; }
+                    Text { text: Math.round(history-avg-quality); font-size: 16px; font-weight: 700; color: accent-color; }
+                }
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Total Jobs"; font-size: 10px; color: text-muted-color; }
+                    Text { text: root.job-history.length; font-size: 16px; font-weight: 700; color: text-primary-color; }
+                }
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Success"; font-size: 10px; color: text-muted-color; }
+                    Text { text: root.history-success-count; font-size: 16px; font-weight: 700; color: success-color; }
+                }
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Warnings"; font-size: 10px; color: text-muted-color; }
+                    Text { text: root.history-warning-count; font-size: 16px; font-weight: 700; color: warning-color; }
+                }
+
+                VerticalBox {
+                    spacing: 0px;
+                    Text { text: "Failed"; font-size: 10px; color: text-muted-color; }
+                    Text { text: root.history-failed-count; font-size: 16px; font-weight: 700; color: danger-color; }
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Filter buttons
+                Rectangle {
+                    width: 260px;
+                    height: 32px;
+                    border-radius: 6px;
+                    background: surface-alt-color;
+
+                    HorizontalBox {
+                        padding: 2px;
+                        spacing: 2px;
+
+                        Rectangle {
+                            width: 60px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: history-filter == "all" ? accent-color : #00000000;
+                            TouchArea { clicked => { history-filter = "all"; } }
+                            Text {
+                                text: t-history-filter-all;
+                                font-size: 11px;
+                                font-weight: history-filter == "all" ? 700 : 500;
+                                color: history-filter == "all" ? #ffffff : text-secondary-color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 60px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: history-filter == "success" ? success-color : #00000000;
+                            TouchArea { clicked => { history-filter = "success"; } }
+                            Text {
+                                text: t-history-filter-success;
+                                font-size: 11px;
+                                font-weight: history-filter == "success" ? 700 : 500;
+                                color: history-filter == "success" ? #ffffff : text-secondary-color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 60px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: history-filter == "warning" ? warning-color : #00000000;
+                            TouchArea { clicked => { history-filter = "warning"; } }
+                            Text {
+                                text: t-history-filter-warning;
+                                font-size: 11px;
+                                font-weight: history-filter == "warning" ? 700 : 500;
+                                color: history-filter == "warning" ? #ffffff : text-secondary-color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+
+                        Rectangle {
+                            width: 60px;
+                            height: 28px;
+                            border-radius: 4px;
+                            background: history-filter == "failed" ? danger-color : #00000000;
+                            TouchArea { clicked => { history-filter = "failed"; } }
+                            Text {
+                                text: t-history-filter-failed;
+                                font-size: 11px;
+                                font-weight: history-filter == "failed" ? 700 : 500;
+                                color: history-filter == "failed" ? #ffffff : text-secondary-color;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         GroupBox {
-            title: root.t-history-recent-jobs;
+            title: root.t-history-recent-jobs + " (" + filtered-jobs.length + ")";
 
             VerticalBox {
                 spacing: 8px;
@@ -60,27 +218,66 @@ export component HistoryTab inherits Rectangle {
                     muted-color: root.text-muted-color;
                 }
 
+                // Header row
+                if root.job-history.length > 0: Rectangle {
+                    height: 28px;
+                    background: surface-alt-color;
+                    border-radius: 6px;
+
+                    HorizontalBox {
+                        padding-left: 8px;
+                        padding-right: 8px;
+                        spacing: 10px;
+
+                        Text { text: "ID"; font-size: 10px; font-weight: 700; color: text-muted-color; width: 72px; }
+                        Text { text: "Status"; font-size: 10px; font-weight: 700; color: text-muted-color; width: 70px; }
+                        Text { text: t-history-quality; font-size: 10px; font-weight: 700; color: text-muted-color; width: 52px; }
+                        Text { text: "Input"; font-size: 10px; font-weight: 700; color: text-muted-color; horizontal-stretch: 1; }
+                        Text { text: "Time"; font-size: 10px; font-weight: 700; color: text-muted-color; width: 100px; }
+                        Rectangle { width: 100px; }
+                    }
+                }
+
                 ListView {
                     visible: root.job-history.length > 0;
-                    height: 260px;
+                    height: 240px;
 
-                    for row[idx] in root.job-history: Rectangle {
+                    for row[idx] in root.filtered-jobs: Rectangle {
                         background: idx == root.selected-job-index ? #EFF6FF : (Math.mod(idx, 2) == 0 ? root.surface-color : root.surface-alt-color);
                         border-color: idx == root.selected-job-index ? root.accent-color : root.border-color-token;
-                        border-radius: 8px;
-                        min-height: 48px;
+                        border-radius: 6px;
+                        min-height: 42px;
+
+                        TouchArea { clicked => { root.selected-job-index = idx; } }
 
                         HorizontalBox {
-                            padding: 8px;
+                            padding-left: 8px;
+                            padding-right: 8px;
                             spacing: 10px;
 
-                            Text { text: row.id; font-size: 11px; color: root.text-muted-color; width: 82px; overflow: elide; }
-                            Text { text: row.kind; font-size: 11px; color: root.text-secondary-color; width: 56px; }
+                            Text { text: row.id; font-size: 10px; color: root.text-muted-color; width: 72px; overflow: elide; }
 
                             StatusBadge {
-                                text: row.status;
+                                text: row.status == "Succeeded" ? "Success" : (row.status == "Failed" ? "Failed" : "Running");
                                 background-color: row.status == "Succeeded" ? #ECFDF5 : (row.status == "Failed" ? #FEF2F2 : #EFF6FF);
                                 text-color: row.status == "Succeeded" ? root.success-color : (row.status == "Failed" ? root.danger-color : root.accent-color);
+                            }
+
+                            // Quality score
+                            Rectangle {
+                                width: 52px;
+                                height: 24px;
+                                border-radius: 4px;
+                                background: row.quality-score >= 90 ? #ECFDF5 : (row.quality-score >= 75 ? #EFF6FF : (row.quality-score >= 60 ? #FFFBEB : #FEF2F2));
+
+                                Text {
+                                    text: row.quality-score > 0 ? "" + row.quality-score : "--";
+                                    font-size: 12px;
+                                    font-weight: 700;
+                                    color: row.quality-score >= 90 ? root.success-color : (row.quality-score >= 75 ? root.accent-color : (row.quality-score >= 60 ? root.warning-color : root.danger-color));
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
                             }
 
                             Text {
@@ -96,20 +293,16 @@ export component HistoryTab inherits Rectangle {
                                 text: row.opened-at;
                                 font-size: 10px;
                                 color: root.text-muted-color;
-                                width: 132px;
+                                width: 100px;
                                 overflow: elide;
                                 vertical-alignment: center;
                             }
 
                             Button {
-                                text: "Select";
-                                clicked => { root.selected-job-index = idx; }
-                            }
-
-                            Button {
-                                text: "Remove";
-                                enabled: !root.is-converting;
-                                clicked => { root.remove-job-clicked(row.id); }
+                                text: "Report";
+                                clicked => {
+                                    root.view-quality-report(row.id);
+                                }
                             }
                         }
                     }
@@ -135,6 +328,8 @@ export component HistoryTab inherits Rectangle {
                         enabled: root.job-history.length > 0 && !root.is-converting;
                         clicked => { root.clear-jobs-clicked(); }
                     }
+
+                    Rectangle { horizontal-stretch: 1; }
 
                     Button {
                         primary: true;

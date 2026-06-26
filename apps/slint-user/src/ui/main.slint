@@ -9,7 +9,8 @@ import {
     ListView,
     Switch,
 } from "std-widgets.slint";
-import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode, FeedbackThreadRow } from "types.slint";
+import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode, FeedbackThreadRow, QualityDimensions, SemanticLossItem, QualityReportSummary } from "types.slint";
+import { QualityResultDialog } from "components/quality-result-dialog.slint";
 
 component NavButton inherits Rectangle {
     in property <string> label;
@@ -242,6 +243,27 @@ export component MainWindow inherits Window {
     in-out property <bool> is-quick-activated: false;
     in-out property <string> quick-activation-status: "未激活";
     in-out property <bool> quick-is-pro: false;
+
+    // Quality Report Dialog Properties
+    in-out property <bool> show-quality-dialog: false;
+    in-out property <int> dialog-quality-score: 0;
+    in-out property <int> dialog-parse-score: 0;
+    in-out property <int> dialog-semantic-score: 0;
+    in-out property <int> dialog-docx-score: 0;
+    in-out property <int> dialog-visual-score: 0;
+    in-out property <int> dialog-editable-score: 0;
+    in-out property <int> dialog-performance-score: 0;
+    in-out property <string> dialog-word-status: "unchecked";
+    in-out property <[string]> dialog-word-errors: [];
+    in-out property <string> dialog-word-method: "none";
+    in-out property <float> dialog-style-coverage: 0.0;
+    in-out property <int> dialog-style-mapped: 0;
+    in-out property <int> dialog-style-total: 0;
+    in-out property <float> dialog-visual-diff: 0.0;
+    in-out property <string> dialog-job-id: "";
+    in-out property <string> dialog-profile: "";
+    in-out property <string> dialog-engine-version: "";
+    in-out property <[SemanticLossItem]> dialog-semantic-loss-list: [];
 
     in-out property <color> color-window-bg: #f6f8fb;
     in-out property <color> color-surface: #ffffff;
@@ -1346,6 +1368,47 @@ export component MainWindow inherits Window {
                     }
                 }
             }
+        }
+    }
+
+    // Quality Result Dialog
+    QualityResultDialog {
+        visible: root.show-quality-dialog;
+        quality-score: root.dialog-quality-score;
+        parse-score: root.dialog-parse-score;
+        semantic-score: root.dialog-semantic-score;
+        docx-score: root.dialog-docx-score;
+        visual-score: root.dialog-visual-score;
+        editable-score: root.dialog-editable-score;
+        performance-score: root.dialog-performance-score;
+        word-status: root.dialog-word-status;
+        word-errors: root.dialog-word-errors;
+        word-method: root.dialog-word-method;
+        style-coverage: root.dialog-style-coverage;
+        style-mapped: root.dialog-style-mapped;
+        style-total: root.dialog-style-total;
+        visual-diff: root.dialog-visual-diff;
+        job-id: root.dialog-job-id;
+        profile: root.dialog-profile;
+        engine-version: root.dialog-engine-version;
+        semantic-loss-list: root.dialog-semantic-loss-list;
+
+        close => {
+            root.show-quality-dialog = false;
+        }
+        open-docx => {
+            root.show-quality-dialog = false;
+            if (root.output-path != "") {
+                root.open-output-clicked(root.output-path);
+            }
+        }
+        view-full-report => {
+            root.show-quality-dialog = false;
+            // Navigate to report page (if needed)
+        }
+        export-diagnostics => {
+            root.show-quality-dialog = false;
+            // Export diagnostics logic
         }
     }
 

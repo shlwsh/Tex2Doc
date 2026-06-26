@@ -3,7 +3,95 @@ use std::sync::Arc;
 use crate::app_state::{AppState, JobUpdate};
 use crate::ui::MainWindow;
 use crate::ui_bindings::helpers;
-use slint::ComponentHandle;
+use slint::{ComponentHandle, SharedString, VecModel};
+
+// ============================================================
+// Quality Report Types - aligned with Slint QualityReportSummary
+// ============================================================
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QualityDimensions {
+    pub parse: u8,
+    pub semantic: u8,
+    pub docx: u8,
+    pub visual: u8,
+    pub editable: u8,
+    pub performance: u8,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SemanticLossItem {
+    pub loss_type: String,
+    pub severity: String,
+    pub location: String,
+    pub description: String,
+    pub suggestion: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct WordCompatibilityInfo {
+    pub status: String,
+    pub errors: Vec<String>,
+    pub check_method: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct QualityReportSummary {
+    pub job_id: String,
+    pub engine_version: String,
+    pub profile: String,
+    pub quality_score: u8,
+    pub dimension_scores: QualityDimensions,
+    pub word_compatibility: WordCompatibilityInfo,
+    pub blocking_issues: Vec<SemanticLossItem>,
+    pub warnings: Vec<SemanticLossItem>,
+    pub semantic_loss_events: Vec<SemanticLossItem>,
+    pub style_coverage_rate: f64,
+    pub visual_diff_percentage: f64,
+    pub created_at: String,
+}
+
+impl Default for QualityDimensions {
+    fn default() -> Self {
+        Self {
+            parse: 0,
+            semantic: 0,
+            docx: 0,
+            visual: 0,
+            editable: 0,
+            performance: 0,
+        }
+    }
+}
+
+impl Default for WordCompatibilityInfo {
+    fn default() -> Self {
+        Self {
+            status: "unchecked".to_string(),
+            errors: Vec::new(),
+            check_method: "none".to_string(),
+        }
+    }
+}
+
+impl Default for QualityReportSummary {
+    fn default() -> Self {
+        Self {
+            job_id: String::new(),
+            engine_version: String::new(),
+            profile: String::new(),
+            quality_score: 0,
+            dimension_scores: QualityDimensions::default(),
+            word_compatibility: WordCompatibilityInfo::default(),
+            blocking_issues: Vec::new(),
+            warnings: Vec::new(),
+            semantic_loss_events: Vec::new(),
+            style_coverage_rate: 0.0,
+            visual_diff_percentage: 0.0,
+            created_at: String::new(),
+        }
+    }
+}
 
 pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
     // Convert button (local engine, upload-based)
@@ -401,4 +489,121 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
             }
         }
     });
+}
+
+// ============================================================
+// Helper: Populate quality dialog from QualityReportSummary
+// ============================================================
+
+pub fn populate_quality_dialog(ui: &MainWindow, report: &QualityReportSummary) {
+    use slint::ComponentHandle;
+
+    ui.set_dialog_job_id(report.job_id.clone().into());
+    ui.set_dialog_profile(report.profile.clone().into());
+    ui.set_dialog_engine_version(report.engine_version.clone().into());
+    ui.set_dialog_quality_score(report.quality_score as i32);
+    ui.set_dialog_parse_score(report.dimension_scores.parse as i32);
+    ui.set_dialog_semantic_score(report.dimension_scores.semantic as i32);
+    ui.set_dialog_docx_score(report.dimension_scores.docx as i32);
+    ui.set_dialog_visual_score(report.dimension_scores.visual as i32);
+    ui.set_dialog_editable_score(report.dimension_scores.editable as i32);
+    ui.set_dialog_performance_score(report.dimension_scores.performance as i32);
+    ui.set_dialog_word_status(report.word_compatibility.status.clone().into());
+
+    // Convert word errors to slint vector
+    let errors: Vec<SharedString> = report
+        .word_compatibility
+        .errors
+        .iter()
+        .map(|s| s.clone().into())
+        .collect();
+    ui.set_dialog_word_errors(std::rc::Rc::new(VecModel::from(errors)).into());
+
+    ui.set_dialog_word_method(report.word_compatibility.check_method.clone().into());
+    ui.set_dialog_style_coverage(report.style_coverage_rate as f32);
+    ui.set_dialog_visual_diff(report.visual_diff_percentage as f32);
+
+    // Convert semantic loss items to slint vector
+    let mut semantic_items: Vec<slint::interpreter::Value> = Vec::new();
+    for item in &report.semantic_loss_events {
+        let mut map = std::collections::HashMap::new();
+        map.insert("loss-type".into(), item.loss_type.clone().into());
+        map.insert("severity".into(), item.severity.clone().into());
+        map.insert("location".into(), item.location.clone().into());
+        map.insert("description".into(), item.description.clone().into());
+        map.insert("suggestion".into(), item.suggestion.clone().into());
+        semantic_items.push(slint::interpreter::Value::Object(
+            slint::interpreter::ObjectModel::from(map),
+        ));
+    }
+
+    let semantic_model = Rc::new(VecModel::from(semantic_items));
+    ui.set_dialog_semantic_loss_list(semantic_model.into());
+
+    // Show the dialog
+    ui.set_show_quality_dialog(true);
+}
+
+// ============================================================
+// API: Fetch quality report from backend
+// ============================================================
+
+pub fn fetch_quality_report(base_url: &str, token: &str, job_id: &str) -> Result<QualityReportSummary, String> {
+    let url = format!("{}/api/v1/conversions/{}/quality-report", base_url.trim_end_matches('/'), job_id);
+
+    let client = reqwest::blocking::Client::new();
+    let response = client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .timeout(std::time::Duration::from_secs(30))
+        .send()
+        .map_err(|e| format!("Failed to fetch quality report: {}", e))?;
+
+    if !response.status().is_success() {
+        return Err(format!("API error: {}", response.status()));
+    }
+
+    response
+        .json::<QualityReportSummary>()
+        .map_err(|e| format!("Failed to parse quality report: {}", e))
+}
+
+// ============================================================
+// Helper: Parse dimension scores from JSON value
+// ============================================================
+
+pub fn parse_dimension_scores(json: &serde_json::Value) -> QualityDimensions {
+    let parse = json
+        .get("parse")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+    let semantic = json
+        .get("semantic")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+    let docx = json
+        .get("docx")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+    let visual = json
+        .get("visual")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+    let editable = json
+        .get("editable")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+    let performance = json
+        .get("performance")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as u8;
+
+    QualityDimensions {
+        parse,
+        semantic,
+        docx,
+        visual,
+        editable,
+        performance,
+    }
 }
