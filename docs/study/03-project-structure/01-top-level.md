@@ -18,6 +18,7 @@ d:\work\Tex2Doc\
 │       ├── makeskill/           # 创建/规范项目技能
 │       ├── mygit/               # git 提交脚本与模板
 │       └── scholar-search/      # 文献搜索技能
+├── .agents/                     # 其他 Agent 框架相关（新增）
 ├── .claude/                     # Claude / GitNexus 技能（镜像）
 │   └── skills/gitnexus/...      # gitnexus 全套
 ├── .cursor/                     # Cursor IDE 配置
@@ -34,10 +35,14 @@ d:\work\Tex2Doc\
 ├── .gitnexus/                   # GitNexus 索引（自动生成）
 │   ├── run.cjs                  # 索引运行器
 │   └── ...
+├── .tools/                      # 工具下载缓存与运行日志产物目录（新增）
 ├── apps/                        # 应用目录
+│   ├── flutter-admin/           # 基于 Flutter 的管理后台前端（新增）
+│   ├── flutter-user/            # 基于 Flutter 的用户端前端（新增）
 │   ├── rust-service/            # doc-server：HTTP 服务端（支持 PostgreSQL 持久化）
 │   └── slint-user/              # doc-desktop-slint：基于 Slint 的桌面端客户端
 ├── crates/                      # Rust workspace（19 个 crate）
+├── database/                    # 数据库数据目录（如 PostgreSQL）（新增）
 ├── docs/                        # 项目文档（已有）
 │   ├── *.md                     # 技术方案 / 任务清单 / 进展报告
 │   └── study/                   # 【本目录】学习文档
@@ -47,14 +52,21 @@ d:\work\Tex2Doc\
 ├── extension/                   # Chrome MV3 扩展
 ├── flutter_app/                 # Flutter 多端工程
 ├── node_modules/                # npm 依赖（.gitignore）
+├── profiles/                    # 转换配置模板与策略集合（新增）
 ├── scripts/                     # Bash + Python + Node + PowerShell 脚本
+├── sessions/                    # 会话数据缓存目录（新增）
+├── standards/                   # 映射标准与规范目录（新增）
 ├── target/                      # Cargo 编译产物（.gitignore）
 ├── tests/                       # 跨 crate 共享夹具
 │   └── fixtures/
+├── third_party/                 # 第三方依赖子模块（如 slint）（新增）
 ├── .env copy.mygit              # 模板
 ├── .env.mygit                   # 模板
+├── .env.mygit.example           # 环境变量示例模板（新增）
+├── .gitattributes               # Git 属性配置（新增）
 ├── .gitignore
 ├── .rustfmt.toml                # 格式化配置
+├── _fix_line.txt                # 补丁临时文件（新增）
 ├── AGENTS.md                    # GitNexus Agent 规则
 ├── Cargo.lock                   # 锁文件（已入仓）
 ├── Cargo.toml                   # Workspace 顶层配置
@@ -63,8 +75,14 @@ d:\work\Tex2Doc\
 ├── deny.toml                    # cargo-deny 许可证白名单
 ├── package-lock.json            # npm 锁文件
 ├── package.json                 # npm 顶层
+├── probe_gateway.py             # 探针脚本（新增）
 ├── README.md                    # 项目自述
-└── rust-toolchain.toml          # 工具链固定
+├── rust-toolchain.toml          # 工具链固定
+├── simulate_mygit_ai.py         # AI 模拟测试脚本（新增）
+├── standards.lock.json          # 标准映射版本锁定文件（新增）
+├── verify_claude_max.py         # Claude 验证脚本（新增）
+├── verify_deepseek.py           # DeepSeek 验证脚本（新增）
+└── verify_mygit_deepseek.py     # MyGit DeepSeek 验证脚本（新增）
 ```
 
 ---

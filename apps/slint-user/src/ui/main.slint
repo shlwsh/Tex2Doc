@@ -241,6 +241,7 @@ export component MainWindow inherits Window {
     in-out property <bool> is-quick-mode: true;
     in-out property <bool> is-quick-activated: false;
     in-out property <string> quick-activation-status: "未激活";
+    in-out property <bool> quick-is-pro: false;
 
     in-out property <color> color-window-bg: #f6f8fb;
     in-out property <color> color-surface: #ffffff;
@@ -597,10 +598,16 @@ export component MainWindow inherits Window {
                             ComboBox { current-value <=> detected-profile; model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"]; }
                             ComboBox { current-value <=> quality-level; model: ["preview", "standard", "strict"]; }
                             Text {
-                                text: "转换引擎: 本地语义引擎";
+                                text: "模式选择:";
                                 font-size: 12px;
                                 color: color-text-secondary;
                                 vertical-alignment: center;
+                            }
+                            ComboBox {
+                                width: 140px;
+                                current-value: quick-is-pro ? "专业版 (云端引擎)" : "快捷版 (本地引擎)";
+                                model: ["快捷版 (本地引擎)", "专业版 (云端引擎)"];
+                                selected(val) => { quick-is-pro = val == "专业版 (云端引擎)"; }
                             }
                             Rectangle { horizontal-stretch: 1; }
                         }
@@ -615,13 +622,17 @@ export component MainWindow inherits Window {
                             spacing: 10px;
                             Button { text: t-convert-detect-profile; enabled: upload-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + upload-path; detect-profile-clicked(upload-path); } }
                             Button {
-                                text: is-converting ? t-convert-converting : "本地转换 (Convert Local)";
+                                text: is-converting ? t-convert-converting : (quick-is-pro ? "专业转换 (Convert Pro)" : "快捷转换 (Convert Quick)");
                                 primary: true;
                                 enabled: !is-converting && upload-path != "" && output-path != "" && is-quick-activated;
                                 clicked => {
                                     is-converting = true;
                                     conversion-progress = 0.15;
-                                    convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
+                                    if (quick-is-pro) {
+                                        cloud-convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path, api-base-url);
+                                    } else {
+                                        convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
+                                    }
                                 }
                             }
                             Button { text: t-convert-open-output; enabled: output-path != ""; clicked => { open-output-clicked(output-path); } }
