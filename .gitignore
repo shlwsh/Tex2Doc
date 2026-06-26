@@ -65,3 +65,4 @@ sessions/
 .env*
 !.env.example
 !.env.*.example
+third_party/
