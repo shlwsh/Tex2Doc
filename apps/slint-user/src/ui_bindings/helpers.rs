@@ -129,6 +129,26 @@ pub(crate) fn persist_settings(
     }
 }
 
+pub(crate) fn persist_redeem_code(
+    code: &str,
+    api_base_url: &str,
+    login_email: &str,
+) {
+    let mut settings = crate::settings::Settings::load();
+    if !code.trim().is_empty() {
+        settings.last_redeem_code = Some(code.to_string());
+    }
+    if !api_base_url.trim().is_empty() {
+        settings.api_base_url = api_base_url.to_string();
+    }
+    if !login_email.trim().is_empty() {
+        settings.last_login_email = Some(login_email.to_string());
+    }
+    if let Err(error) = settings.save() {
+        log::warn!("Failed to persist redeem code: {}", error);
+    }
+}
+
 pub(crate) fn persist_release_channel(channel: &str) {
     let channel = channel.trim();
     if channel.is_empty() {

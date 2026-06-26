@@ -1146,14 +1146,22 @@ async fn create_conversion(
     if state.get_upload(&upload_id).await.is_none() {
         return Err(ApiError::NotFound(format!("upload {upload_id}")));
     }
-    let profile = payload.profile.unwrap_or_else(|| "auto".to_string());
-    let quality = payload.quality.unwrap_or_else(|| "standard".to_string());
+    let profile = payload
+        .profile
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "auto".to_string());
+    let quality = payload
+        .quality
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "standard".to_string());
     let engine = payload
         .engine
         .or(payload.backend)
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "semantic-engine".to_string());
     let main_tex = payload
         .main_tex
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
     let job = state
         .create_job(
@@ -1204,13 +1212,13 @@ async fn check_local_conversion(
             valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
         });
     let used = state.cloud_conversions_used(&session.id).await;
-    let allowed = valid_until_active || entitlement.count_balance > 0;
+    let allowed = valid_until_active || entitlement.count_balance > 0 || used < PREVIEW_CLOUD_CONVERSION_LIMIT;
     Ok(Json(json!({
         "allowed": allowed,
         "valid_until_active": valid_until_active,
         "count_balance": entitlement.count_balance,
         "used": used,
-        "limit": 0,
+        "limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
     })))
 }
 

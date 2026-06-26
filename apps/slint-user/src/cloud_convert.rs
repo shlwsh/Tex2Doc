@@ -426,4 +426,37 @@ mod tests {
         let temp = extract_to_temp(&buf, "archive.zip").unwrap();
         assert!(temp.path().join("main.tex").is_file());
     }
+
+    #[test]
+    fn test_extract_upload_zip() {
+        let bytes = std::fs::read("D:\\temp\\upload.zip").unwrap();
+        match extract_to_temp(&bytes, "upload.zip") {
+            Ok(_) => println!("Extract OK"),
+            Err(e) => panic!("Extract failed: {}", e),
+        }
+    }
+
+    #[test]
+    fn test_engine_directly_on_upload_zip() {
+        let bytes = std::fs::read("D:\\temp\\upload.zip").unwrap();
+        let temp = extract_to_temp(&bytes, "upload.zip").unwrap();
+        
+        let engine = doc_compiler_engine::SemanticTexEngine::new();
+        let options = doc_compiler_engine::CompileOptions {
+            profile_ref: Some(doc_compiler_engine::ProfileRef::Auto),
+            semantic_backend: doc_compiler_engine::SemanticBackendKind::Auto,
+            allow_backend_fallback: true,
+            min_compatibility_score_override: Some(75),
+            ..Default::default()
+        };
+        
+        let main_tex = find_main_tex(temp.path()).unwrap();
+        println!("Found main tex: {}", main_tex);
+        
+        let res = engine.compile_dir_to_docx(temp.path(), &temp.path().join(main_tex), &options);
+        match res {
+            Ok(artifact) => println!("Engine OK! Docx size: {}", artifact.docx.len()),
+            Err(e) => panic!("Engine failed: {}", e),
+        }
+    }
 }

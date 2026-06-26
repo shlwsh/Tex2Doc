@@ -119,6 +119,9 @@ fn main() {
     if let Some(path) = settings.last_project_path.clone() {
         ui.set_upload_path(path.into());
     }
+    if let Some(code) = settings.last_redeem_code.clone() {
+        ui.set_redeem_code(code.into());
+    }
     if !account_status_set {
         ui.set_account_status(i18n::translate(&settings.locale, "account.not_signed_in").into());
     }
@@ -326,7 +329,9 @@ fn main() {
                     ui.set_is_billing_busy(false);
                     match final_result {
                         Ok(session) => {
-                            persist_settings(None, None, None, None, Some(&base_url), Some(&code));
+                            let email_value = ui.get_login_email().to_string();
+                            persist_settings(None, None, None, None, Some(&base_url), Some(&email_value));
+                            persist_redeem_code(&code);
                             let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
                             ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
                             ui.set_is_quick_activated(true);
@@ -788,6 +793,14 @@ fn persist_settings(
     }
     if let Err(error) = settings.save() {
         log::warn!("Failed to persist settings: {}", error);
+    }
+}
+
+fn persist_redeem_code(code: &str) {
+    let mut settings = Settings::load();
+    settings.last_redeem_code = Some(code.to_string());
+    if let Err(error) = settings.save() {
+        log::warn!("Failed to persist redeem code: {}", error);
     }
 }
 

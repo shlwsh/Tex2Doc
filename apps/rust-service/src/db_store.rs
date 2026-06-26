@@ -836,8 +836,37 @@ impl DbStore {
             return Ok(used);
         }
 
-        tx.rollback().await.ok();
-        Err(used)
+        if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
+            tx.rollback().await.ok();
+            return Err(used);
+        }
+
+        let period_id = ensure_usage_period(&mut tx, user_uuid)
+            .await
+            .map_err(|_| used)?;
+        sqlx::query(
+            "INSERT INTO usage_events (user_id, usage_period_id, event_type, quantity, source_id) VALUES ($1, $2, 'local_conversion', 1, $3)",
+        )
+        .bind(user_uuid)
+        .bind(period_id)
+        .bind("local")
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| used)?;
+        insert_usage_ledger(
+            &mut tx,
+            user_uuid,
+            None,
+            "reserve",
+            1,
+            None,
+            "preview",
+            Some("preview quota reserved for local conversion"),
+        )
+        .await
+        .map_err(|_| used)?;
+        tx.commit().await.map_err(|_| used)?;
+        Ok(used + 1)
     }
 
     pub async fn refund_cloud_conversion_for_job(

@@ -570,7 +570,7 @@ export component MainWindow inherits Window {
                                 clicked => { purchase-redeem-code-clicked(); }
                             }
                         }
-                        Text { text: quick-activation-status; font-size: 12px; color: color-accent; font-weight: 700; }
+                        Text { text: quick-activation-status; font-size: 16px; color: color-danger; font-weight: 800; }
                     }
                 }
 
@@ -597,19 +597,48 @@ export component MainWindow inherits Window {
                             spacing: 12px;
                             ComboBox { current-value <=> detected-profile; model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"]; }
                             ComboBox { current-value <=> quality-level; model: ["preview", "standard", "strict"]; }
-                            Text {
-                                text: "模式选择:";
-                                font-size: 12px;
-                                color: color-text-secondary;
-                                vertical-alignment: center;
-                            }
-                            ComboBox {
-                                width: 140px;
-                                current-value: quick-is-pro ? "专业版 (云端引擎)" : "快捷版 (本地引擎)";
-                                model: ["快捷版 (本地引擎)", "专业版 (云端引擎)"];
-                                selected(val) => { quick-is-pro = val == "专业版 (云端引擎)"; }
-                            }
                             Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        // Prominent Mode Selector
+                        Rectangle {
+                            height: 48px;
+                            border-radius: 8px;
+                            border-color: quick-is-pro ? color-warning : color-accent;
+                            border-width: 2px;
+                            background: color-surface-alt;
+                            HorizontalBox {
+                                padding: 4px;
+                                spacing: 4px;
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 6px;
+                                    background: !quick-is-pro ? color-accent : #00000000;
+                                    TouchArea { clicked => { quick-is-pro = false; } }
+                                    Text {
+                                        text: "⚡ 快捷版 (调用本地引擎)";
+                                        font-size: 14px;
+                                        font-weight: !quick-is-pro ? 800 : 500;
+                                        color: !quick-is-pro ? color-surface : color-text-secondary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                                Rectangle {
+                                    horizontal-stretch: 1;
+                                    border-radius: 6px;
+                                    background: quick-is-pro ? color-warning : #00000000;
+                                    TouchArea { clicked => { quick-is-pro = true; } }
+                                    Text {
+                                        text: "🚀 专业版 (调用云端引擎)";
+                                        font-size: 14px;
+                                        font-weight: quick-is-pro ? 800 : 500;
+                                        color: quick-is-pro ? color-surface : color-text-secondary;
+                                        horizontal-alignment: center;
+                                        vertical-alignment: center;
+                                    }
+                                }
+                            }
                         }
 
                         HorizontalBox {
@@ -629,7 +658,7 @@ export component MainWindow inherits Window {
                                     is-converting = true;
                                     conversion-progress = 0.15;
                                     if (quick-is-pro) {
-                                        cloud-convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path, api-base-url);
+                                        cloud-convert-clicked(api-base-url, upload-path, main-tex, detected-profile, quality-level, output-path);
                                     } else {
                                         convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
                                     }

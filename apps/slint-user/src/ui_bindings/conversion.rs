@@ -24,8 +24,8 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 quality_level
             );
 
-            let upload = upload_path.to_string();
-            let main_tex_str = main_tex.to_string();
+            let upload = upload_path.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
+            let main_tex_str = main_tex.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
             let profile = detected_profile.to_string();
             let quality = quality_level.to_string();
             let out_dir = output_dir.to_string();
@@ -170,8 +170,8 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
               quality_level: slint::SharedString,
               output_dir: slint::SharedString| {
             let base_url = api_base_url.to_string();
-            let upload = upload_path.to_string();
-            let main_tex_str = main_tex.to_string();
+            let upload = upload_path.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
+            let main_tex_str = main_tex.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
             let profile = detected_profile.to_string();
             let quality = quality_level.to_string();
             let out_dir = std::path::PathBuf::from(output_dir.as_str());
