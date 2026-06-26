@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Quality Corpus Entry",
+  "description": "Tex2Doc 质量回归样例元数据规范。对应技术方案第 1.4 节 corpus 元数据规范。",
+  "type": "object",
+  "required": ["id", "source", "document_type", "expected_profile"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "唯一标识符，格式：<profile>-<variant>-<index>，如 jos-paper-minimal-001"
+    },
+    "source": {
+      "type": "string",
+      "description": "源文件路径，相对于 corpus 根目录"
+    },
+    "document_type": {
+      "type": "string",
+      "enum": ["journal-article", "conference-paper", "report", "thesis", "generic"],
+      "description": "文档类型"
+    },
+    "page_count": {
+      "type": "integer",
+      "description": "预估页数"
+    },
+    "packages": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "使用的 LaTeX 宏包列表"
+    },
+    "expected_profile": {
+      "type": "string",
+      "description": "期望匹配的 profile ID，如 jos-paper, cvpr, tacl 等"
+    },
+    "authorization": {
+      "type": "string",
+      "enum": ["internal", "synthetic", "public"],
+      "description": "授权状态：internal=内部合成, synthetic=公开合成, public=真实论文（已获授权）"
+    },
+    "golden_docx": {
+      "type": "string",
+      "description": "golden DOCX 输出路径（相对于 corpus 根目录）"
+    },
+    "golden_pdf": {
+      "type": "string",
+      "description": "golden PDF 参考路径（相对于 corpus 根目录）"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "标签，用于筛选：tables, figures, equations, algorithms, chinese, cjk, biblatex"
+    },
+    "notes": {
+      "type": "string",
+      "description": "备注说明"
+    }
+  }
+}

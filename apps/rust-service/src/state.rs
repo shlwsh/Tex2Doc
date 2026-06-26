@@ -10,6 +10,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::db_store::{AppUser, BillingPlanRecord, DbStore, ManualOrderRecord};
+use crate::error_code::ConversionErrorCode;
 use crate::excel_export;
 use crate::feedback_service::FeedbackStore;
 use crate::file_storage::FileStorage;
@@ -229,6 +230,12 @@ pub struct ConversionReportRecord {
     pub warnings: Vec<String>,
     pub error_code: Option<String>,
     pub message: String,
+    /// 六维评分（对应技术方案第 1.2 节）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension_scores: Option<serde_json::Value>,
+    /// 完整 QualityRun JSON（对应技术方案第 8 节报告结构）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_run_json: Option<String>,
 }
 
 impl ServerState {
@@ -714,7 +721,12 @@ impl ServerState {
         }
     }
 
-    pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
+    pub async fn fail_job(
+        &self,
+        job_id: &str,
+        error: ConversionErrorCode,
+        message: String,
+    ) {
         let job = self.db.get_job(job_id).await.ok().flatten();
         let report = ConversionReportRecord {
             job_id: job_id.to_string(),
@@ -728,8 +740,10 @@ impl ServerState {
             compatibility_score: None,
             docx_bytes: 0,
             warnings: Vec::new(),
-            error_code: Some(error_code.to_string()),
-            message: error.clone(),
+            error_code: Some(error.as_code().to_string()),
+            message: message.clone(),
+            dimension_scores: None,
+            quality_run_json: None,
         };
         let log = FileStorage::build_conversion_log(
             job_id,
@@ -743,7 +757,7 @@ impl ServerState {
             &report.executor,
             "failed",
             None,
-            Some(&error),
+            Some(&format!("[{}] {}", error.as_code(), message)),
         );
         let log_key = self.file_storage.file_key(job_id, "conversion.log");
         if let Err(write_error) = self
@@ -756,8 +770,8 @@ impl ServerState {
             .db
             .fail_job(
                 job_id,
-                error_code,
-                &error,
+                error.as_code(),
+                &format!("[{}] {}", error.as_code(), message),
                 log_key,
                 log.len() as u64,
                 &report,
@@ -766,13 +780,23 @@ impl ServerState {
         {
             tracing::error!("failed to mark conversion job failed: {db_error}");
         }
-        if let Err(refund_error) = self
-            .db
-            .refund_cloud_conversion_for_job(job_id, error_code)
-            .await
-        {
-            tracing::error!("failed to refund conversion quota: {refund_error}");
+        if error.should_refund() {
+            if let Err(refund_error) = self
+                .db
+                .refund_cloud_conversion_for_job(job_id, error.as_code())
+                .await
+            {
+                tracing::error!("failed to refund conversion quota: {refund_error}");
+            }
         }
+    }
+
+    /// 使用错误码和可选自定义消息失败 job。
+    ///
+    /// 优先使用带 `ConversionErrorCode` 的 `fail_job` 方法，此方法保留用于向后兼容。
+    pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
+        let err = ConversionErrorCode::from_code(error_code).unwrap_or(ConversionErrorCode::ConvertFailed);
+        self.fail_job(job_id, err, error).await;
     }
 
     pub fn load_storage_key(&self, key: &str) -> Option<Vec<u8>> {

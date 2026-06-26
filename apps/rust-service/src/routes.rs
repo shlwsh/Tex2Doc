@@ -16,6 +16,7 @@ use doc_core::{convert_zip, ConvertOptions};
 
 use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
+use crate::error_code::ConversionErrorCode;
 use crate::excel_export::write_xml_part;
 use crate::feedback_service::{
     AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
@@ -140,6 +141,12 @@ pub fn router_with_state(state: ServerState) -> Router {
         )
         .route("/v1/conversions/:id/report", get(get_conversion_report))
         .route("/api/v1/conversions/:id/report", get(get_conversion_report))
+        // QualityRun 多维质量报告（对应技术方案第 1.5 节）
+        .route("/v1/conversions/:id/quality-report", get(get_quality_report_json))
+        .route(
+            "/api/v1/conversions/:id/quality-report",
+            get(get_quality_report_json),
+        )
         // Conversion file download (enhanced)
         .route(
             "/v1/conversions/:id/download/zip",
@@ -1179,9 +1186,9 @@ async fn create_conversion(
         .await
     {
         state
-            .fail_job_with_code(
+            .fail_job(
                 &job.job_id,
-                "quota_exhausted",
+                ConversionErrorCode::QuotaExhausted,
                 format!(
                     "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
                 ),
@@ -1314,6 +1321,50 @@ async fn get_conversion_report(
     Ok(Json(
         serde_json::to_value(report).map_err(|e| ApiError::Io(e.to_string()))?,
     ))
+}
+
+/// 返回完整的 QualityRun JSON（多维评分报告）。
+///
+/// 对应技术方案第 1.5 节"服务报告 API 增强"：
+/// - GET /api/v1/conversions/:id/quality-report
+async fn get_quality_report_json(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    let job = state
+        .get_job(&id)
+        .await
+        .filter(|job| job.user_id == session.id)
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
+
+    let report = job
+        .report
+        .as_ref()
+        .ok_or_else(|| ApiError::Conflict(format!("conversion {id} report is not ready")))?;
+
+    // 优先返回完整的 QualityRun JSON
+    if let Some(quality_run_json) = &report.quality_run_json {
+        let parsed: serde_json::Value =
+            serde_json::from_str(quality_run_json).map_err(|e| ApiError::Io(e.to_string()))?;
+        return Ok(Json(parsed));
+    }
+
+    // 降级：返回包含 dimension_scores 的结构化报告
+    let response = serde_json::json!({
+        "job_id": &report.job_id,
+        "status": report.status.as_str(),
+        "quality_score": report.quality_score,
+        "profile": &report.profile,
+        "executor": &report.executor,
+        "backend": &report.backend,
+        "quality_status": &report.quality_status,
+        "dimension_scores": report.dimension_scores,
+        "warnings": &report.warnings,
+        "message": &report.message,
+    });
+    Ok(Json(response))
 }
 
 async fn release_manifest(

@@ -1,0 +1,11 @@
+{
+  "id": "nature-minimal-001",
+  "source": "examples/journals/nature/minimal.tex",
+  "document_type": "journal-article",
+  "page_count": 3,
+  "packages": ["graphicx"],
+  "expected_profile": "nature",
+  "authorization": "synthetic",
+  "tags": ["figures", "minimal"],
+  "notes": "Nature 风格最小化测试"
+}

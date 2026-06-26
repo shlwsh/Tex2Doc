@@ -1771,6 +1771,7 @@ dependencies = [
  "chrono",
  "doc-compiler-engine",
  "doc-core",
+ "doc-quality",
  "http",
  "memchr",
  "mime",

@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 doc-core = { path = "../../crates/core" }
 doc-compiler-engine = { path = "../../crates/compiler-engine" }
+doc-quality = { path = "../../crates/quality" }
 
 axum         = { version = "0.7", features = ["multipart", "macros"] }
 tower        = "0.5"

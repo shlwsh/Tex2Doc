@@ -1,0 +1,11 @@
+{
+  "id": "jos-paper-realistic-001",
+  "source": "examples/journals/jos-paper/realistic-01.tex",
+  "document_type": "journal-article",
+  "page_count": 8,
+  "packages": ["amsmath", "graphicx", "natbib", "hyperref", "booktabs"],
+  "expected_profile": "jos-paper",
+  "authorization": "synthetic",
+  "tags": ["equations", "tables", "figures", "references", "CJK"],
+  "notes": "Journal of Software 真实风格论文，包含表格和参考文献"
+}

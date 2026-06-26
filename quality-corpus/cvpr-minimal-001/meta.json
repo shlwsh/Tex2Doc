@@ -1,0 +1,11 @@
+{
+  "id": "cvpr-minimal-001",
+  "source": "examples/journals/cvpr/minimal.tex",
+  "document_type": "conference-paper",
+  "page_count": 4,
+  "packages": ["amsmath", "graphicx", "ieeeaccess"],
+  "expected_profile": "cvpr",
+  "authorization": "synthetic",
+  "tags": ["equations", "figures", "minimal"],
+  "notes": "CVPR 最小化测试样例"
+}

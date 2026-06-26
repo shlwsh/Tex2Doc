@@ -19,6 +19,7 @@ pub mod error;
 pub mod layer;
 pub mod markers;
 pub mod normalize;
+pub mod quality_run;
 pub mod report;
 pub mod structural;
 pub mod structural_pdf;
@@ -30,6 +31,10 @@ pub use context::{Context, PdfMetaSnapshot};
 pub use docx_diff::{compare_docx, DocxDiffOptions, DocxDiffReport, DocxSnapshot};
 pub use error::QualityError;
 pub use layer::{Check, Layer, LayerResult, MarkerHit, QualityReport, Severity};
+pub use quality_run::{
+    BackendSummary, DimensionScores, QualityArtifacts, QualityExitCode, QualityIssue,
+    QualityRun, SemanticLossEvent, WordCompatibility,
+};
 pub use report::{write_json, write_markdown};
 pub use thresholds::{StructuralThresholds, TextualThresholds, Thresholds, VisualThresholds};
 pub use visual::VisualRunner;

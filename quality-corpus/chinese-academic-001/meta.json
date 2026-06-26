@@ -1,0 +1,11 @@
+{
+  "id": "chinese-academic-001",
+  "source": "examples/journals/chinese-academic/realistic-01.tex",
+  "document_type": "journal-article",
+  "page_count": 8,
+  "packages": ["ctex", "amsmath", "graphicx", "natbib", "booktabs"],
+  "expected_profile": "chinese-academic",
+  "authorization": "synthetic",
+  "tags": ["CJK", "tables", "figures", "equations", "references", "chinese"],
+  "notes": "中文学术论文样例，包含 ctex 宏包"
+}

@@ -2,9 +2,13 @@
 
 use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
 use doc_core::{convert_zip, ConvertOptions};
+use doc_quality::quality_run::BackendSummary;
+use serde_json;
 use tokio::sync::mpsc;
+use zip;
 use tokio::time::{self, Duration};
 
+use crate::error_code::ConversionErrorCode;
 use crate::state::{ConversionReportRecord, ConversionStatus, ServerState};
 
 #[derive(Debug, Clone)]
@@ -58,9 +62,9 @@ async fn process_job(state: ServerState, job_id: String) {
     };
     let Some(upload) = state.get_upload(&job.upload_id).await else {
         state
-            .fail_job_with_code(
+            .fail_job(
                 &job_id,
-                "upload_not_found",
+                ConversionErrorCode::UploadNotFound,
                 format!("upload not found: {}", job.upload_id),
             )
             .await;
@@ -88,18 +92,18 @@ async fn process_job(state: ServerState, job_id: String) {
 
     let output = match result {
         Ok(Ok(result)) => result,
-        Ok(Err(error)) => {
+        Ok(Err(err)) => {
             state
-                .fail_job_with_code(&job_id, "convert_failed", error)
+                .fail_job(&job_id, ConversionErrorCode::ConvertFailed, err)
                 .await;
             return;
         }
-        Err(error) => {
+        Err(err) => {
             state
-                .fail_job_with_code(
+                .fail_job(
                     &job_id,
-                    "worker_join_error",
-                    format!("worker join error: {error}"),
+                    ConversionErrorCode::WorkerJoinError,
+                    format!("worker join error: {err}"),
                 )
                 .await;
             return;
@@ -115,9 +119,9 @@ async fn process_job(state: ServerState, job_id: String) {
 
     if output.docx.len() < 4 || &output.docx[..4] != b"PK\x03\x04" {
         state
-            .fail_job_with_code(
+            .fail_job(
                 &job_id,
-                "invalid_docx",
+                ConversionErrorCode::InvalidDocx,
                 "generated docx does not have a valid ZIP header".to_string(),
             )
             .await;
@@ -128,19 +132,25 @@ async fn process_job(state: ServerState, job_id: String) {
         job_id: job_id.clone(),
         status: ConversionStatus::Completed,
         quality_score: output.quality_score,
-        profile: output.profile,
+        profile: output.profile.clone(),
         main_tex: job.main_tex.clone(),
-        executor: output.executor,
-        backend: output.backend,
-        quality_status: output.quality_status,
+        executor: output.executor.clone(),
+        backend: output.backend.clone(),
+        quality_status: output.quality_status.clone(),
         compatibility_score: output.compatibility_score,
         docx_bytes: output.docx.len(),
-        warnings: output.warnings,
+        warnings: output.warnings.clone(),
         error_code: None,
         message: format!(
             "Converted upload {} ({}) with profile={} quality={} engine={}",
             upload.upload_id, upload.file_name, job.profile, job.quality, job.engine
         ),
+        dimension_scores: output
+            .quality_run_json
+            .as_ref()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(j).ok())
+            .and_then(|v| v.get("dimension_scores").cloned()),
+        quality_run_json: output.quality_run_json,
     };
 
     state.complete_job(&job_id, output.docx, report).await;
@@ -165,6 +175,8 @@ struct ConversionJobOutput {
     quality_score: u8,
     compatibility_score: Option<u8>,
     warnings: Vec<String>,
+    /// QualityRun JSON 报告（供 API 返回多维评分）。
+    quality_run_json: Option<String>,
 }
 
 fn execute_conversion(input: ConversionJobInput) -> Result<ConversionJobOutput, String> {
@@ -206,29 +218,50 @@ fn execute_semantic(input: &ConversionJobInput) -> Result<ConversionJobOutput, S
         .as_ref()
         .map(|profile| profile.id.clone())
         .unwrap_or_else(|| report.profile.id().to_string());
-    let quality_status = report
+
+    // 从 QualityGateResult 获取评分，不再使用 score_from_docx_size heuristic
+    let (quality_status, quality_score) = report
         .quality_gate
         .as_ref()
-        .map(|quality| quality.status.as_str().to_string())
-        .unwrap_or_else(|| "Unknown".to_string());
-    let quality_score = report
-        .quality_gate
-        .as_ref()
-        .map(|quality| quality.score)
-        .unwrap_or_else(|| score_from_docx_size(artifact.docx.len()));
+        .map(|quality| {
+            let status = quality.status.as_str().to_string();
+            let score = quality.score;
+            (status, score)
+        })
+        .unwrap_or_else(|| ("Unknown".to_string(), 0));
+
+    // 构建 BackendSummary
+    let backend_summary = {
+        let selected = report.backend.selected.id().to_string();
+        let requested = "auto".to_string();
+        match report.backend.fallback_from {
+            Some(from) => BackendSummary::new(&requested, &selected)
+                .with_fallback(from.id(), "runtime unavailable"),
+            None => BackendSummary::new(&requested, &selected),
+        }
+    };
+
+    // 构建 QualityRun（用于 API 返回多维评分）
+    let quality_run_json = build_quality_run(
+        "",
+        "0.1.0",
+        &profile,
+        backend_summary.clone(),
+        &report.diagnostics,
+        report.quality_gate.as_ref(),
+    );
+
     let mut warnings = report
         .diagnostics
         .iter()
         .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
         .collect::<Vec<_>>();
-    if let Some(fallback_from) = report.backend.fallback_from {
+    if report.backend.fallback_from.is_some() {
+        let fallback_from = report.backend.fallback_from.as_ref().unwrap();
+        let selected = report.backend.selected.id();
         warnings.insert(
             0,
-            format!(
-                "semantic backend fallback: {} -> {}",
-                fallback_from.id(),
-                report.backend.selected.id()
-            ),
+            format!("semantic backend fallback: {} -> {}", fallback_from.id(), selected),
         );
     }
 
@@ -241,7 +274,98 @@ fn execute_semantic(input: &ConversionJobInput) -> Result<ConversionJobOutput, S
         quality_score,
         compatibility_score: Some(report.compatibility.score),
         warnings,
+        quality_run_json,
     })
+}
+
+/// 从 `CompileReport` 构建 `QualityRun` JSON。
+fn build_quality_run(
+    job_id: &str,
+    engine_version: &str,
+    profile: &str,
+    backend: BackendSummary,
+    diagnostics: &[doc_compiler_engine::EngineDiagnostic],
+    quality_gate: Option<&doc_compiler_engine::QualityGateResult>,
+) -> Option<String> {
+    use doc_quality::quality_run::{
+        DimensionScores, QualityIssue, QualityRun, SemanticLossEvent,
+    };
+
+    // 从 diagnostics 提取 semantic loss events
+    let semantic_losses: Vec<SemanticLossEvent> = diagnostics
+        .iter()
+        .filter(|d| d.severity == doc_compiler_engine::DiagnosticSeverity::Warning)
+        .map(|d| {
+            SemanticLossEvent::new(
+                &d.code,
+                "text_fallback",
+                "degraded",
+                &d.message,
+            )
+        })
+        .collect();
+
+    // 从 quality_gate 提取 issues
+    let (blocking_issues, warnings): (Vec<QualityIssue>, Vec<QualityIssue>) = quality_gate
+        .map(|qg| {
+            let mut blocking = Vec::new();
+            let mut warns = Vec::new();
+            for check in &qg.failed_checks {
+                let issue = convert_quality_check_to_issue(check);
+                if issue.is_blocking() {
+                    blocking.push(issue);
+                } else {
+                    warns.push(issue);
+                }
+            }
+            for check in &qg.warnings {
+                warns.push(convert_quality_check_to_issue(check));
+            }
+            (blocking, warns)
+        })
+        .unwrap_or_default();
+
+    // 计算维度评分（基于 quality_gate 的 passed_checks 比例）
+    let dimension_scores = quality_gate
+        .map(|qg| {
+            let total = qg.total_checks;
+            let passed = qg.passed_checks;
+            let ratio = if total > 0 {
+                passed as f64 / total as f64
+            } else {
+                1.0
+            };
+            let score = (ratio * 100.0).round() as u8;
+            DimensionScores {
+                parse: score,
+                semantic: score,
+                docx: score,
+                visual: score,
+                editable: score,
+                performance: 100,
+            }
+        })
+        .unwrap_or_default();
+
+    let quality_score = quality_gate
+        .map(|qg| qg.score)
+        .unwrap_or_else(|| dimension_scores.weighted_score());
+
+    let qr = QualityRun {
+        job_id: job_id.to_string(),
+        engine_version: engine_version.to_string(),
+        profile: profile.to_string(),
+        backend,
+        quality_score,
+        dimension_scores,
+        blocking_issues,
+        warnings,
+        semantic_loss_events: semantic_losses,
+        word_compatibility: doc_quality::quality_run::WordCompatibility::default(),
+        artifacts: doc_quality::quality_run::QualityArtifacts::default(),
+    };
+
+    serde_json::to_string_pretty(&qr).ok()
 }
 
 fn execute_legacy(input: ConversionJobInput) -> Result<ConversionJobOutput, String> {
@@ -252,8 +376,12 @@ fn execute_legacy(input: ConversionJobInput) -> Result<ConversionJobOutput, Stri
     )
     .map_err(|e| e.to_string())?;
 
+    // Legacy engine: 使用基于 DOCX 结构的最低限度评分
+    // 不再依赖纯大小的 heuristic，改用更合理的结构评分
+    let quality_score = score_from_docx_structure(&result.docx);
+
     Ok(ConversionJobOutput {
-        quality_score: score_from_docx_size(result.docx.len()),
+        quality_score,
         docx: result.docx,
         executor: "legacy-rule".to_string(),
         backend: "doc-core".to_string(),
@@ -261,7 +389,62 @@ fn execute_legacy(input: ConversionJobInput) -> Result<ConversionJobOutput, Stri
         quality_status: "LegacyHeuristic".to_string(),
         compatibility_score: None,
         warnings: result.warnings,
+        quality_run_json: None,
     })
+}
+
+/// 基于 DOCX 结构特征计算质量分数（替代纯大小 heuristic）。
+///
+/// 检查点：
+/// - 文件是否为有效的 ZIP
+/// - 是否包含 document.xml
+/// - 是否包含 styles.xml
+/// - 文件大小是否合理
+fn score_from_docx_structure(docx_bytes: &[u8]) -> u8 {
+    // 检查 ZIP 头
+    if docx_bytes.len() < 4 || &docx_bytes[..4] != b"PK\x03\x04" {
+        return 30;
+    }
+
+    // 尝试解析 ZIP 内容
+    let archive = zip::ZipArchive::new(std::io::Cursor::new(docx_bytes)).ok();
+    let Some(mut archive) = archive else {
+        return 50;
+    };
+
+    let mut has_document = false;
+    let mut has_styles = false;
+    let mut content_files = 0;
+
+    for i in 0..archive.len() {
+        if let Ok(file) = archive.by_index(i) {
+            let name = file.name().to_lowercase();
+            if name == "word/document.xml" {
+                has_document = true;
+            } else if name == "word/styles.xml" {
+                has_styles = true;
+            }
+            if name.starts_with("word/") {
+                content_files += 1;
+            }
+        }
+    }
+
+    let mut score = 50u8; // 基础分
+    if has_document {
+        score += 20;
+    }
+    if has_styles {
+        score += 15;
+    }
+    if content_files >= 3 {
+        score += 10;
+    }
+    if docx_bytes.len() > 2 * 1024 {
+        score += 5;
+    }
+
+    score.min(100)
 }
 
 fn parse_profile_ref(profile: &str) -> ProfileRef {
@@ -280,14 +463,31 @@ fn min_score_for_quality(quality: &str) -> u8 {
     }
 }
 
-fn score_from_docx_size(bytes: usize) -> u8 {
-    if bytes > 4 * 1024 {
-        90
-    } else {
-        70
-    }
-}
-
 fn normalize_engine(engine: &str) -> String {
     engine.trim().to_ascii_lowercase().replace('_', "-")
+}
+
+/// 将 compiler-engine 的 QualityCheck 转换为 QualityIssue。
+fn convert_quality_check_to_issue(
+    check: &doc_compiler_engine::QualityCheck,
+) -> doc_quality::quality_run::QualityIssue {
+    use doc_quality::quality_run::{IssueSeverity, QualityIssue};
+
+    let layer = match check.severity {
+        doc_compiler_engine::QualitySeverity::Error => "structural",
+        doc_compiler_engine::QualitySeverity::Warning => "textual",
+        doc_compiler_engine::QualitySeverity::Info => "visual",
+    };
+    let severity = match check.severity {
+        doc_compiler_engine::QualitySeverity::Error => IssueSeverity::Blocking,
+        doc_compiler_engine::QualitySeverity::Warning => IssueSeverity::Warning,
+        doc_compiler_engine::QualitySeverity::Info => IssueSeverity::Info,
+    };
+    QualityIssue {
+        name: check.name.clone(),
+        severity,
+        description: check.message.clone(),
+        suggestion: if check.passed { None } else { Some(check.message.clone()) },
+        layer: layer.to_string(),
+    }
 }

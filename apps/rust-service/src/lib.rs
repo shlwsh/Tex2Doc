@@ -2,6 +2,7 @@
 
 pub mod db_store;
 pub mod error;
+pub mod error_code;
 pub mod excel_export;
 pub mod feedback_service;
 pub mod file_storage;

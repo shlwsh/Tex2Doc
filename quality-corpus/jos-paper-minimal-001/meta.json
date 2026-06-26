@@ -1,0 +1,11 @@
+{
+  "id": "jos-paper-minimal-001",
+  "source": "examples/journals/jos-paper/minimal.tex",
+  "document_type": "journal-article",
+  "page_count": 4,
+  "packages": ["amsmath", "graphicx", "natbib"],
+  "expected_profile": "jos-paper",
+  "authorization": "synthetic",
+  "tags": ["equations", "figures", "minimal"],
+  "notes": "Journal of Software 最小化测试样例，包含基本公式和图片引用"
+}
