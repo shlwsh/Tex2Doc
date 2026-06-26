@@ -728,7 +728,10 @@ fn active_profile_style_map(active: &ActiveProfile) -> Option<doc_docx_writer::P
         let role = normalize_style_role(&entry.semantic);
         by_role.insert(role.to_string(), entry.docx_style.clone());
     }
-    Some(doc_docx_writer::ProfileStyleMap { by_role })
+    Some(doc_docx_writer::ProfileStyleMap {
+        by_role,
+        cjk_options: None,
+    })
 }
 
 fn normalize_style_role(role: &str) -> &str {

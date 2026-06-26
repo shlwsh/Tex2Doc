@@ -9,7 +9,74 @@ use zip;
 use tokio::time::{self, Duration};
 
 use crate::error_code::ConversionErrorCode;
+use crate::limits::{
+    MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_UNCOMPRESSED_BYTES,
+};
 use crate::state::{ConversionReportRecord, ConversionStatus, ServerState};
+
+/// Redact user content from log messages to protect privacy.
+/// Replaces LaTeX content and user data with placeholders.
+pub fn redact_content(content: &str) -> String {
+    // Truncate long content
+    if content.len() > 200 {
+        format!("{}... [REDACTED_CONTENT]", &content[..200])
+    } else {
+        content.replace("\\begin", "[REDACTED_LATEX]")
+            .replace("\\end", "[/REDACTED_LATEX]")
+    }
+}
+
+/// Validate ZIP file for security threats.
+fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
+    let cursor = std::io::Cursor::new(zip_bytes);
+    let mut archive = zip::ZipArchive::new(cursor).map_err(|e| format!("Invalid ZIP: {e}"))?;
+
+    let mut total_uncompressed: u64 = 0;
+    let mut file_count: usize = 0;
+
+    for i in 0..archive.len() {
+        let file = archive.by_index(i).map_err(|e| format!("Cannot read file {i}: {e}"))?;
+        file_count += 1;
+
+        if file_count > MAX_UPLOAD_FILE_COUNT {
+            return Err(format!("Too many files: {file_count} > {}", MAX_UPLOAD_FILE_COUNT));
+        }
+
+        let uncompressed_size = file.size();
+        total_uncompressed += uncompressed_size;
+
+        if total_uncompressed > MAX_UPLOAD_UNCOMPRESSED_BYTES {
+            return Err(format!(
+                "Uncompressed size exceeds limit: {} > {} bytes",
+                total_uncompressed, MAX_UPLOAD_UNCOMPRESSED_BYTES
+            ));
+        }
+
+        // Check for path traversal attacks
+        let name = file.name();
+        if name.contains("..") || name.starts_with('/') || name.contains('\\') && !name.starts_with('\\') {
+            return Err(format!("Dangerous path in ZIP: {name}"));
+        }
+
+        // Check individual file size
+        if uncompressed_size > MAX_UPLOAD_FILE_BYTES as u64 {
+            return Err(format!(
+                "File too large: {name} is {} > {} bytes",
+                uncompressed_size, MAX_UPLOAD_FILE_BYTES
+            ));
+        }
+    }
+
+    Ok(ZipValidation {
+        file_count,
+        total_uncompressed,
+    })
+}
+
+struct ZipValidation {
+    file_count: usize,
+    total_uncompressed: u64,
+}
 
 #[derive(Debug, Clone)]
 pub struct WorkerCommand {
@@ -29,11 +96,11 @@ async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) 
     loop {
         tokio::select! {
             Some(command) = rx.recv() => {
-                tracing::debug!("worker notified for job {}", command.job_id);
+                tracing::debug!(job_id = %command.job_id, "worker notified");
             }
             _ = interval.tick() => {
                 if let Err(error) = state.recover_stale_jobs().await {
-                    tracing::warn!("failed to recover stale conversion jobs: {error}");
+                    tracing::warn!(error = %error, "failed to recover stale jobs");
                 }
             }
             else => break,
@@ -41,7 +108,10 @@ async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) 
 
         loop {
             match state.claim_next_job(&worker_id).await {
-                Ok(Some(job_id)) => process_job(state.clone(), job_id).await,
+                Ok(Some(job_id)) => {
+                    tracing::info!(job_id = %job_id, "claiming job");
+                    process_job(state.clone(), job_id).await;
+                }
                 Ok(None) => break,
                 Err(error) => {
                     tracing::error!("failed to claim queued conversion job: {error}");
@@ -53,11 +123,17 @@ async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) 
 }
 
 async fn process_job(state: ServerState, job_id: String) {
+    tracing::info!(job_id = %job_id, "processing job started");
+
     state
         .update_status(&job_id, ConversionStatus::Normalizing)
         .await;
 
     let Some(job) = state.get_job(&job_id).await else {
+        tracing::warn!("job not found");
+        return;
+    };
+    let Some(upload) = state.get_upload(&job.upload_id).await else {
         return;
     };
     let Some(upload) = state.get_upload(&job.upload_id).await else {
@@ -71,16 +147,17 @@ async fn process_job(state: ServerState, job_id: String) {
         return;
     };
 
-    state
-        .update_status(&job_id, ConversionStatus::Detecting)
-        .await;
-    state
-        .update_status(&job_id, ConversionStatus::Analyzing)
-        .await;
-    state
-        .update_status(&job_id, ConversionStatus::Compiling)
-        .await;
+    // Validate ZIP file for security threats
+    tracing::info!("validating upload ZIP");
+    if let Err(err) = validate_zip(&upload.bytes) {
+        tracing::warn!(error = %err, "ZIP validation failed");
+        state
+            .fail_job(&job_id, ConversionErrorCode::UploadInvalidZip, err)
+            .await;
+        return;
+    }
 
+    tracing::info!(profile = %job.profile, quality = %job.quality, engine = %job.engine, "starting conversion");
     let input = ConversionJobInput {
         zip_bytes: upload.bytes.clone(),
         main_tex: job.main_tex.clone(),

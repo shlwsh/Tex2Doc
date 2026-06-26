@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    AlgLine, BibEntry, Block, Document, FigureSizing, Span, TableRow, TextRun, TheoremLikeKind,
+    AlgLine, BibEntry, Block, Document, FigureSizing, Span, TableRow, TextDirection, TextRun,
+    TheoremLikeKind,
 };
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -406,6 +407,8 @@ impl BlockNode {
                 scale,
                 sizing,
                 number,
+                label,
+                text_direction,
                 span,
             } => Self {
                 id,
@@ -414,6 +417,8 @@ impl BlockNode {
                     caption: caption.clone(),
                     scale: *scale,
                     sizing: sizing.clone(),
+                    label: label.clone(),
+                    text_direction: text_direction.clone(),
                 }),
                 source_span: Some(*span),
                 label: None,
@@ -617,6 +622,8 @@ pub struct FigureNode {
     pub caption: Option<String>,
     pub scale: f32,
     pub sizing: Option<FigureSizing>,
+    pub label: Option<String>,
+    pub text_direction: Option<TextDirection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

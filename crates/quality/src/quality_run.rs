@@ -64,6 +64,32 @@ impl DimensionScores {
     }
 }
 
+/// 视觉差异报告（Phase 3.4 新增）。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct VisualDiffReport {
+    /// 总体差异百分比（0.0 - 100.0）
+    pub diff_percentage: f64,
+    /// 每页失败详情
+    pub per_page_failures: Vec<PageDiff>,
+    /// 整体 pass/fail
+    pub passed: bool,
+    /// 差异 PNG 输出路径（如果生成）
+    pub diff_image_path: Option<String>,
+}
+
+/// 单页差异。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageDiff {
+    /// 页码（从 1 开始）
+    pub page: usize,
+    /// SSIM 分数
+    pub ssim: f64,
+    /// 像素差异均值
+    pub pixel_diff: f64,
+    /// 是否通过
+    pub passed: bool,
+}
+
 /// 质量问题的严重级别（对外暴露版）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]

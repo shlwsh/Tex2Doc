@@ -2409,6 +2409,17 @@ fn write_table(
                 shd.push_attribute(("w:fill", fill.as_str()));
                 w.write_event(Event::Empty(shd)).unwrap();
             }
+            // Vertical alignment (top / center / bottom)
+            if let Some(va) = cell.vertical_align {
+                let val = match va {
+                    doc_semantic_ast::VerticalAlign::Top => "top",
+                    doc_semantic_ast::VerticalAlign::Center => "center",
+                    doc_semantic_ast::VerticalAlign::Bottom => "bottom",
+                };
+                let mut v_align = BytesStart::new("w:vAlign");
+                v_align.push_attribute(("w:val", val));
+                w.write_event(Event::Empty(v_align)).unwrap();
+            }
             w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
             let p = Paragraph {

@@ -405,16 +405,18 @@ impl DbStore {
         profile: String,
         quality: String,
         engine: String,
+        idempotency_key: Option<String>,
     ) -> Result<ConversionJobRecord, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'queued')
+            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status, idempotency_key, attempt_count, engine_version)
+            VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, 1, '1.0.0')
             RETURNING id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
                       result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                       zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                       EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
+                      idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
             "#,
         )
         .bind(parse_uuid(&user_id)?)
@@ -423,6 +425,7 @@ impl DbStore {
         .bind(&profile)
         .bind(&quality)
         .bind(&engine)
+        .bind(&idempotency_key)
         .fetch_one(&self.pool)
         .await?;
         Ok(job_from_row(&row, None, None))
@@ -452,6 +455,18 @@ impl DbStore {
     pub async fn get_job(&self, job_id: &str) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
         let row = sqlx::query(&job_select_sql("WHERE id = $1"))
             .bind(parse_uuid(job_id)?)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
+    }
+
+    /// Find a job by idempotency key.
+    pub async fn find_job_by_idempotency_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
+        let row = sqlx::query(&job_select_sql("WHERE idempotency_key = $1 AND status != 'failed' ORDER BY created_at DESC LIMIT 1"))
+            .bind(key)
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
@@ -590,16 +605,14 @@ impl DbStore {
         let result = sqlx::query(
             r#"
             UPDATE conversion_jobs
-            SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'queued' END,
-                error_code = CASE WHEN attempts >= 3 THEN 'worker_timeout' ELSE error_code END,
-                error_message = CASE WHEN attempts >= 3 THEN 'worker timed out before completing this conversion' ELSE error_message END,
-                failed_at = CASE WHEN attempts >= 3 THEN now() ELSE failed_at END,
+            SET status = CASE WHEN attempt_count >= 3 THEN 'failed' ELSE 'queued' END,
+                error_code = CASE WHEN attempt_count >= 3 THEN 'worker_timeout' ELSE error_code END,
+                error_message = CASE WHEN attempt_count >= 3 THEN 'Max retry attempts exceeded' ELSE error_message END,
+                failed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE failed_at END,
                 worker_id = NULL,
                 locked_at = NULL,
-                next_run_at = CASE
-                    WHEN attempts >= 3 THEN next_run_at
-                    ELSE now() + make_interval(secs => LEAST(60, GREATEST(1, attempts * 5)))
-                END,
+                last_error_code = error_code,
+                attempt_count = CASE WHEN attempt_count >= 3 THEN attempt_count ELSE attempt_count + 1 END,
                 updated_at = now()
             WHERE status IN ('normalizing', 'detecting', 'analyzing', 'compiling', 'rendering', 'verifying')
               AND locked_at IS NOT NULL
@@ -2390,7 +2403,8 @@ fn job_select_sql(tail: &str) -> String {
                result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
+               idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
         FROM conversion_jobs {tail}
         "#
     )
@@ -2436,6 +2450,16 @@ fn job_from_row(
             .ok()
             .flatten()
             .map(|v| v.max(0) as u64),
+        idempotency_key: row.get("idempotency_key"),
+        attempt_count: row
+            .try_get::<Option<i32>, _>("attempt_count")
+            .ok()
+            .flatten()
+            .unwrap_or(1) as u8,
+        worker_id: row.get("worker_id"),
+        engine_version: row.get::<String, _>("engine_version"),
+        profile_version: row.get("profile_version"),
+        last_error_code: row.get("last_error_code"),
     }
 }
 

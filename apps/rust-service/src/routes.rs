@@ -27,8 +27,8 @@ use crate::limits::{
     MAX_UPLOAD_ZIP_BYTES,
 };
 use crate::state::{
-    ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
-    RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
+    ConversionJobRecord, ConversionStatus, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
+    RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 use crate::worker_service;
 
@@ -321,6 +321,8 @@ struct ConversionBody {
     quality: Option<String>,
     engine: Option<String>,
     backend: Option<String>,
+    /// Idempotency key for request deduplication
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1170,6 +1172,22 @@ async fn create_conversion(
         .main_tex
         .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
+
+    // Check for existing job with same idempotency key (if provided)
+    if let Some(ref key) = payload.idempotency_key {
+        if let Some(existing) = state.find_job_by_idempotency_key(key).await {
+            // Return existing job if it's not failed
+            if existing.status != ConversionStatus::Failed {
+                return Ok(Json(serde_json::json!({
+                    "job_id": existing.job_id,
+                    "status": existing.status,
+                    "idempotent": true,
+                    "message": "Returning existing job with same idempotency key"
+                })));
+            }
+        }
+    }
+
     let job = state
         .create_job(
             session.id.clone(),
@@ -1178,6 +1196,7 @@ async fn create_conversion(
             profile,
             quality,
             engine,
+            payload.idempotency_key,
         )
         .await
         .map_err(ApiError::Io)?;

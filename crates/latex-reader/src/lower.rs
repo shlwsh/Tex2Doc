@@ -1427,9 +1427,50 @@ fn lower_environment(
             cite_numbers,
             label_map,
         ),
-        "tabular" | "tabular*" | "array" => lower_table(body, span, cite_numbers, label_map),
+        "tabular" | "tabular*" | "array" | "longtable" => lower_table(body, span, cite_numbers, label_map),
         "figure" | "figure*" | "table" | "table*" | "algorithm" | "algorithm*" => {
             lower_captioned_env(name, body, span, macros, numbering, cite_numbers, label_map)
+        }
+        // wrapfigure: treat as figure (wrap positioning is lost in DOCX)
+        "wrapfigure" | "wraptable" => {
+            let (img, caption) = extract_includegraphics_and_caption(body);
+            let (img_path, sizing) = img
+                .map(|i| (i.path, i.sizing))
+                .unwrap_or_else(|| (String::new(), None));
+            let scale = sizing
+                .as_ref()
+                .and_then(|s| s.normalized_width_ratio)
+                .unwrap_or(1.0);
+            let caption_normalized = caption
+                .as_deref()
+                .map(|cap| normalize_caption(cap, cite_numbers, label_map));
+            let (_, label) = extract_caption_and_label(body);
+            Block::Figure {
+                path: img_path,
+                caption: caption_normalized,
+                scale,
+                sizing,
+                number: Some(numbering.next_figure()),
+                label: if label.is_empty() { None } else { Some(label) },
+                text_direction: None,
+                span,
+            }
+        }
+        // subcaption: extract as caption text (will be merged with parent figure)
+        "subcaption" | "subtable" => {
+            // Extract caption content from subcaption environment
+            let (caption_text, _label) = extract_caption_and_label(body);
+            let caption_normalized = caption_text
+                .as_deref()
+                .map(|cap| normalize_caption(cap, cite_numbers, label_map));
+            // Return as a paragraph with caption-style text
+            Block::Paragraph {
+                runs: vec![doc_semantic_ast::TextRun::plain(
+                    caption_normalized.unwrap_or_default(),
+                    span,
+                )],
+                span,
+            }
         }
         "equation" | "equation*" | "align" | "align*" | "gather" | "gather*" => Block::Equation {
             latex: body.trim().to_string(),
@@ -2331,6 +2372,8 @@ fn lower_table(
                     colspan: 1,
                     rowspan: 0,
                     bg_color: current_row_color.clone(),
+                    vertical_align: None,
+                    text_direction: None,
                 });
                 if let Some(remaining) = active_rowspans.get_mut(col_idx) {
                     *remaining = remaining.saturating_sub(1);
@@ -2347,6 +2390,35 @@ fn lower_table(
                 let rest = stripped.trim_start();
                 let color_text = if rest.starts_with('[') {
                     // \rowcolor[model]{color} format
+                    if let Some(close_bracket) = rest.find(']') {
+                        let after_bracket = &rest[close_bracket + 1..];
+                        if after_bracket.starts_with('{') {
+                            after_bracket
+                                .find('}')
+                                .map(|close_brace| after_bracket[1..close_brace].to_string())
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if rest.starts_with('{') {
+                    rest.find('}')
+                        .map(|close_brace| rest[1..close_brace].to_string())
+                } else {
+                    None
+                };
+                if let Some(color) = color_text {
+                    cell_bg_color = Some(color);
+                }
+            }
+
+            // Check for \cellcolor{color} or \cellcolor[model]{color} in this cell
+            // Cell-level color overrides row-level color
+            if let Some(stripped) = raw_for_colorcheck.strip_prefix("\\cellcolor") {
+                let rest = stripped.trim_start();
+                let color_text = if rest.starts_with('[') {
+                    // \cellcolor[model]{color} format
                     if let Some(close_bracket) = rest.find(']') {
                         let after_bracket = &rest[close_bracket + 1..];
                         if after_bracket.starts_with('{') {
@@ -2406,6 +2478,8 @@ fn lower_table(
                     colspan: n as u32,
                     rowspan: 1,
                     bg_color: cell_bg_color,
+                    vertical_align: None,
+                    text_direction: None,
                 });
                 col_idx += n;
                 continue;
@@ -2442,6 +2516,8 @@ fn lower_table(
                     colspan: 1,
                     rowspan: n as u32,
                     bg_color: cell_bg_color,
+                    vertical_align: None,
+                    text_direction: None,
                 });
                 col_idx += 1;
                 continue;
@@ -2453,6 +2529,8 @@ fn lower_table(
                     colspan: 1,
                     rowspan: 1,
                     bg_color: cell_bg_color,
+                    vertical_align: None,
+                    text_direction: None,
                 });
                 col_idx += 1;
                 continue;
@@ -2531,6 +2609,8 @@ fn lower_table(
                 colspan: 1,
                 rowspan: 1,
                 bg_color: cell_bg_color,
+                vertical_align: None,
+                text_direction: None,
             });
             col_idx += 1;
         }
@@ -2562,6 +2642,8 @@ fn lower_table(
                 colspan: 1,
                 rowspan: 1,
                 bg_color: None,
+                vertical_align: None,
+                text_direction: None,
             }],
         });
     }
@@ -2760,19 +2842,23 @@ fn lower_captioned_env(
         .as_deref()
         .map(|cap| normalize_caption(cap, cite_numbers, label_map));
     if name.starts_with("figure") {
-        let (path, sizing) = img
+        let (img_path, sizing) = img
             .map(|img| (img.path, img.sizing))
             .unwrap_or_else(|| (String::new(), None));
         let scale = sizing
             .as_ref()
             .and_then(|s| s.normalized_width_ratio)
             .unwrap_or(1.0);
+        // Extract label from figure body
+        let (_, label) = extract_caption_and_label(body);
         Block::Figure {
-            path,
+            path: img_path,
             caption: caption_normalized,
             scale,
             sizing,
             number: Some(numbering.next_figure()),
+            label: if label.is_empty() { None } else { Some(label) },
+            text_direction: None,
             span,
         }
     } else {

@@ -110,6 +110,18 @@ pub struct ConversionJobRecord {
     pub zip_bytes: Option<u64>,
     pub docx_bytes: Option<u64>,
     pub log_bytes: Option<u64>,
+    /// Idempotency key for deduplication
+    pub idempotency_key: Option<String>,
+    /// Number of retry attempts
+    pub attempt_count: u8,
+    /// Worker ID that processed this job
+    pub worker_id: Option<String>,
+    /// Engine version used
+    pub engine_version: String,
+    /// Profile version used
+    pub profile_version: Option<String>,
+    /// Last error code (for retry tracking)
+    pub last_error_code: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -332,6 +344,7 @@ impl ServerState {
         profile: String,
         quality: String,
         engine: String,
+        idempotency_key: Option<String>,
     ) -> Result<ConversionJobRecord, String> {
         let mut job = self
             .db
@@ -342,6 +355,7 @@ impl ServerState {
                 profile,
                 quality,
                 engine,
+                idempotency_key,
             )
             .await
             .map_err(|e| e.to_string())?;
@@ -374,6 +388,15 @@ impl ServerState {
 
     pub async fn claim_next_job(&self, worker_id: &str) -> Result<Option<String>, sqlx::Error> {
         self.db.claim_next_job(worker_id).await
+    }
+
+    /// Find a job by idempotency key.
+    pub async fn find_job_by_idempotency_key(&self, key: &str) -> Option<ConversionJobRecord> {
+        self.db
+            .find_job_by_idempotency_key(key)
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn recover_stale_jobs(&self) -> Result<u64, sqlx::Error> {
