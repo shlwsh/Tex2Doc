@@ -913,3 +913,63 @@ async fn convert_zip_header_only_returns_400() {
     );
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn p8_local_conversion_quota_checking_and_consumption() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+
+    // 1. Check local conversion quota - should be allowed since fresh user gets preview limit (3)
+    let check_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/local-conversions/check"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send check")
+        .json()
+        .await
+        .expect("check json");
+    println!("DEBUG check_resp: {:?}", check_resp);
+    
+    assert_eq!(check_resp["allowed"], true);
+    assert_eq!(check_resp["used"], 0);
+
+    // 2. Consume all 100 preview quotas in a loop
+    for i in 1..=100 {
+        let consume_resp: serde_json::Value = client
+            .post(format!("http://{addr}/v1/local-conversions/consume"))
+            .bearer_auth(&token)
+            .send()
+            .await
+            .expect("send consume")
+            .json()
+            .await
+            .expect("consume json");
+        assert_eq!(consume_resp["consumed"], true, "failed at consumption {}", i);
+    }
+
+    // 3. Check should now be disallowed since preview limit (100) is reached
+    let check2_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/local-conversions/check"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send check 2")
+        .json()
+        .await
+        .expect("check 2 json");
+    assert_eq!(check2_resp["allowed"], false);
+    assert_eq!(check2_resp["used"], 100);
+
+    // 4. Attempt 101st consume - should fail with 402 Payment Required
+    let consume_fail_resp = client
+        .post(format!("http://{addr}/v1/local-conversions/consume"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send consume fail");
+    assert_eq!(consume_fail_resp.status(), 402);
+
+    let _ = shutdown.send(());
+}

@@ -407,6 +407,10 @@ impl ServerState {
         self.db.reserve_cloud_conversion(user_id, job_id).await
     }
 
+    pub async fn consume_local_conversion(&self, user_id: &str) -> Result<u64, u64> {
+        self.db.consume_local_conversion(user_id).await
+    }
+
     pub async fn create_recharge(
         &self,
         user_id: String,

@@ -766,6 +766,97 @@ impl DbStore {
         Ok(used + 1)
     }
 
+    pub async fn consume_local_conversion(&self, user_id: &str) -> Result<u64, u64> {
+        let user_uuid = parse_uuid(user_id).map_err(|_| 0_u64)?;
+        let mut tx = self.pool.begin().await.map_err(|_| 0_u64)?;
+        let entitlement = sqlx::query(
+            r#"
+            INSERT INTO commercial_entitlements (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            RETURNING count_balance, valid_until
+            "#,
+        )
+        .bind(user_uuid)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| 0_u64)?;
+
+        let count_balance = entitlement.get::<i64, _>("count_balance");
+        let valid_until_active = entitlement
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("valid_until")
+            .ok()
+            .flatten()
+            .is_some_and(|value| value >= chrono::Utc::now());
+        let used = preview_conversions_used_tx(&mut tx, user_uuid)
+            .await
+            .map_err(|_| 0_u64)?;
+
+        if valid_until_active {
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                None,
+                "reserve",
+                0,
+                None,
+                "date_entitlement",
+                Some("local conversion using date entitlement"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
+        if count_balance > 0 {
+            let new_balance = count_balance - 1;
+            sqlx::query(
+                "UPDATE commercial_entitlements SET count_balance = $2, updated_at = now() WHERE user_id = $1",
+            )
+            .bind(user_uuid)
+            .bind(new_balance)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| used)?;
+
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                None,
+                "reserve",
+                1,
+                Some(new_balance),
+                "entitlement",
+                Some("count entitlement consumed for local conversion"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
+        if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
+            tx.rollback().await.ok();
+            return Err(used);
+        }
+
+        insert_usage_ledger(
+            &mut tx,
+            user_uuid,
+            None,
+            "reserve",
+            1,
+            None,
+            "preview",
+            Some("preview local conversion consumed"),
+        )
+        .await
+        .map_err(|_| used)?;
+        tx.commit().await.map_err(|_| used)?;
+        Ok(used + 1)
+    }
+
     pub async fn refund_cloud_conversion_for_job(
         &self,
         job_id: &str,

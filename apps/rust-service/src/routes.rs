@@ -120,6 +120,10 @@ pub fn router_with_state(state: ServerState) -> Router {
             "/v1/conversions",
             get(list_conversions).post(create_conversion),
         )
+        .route("/v1/local-conversions/check", post(check_local_conversion))
+        .route("/api/v1/local-conversions/check", post(check_local_conversion))
+        .route("/v1/local-conversions/consume", post(consume_local_conversion))
+        .route("/api/v1/local-conversions/consume", post(consume_local_conversion))
         .route(
             "/api/v1/conversions",
             get(list_conversions).post(create_conversion),
@@ -1184,6 +1188,50 @@ async fn create_conversion(
         .await
         .map_err(ApiError::Io)?;
     Ok(Json(job_json(&job)))
+}
+
+async fn check_local_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    let entitlement = state.entitlement(&session.id).await;
+    let valid_until_active = entitlement
+        .valid_until
+        .as_deref()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|valid_until| {
+            valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
+        });
+    let used = state.cloud_conversions_used(&session.id).await;
+    let preview_limit = PREVIEW_CLOUD_CONVERSION_LIMIT;
+    let allowed = valid_until_active || entitlement.count_balance > 0 || (used < preview_limit);
+    Ok(Json(json!({
+        "allowed": allowed,
+        "valid_until_active": valid_until_active,
+        "count_balance": entitlement.count_balance,
+        "used": used,
+        "limit": preview_limit,
+    })))
+}
+
+async fn consume_local_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    match state.consume_local_conversion(&session.id).await {
+        Ok(_used) => {
+            let entitlement = state.entitlement(&session.id).await;
+            Ok(Json(json!({
+                "consumed": true,
+                "balance": entitlement.count_balance,
+            })))
+        }
+        Err(_used) => Err(ApiError::PaymentRequired(
+            "local conversion entitlement exhausted".to_string(),
+        )),
+    }
 }
 
 async fn list_conversions(

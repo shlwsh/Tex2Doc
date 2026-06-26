@@ -83,6 +83,27 @@ fn main() {
                     i18n::translate(&settings.locale, "account.stored_session_found").into(),
                 );
                 account_status_set = true;
+
+                // Auto-refresh stored session on startup
+                let base_url = settings.api_base_url.clone();
+                let email_str = email.clone();
+                let app = Arc::clone(&app_state);
+                let ui_weak = ui.as_weak();
+                std::thread::spawn(move || {
+                    let r_token = app.refresh_token();
+                    let result = cloud_account::refresh_and_fetch_usage_blocking(&base_url, r_token);
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = ui_weak.upgrade() {
+                            if let Ok(session) = result {
+                                if !email_str.contains('@') {
+                                    let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
+                                    ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                                }
+                                apply_account_session(&app, &ui, &base_url, session);
+                            }
+                        }
+                    });
+                });
             }
             Ok(None) => {}
             Err(error) => {
@@ -108,6 +129,8 @@ fn main() {
     ui.set_quota_remaining(0);
     ui.set_quota_total(0);
     ui.set_use_cloud_engine(false);
+    ui.set_is_quick_mode(true);
+    ui.set_quick_activation_status("未激活 (Not activated)".into());
     ui.set_usage_status("--".into());
     ui.set_billing_plan_id("pro".into());
     ui.set_billing_status(i18n::translate(&settings.locale, "billing.status_idle").into());
@@ -236,6 +259,93 @@ fn main() {
             });
         },
     );
+
+    let app_state_clone = Arc::clone(&app_state);
+    let ui_weak = ui.as_weak();
+    ui.on_quick_activate_clicked(move |redeem_code: slint::SharedString| {
+        let code = redeem_code.to_string().trim().to_string();
+        if code.is_empty() {
+            return;
+        }
+        let app = Arc::clone(&app_state_clone);
+        let ui_weak = ui_weak.clone();
+
+        let base_url = if let Some(ui) = ui_weak.upgrade() {
+            ui.get_api_base_url().to_string()
+        } else {
+            "http://127.0.0.1:2624/v1/".to_string()
+        };
+
+        std::thread::spawn(move || {
+            // Step 1: Login
+            let login_res = cloud_account::login_and_fetch_usage_blocking(
+                &base_url,
+                &code,
+                &code,
+            );
+
+            let session_res = match login_res {
+                Ok(session) => Ok(session),
+                Err(_) => {
+                    // Step 2: Register if login fails
+                    cloud_account::register_and_fetch_usage_blocking(
+                        &base_url,
+                        &code,
+                        &code,
+                    )
+                }
+            };
+
+            let final_result = match session_res {
+                Ok(session) => {
+                    // Step 3: Redeem code
+                    let _ = cloud_account::redeem_code_blocking(
+                        &base_url,
+                        Some(session.access_token.clone()),
+                        &code,
+                    );
+
+                    // Refetch usage to ensure balance is updated
+                    let final_usage = cloud_account::fetch_usage_blocking(&base_url, &session.access_token);
+                    match final_usage {
+                        Ok(usage) => {
+                            let mut updated_session = session;
+                            updated_session.usage = usage;
+                            Ok(updated_session)
+                        }
+                        Err(_) => Ok(session),
+                    }
+                }
+                Err(error) => Err(error),
+            };
+
+            let invoke_result = slint::invoke_from_event_loop(move || {
+                if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_billing_busy(false);
+                    match final_result {
+                        Ok(session) => {
+                            persist_settings(None, None, None, None, Some(&base_url), Some(&code));
+                            let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
+                            ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                            apply_account_session(&app, &ui, &base_url, session);
+                            ui.set_toast_message("Activated successfully! (激活成功)".into());
+                            ui.set_toast_level("success".into());
+                            ui.set_toast_visible(true);
+                        }
+                        Err(error) => {
+                            ui.set_quick_activation_status(format!("Activation failed: {}", error).into());
+                            ui.set_toast_message(format!("Activation failed: {}", error).into());
+                            ui.set_toast_level("error".into());
+                            ui.set_toast_visible(true);
+                        }
+                    }
+                }
+            });
+            if let Err(error) = invoke_result {
+                log::error!("Failed to update UI after quick activation: {}", error);
+            }
+        });
+    });
 
     let app_state_clone = Arc::clone(&app_state);
     let ui_weak = ui.as_weak();

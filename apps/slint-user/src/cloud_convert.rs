@@ -161,6 +161,8 @@ pub fn convert_upload_blocking(request: CloudUploadRequest<'_>) -> Result<CloudC
 /// directory, runs the semantic engine, and writes the result DOCX to
 /// `output_dir/<file_stem>.docx`.
 pub fn convert_local_blocking(
+    base_url: &str,
+    access_token: Option<String>,
     bytes: &[u8],
     file_name: &str,
     main_tex: &str,
@@ -175,6 +177,18 @@ pub fn convert_local_blocking(
     let output_dir = output_dir.to_path_buf();
     let output_docx = output_dir.join(format!("{stem}.docx"));
     let report_path = output_dir.join(format!("{stem}.report.json"));
+
+    let access_token = access_token.ok_or(CloudConvertError::MissingAccessToken)?;
+    let parsed_url = parse_base_url(base_url)?;
+    let client = authenticated_client(parsed_url, &access_token)?;
+
+    let check_res = runtime()?.block_on(async { client.check_local_conversion().await })?;
+    if !check_res.allowed {
+        return Err(CloudConvertError::QuotaExceeded {
+            used: check_res.used,
+            limit: check_res.limit,
+        });
+    }
 
     let temp_dir = extract_to_temp(bytes, file_name)?;
     let project_root = temp_dir.path();
@@ -215,8 +229,19 @@ pub fn convert_local_blocking(
             error: e.to_string(),
         })?;
 
+    let temp_docx_path = temp_dir.path().join("temp_result.docx");
+    fs::write(&temp_docx_path, &artifact.docx)?;
+
+    let consume_res = runtime()?.block_on(async { client.consume_local_conversion().await })?;
+    if !consume_res.consumed {
+        return Err(CloudConvertError::QuotaExceeded {
+            used: 0,
+            limit: 0,
+        });
+    }
+
     fs::create_dir_all(&output_dir)?;
-    fs::write(&output_docx, &artifact.docx)?;
+    fs::copy(&temp_docx_path, &output_docx)?;
 
     let report_json = serde_json::to_vec_pretty(&artifact.report)?;
     fs::write(&report_path, report_json)?;

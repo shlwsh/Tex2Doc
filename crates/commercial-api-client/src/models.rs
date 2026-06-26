@@ -430,3 +430,18 @@ pub struct FileMeta {
     pub key: String,
     pub bytes: Option<u64>,
 }
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LocalQuotaCheckResponse {
+    pub allowed: bool,
+    pub valid_until_active: bool,
+    pub count_balance: u32,
+    pub used: u32,
+    pub limit: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LocalQuotaConsumeResponse {
+    pub consumed: bool,
+    pub balance: u32,
+}

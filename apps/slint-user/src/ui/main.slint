@@ -238,6 +238,8 @@ export component MainWindow inherits Window {
     in-out property <bool> settings-dirty: false;
     in-out property <string> settings-saved-at: "";
     in-out property <string> settings-panel-state: "idle";
+    in-out property <bool> is-quick-mode: true;
+    in-out property <string> quick-activation-status: "未激活";
 
     in-out property <color> color-window-bg: #f6f8fb;
     in-out property <color> color-surface: #ffffff;
@@ -444,6 +446,7 @@ export component MainWindow inherits Window {
     callback billing-portal-clicked(string);
     callback redeem-code-clicked(string, string);
     callback purchase-redeem-code-clicked();
+    callback quick-activate-clicked(string);
     callback refresh-conversion-records-clicked(string);
     callback refresh-recharge-records-clicked(string);
     callback refresh-feedback-clicked(string);
@@ -460,598 +463,775 @@ export component MainWindow inherits Window {
     callback clear-jobs-clicked();
     callback export-diagnostics-clicked(string, string, string, string, string, string, string, string);
 
-    if !is-signed-in: Rectangle {
-        background: color-window-bg;
+    VerticalBox {
+        padding: 0px;
+        spacing: 0px;
 
-        VerticalBox {
-            padding: 32px;
-            spacing: 0px;
+        // Mode Switcher Tab Bar (at the very top)
+        Rectangle {
+            height: 48px;
+            background: color-surface-alt;
+            border-color: color-border;
+            border-width: 1px;
 
-            Rectangle {
-                horizontal-stretch: 1;
-                max-height: 580px;
-                border-radius: 12px;
-                border-color: color-border;
-                background: color-surface;
+            HorizontalBox {
+                padding-left: 20px;
+                padding-right: 20px;
+                spacing: 20px;
 
-                VerticalBox {
-                    padding: 28px;
-                    spacing: 0px;
-
-                    // ---- Header ----
-                    HorizontalBox {
-                        spacing: 14px;
-                        Image { source: @image-url("assets/app_icon.png"); width: 44px; height: 44px; image-fit: contain; }
-                        VerticalBox {
-                            spacing: 2px;
-                            Text { text: "Tex2Doc"; font-size: 22px; font-weight: 700; color: color-text-primary; }
-                            Text { text: "启哲科技 · 智能文档转换工作台"; font-size: 12px; color: color-text-muted; }
-                        }
+                // Tab 1: 快捷助手
+                Rectangle {
+                    width: 140px;
+                    height: 36px;
+                    background: is-quick-mode ? color-surface : #00000000;
+                    border-radius: 6px;
+                    border-color: is-quick-mode ? color-border : #00000000;
+                    border-width: is-quick-mode ? 1px : 0px;
+                    TouchArea { clicked => { is-quick-mode = true; } }
+                    Text {
+                        text: "快捷助手 (Quick)";
+                        font-size: 14px;
+                        font-weight: is-quick-mode ? 700 : 500;
+                        color: is-quick-mode ? color-accent : color-text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
+                }
 
-                    Rectangle { height: 1px; background: color-border; }
-                    Rectangle { height: 8px; }
-
-                    // ---- Demo Account ----
-                    Rectangle {
-                        border-radius: 8px;
-                        border-color: color-border;
-                        background: color-surface-alt;
-                        VerticalBox {
-                            padding: 14px;
-                            spacing: 6px;
-                            Text { text: "Demo 账号"; font-size: 12px; font-weight: 700; color: color-accent; }
-                            Text { text: "Email:  demo@example.com"; font-size: 12px; color: color-text-secondary; }
-                            Text { text: "Password:  demo"; font-size: 12px; color: color-text-secondary; }
-                        }
+                // Tab 2: 会员中心
+                Rectangle {
+                    width: 140px;
+                    height: 36px;
+                    background: !is-quick-mode ? color-surface : #00000000;
+                    border-radius: 6px;
+                    border-color: !is-quick-mode ? color-border : #00000000;
+                    border-width: !is-quick-mode ? 1px : 0px;
+                    TouchArea { clicked => { is-quick-mode = false; } }
+                    Text {
+                        text: "会员中心 (Member)";
+                        font-size: 14px;
+                        font-weight: !is-quick-mode ? 700 : 500;
+                        color: !is-quick-mode ? color-accent : color-text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
                     }
+                }
 
-                    Rectangle { height: 1px; background: color-border; }
-                    Rectangle { height: 6px; }
+                Rectangle { horizontal-stretch: 1; }
+            }
+        }
 
-                    // ---- Sign In Form ----
+        // View Content
+        if is-quick-mode : Rectangle {
+            background: color-window-bg;
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
+
+            VerticalBox {
+                padding: 24px;
+                spacing: 16px;
+
+                // Title Area
+                HorizontalBox {
+                    spacing: 14px;
+                    Image { source: @image-url("assets/app_icon.png"); width: 44px; height: 44px; image-fit: contain; }
                     VerticalBox {
-                        spacing: 10px;
+                        spacing: 2px;
+                        Text { text: "Tex2Doc 快捷助手"; font-size: 20px; font-weight: 700; color: color-text-primary; }
+                        Text { text: "免登录模式 · 本地高效安全文档转换"; font-size: 12px; color: color-text-muted; }
+                    }
+                }
 
-                        Text { text: "登录 / 注册"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                // Redeem Activation
+                Rectangle {
+                    border-radius: 8px;
+                    border-color: color-border;
+                    background: color-surface;
+                    height: 124px;
+                    VerticalBox {
+                        padding: 16px;
+                        spacing: 8px;
+                        Text { text: "激活此模块以开始使用"; font-size: 13px; font-weight: 700; color: color-text-primary; }
+                        HorizontalBox {
+                            spacing: 12px;
+                            LineEdit { 
+                                placeholder-text: "请输入激活兑换码 (T2D-xxxx)..."; 
+                                text <=> redeem-code; 
+                            }
+                            Button {
+                                text: "激活当前模式";
+                                primary: true;
+                                clicked => { quick-activate-clicked(redeem-code); }
+                            }
+                            Button {
+                                text: "购买卡片";
+                                clicked => { purchase-redeem-code-clicked(); }
+                            }
+                        }
+                        Text { text: quick-activation-status; font-size: 12px; color: color-accent; font-weight: 700; }
+                    }
+                }
 
-                        LineEdit { placeholder-text: "API Base URL (http://localhost:...)"; text <=> api-base-url; height: 36px; }
-                        LineEdit { placeholder-text: "Email"; text <=> login-email; height: 36px; }
-                        LineEdit { placeholder-text: "Password"; text <=> login-password; height: 36px; }
+                // Document Conversion Form (Local compiler)
+                Rectangle {
+                    border-radius: 8px;
+                    border-color: color-border;
+                    background: color-surface;
+                    vertical-stretch: 1;
+                    VerticalBox {
+                        padding: 20px;
+                        spacing: 12px;
 
-                        if is-account-busy: ProgressIndicator { progress: 0.5; }
+                        // File inputs
+                        HorizontalBox {
+                            spacing: 8px;
+                            LineEdit { placeholder-text: t-convert-upload-placeholder; text <=> upload-path; }
+                            Button { text: t-convert-choose-upload; enabled: !is-converting; clicked => { choose-upload-file-clicked(upload-path, output-path); } }
+                        }
+
+                        LineEdit { placeholder-text: t-convert-main-tex-placeholder; text <=> main-tex; }
+
+                        HorizontalBox {
+                            spacing: 12px;
+                            ComboBox { current-value <=> detected-profile; model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"]; }
+                            ComboBox { current-value <=> quality-level; model: ["preview", "standard", "strict"]; }
+                            Text {
+                                text: "转换引擎: 本地语义引擎";
+                                font-size: 12px;
+                                color: color-text-secondary;
+                                vertical-alignment: center;
+                            }
+                            Rectangle { horizontal-stretch: 1; }
+                        }
+
+                        HorizontalBox {
+                            spacing: 8px;
+                            LineEdit { placeholder-text: t-convert-output-dir-placeholder; text <=> output-path; }
+                            Button { text: t-convert-choose-output-dir; clicked => { choose-output-dir-clicked(output-path); } }
+                        }
 
                         HorizontalBox {
                             spacing: 10px;
+                            Button { text: t-convert-detect-profile; enabled: upload-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + upload-path; detect-profile-clicked(upload-path); } }
                             Button {
-                                text: is-account-busy ? t-account-signing-in : t-account-login;
+                                text: is-converting ? t-convert-converting : "本地转换 (Convert Local)";
                                 primary: true;
-                                enabled: !is-account-busy && api-base-url != "" && login-email != "";
+                                enabled: !is-converting && upload-path != "" && output-path != "" && is-signed-in;
                                 clicked => {
-                                    is-account-busy = true;
-                                    login-clicked(api-base-url, login-email, login-password);
-                                    toast-message = t-account-signing-in;
-                                    toast-level = "info";
-                                    toast-visible = true;
+                                    is-converting = true;
+                                    conversion-progress = 0.15;
+                                    convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
                                 }
                             }
-                            Button {
-                                text: is-account-busy ? t-account-registering : t-account-register;
-                                enabled: !is-account-busy && api-base-url != "" && login-email != "";
-                                clicked => {
-                                    is-account-busy = true;
-                                    register-clicked(api-base-url, login-email, login-password);
-                                    toast-message = t-account-registering;
-                                    toast-level = "info";
-                                    toast-visible = true;
-                                }
-                            }
-                            Button {
-                                text: t-account-refresh;
-                                enabled: !is-account-busy && api-base-url != "";
-                                clicked => {
-                                    is-account-busy = true;
-                                    refresh-login-clicked(api-base-url);
-                                }
-                            }
+                            Button { text: t-convert-open-output; enabled: output-path != ""; clicked => { open-output-clicked(output-path); } }
+                            Button { text: t-convert-open-report; enabled: output-path != ""; clicked => { open-report-clicked(output-path); } }
                         }
 
-                        Text { text: account-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
-                    }
-
-                    Rectangle { height: 1px; background: color-border; }
-                    Rectangle { height: 4px; }
-
-                    // ---- Language / Theme ----
-                    HorizontalBox {
-                        spacing: 10px;
-                        Text { text: "Language"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
-                        ComboBox {
-                            width: 120px;
-                            current-value <=> ui-locale;
-                            model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
-                            selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
-                        }
-                        Text { text: "Theme"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
-                        ComboBox {
-                            width: 110px;
-                            current-value <=> ui-theme;
-                            model: ["default", "blue", "green", "purple", "orange", "dark"];
-                            selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
-                        }
+                        ProgressIndicator { progress: is-converting ? conversion-progress : 0.0; }
+                        Text { text: status-text == "" ? (is-signed-in ? "就绪。选择输入文件及输出目录后，点击 [本地转换] 进行编译。" : "请在上方输入兑换码激活快捷助手以开始转换。") : status-text; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
                     }
                 }
             }
         }
-    }
 
-    if is-signed-in: HorizontalBox {
-        spacing: 0px;
+        if !is-quick-mode : Rectangle {
+            vertical-stretch: 1;
+            horizontal-stretch: 1;
 
-        Rectangle {
-            width: 248px;
-            background: color-surface-alt;
-            border-color: color-border;
+            if !is-signed-in: Rectangle {
+                background: color-window-bg;
 
-            VerticalBox {
-                padding: 18px;
-                spacing: 16px;
+                VerticalBox {
+                    padding: 32px;
+                    spacing: 0px;
 
-                HorizontalBox {
-                    spacing: 10px;
-                    Image { source: @image-url("assets/app_icon.png"); width: 38px; height: 38px; image-fit: contain; }
-                    VerticalBox {
-                        spacing: 1px;
-                        Text { text: "Tex2Doc"; font-size: 20px; font-weight: 700; color: color-text-primary; }
-                        Text { text: is-signed-in ? account-display-name : "Guest · 启哲科技"; font-size: 11px; color: color-text-muted; overflow: elide; }
-                    }
-                }
-
-                NavButton { label: t-common-account; detail: account-tier; selected: selected-page == 0; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 0; } }
-                NavButton { label: t-nav-recharge; detail: t-nav-quota-billing; selected: selected-page == 1; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 1; } }
-                NavButton { label: t-tab-convert; detail: t-nav-cloud-engine; selected: selected-page == 2; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 2; } }
-                NavButton { label: t-nav-conversion-records; detail: t-nav-jobs-reports; selected: selected-page == 3; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 3; } }
-                NavButton { label: t-nav-recharge-records; detail: t-nav-mock-payment-history; selected: selected-page == 4; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 4; } }
-                NavButton { label: t-tab-feedback; detail: t-nav-jobs-reports; selected: selected-page == 5; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 5; } }
-                NavButton { label: t-tab-about; detail: "Qizhe Technology"; selected: selected-page == 6; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 6; } }
-
-                Rectangle { vertical-stretch: 1; }
-            }
-        }
-
-        VerticalBox {
-            spacing: 0px;
-
-            Rectangle {
-                height: 64px;
-                background: color-surface;
-                border-color: color-border;
-
-                HorizontalBox {
-                    padding-left: 22px;
-                    padding-right: 22px;
-                    spacing: 14px;
-
-                    VerticalBox {
+                    Rectangle {
                         horizontal-stretch: 1;
-                        spacing: 1px;
-                        Text {
-                            text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : (selected-page == 4 ? t-records-recharge-title : (selected-page == 5 ? t-tab-feedback : t-tab-about)))));
-                            font-size: 20px;
-                            font-weight: 700;
-                            color: color-text-primary;
-                            vertical-alignment: bottom;
+                        max-height: 580px;
+                        border-radius: 12px;
+                        border-color: color-border;
+                        background: color-surface;
+
+                        VerticalBox {
+                            padding: 28px;
+                            spacing: 0px;
+
+                            // ---- Header ----
+                            HorizontalBox {
+                                spacing: 14px;
+                                Image { source: @image-url("assets/app_icon.png"); width: 44px; height: 44px; image-fit: contain; }
+                                VerticalBox {
+                                    spacing: 2px;
+                                    Text { text: "Tex2Doc"; font-size: 22px; font-weight: 700; color: color-text-primary; }
+                                    Text { text: "启哲科技 · 智能文档转换工作台"; font-size: 12px; color: color-text-muted; }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: color-border; }
+                            Rectangle { height: 8px; }
+
+                            // ---- Demo Account ----
+                            Rectangle {
+                                border-radius: 8px;
+                                border-color: color-border;
+                                background: color-surface-alt;
+                                VerticalBox {
+                                    padding: 14px;
+                                    spacing: 6px;
+                                    Text { text: "Demo 账号"; font-size: 12px; font-weight: 700; color: color-accent; }
+                                    Text { text: "Email:  demo@example.com"; font-size: 12px; color: color-text-secondary; }
+                                    Text { text: "Password:  demo"; font-size: 12px; color: color-text-secondary; }
+                                }
+                            }
+
+                            Rectangle { height: 1px; background: color-border; }
+                            Rectangle { height: 6px; }
+
+                            // ---- Sign In Form ----
+                            VerticalBox {
+                                spacing: 10px;
+
+                                Text { text: "登录 / 注册"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+
+                                LineEdit { placeholder-text: "API Base URL (http://localhost:...)"; text <=> api-base-url; height: 36px; }
+                                LineEdit { placeholder-text: "Email"; text <=> login-email; height: 36px; }
+                                LineEdit { placeholder-text: "Password"; text <=> login-password; height: 36px; }
+
+                                if is-account-busy: ProgressIndicator { progress: 0.5; }
+
+                                HorizontalBox {
+                                    spacing: 10px;
+                                    Button {
+                                        text: is-account-busy ? t-account-signing-in : t-account-login;
+                                        primary: true;
+                                        enabled: !is-account-busy && api-base-url != "" && login-email != "";
+                                        clicked => {
+                                            is-account-busy = true;
+                                            login-clicked(api-base-url, login-email, login-password);
+                                            toast-message = t-account-signing-in;
+                                            toast-level = "info";
+                                            toast-visible = true;
+                                        }
+                                    }
+                                    Button {
+                                        text: is-account-busy ? t-account-registering : t-account-register;
+                                        enabled: !is-account-busy && api-base-url != "" && login-email != "";
+                                        clicked => {
+                                            is-account-busy = true;
+                                            register-clicked(api-base-url, login-email, login-password);
+                                            toast-message = t-account-registering;
+                                            toast-level = "info";
+                                            toast-visible = true;
+                                        }
+                                    }
+                                    Button {
+                                        text: t-account-refresh;
+                                        enabled: !is-account-busy && api-base-url != "";
+                                        clicked => {
+                                            is-account-busy = true;
+                                            refresh-login-clicked(api-base-url);
+                                        }
+                                    }
+                                }
+
+                                Text { text: account-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                            }
+
+                            Rectangle { height: 1px; background: color-border; }
+                            Rectangle { height: 4px; }
+
+                            // ---- Language / Theme ----
+                            HorizontalBox {
+                                spacing: 10px;
+                                Text { text: "Language"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
+                                ComboBox {
+                                    width: 120px;
+                                    current-value <=> ui-locale;
+                                    model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
+                                    selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                                }
+                                Text { text: "Theme"; font-size: 12px; color: color-text-muted; vertical-alignment: center; }
+                                ComboBox {
+                                    width: 110px;
+                                    current-value <=> ui-theme;
+                                    model: ["default", "blue", "green", "purple", "orange", "dark"];
+                                    selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                                }
+                            }
                         }
                     }
+                }
+            }
 
-                    ComboBox {
-                        width: 112px;
-                        current-value <=> ui-locale;
-                        model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
-                        selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+            if is-signed-in: HorizontalBox {
+                spacing: 0px;
+
+                Rectangle {
+                    width: 248px;
+                    background: color-surface-alt;
+                    border-color: color-border;
+
+                    VerticalBox {
+                        padding: 18px;
+                        spacing: 16px;
+
+                        HorizontalBox {
+                            spacing: 10px;
+                            Image { source: @image-url("assets/app_icon.png"); width: 38px; height: 38px; image-fit: contain; }
+                            VerticalBox {
+                                spacing: 1px;
+                                Text { text: "Tex2Doc"; font-size: 20px; font-weight: 700; color: color-text-primary; }
+                                Text { text: is-signed-in ? account-display-name : "Guest · 启哲科技"; font-size: 11px; color: color-text-muted; overflow: elide; }
+                            }
+                        }
+
+                        NavButton { label: t-common-account; detail: account-tier; selected: selected-page == 0; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 0; } }
+                        NavButton { label: t-nav-recharge; detail: t-nav-quota-billing; selected: selected-page == 1; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 1; } }
+                        NavButton { label: t-tab-convert; detail: t-nav-cloud-engine; selected: selected-page == 2; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 2; } }
+                        NavButton { label: t-nav-conversion-records; detail: t-nav-jobs-reports; selected: selected-page == 3; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 3; } }
+                        NavButton { label: t-nav-recharge-records; detail: t-nav-mock-payment-history; selected: selected-page == 4; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 4; } }
+                        NavButton { label: t-tab-feedback; detail: t-nav-jobs-reports; selected: selected-page == 5; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 5; } }
+                        NavButton { label: t-tab-about; detail: "Qizhe Technology"; selected: selected-page == 6; accent: color-accent; text-primary: color-text-primary; text-muted: color-text-muted; clicked => { selected-page = 6; } }
+
+                        Rectangle { vertical-stretch: 1; }
                     }
+                }
 
-                    ComboBox {
-                        width: 112px;
-                        current-value <=> ui-theme;
-                        model: ["default", "blue", "green", "purple", "orange", "dark"];
-                        selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                VerticalBox {
+                    spacing: 0px;
+
+                    Rectangle {
+                        height: 64px;
+                        background: color-surface;
+                        border-color: color-border;
+
+                        HorizontalBox {
+                            padding-left: 22px;
+                            padding-right: 22px;
+                            spacing: 14px;
+
+                            VerticalBox {
+                                horizontal-stretch: 1;
+                                spacing: 1px;
+                                Text {
+                                    text: selected-page == 0 ? t-account-overview-title : (selected-page == 1 ? t-recharge-title : (selected-page == 2 ? t-convert-cloud-convert : (selected-page == 3 ? t-records-conversion-title : (selected-page == 4 ? t-records-recharge-title : (selected-page == 5 ? t-tab-feedback : t-tab-about)))));
+                                    font-size: 20px;
+                                    font-weight: 700;
+                                    color: color-text-primary;
+                                    vertical-alignment: bottom;
+                                }
+                            }
+
+                            ComboBox {
+                                width: 112px;
+                                current-value <=> ui-locale;
+                                model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
+                                selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                            }
+
+                            ComboBox {
+                                width: 112px;
+                                current-value <=> ui-theme;
+                                model: ["default", "blue", "green", "purple", "orange", "dark"];
+                                selected(_) => { apply-appearance-clicked(ui-locale, ui-theme); }
+                            }
+
+                            Rectangle {
+                                width: 38px;
+                                height: 38px;
+                                border-radius: 19px;
+                                background: is-signed-in ? color-accent : color-border;
+
+                                Text {
+                                    text: is-signed-in ? "T" : "?";
+                                    color: #ffffff;
+                                    font-size: 16px;
+                                    font-weight: 700;
+                                    horizontal-alignment: center;
+                                    vertical-alignment: center;
+                                }
+
+                                TouchArea { clicked => { account-menu-open = !account-menu-open; } }
+                            }
+                        }
                     }
 
                     Rectangle {
-                        width: 38px;
-                        height: 38px;
-                        border-radius: 19px;
-                        background: is-signed-in ? color-accent : color-border;
+                        background: color-window-bg;
+                        horizontal-stretch: 1;
+                        vertical-stretch: 1;
 
-                        Text {
-                            text: is-signed-in ? "T" : "?";
-                            color: #ffffff;
-                            font-size: 16px;
-                            font-weight: 700;
-                            horizontal-alignment: center;
-                            vertical-alignment: center;
-                        }
-
-                        TouchArea { clicked => { account-menu-open = !account-menu-open; } }
-                    }
-                }
-            }
-
-            Rectangle {
-                background: color-window-bg;
-                horizontal-stretch: 1;
-                vertical-stretch: 1;
-
-                if selected-page == 0: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 16px;
-
-                        HorizontalBox {
-                            spacing: 14px;
-                            MetricTile { label: t-account-account; value: account-display-name; note: login-email; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
-                            MetricTile { label: t-account-plan; value: account-tier; note: is-signed-in ? t-account-active-subscription : t-account-guest-mode; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
-                            MetricTile { label: t-account-remaining; value: "" + quota-remaining; note: t-account-cloud-quota; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
-                        }
-
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            HorizontalBox {
-                                padding: 18px;
-                                spacing: 18px;
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    spacing: 6px;
-                                    Text { text: t-account-email; font-size: 11px; color: color-text-muted; }
-                                    Text { text: login-email; font-size: 15px; font-weight: 700; color: color-text-primary; overflow: elide; }
-                                }
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    spacing: 6px;
-                                    Text { text: t-account-status; font-size: 11px; color: color-text-muted; }
-                                    Text { text: is-signed-in ? t-account-signed-in-short : t-account-guest-mode; font-size: 15px; font-weight: 700; color: is-signed-in ? color-success : color-warning; overflow: elide; }
-                                }
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    spacing: 6px;
-                                    Text { text: t-common-quota; font-size: 11px; color: color-text-muted; }
-                                    Text { text: "" + quota-remaining + " / " + quota-total; font-size: 15px; font-weight: 700; color: color-text-primary; overflow: elide; }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if selected-page == 1: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 16px;
-
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            HorizontalBox {
-                                padding: 18px;
-                                spacing: 14px;
-                                Rectangle {
-                                    width: 42px;
-                                    height: 42px;
-                                    border-radius: 8px;
-                                    background: #eff6ff;
-                                    Text { text: "¥"; color: color-accent; font-size: 20px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
-                                }
-                                VerticalBox {
-                                    horizontal-stretch: 1;
-                                    spacing: 4px;
-                                    Text { text: t-recharge-purchase-title; font-size: 16px; font-weight: 700; color: color-text-primary; }
-                                    Text { text: t-recharge-purchase-note; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
-                                }
-                                Button { text: t-recharge-purchase-button; primary: true; clicked => { purchase-redeem-code-clicked(); } }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 14px;
-                            MetricTile { label: t-account-plan; value: account-tier; note: billing-plan-id; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
-                            MetricTile { label: t-common-quota; value: "" + quota-remaining + " / " + quota-total; note: is-signed-in ? t-account-cloud-quota : t-nav-sign-in-first; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
-                            MetricTile { label: t-tab-billing; value: is-billing-busy ? t-common-working : t-common-ready; note: billing-status; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-warning; }
-                        }
-
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            VerticalBox {
-                                padding: 18px;
-                                spacing: 12px;
-                                Text { text: t-recharge-by-count; font-size: 16px; font-weight: 700; color: color-text-primary; }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    LineEdit { placeholder-text: t-recharge-code-placeholder; text <=> redeem-code; enabled: !is-billing-busy; horizontal-stretch: 1; }
-                                    Button { text: t-recharge-mock-pay; primary: true; enabled: api-base-url != "" && redeem-code != "" && !is-billing-busy; clicked => { is-billing-busy = true; billing-status = t-recharge-redeeming; redeem-code-clicked(api-base-url, redeem-code); } }
-                                }
-                                Text { text: t-recharge-by-date; font-size: 16px; font-weight: 700; color: color-text-primary; }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    StatusPill { text: "count_3"; bg: #eff6ff; fg: color-accent; }
-                                    StatusPill { text: "count_10"; bg: #ecfdf5; fg: color-success; }
-                                    StatusPill { text: "count_30"; bg: #fffbeb; fg: color-warning; }
-                                }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    Button { text: t-billing-plans; enabled: api-base-url != ""; clicked => { is-billing-busy = true; show-plans-clicked(api-base-url); } }
-                                    Button { text: t-billing-portal; enabled: api-base-url != ""; clicked => { is-billing-busy = true; billing-portal-clicked(api-base-url); } }
-                                    Button { text: t-recharge-records-action; enabled: is-signed-in && api-base-url != ""; clicked => { selected-page = 4; is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
-                                }
-                                Text { text: billing-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
-                            }
-                        }
-                    }
-                }
-
-                if selected-page == 2: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 14px;
-
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            VerticalBox {
-                                padding: 18px;
-                                spacing: 10px;
-
-                                HorizontalBox {
-                                    spacing: 8px;
-                                    LineEdit { placeholder-text: t-convert-upload-placeholder; text <=> upload-path; }
-                                    Button { text: t-convert-choose-upload; enabled: !is-converting; clicked => { choose-upload-file-clicked(upload-path, output-path); } }
-                                }
-
-                                LineEdit { placeholder-text: t-convert-main-tex-placeholder; text <=> main-tex; }
-
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    ComboBox { current-value <=> detected-profile; model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"]; }
-                                    ComboBox { current-value <=> quality-level; model: ["preview", "standard", "strict"]; }
-                                    Switch { text: t-convert-cloud; checked <=> use-cloud-engine; enabled: is-signed-in; }
-                                }
-
-                                HorizontalBox {
-                                    spacing: 8px;
-                                    LineEdit { placeholder-text: t-convert-output-dir-placeholder; text <=> output-path; }
-                                    Button { text: t-convert-choose-output-dir; clicked => { choose-output-dir-clicked(output-path); } }
-                                }
-
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    Button { text: t-convert-detect-profile; enabled: upload-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + upload-path; detect-profile-clicked(upload-path); } }
-                                    Button {
-                                        text: is-converting ? t-convert-converting : (use-cloud-engine ? t-convert-cloud-convert : t-convert-convert);
-                                        primary: true;
-                                        enabled: !is-converting && upload-path != "" && output-path != "" && (!use-cloud-engine || is-signed-in);
-                                        clicked => {
-                                            is-converting = true;
-                                            conversion-progress = 0.15;
-                                            if use-cloud-engine {
-                                                cloud-convert-clicked(api-base-url, upload-path, main-tex, detected-profile, quality-level, output-path);
-                                            } else {
-                                                convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
-                                            }
-                                        }
-                                    }
-                                    Button { text: t-convert-open-output; enabled: output-path != ""; clicked => { open-output-clicked(output-path); } }
-                                    Button { text: t-convert-open-report; enabled: output-path != ""; clicked => { open-report-clicked(output-path); } }
-                                }
-
-                                ProgressIndicator { progress: is-converting ? conversion-progress : 0.0; }
-                                Text { text: status-text == "" ? t-convert-ready : status-text; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
-                            }
-                        }
-
-                        HorizontalBox {
-                            spacing: 14px;
-                            MetricTile { label: t-common-compatibility; value: compatibility-score; note: "Profile " + detected-profile; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
-                            MetricTile { label: "Quality"; value: quality-status; note: quality-level; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
-                            MetricTile { label: t-common-confidence; value: profile-confidence; note: t-convert-detected; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-warning; }
-                        }
-                    }
-                }
-
-                if selected-page == 3: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 14px;
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            VerticalBox {
-                                padding: 14px;
-                                spacing: 12px;
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    Button { text: t-records-query-conversions; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-conversion-records-clicked(api-base-url); } }
-                                }
-                                ConversionRecordsTable {
-                                    rows: cloud-conversion-records;
-                                    empty-text: status-text == "" ? t-history-no-recent-jobs : status-text;
-                                    status-label: t-records-status;
-                                    main-label: t-records-main-input;
-                                    profile-label: t-records-profile;
-                                    updated-label: t-records-updated;
-                                    error-label: t-records-error;
-                                    surface: color-surface;
-                                    surface-alt: color-surface-alt;
-                                    border: color-border;
-                                    text-primary: color-text-primary;
-                                    text-secondary: color-text-secondary;
-                                    text-muted: color-text-muted;
-                                    accent: color-accent;
-                                    success: color-success;
-                                    danger: color-danger;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if selected-page == 4: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 14px;
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            VerticalBox {
-                                padding: 18px;
-                                spacing: 12px;
-                                HorizontalBox {
-                                    spacing: 12px;
-                                    StatusPill { text: billing-plan-id; bg: #eff6ff; fg: color-accent; }
-                                    StatusPill { text: is-billing-busy ? t-common-working : t-common-idle; bg: #ecfdf5; fg: color-success; }
-                                    StatusPill { text: account-tier; bg: #fffbeb; fg: color-warning; }
-                                    Button { text: t-records-query-recharges; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
-                                }
-                                Rectangle {
-                                    height: 30px;
-                                    background: color-surface-alt;
-                                    HorizontalBox {
-                                        padding: 8px;
-                                        spacing: 10px;
-                                        Text { text: t-records-type; width: 90px; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: t-records-package-code; horizontal-stretch: 1; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: t-records-quantity; width: 58px; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: t-records-status; width: 92px; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: t-records-provider; width: 118px; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: t-records-created; width: 138px; font-size: 11px; font-weight: 700; color: color-text-primary; }
-                                    }
-                                }
-                                if recharge-records.length == 0: Text { text: billing-status == "--" ? t-records-no-recharge : billing-status; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
-                                ListView {
-                                    visible: recharge-records.length > 0;
-                                    height: 390px;
-                                    for row[idx] in recharge-records: Rectangle {
-                                        min-height: 42px;
-                                        background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
-                                        HorizontalBox {
-                                            padding: 8px;
-                                            spacing: 10px;
-                                            Text { text: row.kind; width: 90px; font-size: 11px; color: color-text-secondary; overflow: elide; }
-                                            Text { text: row.package; horizontal-stretch: 1; font-size: 11px; color: color-text-secondary; overflow: elide; }
-                                            Text { text: row.quantity; width: 58px; font-size: 11px; color: color-text-muted; overflow: elide; }
-                                            Text { text: row.status; width: 92px; font-size: 11px; color: row.status == "paid" || row.status == "redeemed" ? color-success : color-warning; overflow: elide; }
-                                            Text { text: row.provider; width: 118px; font-size: 10px; color: color-text-muted; overflow: elide; }
-                                            Text { text: row.created-at; width: 138px; font-size: 10px; color: color-text-muted; overflow: elide; }
-                                        }
-                                    }
-                                }
-                                Text { text: t-common-account + ": " + account-display-name + " | " + t-common-quota + ": " + quota-remaining + " / " + quota-total; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
-                                Button { text: t-records-go-recharge; clicked => { selected-page = 1; } }
-                            }
-                        }
-                    }
-                }
-
-                if selected-page == 5: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 14px;
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
-                            VerticalBox {
-                                padding: 14px;
-                                spacing: 12px;
-                                Text { text: t-feedback-new; font-size: 14px; font-weight: 700; color: color-text-primary; }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    ComboBox { width: 140px; current-value <=> feedback-type; model: ["issue", "feature"]; }
-                                    LineEdit { placeholder-text: t-feedback-title-placeholder; text <=> feedback-title; horizontal-stretch: 1; }
-                                    LineEdit { placeholder-text: t-feedback-job-placeholder; text <=> feedback-job-id; width: 210px; }
-                                }
-                                TextEdit {
-                                    text <=> feedback-message;
-                                    placeholder-text: t-feedback-message-placeholder;
-                                    height: 96px;
-                                }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    Button { text: is-billing-busy ? t-common-working : t-feedback-submit; primary: true; enabled: is-signed-in && api-base-url != "" && feedback-title != "" && feedback-message != "" && !is-billing-busy; clicked => { is-billing-busy = true; feedback-status = t-common-working; submit-feedback-clicked(api-base-url, feedback-type, feedback-title, feedback-message, feedback-job-id); } }
-                                    Button { text: t-feedback-refresh; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-feedback-clicked(api-base-url); } }
-                                    Text { text: feedback-status; font-size: 12px; color: color-text-muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
-                                }
-                                HorizontalBox {
-                                    spacing: 10px;
-                                    Text { text: t-feedback-threads + " (" + feedback-threads.length + ")"; font-size: 14px; font-weight: 700; color: color-text-primary; }
-                                }
-                                if feedback-threads.length == 0: Text { text: t-feedback-empty; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
-                                ListView {
-                                    visible: feedback-threads.length > 0;
-                                    height: 390px;
-                                    for row[idx] in feedback-threads: Rectangle {
-                                        min-height: 52px;
-                                        border-radius: 6px;
-                                        border-color: color-border;
-                                        background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
-                                        VerticalBox {
-                                            padding: 10px;
-                                            spacing: 4px;
-                                            HorizontalBox {
-                                                spacing: 8px;
-                                                StatusPill { text: row.feedback-type; bg: row.feedback-type == "issue" ? #fef2f2 : #eff6ff; fg: row.feedback-type == "issue" ? color-danger : color-accent; }
-                                                StatusPill { text: row.status; bg: row.status == "open" ? #fef2f2 : (row.status == "resolved" ? #ecfdf5 : #eff6ff); fg: row.status == "open" ? color-danger : (row.status == "resolved" ? color-success : color-warning); }
-                                                StatusPill { text: row.priority; bg: row.priority == "high" || row.priority == "urgent" ? #fef2f2 : #eff6ff; fg: row.priority == "high" || row.priority == "urgent" ? color-danger : color-text-muted; }
-                                                Text { text: row.title; horizontal-stretch: 1; font-size: 13px; font-weight: 600; color: color-text-primary; overflow: elide; }
-                                            }
-                                            Text { text: "Job: " + row.conversion-job-id + " | Msgs: " + row.message-count + " | Updated: " + row.latest-message-at; font-size: 11px; color: color-text-muted; overflow: elide; }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                if selected-page == 6: Rectangle {
-                    background: color-window-bg;
-                    VerticalBox {
-                        padding: 22px;
-                        spacing: 14px;
-                        Rectangle {
-                            border-radius: 8px;
-                            border-color: color-border;
-                            background: color-surface;
+                        if selected-page == 0: Rectangle {
+                            background: color-window-bg;
                             VerticalBox {
                                 padding: 22px;
                                 spacing: 16px;
+
                                 HorizontalBox {
-                                    spacing: 18px;
-                                    Image { source: @image-url("assets/app_icon.png"); width: 76px; height: 76px; image-fit: contain; }
-                                    VerticalBox {
-                                        spacing: 5px;
-                                        Text { text: "Tex2Doc"; font-size: 26px; font-weight: 700; color: color-text-primary; }
-                                        Text { text: "开发公司：启哲科技"; font-size: 14px; font-weight: 600; color: color-accent; }
-                                        Text { text: "面向科研写作、期刊投稿、机构归档和企业文档流转的智能文档转换产品。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                    spacing: 14px;
+                                    MetricTile { label: t-account-account; value: account-display-name; note: login-email; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
+                                    MetricTile { label: t-account-plan; value: account-tier; note: is-signed-in ? t-account-active-subscription : t-account-guest-mode; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
+                                    MetricTile { label: t-account-remaining; value: "" + quota-remaining; note: t-account-cloud-quota; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
+                                }
+
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    HorizontalBox {
+                                        padding: 18px;
+                                        spacing: 18px;
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 6px;
+                                            Text { text: t-account-email; font-size: 11px; color: color-text-muted; }
+                                            Text { text: login-email; font-size: 15px; font-weight: 700; color: color-text-primary; overflow: elide; }
+                                        }
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 6px;
+                                            Text { text: t-account-status; font-size: 11px; color: color-text-muted; }
+                                            Text { text: is-signed-in ? t-account-signed-in-short : t-account-guest-mode; font-size: 15px; font-weight: 700; color: is-signed-in ? color-success : color-warning; overflow: elide; }
+                                        }
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 6px;
+                                            Text { text: t-common-quota; font-size: 11px; color: color-text-muted; }
+                                            Text { text: "" + quota-remaining + " / " + quota-total; font-size: 15px; font-weight: 700; color: color-text-primary; overflow: elide; }
+                                        }
                                     }
                                 }
-                                Rectangle { height: 1px; background: color-border; }
-                                Text { text: "项目目标"; font-size: 16px; font-weight: 700; color: color-text-primary; }
-                                Text { text: "将复杂 TeX/LaTeX 项目稳定转换为可编辑、可审阅、可交付的 Word 文档，并提供转换、质检、记录追溯和商业化运营的一体化工作台。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
-                                Text { text: "主要功能"; font-size: 16px; font-weight: 700; color: color-text-primary; }
-                                Text { text: "• TeX/LaTeX 项目路径或 ZIP 输入，生成 DOCX 与报告。\n• 云端语义转换、本地桌面转换和任务历史记录。\n• 兼容性分析、期刊模板适配、转换日志和诊断导出。\n• 账号、套餐、兑换码、用量额度、反馈和管理端运营能力。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                            }
+                        }
+
+                        if selected-page == 1: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 16px;
+
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    HorizontalBox {
+                                        padding: 18px;
+                                        spacing: 14px;
+                                        Rectangle {
+                                            width: 42px;
+                                            height: 42px;
+                                            border-radius: 8px;
+                                            background: #eff6ff;
+                                            Text { text: "¥"; color: color-accent; font-size: 20px; font-weight: 700; horizontal-alignment: center; vertical-alignment: center; }
+                                        }
+                                        VerticalBox {
+                                            horizontal-stretch: 1;
+                                            spacing: 4px;
+                                            Text { text: t-recharge-purchase-title; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                            Text { text: t-recharge-purchase-note; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                                        }
+                                        Button { text: t-recharge-purchase-button; primary: true; clicked => { purchase-redeem-code-clicked(); } }
+                                    }
+                                }
+
+                                HorizontalBox {
+                                    spacing: 14px;
+                                    MetricTile { label: t-account-plan; value: account-tier; note: billing-plan-id; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
+                                    MetricTile { label: t-common-quota; value: "" + quota-remaining + " / " + quota-total; note: is-signed-in ? t-account-cloud-quota : t-nav-sign-in-first; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
+                                    MetricTile { label: t-tab-billing; value: is-billing-busy ? t-common-working : t-common-ready; note: billing-status; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-warning; }
+                                }
+
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 18px;
+                                        spacing: 12px;
+                                        Text { text: t-recharge-by-count; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            LineEdit { placeholder-text: t-recharge-code-placeholder; text <=> redeem-code; enabled: !is-billing-busy; horizontal-stretch: 1; }
+                                            Button { text: t-recharge-mock-pay; primary: true; enabled: api-base-url != "" && redeem-code != "" && !is-billing-busy; clicked => { is-billing-busy = true; billing-status = t-recharge-redeeming; redeem-code-clicked(api-base-url, redeem-code); } }
+                                        }
+                                        Text { text: t-recharge-by-date; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            StatusPill { text: "count_3"; bg: #eff6ff; fg: color-accent; }
+                                            StatusPill { text: "count_10"; bg: #ecfdf5; fg: color-success; }
+                                            StatusPill { text: "count_30"; bg: #fffbeb; fg: color-warning; }
+                                        }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            Button { text: t-billing-plans; enabled: api-base-url != ""; clicked => { is-billing-busy = true; show-plans-clicked(api-base-url); } }
+                                            Button { text: t-billing-portal; enabled: api-base-url != ""; clicked => { is-billing-busy = true; billing-portal-clicked(api-base-url); } }
+                                            Button { text: t-recharge-records-action; enabled: is-signed-in && api-base-url != ""; clicked => { selected-page = 4; is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
+                                        }
+                                        Text { text: billing-status; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                                    }
+                                }
+                            }
+                        }
+
+                        if selected-page == 2: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 14px;
+
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 18px;
+                                        spacing: 10px;
+
+                                        HorizontalBox {
+                                            spacing: 8px;
+                                            LineEdit { placeholder-text: t-convert-upload-placeholder; text <=> upload-path; }
+                                            Button { text: t-convert-choose-upload; enabled: !is-converting; clicked => { choose-upload-file-clicked(upload-path, output-path); } }
+                                        }
+
+                                        LineEdit { placeholder-text: t-convert-main-tex-placeholder; text <=> main-tex; }
+
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            ComboBox { current-value <=> detected-profile; model: ["auto", "generic-article", "tacl", "cvpr", "nature", "springer", "jos-paper", "chinese-academic"]; }
+                                            ComboBox { current-value <=> quality-level; model: ["preview", "standard", "strict"]; }
+                                            Switch { text: t-convert-cloud; checked <=> use-cloud-engine; enabled: is-signed-in; }
+                                        }
+
+                                        HorizontalBox {
+                                            spacing: 8px;
+                                            LineEdit { placeholder-text: t-convert-output-dir-placeholder; text <=> output-path; }
+                                            Button { text: t-convert-choose-output-dir; clicked => { choose-output-dir-clicked(output-path); } }
+                                        }
+
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            Button { text: t-convert-detect-profile; enabled: upload-path != "" && !is-converting; clicked => { status-text = t-convert-detecting-profile + upload-path; detect-profile-clicked(upload-path); } }
+                                            Button {
+                                                text: is-converting ? t-convert-converting : (use-cloud-engine ? t-convert-cloud-convert : t-convert-convert);
+                                                primary: true;
+                                                enabled: !is-converting && upload-path != "" && output-path != "" && (!use-cloud-engine || is-signed-in);
+                                                clicked => {
+                                                    is-converting = true;
+                                                    conversion-progress = 0.15;
+                                                    if use-cloud-engine {
+                                                        cloud-convert-clicked(api-base-url, upload-path, main-tex, detected-profile, quality-level, output-path);
+                                                    } else {
+                                                        convert-clicked(upload-path, main-tex, detected-profile, quality-level, output-path);
+                                                    }
+                                                }
+                                            }
+                                            Button { text: t-convert-open-output; enabled: output-path != ""; clicked => { open-output-clicked(output-path); } }
+                                            Button { text: t-convert-open-report; enabled: output-path != ""; clicked => { open-report-clicked(output-path); } }
+                                        }
+
+                                        ProgressIndicator { progress: is-converting ? conversion-progress : 0.0; }
+                                        Text { text: status-text == "" ? t-convert-ready : status-text; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                                    }
+                                }
+
+                                HorizontalBox {
+                                    spacing: 14px;
+                                    MetricTile { label: t-common-compatibility; value: compatibility-score; note: "Profile " + detected-profile; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-accent; }
+                                    MetricTile { label: "Quality"; value: quality-status; note: quality-level; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-success; }
+                                    MetricTile { label: t-common-confidence; value: profile-confidence; note: t-convert-detected; surface: color-surface; border: color-border; text-primary: color-text-primary; text-muted: color-text-muted; accent: color-warning; }
+                                }
+                            }
+                        }
+
+                        if selected-page == 3: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 14px;
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 14px;
+                                        spacing: 12px;
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            Button { text: t-records-query-conversions; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-conversion-records-clicked(api-base-url); } }
+                                        }
+                                        ConversionRecordsTable {
+                                            rows: cloud-conversion-records;
+                                            empty-text: status-text == "" ? t-history-no-recent-jobs : status-text;
+                                            status-label: t-records-status;
+                                            main-label: t-records-main-input;
+                                            profile-label: t-records-profile;
+                                            updated-label: t-records-updated;
+                                            error-label: t-records-error;
+                                            surface: color-surface;
+                                            surface-alt: color-surface-alt;
+                                            border: color-border;
+                                            text-primary: color-text-primary;
+                                            text-secondary: color-text-secondary;
+                                            text-muted: color-text-muted;
+                                            accent: color-accent;
+                                            success: color-success;
+                                            danger: color-danger;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if selected-page == 4: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 14px;
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 18px;
+                                        spacing: 12px;
+                                        HorizontalBox {
+                                            spacing: 12px;
+                                            StatusPill { text: billing-plan-id; bg: #eff6ff; fg: color-accent; }
+                                            StatusPill { text: is-billing-busy ? t-common-working : t-common-idle; bg: #ecfdf5; fg: color-success; }
+                                            StatusPill { text: account-tier; bg: #fffbeb; fg: color-warning; }
+                                            Button { text: t-records-query-recharges; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-recharge-records-clicked(api-base-url); } }
+                                        }
+                                        Rectangle {
+                                            height: 30px;
+                                            background: color-surface-alt;
+                                            HorizontalBox {
+                                                padding: 8px;
+                                                spacing: 10px;
+                                                Text { text: t-records-type; width: 90px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: t-records-package-code; horizontal-stretch: 1; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: t-records-quantity; width: 58px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: t-records-status; width: 92px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: t-records-provider; width: 118px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: t-records-created; width: 138px; font-size: 11px; font-weight: 700; color: color-text-primary; }
+                                            }
+                                        }
+                                        if recharge-records.length == 0: Text { text: billing-status == "--" ? t-records-no-recharge : billing-status; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                        ListView {
+                                            visible: recharge-records.length > 0;
+                                            height: 390px;
+                                            for row[idx] in recharge-records: Rectangle {
+                                                min-height: 42px;
+                                                background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
+                                                HorizontalBox {
+                                                    padding: 8px;
+                                                    spacing: 10px;
+                                                    Text { text: row.kind; width: 90px; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                                    Text { text: row.package; horizontal-stretch: 1; font-size: 11px; color: color-text-secondary; overflow: elide; }
+                                                    Text { text: row.quantity; width: 58px; font-size: 11px; color: color-text-muted; overflow: elide; }
+                                                    Text { text: row.status; width: 92px; font-size: 11px; color: row.status == "paid" || row.status == "redeemed" ? color-success : color-warning; overflow: elide; }
+                                                    Text { text: row.provider; width: 118px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                                    Text { text: row.created-at; width: 138px; font-size: 10px; color: color-text-muted; overflow: elide; }
+                                                }
+                                            }
+                                        }
+                                        Text { text: t-common-account + ": " + account-display-name + " | " + t-common-quota + ": " + quota-remaining + " / " + quota-total; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
+                                        Button { text: t-records-go-recharge; clicked => { selected-page = 1; } }
+                                    }
+                                }
+                            }
+                        }
+
+                        if selected-page == 5: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 14px;
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 14px;
+                                        spacing: 12px;
+                                        Text { text: t-feedback-new; font-size: 14px; font-weight: 700; color: color-text-primary; }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            ComboBox { width: 140px; current-value <=> feedback-type; model: ["issue", "feature"]; }
+                                            LineEdit { placeholder-text: t-feedback-title-placeholder; text <=> feedback-title; horizontal-stretch: 1; }
+                                            LineEdit { placeholder-text: t-feedback-job-placeholder; text <=> feedback-job-id; width: 210px; }
+                                        }
+                                        TextEdit {
+                                            text <=> feedback-message;
+                                            placeholder-text: t-feedback-message-placeholder;
+                                            height: 96px;
+                                        }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            Button { text: is-billing-busy ? t-common-working : t-feedback-submit; primary: true; enabled: is-signed-in && api-base-url != "" && feedback-title != "" && feedback-message != "" && !is-billing-busy; clicked => { is-billing-busy = true; feedback-status = t-common-working; submit-feedback-clicked(api-base-url, feedback-type, feedback-title, feedback-message, feedback-job-id); } }
+                                            Button { text: t-feedback-refresh; enabled: is-signed-in && api-base-url != "" && !is-billing-busy; clicked => { is-billing-busy = true; refresh-feedback-clicked(api-base-url); } }
+                                            Text { text: feedback-status; font-size: 12px; color: color-text-muted; vertical-alignment: center; overflow: elide; horizontal-stretch: 1; }
+                                        }
+                                        HorizontalBox {
+                                            spacing: 10px;
+                                            Text { text: t-feedback-threads + " (" + feedback-threads.length + ")"; font-size: 14px; font-weight: 700; color: color-text-primary; }
+                                        }
+                                        if feedback-threads.length == 0: Text { text: t-feedback-empty; font-size: 12px; color: color-text-muted; wrap: word-wrap; }
+                                        ListView {
+                                            visible: feedback-threads.length > 0;
+                                            height: 390px;
+                                            for row[idx] in feedback-threads: Rectangle {
+                                                min-height: 52px;
+                                                border-radius: 6px;
+                                                border-color: color-border;
+                                                background: Math.mod(idx, 2) == 0 ? color-surface : color-surface-alt;
+                                                VerticalBox {
+                                                    padding: 10px;
+                                                    spacing: 4px;
+                                                    HorizontalBox {
+                                                        spacing: 8px;
+                                                        StatusPill { text: row.feedback-type; bg: row.feedback-type == "issue" ? #fef2f2 : #eff6ff; fg: row.feedback-type == "issue" ? color-danger : color-accent; }
+                                                        StatusPill { text: row.status; bg: row.status == "open" ? #fef2f2 : (row.status == "resolved" ? #ecfdf5 : #eff6ff); fg: row.status == "open" ? color-danger : (row.status == "resolved" ? color-success : color-warning); }
+                                                        StatusPill { text: row.priority; bg: row.priority == "high" || row.priority == "urgent" ? #fef2f2 : #eff6ff; fg: row.priority == "high" || row.priority == "urgent" ? color-danger : color-text-muted; }
+                                                        Text { text: row.title; horizontal-stretch: 1; font-size: 13px; font-weight: 600; color: color-text-primary; overflow: elide; }
+                                                    }
+                                                    Text { text: "Job: " + row.conversion-job-id + " | Msgs: " + row.message-count + " | Updated: " + row.latest-message-at; font-size: 11px; color: color-text-muted; overflow: elide; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        if selected-page == 6: Rectangle {
+                            background: color-window-bg;
+                            VerticalBox {
+                                padding: 22px;
+                                spacing: 14px;
+                                Rectangle {
+                                    border-radius: 8px;
+                                    border-color: color-border;
+                                    background: color-surface;
+                                    VerticalBox {
+                                        padding: 22px;
+                                        spacing: 16px;
+                                        HorizontalBox {
+                                            spacing: 18px;
+                                            Image { source: @image-url("assets/app_icon.png"); width: 76px; height: 76px; image-fit: contain; }
+                                            VerticalBox {
+                                                spacing: 5px;
+                                                Text { text: "Tex2Doc"; font-size: 26px; font-weight: 700; color: color-text-primary; }
+                                                Text { text: "开发公司：启哲科技"; font-size: 14px; font-weight: 600; color: color-accent; }
+                                                Text { text: "面向科研写作、期刊投稿、机构归档和企业文档流转的智能文档转换产品。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                            }
+                                        }
+                                        Rectangle { height: 1px; background: color-border; }
+                                        Text { text: "项目目标"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "将复杂 TeX/LaTeX 项目稳定转换为可编辑、可审阅、可交付的 Word 文档，并提供转换、质检、记录追溯和商业化运营的一体化工作台。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                        Text { text: "主要功能"; font-size: 16px; font-weight: 700; color: color-text-primary; }
+                                        Text { text: "• TeX/LaTeX 项目路径或 ZIP 输入，生成 DOCX 与报告。\n• 云端语义转换、本地桌面转换和任务历史记录。\n• 兼容性分析、期刊模板适配、转换日志和诊断导出。\n• 账号、套餐、兑换码、用量额度、反馈和管理端运营能力。"; font-size: 13px; color: color-text-secondary; wrap: word-wrap; }
+                                    }
+                                }
                             }
                         }
                     }

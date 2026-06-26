@@ -9,6 +9,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
     // Convert button (local engine, upload-based)
     let app_state_clone = Arc::clone(&app_state);
     let ui_weak = ui.as_weak();
+    let ui_weak_cb = ui_weak.clone();
     ui.on_convert_clicked(
         move |upload_path: slint::SharedString,
               main_tex: slint::SharedString,
@@ -36,6 +37,12 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 None,
                 None,
             );
+            let base_url = if let Some(ui_instance) = ui_weak_cb.upgrade() {
+                ui_instance.get_api_base_url().to_string()
+            } else {
+                String::new()
+            };
+            let token = app_state_clone.auth_token();
             let app = Arc::clone(&app_state_clone);
             let ui_weak = ui_weak.clone();
 
@@ -67,6 +74,8 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                     .unwrap_or("upload");
 
                 let result = crate::cloud_convert::convert_local_blocking(
+                    &base_url,
+                    token.clone(),
                     &bytes,
                     file_name,
                     &main_tex_str,
@@ -74,6 +83,12 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                     &profile,
                     &quality,
                 );
+
+                let usage_res = if let Some(ref t) = token {
+                    crate::cloud_account::fetch_usage_blocking(&base_url, t).ok()
+                } else {
+                    None
+                };
 
                 let job_id = crate::commands::generate_job_id();
                 match &result {
@@ -97,6 +112,15 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                         ui.set_is_converting(false);
                         ui.set_conversion_progress(1.0);
                         ui.set_recent_jobs(recent_jobs.into());
+
+                        if let Some(usage) = usage_res {
+                            let remaining = usage.cloud_conversions_limit.saturating_sub(usage.cloud_conversions_used) as i32;
+                            let total = usage.cloud_conversions_limit as i32;
+                            ui.set_quota_remaining(remaining);
+                            ui.set_quota_total(total);
+                            ui.set_usage_status(crate::cloud_account::usage_line(&usage).into());
+                            app.set_quota_remaining(Some(remaining as usize));
+                        }
 
                         match &result {
                             Ok(r) => {
