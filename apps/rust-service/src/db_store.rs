@@ -836,25 +836,8 @@ impl DbStore {
             return Ok(used);
         }
 
-        if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
-            tx.rollback().await.ok();
-            return Err(used);
-        }
-
-        insert_usage_ledger(
-            &mut tx,
-            user_uuid,
-            None,
-            "reserve",
-            1,
-            None,
-            "preview",
-            Some("preview local conversion consumed"),
-        )
-        .await
-        .map_err(|_| used)?;
-        tx.commit().await.map_err(|_| used)?;
-        Ok(used + 1)
+        tx.rollback().await.ok();
+        Err(used)
     }
 
     pub async fn refund_cloud_conversion_for_job(

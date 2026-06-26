@@ -98,6 +98,7 @@ fn main() {
                                 if !email_str.contains('@') {
                                     let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
                                     ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                                    ui.set_is_quick_activated(true);
                                 }
                                 apply_account_session(&app, &ui, &base_url, session);
                             }
@@ -130,6 +131,7 @@ fn main() {
     ui.set_quota_total(0);
     ui.set_use_cloud_engine(false);
     ui.set_is_quick_mode(true);
+    ui.set_is_quick_activated(false);
     ui.set_quick_activation_status("未激活 (Not activated)".into());
     ui.set_usage_status("--".into());
     ui.set_billing_plan_id("pro".into());
@@ -327,6 +329,7 @@ fn main() {
                             persist_settings(None, None, None, None, Some(&base_url), Some(&code));
                             let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
                             ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                            ui.set_is_quick_activated(true);
                             apply_account_session(&app, &ui, &base_url, session);
                             ui.set_toast_message("Activated successfully! (激活成功)".into());
                             ui.set_toast_level("success".into());
@@ -390,6 +393,8 @@ fn main() {
             ui.set_usage_status("--".into());
             ui.set_billing_status(tr_ui(&ui, "billing.status_idle").into());
             ui.set_is_signed_in(false);
+            ui.set_is_quick_activated(false);
+            ui.set_quick_activation_status("未激活 (Not activated)".into());
             ui.set_is_account_busy(false);
             ui.set_is_billing_busy(false);
             ui.set_account_display_name("Guest".into());

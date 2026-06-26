@@ -920,7 +920,19 @@ async fn p8_local_conversion_quota_checking_and_consumption() {
     let client = test_client();
     let token = register_preview_token(&client, addr).await;
 
-    // 1. Check local conversion quota - should be allowed since fresh user gets preview limit (3)
+    // Get user id
+    let me_resp: serde_json::Value = client
+        .get(format!("http://{addr}/v1/me"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send me")
+        .json()
+        .await
+        .expect("me json");
+    let user_id = me_resp["id"].as_str().unwrap();
+
+    // 1. Check local conversion quota - should NOT be allowed initially (no preview limit for local)
     let check_resp: serde_json::Value = client
         .post(format!("http://{addr}/v1/local-conversions/check"))
         .bearer_auth(&token)
@@ -930,26 +942,37 @@ async fn p8_local_conversion_quota_checking_and_consumption() {
         .json()
         .await
         .expect("check json");
-    println!("DEBUG check_resp: {:?}", check_resp);
     
-    assert_eq!(check_resp["allowed"], true);
-    assert_eq!(check_resp["used"], 0);
+    assert_eq!(check_resp["allowed"], false);
+    assert_eq!(check_resp["count_balance"], 0);
 
-    // 2. Consume all 100 preview quotas in a loop
-    for i in 1..=100 {
-        let consume_resp: serde_json::Value = client
-            .post(format!("http://{addr}/v1/local-conversions/consume"))
-            .bearer_auth(&token)
-            .send()
-            .await
-            .expect("send consume")
-            .json()
-            .await
-            .expect("consume json");
-        assert_eq!(consume_resp["consumed"], true, "failed at consumption {}", i);
-    }
+    // 2. Consume should fail with 402
+    let consume_fail_resp = client
+        .post(format!("http://{addr}/v1/local-conversions/consume"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send consume fail");
+    assert_eq!(consume_fail_resp.status(), 402);
 
-    // 3. Check should now be disallowed since preview limit (100) is reached
+    // 3. Recharge via admin
+    let admin = admin_token(&client, addr).await;
+    let _order_resp = client
+        .post(format!("http://{addr}/admin/v1/manual-orders"))
+        .bearer_auth(&admin)
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "package_id": "count_10",
+            "recharge_type": "count"
+        }))
+        .send()
+        .await
+        .expect("send manual order")
+        .json::<serde_json::Value>()
+        .await
+        .expect("manual order json");
+
+    // 4. Check should now be allowed
     let check2_resp: serde_json::Value = client
         .post(format!("http://{addr}/v1/local-conversions/check"))
         .bearer_auth(&token)
@@ -959,17 +982,21 @@ async fn p8_local_conversion_quota_checking_and_consumption() {
         .json()
         .await
         .expect("check 2 json");
-    assert_eq!(check2_resp["allowed"], false);
-    assert_eq!(check2_resp["used"], 100);
+    assert_eq!(check2_resp["allowed"], true);
+    assert_eq!(check2_resp["count_balance"], 10);
 
-    // 4. Attempt 101st consume - should fail with 402 Payment Required
-    let consume_fail_resp = client
+    // 5. Consume should succeed
+    let consume_resp: serde_json::Value = client
         .post(format!("http://{addr}/v1/local-conversions/consume"))
         .bearer_auth(&token)
         .send()
         .await
-        .expect("send consume fail");
-    assert_eq!(consume_fail_resp.status(), 402);
+        .expect("send consume")
+        .json()
+        .await
+        .expect("consume json");
+    assert_eq!(consume_resp["consumed"], true);
+    assert_eq!(consume_resp["balance"], 9);
 
     let _ = shutdown.send(());
 }

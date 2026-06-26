@@ -239,6 +239,7 @@ export component MainWindow inherits Window {
     in-out property <string> settings-saved-at: "";
     in-out property <string> settings-panel-state: "idle";
     in-out property <bool> is-quick-mode: true;
+    in-out property <bool> is-quick-activated: false;
     in-out property <string> quick-activation-status: "未激活";
 
     in-out property <color> color-window-bg: #f6f8fb;
@@ -616,7 +617,7 @@ export component MainWindow inherits Window {
                             Button {
                                 text: is-converting ? t-convert-converting : "本地转换 (Convert Local)";
                                 primary: true;
-                                enabled: !is-converting && upload-path != "" && output-path != "" && is-signed-in;
+                                enabled: !is-converting && upload-path != "" && output-path != "" && is-quick-activated;
                                 clicked => {
                                     is-converting = true;
                                     conversion-progress = 0.15;
@@ -628,7 +629,7 @@ export component MainWindow inherits Window {
                         }
 
                         ProgressIndicator { progress: is-converting ? conversion-progress : 0.0; }
-                        Text { text: status-text == "" ? (is-signed-in ? "就绪。选择输入文件及输出目录后，点击 [本地转换] 进行编译。" : "请在上方输入兑换码激活快捷助手以开始转换。") : status-text; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
+                        Text { text: status-text == "" ? (is-quick-activated ? "就绪。选择输入文件及输出目录后，点击 [本地转换] 进行编译。" : "请在上方输入兑换码激活快捷助手以开始转换。") : status-text; font-size: 12px; color: color-text-secondary; wrap: word-wrap; }
                     }
                 }
             }

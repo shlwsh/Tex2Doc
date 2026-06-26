@@ -1204,14 +1204,13 @@ async fn check_local_conversion(
             valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
         });
     let used = state.cloud_conversions_used(&session.id).await;
-    let preview_limit = PREVIEW_CLOUD_CONVERSION_LIMIT;
-    let allowed = valid_until_active || entitlement.count_balance > 0 || (used < preview_limit);
+    let allowed = valid_until_active || entitlement.count_balance > 0;
     Ok(Json(json!({
         "allowed": allowed,
         "valid_until_active": valid_until_active,
         "count_balance": entitlement.count_balance,
         "used": used,
-        "limit": preview_limit,
+        "limit": 0,
     })))
 }
 
