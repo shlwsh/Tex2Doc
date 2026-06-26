@@ -260,35 +260,35 @@ runs-on: ubuntu-22.04
 步骤：
 
 1. Checkout 代码。
-2. 安装 Linux 原生依赖。
-3. 安装 Rust stable。
-4. 缓存 cargo。
-5. 构建 Rust 服务端：
+1. 安装 Linux 原生依赖。
+1. 安装 Rust stable。
+1. 缓存 cargo。
+1. 构建 Rust 服务端：
 
 ```bash
 cargo build -p doc-server --release
 ```
 
-6. 安装 Flutter stable。
-7. 构建 Home Web：
+1. 安装 Flutter stable。
+1. 构建 Home Web：
 
 ```bash
 flutter build web --release --target lib/main.dart --base-href /
 ```
 
-8. 构建 User Web：
+1. 构建 User Web：
 
 ```bash
 flutter build web --release --target lib/main_user.dart --base-href /user/
 ```
 
-9. 构建 Admin Web：
+1. 构建 Admin Web：
 
 ```bash
 flutter build web --release --target lib/main_admin.dart --base-href /admin/
 ```
 
-10. 归档产物：
+1. 归档产物：
 
 ```text
 tex2doc-production.tar.gz
@@ -299,20 +299,20 @@ tex2doc-production.tar.gz
 步骤：
 
 1. 下载 `tex2doc-production.tar.gz`。
-2. 写入临时 SSH key。
-3. 配置 SSH。
-4. 上传产物。
-5. 解压到新 release 目录。
-6. 更新 `/opt/tex2doc/current` 软链接。
-7. 重启 `tex2doc-server`。
-8. 校验 nginx 配置并 reload。
-9. 调用本机健康检查：
+1. 写入临时 SSH key。
+1. 配置 SSH。
+1. 上传产物。
+1. 解压到新 release 目录。
+1. 更新 `/opt/tex2doc/current` 软链接。
+1. 重启 `tex2doc-server`。
+1. 校验 nginx 配置并 reload。
+1. 调用本机健康检查：
 
 ```bash
 curl -fsS http://127.0.0.1:2624/api/v1/health
 ```
 
-10. 清理旧 release，仅保留最近 5 个版本。
+1. 清理旧 release，仅保留最近 5 个版本。
 
 ## 10. SSH 上传实现说明
 
@@ -351,7 +351,11 @@ ServerAliveCountMax 6
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y nginx postgresql postgresql-contrib postgresql-client tar unzip ca-certificates openssl
+sudo apt-get install -y nginx postgresql postgresql-contrib postgresql-client tar unzip ca-certificates openssl \
+  texlive-xetex texlive-luatex texlive-latex-recommended texlive-latex-extra \
+  texlive-lang-chinese texlive-bibtex-extra latexmk fontconfig fonts-noto-cjk fonts-noto-cjk-extra
+
+sudo fc-cache -fv
 ```
 
 创建目录：
@@ -376,6 +380,7 @@ sudo -u postgres psql -c "ALTER DATABASE docdb OWNER TO tex2doc_app;"
 DOC_SERVER_ADDR=127.0.0.1:2624
 DATABASE_URL=postgres://tex2doc_app:REPLACE_ME@127.0.0.1:5432/docdb
 RUST_LOG=info
+TEX2DOC_STATIC_DIR=/opt/tex2doc/current/static
 TEX2DOC_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD=REPLACE_ME
 ```
@@ -742,4 +747,3 @@ sudo tail -n 120 /var/log/nginx/error.log
 - 将 GitHub 上传产物链路改为对象存储中转，以提升大文件上传速度。
 - 恢复 macOS 矩阵前先单独建非阻塞 workflow 观察 runner 排队情况。
 - 为生产数据库建立定时备份和恢复演练。
-

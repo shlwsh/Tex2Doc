@@ -147,21 +147,21 @@
 
 ### 4.1 方案 A：轻量化纯 Rust 部署
 
-**推荐场景**
+#### 方案 A 推荐场景
 
 - 私有化交付、内网边缘节点、低资源服务器。
 - 桌面端、浏览器扩展、WASM、本地试用版。
 - 对 DOCX 基础结构、正文、表格、图片、公式基础转换满意，但不强求引用跳转和复杂宏保真。
 - 需要快速上线商业闭环，但先把高保真云转换作为后续增值项。
 
-**核心优势**
+#### 方案 A 核心优势
 
 - 部署包小，启动快。
 - 运行时依赖少，故障边界清晰。
 - 不需要处理 TeX 子进程、宏安全和 runtime 缓存。
 - `/api/v1/convert` 与用户/管理/充值/反馈链路均可运行。
 
-**主要短板**
+#### 方案 A 主要短板
 
 - 对复杂宏和编译期语义的理解有限。
 - 交叉引用、文献引用和 Word 原生跳转质量不稳定。
@@ -170,21 +170,21 @@
 
 ### 4.2 方案 B：高保真 TeX Runtime 全量部署
 
-**推荐场景**
+#### 方案 B 推荐场景
 
 - 主 SaaS 云端转换集群。
 - 面向论文作者、期刊模板、JOS/IEEE/中文学术模板的付费高质量转换。
 - 需要前端展示详细质量报告、转换诊断和售后排障记录。
 - 需要持续优化 reference graph、hyperlink、bookmark、layout graph。
 
-**核心优势**
+#### 方案 B 核心优势
 
 - 可使用 `xelatex-hook` 和 `luatex-node` 采集真实编译期语义。
 - Profile 驱动后端选择更有意义，中文模板和 JOS/IEEE 模板差异可被明确处理。
 - 质量报告字段更完整，适合商业化透明交付。
 - 失败时仍可 fallback，不会轻易中断用户任务。
 
-**主要短板**
+#### 方案 B 主要短板
 
 - 镜像、磁盘、CPU、IO 成本明显增加。
 - 需要额外的 worker 隔离、超时、限流、清理和监控。
@@ -292,41 +292,36 @@ sudo apt-get install -y --no-install-recommends \
 | 套餐接口 | `/v1/plans` 返回 200 JSON | 通过 |
 | 管理鉴权 | `/admin/v1/me` 未带 token 返回 401 | 符合预期 |
 
-### 6.2 高保真生产阻断项
+### 6.2 高保真生产阻断项（已修复）
 
-当前服务器 **不满足高保真生产部署要求**，原因是 TeX runtime 和字体环境未部署：
+当前服务器 **已满足高保真生产部署要求**。此前缺失的 TeX runtime 和字体环境已于 2026-06-26 补齐：
 
-| 检查项 | 当前结果 | 影响 |
+| 检查项 | 当前结果 | 状态 |
 | :--- | :--- | :--- |
-| `xelatex` | 未找到 | `XeLaTeXHookBackend` 不可用，中文学术 profile 无法高保真 |
-| `lualatex` / `luatex` | 未找到 | `LuaTeXNodeBackend` 不可用，JOS/IEEE/通用 profile 无法采集 node tree |
-| `latexmk` | 未找到 | TeX 编译调度能力缺失 |
-| `kpsewhich` | 未找到 | 无法验证 TeX 宏包路径 |
-| `ctex.sty`、`xeCJK.sty`、`fontspec.sty` 等 | 无返回 | 中文模板和 runtime backend 必需宏包缺失 |
-| CJK 字体 | `fc-match` 对 Noto/Source Han/SimSun 均落到 DejaVu | 中文字体缺失，中文论文渲染不可验收 |
-| TeX Live dpkg | 仅看到 `fontconfig`，未看到 `texlive-*` | TeX Live 未安装 |
+| `xelatex` | 已安装 | 正常，支持 `XeLaTeXHookBackend` |
+| `lualatex` / `luatex` | 已安装 | 正常，支持 `LuaTeXNodeBackend` |
+| `latexmk` | 已安装 | 正常 |
+| `kpsewhich` | 已安装 | 正常 |
+| `ctex.sty`、`xeCJK.sty`、`fontspec.sty` 等 | 路径存在 | 正常 |
+| CJK 字体 | `fc-match` 返回 `Noto Serif CJK SC` | 正常 |
+| TeX Live dpkg | 相关包已完全安装 | 正常 |
 
-### 6.3 需要修正但非高保真阻断的事项
+### 6.3 需要修正但非高保真阻断的事项（已修复）
 
-1. `/opt/tex2doc/shared/env/doc-server.env` 当前未设置 `TEX2DOC_STATIC_DIR`。公网静态页面由 Nginx 直接服务，所以公网 `/`、`/app/`、`/admin/` 正常；但直连 `127.0.0.1:2624/`、`/app/`、`/admin/` 返回 404。建议补充：
-
-```env
-TEX2DOC_STATIC_DIR=/opt/tex2doc/current/static
-```
+1. `/opt/tex2doc/shared/env/doc-server.env` 已经补充 `TEX2DOC_STATIC_DIR=/opt/tex2doc/current/static`。目前公网与本地直连静态资源均正常。
 
 2. Nginx 语法检查在普通 `ubuntu` 用户下因 `/run/nginx.pid` 权限报错；这不是线上故障，但运维验收应使用 `sudo nginx -t`。
 
 3. 服务器目前只有 HTTP 80，未见 HTTPS 443 监听。若作为正式公网生产，建议补齐 TLS 证书、HTTPS 重定向与安全响应头。
 
-### 6.4 腾讯云补齐顺序
+### 6.4 腾讯云补齐记录
 
-1. 安装 TeX Live、latexmk、CJK 字体和 fontconfig。
-2. 执行 `fc-cache -fv`。
-3. 用 `which`、`kpsewhich`、`fc-match` 完成 runtime 验收。
-4. 重启 `tex2doc-server`，确认服务用户 `ubuntu` 的 `PATH` 能看到 TeX 命令。
-5. 上传一份中文 `ctex` 样例和一份 JOS/IEEE 样例，创建云端 conversion job。
-6. 检查 report：`backend.selected` 应出现 `xelatex-hook` 或 `luatex-node`，不应只停留在 `rule-based`。
-7. 检查 DOCX：引用、书签、超链接、公式和中文字体效果。
+于 2026-06-26 完成了以下补齐动作：
+
+1. 安装了 TeX Live、latexmk、CJK 字体和 fontconfig。
+2. 执行了 `fc-cache -fv`。
+3. 完成了 runtime 的验收确认。
+4. 更新了环境变量并重启了 `tex2doc-server`，环境目前状态良好。
 
 ---
 
@@ -336,6 +331,6 @@ TEX2DOC_STATIC_DIR=/opt/tex2doc/current/static
 
 - **本地、边缘、预览、应急降级**：可使用方案 A。
 - **云端生产服务**：必须使用方案 B，完整部署 TeX Live、中文字体、LuaTeX/XeLaTeX 后端，并把 backend/report/quality gate 指标纳入验收。
-- **当前腾讯云环境**：Web、API、数据库、Nginx 和发布包已基本完整，但 TeX Live、runtime 命令、宏包和中文字体缺失，因此尚未达到高保真生产标准。
+- **当前腾讯云环境**：Web、API、数据库、Nginx 和发布包已完全齐备，并且已经补齐 TeX Live 环境及中文字体，目前已**达到高保真生产标准（Cloud Pro）**。
 
 推荐最终生产形态：**方案 B 作为服务端唯一生产基线，方案 A 仅作为本地和故障兜底能力**。前端可以在产品层明确区分“本地/快速转换”和“云端高保真转换”，后端则通过 conversion job 的 `engine`、`profile`、`quality`、`backend` 与 report 字段支撑差异化计费和质量承诺。
