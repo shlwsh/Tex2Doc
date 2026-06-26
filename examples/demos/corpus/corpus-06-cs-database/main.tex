@@ -1,0 +1,116 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{tikz}
+\usetikzlibrary{shapes.geometric,arrows,positioning,calc,er}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+
+% ---- Custom macros (deeply nested) ----
+\newcommand{\Rel}[1]{\text{Rel}(#1)}
+\newcommand{\Proj}[2]{\pi_{#1}\left(#2\right)}
+\newcommand{\Select}[3]{\sigma_{#1}\left(#2,#3\right)}
+\newcommand{\Join}[2]{{#1}\bowtie{#2}}
+\newcommand{\semijoin}[2]{{#1}\ltimes{#2}}
+\newcommand{\naturaljoin}[2]{{#1}\Join{#2}}
+
+\graphicspath{{./figures/}}
+
+\title{Database Systems: Entity-Relationship Modeling and Relational Algebra}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a comprehensive study of database modeling techniques, covering
+entity-relationship diagrams and relational algebra. Our analysis demonstrates
+the application of these concepts to real-world scenarios.
+\end{abstract}
+
+\section{Entity-Relationship Modeling}
+
+Entity-Relationship (ER) diagrams provide a visual representation of data
+structures in database systems.
+
+% ---- TikZ ER Diagram ----
+\begin{figure}[ht]
+  \centering
+  \begin{tikzpicture}[
+    node distance=2.5cm,
+    entity/.style={rectangle,draw,fill=blue!10,minimum width=2.5cm},
+    attr/.style={ellipse,draw,fill=gray!10,minimum width=1.8cm},
+    rel/.style={diamond,draw,fill=green!10,minimum width=2cm,aspect=2}
+  ]
+    \node[entity] (student) {Student};
+    \node[attr,above of=student] (sid) {\underline{ID}};
+    \node[attr,left of=sid] (sname) {Name};
+    \node[attr,right of=sid] (smajor) {Major};
+    \draw (sid) -- (student);
+    \draw (sname) -- (sid);
+    \draw (smajor) -- (sid);
+
+    \node[entity,right=3cm of student] (course) {Course};
+    \node[attr,above of=course] (cid) {\underline{Code}};
+    \node[attr,right of=cid] (ctitle) {Title};
+    \draw (cid) -- (course);
+    \draw (ctitle) -- (cid);
+
+    \node[rel,right=1.5cm of student] (enroll) {Enroll};
+    \node[attr,below of=enroll] (grade) {Grade};
+
+    \draw (student) -- node[above] {N} (enroll);
+    \draw (course)  -- node[above] {M} (enroll);
+    \draw (enroll)  -- (grade);
+  \end{tikzpicture}
+  \caption{Entity-Relationship diagram for a university database.}
+  \label{fig:er}
+\end{figure}
+
+\section{Relational Algebra}
+
+Relational algebra provides theoretical foundations for query languages.
+
+% ---- Relational algebra formulas (heavy custom macros) ----
+\begin{align}
+  &\Proj{\text{Name},\text{Grade}}(
+    \Select{\text{Grade} > 3.5}{\sigma}{\Join{\sigma}{\text{Student}}}
+  ) \label{eq:ra} \\
+  &\semijoin{\Rel{\text{Enroll}}}{\Rel{\text{Course}}}
+    \;=\;
+    \Proj{\text{SID}}{\Rel{\text{Enroll}}}
+    \;\cap\;
+    \Proj{\text{SID}}{\Join{\Rel{\text{Enroll}}}{\Rel{\text{Course}}}} \label{eq:semijoin}
+\end{align}
+
+\section{Query Examples}
+
+\begin{table}[ht]
+\centering
+\caption{Sample relational algebra queries}
+\label{tab:queries}
+\begin{tabular}{lp{6cm}}
+  \toprule
+  Query & Expression \\
+  \midrule
+  Q1 & $\Proj{\text{Name}}{\Select{\text{Major}=\text{CS}}{\text{Student}}}$ \\
+  Q2 & $\Proj{\text{Title}}{\naturaljoin{\text{Enroll}}{\text{Course}}}$ \\
+  Q3 & $\Proj{\text{Name}}{\semijoin{\text{Enroll}}{\text{Course}}}$ \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+ER modeling and relational algebra are fundamental tools for database design
+and query formulation.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

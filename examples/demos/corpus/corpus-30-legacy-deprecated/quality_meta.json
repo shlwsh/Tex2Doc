@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-30-legacy-deprecated",
+  "corpus_name": "Legacy / Deprecated Packages",
+  "corpus_name_zh": "废弃宏包测试",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["epsfig", "eqnarray", "times", "latexsym", "makeidx", "hyperref"],
+  "focus_areas": ["legacy_packages", "deprecated_syntax"],
+  "hard_elements": ["epsfig", "eqnarray", "times", "latexsym", "makeidx"],
+  "thresholds": {
+    "parse_score_min": 60,
+    "semantic_score_min": 50,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 60,
+    "citation_resolved_rate_min": 60
+  },
+  "expected_warnings": ["Deprecated packages may cause warnings or errors"],
+  "expected_fallbacks": ["Some deprecated syntax may not render"],
+  "references": { "type": "bibtex", "count": 2 }
+}

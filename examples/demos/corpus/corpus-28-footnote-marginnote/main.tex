@@ -1,0 +1,49 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,sidenotes,marginpar,hyperref}
+\usepackage{url}
+\usepackage{mparswitch}
+
+\title{Footnote and Marginpar Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests footnote and marginpar handling with sidenotes, long footnotes,
+and margin notes.
+Focus: long footnotes spanning pages, sidenotes.
+\end{abstrct}
+
+\section{Regular Footnotes}
+
+This text has a regular footnote.\footnote{This is a regular footnote.}
+
+This text has multiple footnotes.\footnote{First footnote.}\footnote{Second footnote.}
+
+\section{Marginpar Test}
+
+This text has a margin note.\marginpar{This is a margin note on the side.}
+
+\section{Sidenotes}
+
+This text uses sidenotes for annotations.\sidenote{This is a sidenote that appears in the margin.}
+
+\section{Long Footnote}
+
+This section has a long footnote that tests how the converter handles
+extended footnote content spanning multiple sentences and paragraphs.\footnote{This is a very long footnote that contains substantial content. It tests how the converter handles extended footnotes. The footnote includes multiple sentences and tests paragraph formatting within footnotes. Additional content is provided to ensure the footnote is long enough to test various scenarios. The footnote should be preserved as-is during conversion.}
+
+\section{Mixed Content}
+
+Multiple footnotes in sequence.\footnote{First brief note.}\marginpar{Margin note in between.}\footnote{Second brief note.}
+
+\section{Conclusion}
+
+Footnote and marginpar tests complete.
+
+\end{document}

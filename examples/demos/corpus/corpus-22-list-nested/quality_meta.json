@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-22-list-nested",
+  "corpus_name": "List Nesting Stress",
+  "corpus_name_zh": "列表嵌套压力测试",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["enumitem", "hyperref"],
+  "focus_areas": ["nested_lists", "list_customization"],
+  "hard_elements": ["6-level nesting", "enumitem custom labels"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Deep nesting may flatten in DOCX"],
+  "expected_fallbacks": ["List structure may simplify"],
+  "references": { "type": "bibtex", "count": 2 }
+}

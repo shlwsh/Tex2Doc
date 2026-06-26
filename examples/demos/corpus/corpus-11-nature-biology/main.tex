@@ -1,0 +1,79 @@
+\documentclass{nature}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{biblatex}
+\usepackage{hyperref}
+\addbibresource{refs.bib}
+
+\graphicspath{{./figures/}}
+
+\title{Single-cell RNA sequencing reveals novel insights into cellular heterogeneity}
+
+\author{First Author$^{1,2}$, Second Author$^{1,3}$, and Third Author$^{1,4}$}
+
+\begin{document}
+
+\begin{abst}
+Single-cell RNA sequencing has revolutionized our understanding of cellular
+heterogeneity in complex tissues. Here we present a comprehensive analysis of
+cell types in mammalian brain tissue using scRNA-seq~\supercite{zheng2017}. We
+identify 47 distinct cell populations and characterize their transcriptional
+signatures. Our findings reveal previously unknown cell types and provide insights
+into brain development and disease mechanisms.
+\end{abst}
+
+\maketitle
+
+\section{INTRODUCTION}
+
+The advent of single-cell RNA sequencing (scRNA-seq) has enabled researchers to
+profile gene expression at unprecedented resolution~\supercite{tabula,regev2017}.
+This technology has transformed our understanding of cellular diversity in
+complex tissues.
+
+\section{RESULTS}
+
+We performed scRNA-seq on 50,000 cells from adult mouse brain tissue.
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=0.9\textwidth]{fig-overview.pdf}
+  \caption{Single-cell analysis overview. a, UMAP visualization of cell types.
+    b, Marker gene expression heatmap. c, Cell type proportions.}
+  \label{fig:overview}
+\end{figure}
+
+\begin{table}[ht]
+\centering
+\caption{Major cell type abundances in the dataset.}
+\label{tab:celltypes}
+\begin{tabular}{lcc}
+  \toprule
+  Cell Type & Count & Percentage \\
+  \midrule
+  excitatory neurons & 15,234 & 30.5\% \\
+  inhibitory neurons & 8,567 & 17.1\% \\
+  astrocytes & 6,789 & 13.6\% \\
+  oligodendrocytes & 5,432 & 10.9\% \\
+  microglia & 2,156 & 4.3\% \\
+  other & 11,822 & 23.6\% \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{DISCUSSION}
+
+Our study reveals unprecedented cellular diversity in the mammalian brain.
+The transcriptional profiles we characterized provide a foundation for
+understanding brain function and disease.
+
+\section{METHODS}
+
+Cells were dissociated using papain and loaded onto the 10x Chromium platform.
+Sequencing was performed on an Illumina NovaSeq 6000.
+
+\printbibliography
+
+\end{document}

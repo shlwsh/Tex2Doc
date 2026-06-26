@@ -1,7 +1,7 @@
 # Tex2Doc 转换引擎质量验证 - 30 个基线 Corpus 生成方案
 
 > 日期：2026-06-26
-> 输出目录：`docs-zh/examples`
+> 输出目录：`examples/demos`
 > 目标：为 Tex2Doc 提供"可度量、可解释"的质量基线，覆盖主流期刊和极端排版场景。
 
 ---
@@ -105,7 +105,7 @@
 ## 4. Corpus 目录结构
 
 ```
-docs-zh/examples/corpus/
+examples/demos/corpus/
 ├── corpus-01-ieee-trans/
 │   ├── main.tex
 │   ├── refs.bib
@@ -247,7 +247,7 @@ docs-zh/examples/corpus/
 
 ### Phase 1：建立骨架（Week 1）
 
-- 在 `docs-zh/examples/corpus/` 下创建 30 个目录。
+- 在 `examples/demos/corpus/` 下创建 30 个目录。
 - 复用 `examples/journals/` 中已有的 realistic 文件，扩充符合对应 Corpus 类型的复杂元素。
 - 生成 `_shared/` 中的共享图形资源（SVG placeholder）。
 

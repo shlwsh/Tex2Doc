@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-02-cvpr",
+  "corpus_name": "CVPR Conference Paper",
+  "corpus_name_zh": "CVPR 会议论文",
+  "tier": "golden",
+  "profile": "cvpr",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["IEEEtran", "subfig", "amsmath", "booktabs", "cite", "hyperref"],
+  "focus_areas": ["float", "subfigure", "cross_column_table", "numeric_citation"],
+  "hard_elements": ["subfig", "\\subfloat", "\\multirow in resizebox"],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 95
+  },
+  "expected_warnings": ["subfig: may require manual figure grouping in DOCX"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 15 }
+}

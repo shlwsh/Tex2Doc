@@ -1,0 +1,99 @@
+\documentclass{report}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,booktabs,fancyhdr,tocbibind,hyperref}
+\usepackage{url}
+
+\fancyhf{}
+\fancyhead[L]{\leftmark}
+\fancyhead[R]{\thepage}
+\fancyfoot[C]{\thepage}
+
+\graphicspath{{./figures/}}
+
+\title{Long Report / Thesis Template}
+
+\author{Test Author\\
+        Department of Computer Science\\
+        Example University}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\chapter{Introduction}
+\label{chap:intro}
+
+\section{Background}
+
+This is a report introduction with references~\cite{ref1}.
+
+\section{Objectives}
+
+The objectives of this report are listed below.
+
+\chapter{Literature Review}
+\label{chap:lit}
+
+This chapter reviews relevant literature.
+
+\chapter{Methodology}
+\label{chap:method}
+
+This chapter describes the methodology.
+
+\chapter{Results}
+\label{chap:results}
+
+This chapter presents the results.
+
+\begin{figure}[ht]
+  \centering
+  \rule{6cm}{4cm}
+  \caption{Sample Figure}
+  \label{fig:sample}
+\end{figure}
+
+\begin{table}[ht]
+  \centering
+  \caption{Sample Table}
+  \label{tab:sample}
+  \begin{tabular}{ccc}
+    \toprule
+    A & B & C \\
+    \midrule
+    1 & 2 & 3 \\
+    4 & 5 & 6 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\chapter{Conclusion}
+\label{chap:concl}
+
+This chapter concludes the report.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\appendix
+\chapter{Additional Material}
+\label{app:A}
+
+This is an appendix with additional material.
+
+\section{Supplementary Data}
+
+Supplementary data tables and figures are provided here.
+
+\begin{thebibliography}{99}
+\addtolength{\itemsep}{-0.5ex}
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{thebibliography}
+
+\end{document}

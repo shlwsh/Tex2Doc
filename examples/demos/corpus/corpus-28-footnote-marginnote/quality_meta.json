@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-28-footnote-marginnote",
+  "corpus_name": "Footnote and Marginpar",
+  "corpus_name_zh": "脚注与边注",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["sidenotes", "marginpar", "marginfix", "hyperref"],
+  "focus_areas": ["footnote_handling", "margin_notes"],
+  "hard_elements": ["page-spanning footnotes", "sidenotes", "marginpar"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Margin notes may not translate"],
+  "expected_fallbacks": ["Sidenotes may become regular footnotes"],
+  "references": { "type": "bibtex", "count": 2 }
+}

@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-11-nature-biology",
+  "corpus_name": "Nature / Science Biology",
+  "corpus_name_zh": "Nature/Science 生物期刊",
+  "tier": "golden",
+  "profile": "nature",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["nature", "biblatex", "amsmath", "graphicx", "hyperref"],
+  "focus_areas": ["supercite", "biblatex_integration", "multi_panel_figure"],
+  "hard_elements": ["nature class", "biblatex with .bbl", "4 subfigures", "\\supercite"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["biblatex: may need .bbl pre-processing", "nature: special page layout"],
+  "expected_fallbacks": [],
+  "references": { "type": "biblatex", "count": 15 }
+}

@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-05-cs-algorithms",
+  "corpus_name": "CS Algorithms & Code",
+  "corpus_name_zh": "计算机算法与代码",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 10,
+  "packages": ["listings", "minted", "amsmath", "booktabs", "hyperref"],
+  "focus_areas": ["code_listing", "syntax_highlighting", "algorithm_environment"],
+  "hard_elements": ["listings", "minted", "multi_language", "page_break_algorithm"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["minted: may require external pygmentize", "listings: syntax highlighting may degrade"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 5 }
+}

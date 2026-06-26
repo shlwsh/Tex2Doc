@@ -1,0 +1,44 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,biblatex,hyperref}
+\usepackage{url}
+
+\addbibresource{refs.bib}
+
+\title{BibLaTeX Complex References: Grouped Bibliography}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests the handling of BibLaTeX with grouped bibliography, multiple
+citation styles, and backref functionality.
+Focus: grouped bibliography, backref.
+\end{abstrct}
+
+\section{Introduction}
+
+We cite articles \parencite{einstein1905} and books \textcite{knuth1984}.
+See also \supercite{Dirac1953}.
+
+\subsection{Grouped Bibliography}
+
+\begin{refsection}
+\nocite{physics1,physics2,physics3}
+\printbibliography[title={Physics References}]
+\end{refsection}
+
+\begin{refsection}
+\nocite{cs1,cs2,cs3}
+\printbibliography[title={Computer Science References}]
+\end{refsection}
+
+\printbibliography[title={General References}]
+
+\bibliography{refs}
+
+\end{document}

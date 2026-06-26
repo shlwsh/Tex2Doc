@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-21-macro-expansion",
+  "corpus_name": "Macro Expansion Stress",
+  "corpus_name_zh": "宏展开压力测试",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["xparse", "etoolbox", "hyperref"],
+  "focus_areas": ["macro_expansion", "expl3_syntax", "recursive_macros"],
+  "hard_elements": ["ExplSyntaxOn", "xparse commands", "recursive macros", "etoolbox"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Unexpanded macros may appear in output"],
+  "expected_fallbacks": ["Some macros may not expand correctly"],
+  "references": { "type": "bibtex", "count": 2 }
+}

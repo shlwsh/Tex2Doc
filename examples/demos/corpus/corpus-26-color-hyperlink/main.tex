@@ -1,0 +1,74 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,xcolor,colortbl,mdfactory,hyperref}
+\usepackage{url}
+
+\definecolor{lightblue}{rgb}{0.9,0.95,1}
+\definecolor{lightgreen}{rgb}{0.9,1,0.9}
+\definecolor{lightyellow}{rgb}{1,1,0.9}
+
+\title{Color and Hyperlink Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests color and hyperlink handling with xcolor, colortbl,
+hyperref, and mdframed.
+Focus: xcolor, colortbl, hyperref.
+\end{abstrct}
+
+\section{Text Colors}
+
+This is normal text. \textcolor{blue}{This is blue text.}
+\textcolor{red}{This is red text.}
+\textcolor{green}{This is green text.}
+
+\section{Background Colors}
+
+\colorbox{yellow}{Yellow background.}
+
+\section{Table with Colors}
+
+\begin{table}[ht]
+\centering
+\caption{Table with colored rows}
+\label{tab:colors}
+\begin{tabular}{lll}
+  \toprule
+  \rowcolor{lightblue}
+  Header 1 & Header 2 & Header 3 \\
+  \midrule
+  \rowcolor{lightgreen}
+  Cell A1 & Cell A2 & Cell A3 \\
+  Cell B1 & Cell B2 & Cell B3 \\
+  \rowcolor{lightyellow}
+  Cell C1 & Cell C2 & Cell C3 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Hyperlinks}
+
+\begin{itemize}
+  \item URL: \url{https://www.example.org}
+  \item Link: \href{https://www.example.org}{Example Website}
+  \item Email: \hrefmailto:author@example.org}{author@example.org}
+\end{itemize}
+
+\section{Framed Text}
+
+\begin{mdframed}[backgroundcolor=lightblue]
+This text is framed using mdframed with a light blue background.
+It demonstrates how framed text is handled in the conversion.
+\end{mdframed}
+
+\section{Conclusion}
+
+Color and hyperlink tests complete.
+
+\end{document}

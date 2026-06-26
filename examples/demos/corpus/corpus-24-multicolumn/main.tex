@@ -1,0 +1,62 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,multicol,booktabs,hyperref}
+\usepackage{url}
+
+\title{Multicolumn Layout Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests multicolumn layout with multicol, table*/figure* spanning.
+Focus: multicol, table*/figure* spanning.
+\end{abstrct}
+
+\section{Two Column Content}
+
+\begin{multicols}{2}
+This text appears in two columns. Lorem ipsum dolor sit amet, consectetur
+adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna
+aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.
+
+Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore
+eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident.
+
+\columnbreak
+
+More content in the second column. Another paragraph of text that continues
+the discussion. This tests how the conversion handles column breaks and
+the transition between columns.
+\end{multicols}
+
+\section{Three Column Content}
+
+\begin{multicols}{3}
+Column one content with some text. Column two content with more text.
+Column three has additional content. All three columns are rendered here.
+Column one continues. Column two continues. Column three continues.
+\end{multicols}
+
+\section{Table spanning columns}
+
+\begin{center}
+\begin{tabular}{ccc}
+  \toprule
+  A & B & C \\
+  \midrule
+  1 & 2 & 3 \\
+  4 & 5 & 6 \\
+  \bottomrule
+\end{tabular}
+\end{center}
+
+\section{Conclusion}
+
+Multicolumn tests complete.
+
+\end{document}
