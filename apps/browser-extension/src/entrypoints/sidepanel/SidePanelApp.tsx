@@ -16,7 +16,7 @@ import { Avatar } from '@/ui/components/Avatar';
 import { sendToBackground } from '@/browser/messaging';
 import { MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, Session, UsageSummary, FeedbackThread, PlanSummary } from '@/shared/types';
-import { useI18n } from '@/ui/i18n';
+import { useI18n } from '@/ui/i18n/useI18n';
 import type { Tab } from '@/ui/components/Tabs';
 
 export default function SidePanelApp() {

@@ -6,7 +6,8 @@ import { ErrorBoundary } from '@/ui/components/ErrorBoundary';
 import SidePanelApp from './SidePanelApp';
 import '../../style.css';
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const root = document.getElementById('app')!;
+ReactDOM.createRoot(root).render(
   <React.StrictMode>
     <ErrorBoundary>
       <ThemeProvider>

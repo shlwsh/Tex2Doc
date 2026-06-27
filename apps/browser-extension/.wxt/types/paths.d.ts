@@ -3,6 +3,7 @@ import "wxt/browser";
 
 declare module "wxt/browser" {
   export type PublicPath =
+    | ""
     | "/"
     | "/background.js"
     | "/icons/icon128.png"
@@ -12,6 +13,8 @@ declare module "wxt/browser" {
     | "/options.html"
     | "/popup.html"
     | "/sidepanel.html"
+    | "/wasm/doc_engine_bg.wasm"
+    | "/wasm/doc_engine.js"
   type HtmlPublicPath = Extract<PublicPath, `${string}.html`>
   export interface WxtRuntime {
     getURL(path: PublicPath): string;

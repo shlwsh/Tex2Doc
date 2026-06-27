@@ -26,6 +26,7 @@
     "format": "prettier --write \"src/**/*.{ts,tsx}\""
   },
   "dependencies": {
+    "@wxt-dev/module-react": "^1.2.2",
     "idb": "^8.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -50,7 +51,7 @@
     "typescript": "^5.5.3",
     "vite-plugin-pwa": "^0.20.1",
     "vitest": "^1.6.0",
-    "wxt": "^0.19.22"
+    "wxt": "^0.20.27"
   },
   "engines": {
     "node": ">=18.0.0"

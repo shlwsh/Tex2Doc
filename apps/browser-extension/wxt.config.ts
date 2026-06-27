@@ -15,6 +15,8 @@ export default defineConfig({
 
   outDirTemplate: "{{browser}}-mv{{manifestVersion}}{{modeSuffix}}",
 
+  modules: ['@wxt-dev/module-react'],
+
   plugins: [react()],
 
   alias: {
@@ -62,6 +64,9 @@ export default defineConfig({
       default_title: 'Tex2Doc',
     },
     permissions: ['storage', 'downloads', 'contextMenus', 'notifications'],
+    content_security_policy: {
+      extension_pages: "script-src 'self' 'wasm-unsafe-eval'; object-src 'self' blob:; worker-src 'self' blob:",
+    },
     ...(mode === 'edge' ? { side_panel: { default_path: 'sidepanel.html' } } : {}),
     host_permissions: ['https://api.tex2doc.cn/*'],
     optional_host_permissions: [

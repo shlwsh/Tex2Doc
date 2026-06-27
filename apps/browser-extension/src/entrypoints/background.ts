@@ -13,6 +13,7 @@ import { getSettings, getApiBaseUrl } from '@/state/settings-store';
 import { saveJob, getJob, getAllJobs, updateJobStatus } from '@/state/job-store';
 import { downloadBytes } from '@/browser/downloads';
 import { openUrl } from '@/browser/compat';
+import { convertLocal } from '@/conversion/local-wasm';
 import { CONTEXT_MENU_IDS, MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, ConversionJob } from '@/shared/types';
 import { AuthError } from '@/shared/errors';
@@ -64,6 +65,8 @@ async function handleMessage(message: Record<string, unknown>): Promise<unknown>
         return await handleStartConversion(payload);
       case MESSAGE_TYPES.CANCEL_CONVERSION:
         return await handleCancelConversion(payload);
+      case MESSAGE_TYPES.START_WASM_CONVERSION:
+        return await handleStartWasmConversion(payload);
       case MESSAGE_TYPES.FETCH_JOBS:
         return await handleFetchJobs();
       case MESSAGE_TYPES.DOWNLOAD_DOCX:
@@ -335,5 +338,22 @@ async function restorePollingJobs(): Promise<void> {
     if (job.job_id) {
       console.log('[Tex2Doc Background] Restoring job:', job.id);
     }
+  }
+}
+
+async function handleStartWasmConversion(payload: Record<string, unknown>): Promise<unknown> {
+  const { zipBytes, fileName, mainTex } = payload as {
+    zipBytes: number[];
+    fileName: string;
+    mainTex: string;
+  };
+
+  try {
+    const bytes = new Uint8Array(zipBytes);
+    const result = await convertLocal(bytes, { fileName, mainTex });
+    await downloadBytes(result.docxBytes, result.docxFilename);
+    return { success: true, jobId: result.jobId };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'WASM conversion failed' };
   }
 }
