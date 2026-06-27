@@ -9,16 +9,19 @@ import Card from '@/ui/components/Card';
 import Progress from '@/ui/components/Progress';
 import Select from '@/ui/components/Select';
 import Toast from '@/ui/components/Toast';
+import { Tabs } from '@/ui/components/Tabs';
+import { Modal } from '@/ui/components/Modal';
+import { Textarea } from '@/ui/components/Textarea';
+import { Avatar } from '@/ui/components/Avatar';
 import { sendToBackground } from '@/browser/messaging';
 import { MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, Session, UsageSummary, FeedbackThread, PlanSummary } from '@/shared/types';
-import { t, type Locale } from '@/ui/i18n';
-
-type Tab = 'jobs' | 'billing' | 'feedback' | 'account';
+import { useI18n } from '@/ui/i18n';
+import type { Tab } from '@/ui/components/Tabs';
 
 export default function SidePanelApp() {
-  const [locale, setLocale] = useState<Locale>('en');
-  const [activeTab, setActiveTab] = useState<Tab>('jobs');
+  const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState<string>('jobs');
 
   // Session & Usage
   const [session, setSession] = useState<Session | null>(null);
@@ -30,10 +33,17 @@ export default function SidePanelApp() {
 
   // Billing
   const [plans, setPlans] = useState<PlanSummary[]>([]);
+  const [redeemCode, setRedeemCode] = useState('');
 
   // Feedback
   const [feedbackThreads, setFeedbackThreads] = useState<FeedbackThread[]>([]);
-  const [showFeedbackForm, setShowFeedbackForm] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [feedbackTitle, setFeedbackTitle] = useState('');
+  const [feedbackContent, setFeedbackContent] = useState('');
+  const [feedbackType, setFeedbackType] = useState<'issue' | 'requirement' | 'other'>('issue');
+
+  // Toast
+  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
 
   // Load data on mount
   useEffect(() => {
@@ -85,13 +95,15 @@ export default function SidePanelApp() {
     setUsage(null);
   };
 
-  const handleRedeemCode = async (code: string) => {
+  const handleRedeemCode = async () => {
+    if (!redeemCode.trim()) return;
     try {
-      await sendToBackground({ type: MESSAGE_TYPES.REDEEM_CODE, code });
+      await sendToBackground({ type: MESSAGE_TYPES.REDEEM_CODE, code: redeemCode.trim() });
       await loadSession();
-      alert('Code redeemed successfully!');
+      setRedeemCode('');
+      setToast({ type: 'success', message: t('rechargeSuccess') });
     } catch (error) {
-      alert('Failed to redeem code');
+      setToast({ type: 'error', message: t('errors.networkError') });
     }
   };
 
@@ -111,20 +123,70 @@ export default function SidePanelApp() {
         jobId: job.id,
         cloudJobId: job.job_id,
       });
+      setToast({ type: 'success', message: t('download') + ' ' + t('success').toLowerCase() });
     } catch (error) {
       console.error('Download failed:', error);
     }
   };
 
-  // ============================================
-  // Render
-  // ============================================
+  const handleSubmitFeedback = async () => {
+    if (!feedbackTitle.trim() || !feedbackContent.trim()) return;
+    try {
+      await sendToBackground({
+        type: MESSAGE_TYPES.CREATE_FEEDBACK,
+        title: feedbackTitle.trim(),
+        feedbackType: feedbackType,
+        content: feedbackContent.trim(),
+      });
+      setShowFeedbackModal(false);
+      setFeedbackTitle('');
+      setFeedbackContent('');
+      setFeedbackType('issue');
+      setToast({ type: 'success', message: t('feedback') + ' ' + t('success').toLowerCase() });
+    } catch (error) {
+      setToast({ type: 'error', message: t('errors.networkError') });
+    }
+  };
 
-  const tabs = [
-    { id: 'jobs' as Tab, label: t(locale, 'jobs'), icon: '📄' },
-    { id: 'billing' as Tab, label: t(locale, 'billing'), icon: '💳' },
-    { id: 'feedback' as Tab, label: t(locale, 'feedback'), icon: '💬' },
-    { id: 'account' as Tab, label: t(locale, 'account'), icon: '👤' },
+  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
+    setToast({ type, message });
+  };
+
+  // Tab icons as SVG
+  const icons = {
+    jobs: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+      </svg>
+    ),
+    billing: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
+      </svg>
+    ),
+    feedback: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+      </svg>
+    ),
+    account: (
+      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
+      </svg>
+    ),
+  };
+
+  const tabs: Tab[] = [
+    { id: 'jobs', label: t('jobs'), icon: icons.jobs },
+    { id: 'billing', label: t('billing'), icon: icons.billing },
+    { id: 'feedback', label: t('feedback'), icon: icons.feedback },
+    { id: 'account', label: t('account'), icon: icons.account },
+  ];
+
+  const feedbackTypeOptions = [
+    { value: 'issue', label: t('feedbackTypes.issue') },
+    { value: 'requirement', label: t('feedbackTypes.requirement') },
+    { value: 'other', label: t('feedbackTypes.other') },
   ];
 
   return (
@@ -133,15 +195,13 @@ export default function SidePanelApp() {
       <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-primary-600 rounded-xl flex items-center justify-center">
-              <span className="text-white font-bold">T2D</span>
-            </div>
+            <Avatar name={session?.user?.display_name || session?.user?.email || 'T'} size="lg" />
             <div>
               <h1 className="text-lg font-bold text-gray-900 dark:text-white">
-                {t(locale, 'appName')}
+                {t('appName')}
               </h1>
               <p className="text-xs text-gray-500">
-                {session?.user?.email || 'Not signed in'}
+                {session?.user?.email || t('errors.authError')}
               </p>
             </div>
           </div>
@@ -152,7 +212,7 @@ export default function SidePanelApp() {
                 {Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)} /{' '}
                 {usage.cloud_conversions_limit}
               </p>
-              <p className="text-xs text-gray-500">{t(locale, 'remaining')}</p>
+              <p className="text-xs text-gray-500">{t('remaining')}</p>
               <Progress
                 value={usage.cloud_conversions_used}
                 max={usage.cloud_conversions_limit}
@@ -164,22 +224,7 @@ export default function SidePanelApp() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                activeTab === tab.id
-                  ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300'
-                  : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
-              }`}
-            >
-              <span className="mr-1">{tab.icon}</span>
-              {tab.label}
-            </button>
-          ))}
-        </div>
+        <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} variant="underline" />
       </div>
 
       {/* Content */}
@@ -189,16 +234,16 @@ export default function SidePanelApp() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t(locale, 'jobHistory')}
+                {t('jobHistory')}
               </h2>
-              <Button size="sm" variant="secondary" onClick={loadJobs}>
-                {t(locale, 'refresh')}
+              <Button size="sm" variant="secondary" onClick={loadJobs} leftIcon={icons.jobs}>
+                {t('refresh')}
               </Button>
             </div>
 
             {jobs.length === 0 ? (
               <Card className="text-center py-8">
-                <p className="text-gray-500">{t(locale, 'noJobs')}</p>
+                <p className="text-gray-500">{t('noJobs')}</p>
               </Card>
             ) : (
               <div className="space-y-2">
@@ -206,7 +251,7 @@ export default function SidePanelApp() {
                   <Card
                     key={job.id}
                     hover
-                    onClick={() => setSelectedJob(job)}
+                    onClick={() => setSelectedJob(selectedJob?.id === job.id ? null : job)}
                     className={selectedJob?.id === job.id ? 'ring-2 ring-primary-500' : ''}
                   >
                     <div className="flex items-center justify-between">
@@ -227,17 +272,17 @@ export default function SidePanelApp() {
                             job.status === 'completed'
                               ? 'success'
                               : job.status === 'failed'
-                              ? 'error'
-                              : job.status === 'processing'
-                              ? 'warning'
-                              : 'default'
+                                ? 'error'
+                                : job.status === 'processing'
+                                  ? 'warning'
+                                  : 'default'
                           }
                         >
-                          {t(locale, `jobStatus.${job.status}`)}
+                          {t(`jobStatus.${job.status}`)}
                         </Badge>
                         {job.status === 'completed' && job.docx_ready && (
                           <Button size="sm" onClick={() => handleDownloadDocx(job)}>
-                            {t(locale, 'download')}
+                            {t('download')}
                           </Button>
                         )}
                       </div>
@@ -249,12 +294,10 @@ export default function SidePanelApp() {
                         <h4 className="text-sm font-medium mb-2">Quality Report</h4>
                         <div className="grid grid-cols-2 gap-2 text-sm">
                           <div>
-                            <span className="text-gray-500">Score:</span>{' '}
-                            {job.report.quality_score}%
+                            <span className="text-gray-500">Score:</span> {job.report.quality_score}%
                           </div>
                           <div>
-                            <span className="text-gray-500">Profile:</span>{' '}
-                            {job.report.profile}
+                            <span className="text-gray-500">Profile:</span> {job.report.profile}
                           </div>
                         </div>
                       </div>
@@ -270,7 +313,7 @@ export default function SidePanelApp() {
         {activeTab === 'billing' && (
           <div className="space-y-4">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {t(locale, 'plans')}
+              {t('plans')}
             </h2>
 
             {plans.map((plan) => (
@@ -291,7 +334,7 @@ export default function SidePanelApp() {
                 </div>
                 {session && (
                   <Button className="w-full" onClick={() => handleCheckout(plan.id)}>
-                    {t(locale, 'checkout')}
+                    {t('checkout')}
                   </Button>
                 )}
               </Card>
@@ -300,25 +343,18 @@ export default function SidePanelApp() {
             {/* Redeem Code */}
             <Card>
               <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
-                {t(locale, 'redeemCode')}
+                {t('redeemCode')}
               </h3>
               <div className="flex gap-2">
                 <input
                   type="text"
-                  placeholder={t(locale, 'enterCode')}
-                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800"
-                  id="redeem-input"
+                  value={redeemCode}
+                  onChange={(e) => setRedeemCode(e.target.value)}
+                  placeholder={t('enterCode')}
+                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
                 />
-                <Button
-                  onClick={() => {
-                    const input = document.getElementById('redeem-input') as HTMLInputElement;
-                    if (input?.value) {
-                      handleRedeemCode(input.value);
-                      input.value = '';
-                    }
-                  }}
-                >
-                  {t(locale, 'redeemCode')}
+                <Button onClick={handleRedeemCode} disabled={!redeemCode.trim()}>
+                  {t('redeemCode')}
                 </Button>
               </div>
             </Card>
@@ -330,18 +366,18 @@ export default function SidePanelApp() {
           <div className="space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t(locale, 'feedback')}
+                {t('feedback')}
               </h2>
               {session && (
-                <Button size="sm" onClick={() => setShowFeedbackForm(true)}>
-                  {t(locale, 'submitFeedback')}
+                <Button size="sm" onClick={() => setShowFeedbackModal(true)}>
+                  {t('submitFeedback')}
                 </Button>
               )}
             </div>
 
             {!session ? (
               <Card className="text-center py-8">
-                <p className="text-gray-500">{t(locale, 'errors.authError')}</p>
+                <p className="text-gray-500">{t('errors.authError')}</p>
               </Card>
             ) : feedbackThreads.length === 0 ? (
               <Card className="text-center py-8">
@@ -364,42 +400,6 @@ export default function SidePanelApp() {
                 ))}
               </div>
             )}
-
-            {/* Feedback Form Modal */}
-            {showFeedbackForm && (
-              <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-                <Card className="w-full max-w-md mx-4">
-                  <h3 className="font-semibold mb-4">{t(locale, 'submitFeedback')}</h3>
-                  <div className="space-y-3">
-                    <input
-                      type="text"
-                      placeholder={t(locale, 'feedbackTitle')}
-                      className="w-full px-3 py-2 rounded-lg border"
-                      id="feedback-title"
-                    />
-                    <textarea
-                      placeholder={t(locale, 'feedbackContent')}
-                      rows={4}
-                      className="w-full px-3 py-2 rounded-lg border"
-                      id="feedback-content"
-                    />
-                    <div className="flex gap-2 justify-end">
-                      <Button variant="secondary" onClick={() => setShowFeedbackForm(false)}>
-                        {t(locale, 'cancel')}
-                      </Button>
-                      <Button
-                        onClick={() => {
-                          // Submit feedback
-                          setShowFeedbackForm(false);
-                        }}
-                      >
-                        {t(locale, 'submitFeedback')}
-                      </Button>
-                    </div>
-                  </div>
-                </Card>
-              </div>
-            )}
           </div>
         )}
 
@@ -410,15 +410,15 @@ export default function SidePanelApp() {
               <>
                 <Card>
                   <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                    {t(locale, 'account')}
+                    {t('account')}
                   </h3>
                   <div className="space-y-2">
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t(locale, 'email')}</span>
+                      <span className="text-gray-500">{t('email')}</span>
                       <span className="text-gray-900 dark:text-white">{session.user.email}</span>
                     </div>
                     <div className="flex justify-between">
-                      <span className="text-gray-500">{t(locale, 'plan')}</span>
+                      <span className="text-gray-500">{t('plan')}</span>
                       <span className="text-gray-900 dark:text-white">{session.user.plan_id}</span>
                     </div>
                   </div>
@@ -427,7 +427,7 @@ export default function SidePanelApp() {
                 {usage && (
                   <Card>
                     <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
-                      {t(locale, 'usage')}
+                      {t('usage')}
                     </h3>
                     <div className="space-y-3">
                       <div>
@@ -457,11 +457,11 @@ export default function SidePanelApp() {
                   className="w-full"
                   onClick={() => sendToBackground({ type: MESSAGE_TYPES.CREATE_PORTAL })}
                 >
-                  {t(locale, 'portal')}
+                  {t('portal')}
                 </Button>
 
                 <Button variant="ghost" className="w-full" onClick={handleLogout}>
-                  {t(locale, 'signOut')}
+                  {t('signOut')}
                 </Button>
               </>
             ) : (
@@ -473,6 +473,67 @@ export default function SidePanelApp() {
           </div>
         )}
       </div>
+
+      {/* Feedback Modal */}
+      <Modal
+        open={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        title={t('submitFeedback')}
+        footer={
+          <div className="flex gap-2 justify-end">
+            <Button variant="secondary" onClick={() => setShowFeedbackModal(false)}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={handleSubmitFeedback} disabled={!feedbackTitle.trim() || !feedbackContent.trim()}>
+              {t('submitFeedback')}
+            </Button>
+          </div>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('feedbackTitle')}
+            </label>
+            <input
+              type="text"
+              value={feedbackTitle}
+              onChange={(e) => setFeedbackTitle(e.target.value)}
+              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('feedbackType')}
+            </label>
+            <Select
+              value={feedbackType}
+              onChange={(v) => setFeedbackType(v as typeof feedbackType)}
+              options={feedbackTypeOptions}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+              {t('feedbackContent')}
+            </label>
+            <Textarea
+              value={feedbackContent}
+              onChange={setFeedbackContent}
+              placeholder={t('feedbackContent')}
+              rows={4}
+            />
+          </div>
+        </div>
+      </Modal>
+
+      {/* Toast */}
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+        />
+      )}
     </div>
   );
 }

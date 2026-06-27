@@ -23,7 +23,11 @@ import '../ui/app_tokens.dart';
 import '../ui/auth_window.dart';
 import '../ui/convert_records_panel.dart';
 import '../ui/feedback_panel.dart';
+import '../ui/quick_activation.dart';
+import '../ui/quick_assistant_panel.dart';
+import '../ui/quick_session.dart';
 import '../ui/recharge_records_panel.dart';
+import 'bridge.dart';
 
 const _appIconAsset = 'assets/app_icon.png';
 const _redeemCodePurchaseUrl = 'https://pay.ldxp.cn/item/ns8i2g';
@@ -105,6 +109,10 @@ class _DocEngineAppState extends State<DocEngineApp> {
     );
   }
 }
+
+// ─── Workspace mode ─────────────────────────────────────────────────────────────
+
+enum _WorkspaceMode { quick, member }
 
 // ─── Auth state ───────────────────────────────────────────────────────────────
 
@@ -204,6 +212,69 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   String _apiBaseUrl = defaultCommercialApiBaseUrl;
   String? _authNotice;
 
+  // Quick assistant state
+  _WorkspaceMode _workspaceMode = _WorkspaceMode.quick;
+  QuickSession? _quickSession;
+  String? _quickActivationStatus; // 'idle', 'restoring', 'activating', 'activated', 'error'
+  String? _quickErrorText;
+  bool _quickBusy = false;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.mode == DocEngineAppMode.user) {
+      _loadQuickSession();
+    }
+  }
+
+  Future<void> _loadQuickSession() async {
+    final storedCode = await AppPreferences.read('quick.redeemCode');
+    if (storedCode == null || storedCode.isEmpty) {
+      if (mounted) setState(() => _quickActivationStatus = 'idle');
+      return;
+    }
+
+    if (mounted) setState(() => _quickActivationStatus = 'restoring');
+    await _doQuickActivation(storedCode);
+  }
+
+  Future<void> _doQuickActivation(String code) async {
+    try {
+      if (mounted) {
+        setState(() {
+          _quickBusy = true;
+          _quickActivationStatus = 'activating';
+          _quickErrorText = null;
+        });
+      }
+
+      final service = QuickActivationService(apiBaseUrl: _apiBaseUrl);
+      final result = await service.activate(code);
+
+      await AppPreferences.write('quick.redeemCode', code);
+
+      if (mounted) {
+        setState(() {
+          _quickSession = result.toSession(code);
+          _quickActivationStatus = 'activated';
+          _quickBusy = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _quickActivationStatus = 'error';
+          _quickErrorText = e.toString();
+          _quickBusy = false;
+        });
+      }
+    }
+  }
+
+  void _onQuickActivate(String code) {
+    _doQuickActivation(code);
+  }
+
   List<_NavSection> get _availableSections => switch (widget.mode) {
     DocEngineAppMode.user => const [
       _NavSection.account,
@@ -275,8 +346,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
     DocLogger.instance.i(LogTags.app, 'DocEngineApp build, platform=$platform');
 
-    // Gate: show auth window when not signed in
-    if (_auth == null) {
+    // Admin mode: keep hard gate when not signed in
+    if (widget.mode == DocEngineAppMode.admin && _auth == null) {
       return Stack(
         children: [
           AuthWindow(apiBaseUrl: _apiBaseUrl, onSignedIn: _handleSignedIn),
@@ -304,74 +375,129 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       );
     }
 
+    // User mode: always enter shell with quick/member mode switcher
     return Scaffold(
       body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final compact = constraints.maxWidth < AppBreakpoints.tablet;
-            final content = _NavContent(
-              mode: widget.mode,
-              selectedSection: _selectedSection,
-              sections: _availableSections,
-              compact: compact,
-              apiBaseUrl: _auth!.apiBaseUrl,
-              accessToken: _auth!.accessToken,
-              profile: _auth!.profile,
-              onSectionChanged: _selectSection,
-              onSignedOut: _handleSignedOut,
-            );
-
-            if (compact) {
-              return Column(
-                children: [
-                  _TopBar(
-                    platform: platform,
-                    themeTone: widget.themeTone,
-                    locale: widget.locale,
-                    onThemeChanged: widget.onThemeChanged,
-                    onLocaleChanged: widget.onLocaleChanged,
-                    profile: _auth!.profile,
-                    onSignedOut: _handleSignedOut,
-                    strings: strings,
-                  ),
-                  Expanded(child: content),
-                ],
-              );
-            }
-
-            return Row(
-              children: [
-                _Sidebar(
-                  strings: strings,
-                  selectedSection: _selectedSection,
-                  sections: _availableSections,
-                  onSectionChanged: _selectSection,
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      _TopBar(
-                        platform: platform,
-                        themeTone: widget.themeTone,
-                        locale: widget.locale,
-                        onThemeChanged: widget.onThemeChanged,
-                        onLocaleChanged: widget.onLocaleChanged,
-                        profile: _auth!.profile,
-                        onSignedOut: _handleSignedOut,
-                        strings: strings,
-                      ),
-                      Expanded(child: content),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          },
+        child: Column(
+          children: [
+            _buildModeSwitcher(context),
+            Expanded(child: _buildCurrentModeContent(context)),
+          ],
         ),
       ),
     );
   }
-}
+
+  Widget _buildModeSwitcher(BuildContext context) {
+    final strings = AppStrings.of(context);
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: SegmentedButton<_WorkspaceMode>(
+        segments: [
+          ButtonSegment(
+            value: _WorkspaceMode.quick,
+            label: Text(strings.t('nav.quickAssistant')),
+            icon: const Icon(Icons.flash_on),
+          ),
+          ButtonSegment(
+            value: _WorkspaceMode.member,
+            label: Text(strings.t('nav.memberCenter')),
+            icon: const Icon(Icons.person),
+          ),
+        ],
+        selected: {_workspaceMode},
+        onSelectionChanged: (selection) {
+          setState(() => _workspaceMode = selection.first);
+        },
+      ),
+    );
+  }
+
+  Widget _buildCurrentModeContent(BuildContext context) {
+    if (_workspaceMode == _WorkspaceMode.quick) {
+      return QuickAssistantPanel(
+        session: _quickSession,
+        activationStatus: _quickActivationStatus,
+        errorText: _quickErrorText,
+        busy: _quickBusy,
+        apiBaseUrl: _apiBaseUrl,
+        onActivate: _onQuickActivate,
+        onSessionUpdated: (session) {
+          setState(() => _quickSession = session);
+        },
+      );
+    }
+
+    // Member center mode
+    return _buildMemberCenterContent(context);
+  }
+
+  Widget _buildMemberCenterContent(BuildContext context) {
+    if (_auth == null) {
+      return AuthWindow(apiBaseUrl: _apiBaseUrl, onSignedIn: _handleSignedIn);
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < AppBreakpoints.tablet;
+        final content = _NavContent(
+          mode: widget.mode,
+          selectedSection: _selectedSection,
+          sections: _availableSections,
+          compact: compact,
+          apiBaseUrl: _auth!.apiBaseUrl,
+          accessToken: _auth!.accessToken,
+          profile: _auth!.profile,
+          onSectionChanged: _selectSection,
+          onSignedOut: _handleSignedOut,
+        );
+
+        if (compact) {
+          return Column(
+            children: [
+              _TopBar(
+                compact: true,
+                mode: widget.mode,
+                profile: _auth!.profile,
+                themeTone: widget.themeTone,
+                locale: widget.locale,
+                onThemeChanged: widget.onThemeChanged,
+                onLocaleChanged: widget.onLocaleChanged,
+              ),
+              Expanded(child: content),
+            ],
+          );
+        }
+
+        return Row(
+          children: [
+            _Sidebar(
+              strings: AppStrings.of(context),
+              selectedSection: _selectedSection,
+              sections: _availableSections,
+              onSectionChanged: _selectSection,
+            ),
+            Expanded(
+              child: Column(
+                children: [
+                  _TopBar(
+                    compact: false,
+                    mode: widget.mode,
+                    profile: _auth!.profile,
+                    themeTone: widget.themeTone,
+                    locale: widget.locale,
+                    onThemeChanged: widget.onThemeChanged,
+                    onLocaleChanged: widget.onLocaleChanged,
+                  ),
+                  Expanded(child: content),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 

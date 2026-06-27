@@ -15,11 +15,17 @@
     "forceConsistentCasingInFileNames": true,
     "baseUrl": ".",
     "paths": {
+      "@": ["src"],
       "@/*": ["src/*"],
+      "@shared": ["src/shared"],
       "@shared/*": ["src/shared/*"],
+      "@api": ["src/api"],
       "@api/*": ["src/api/*"],
+      "@browser": ["src/browser"],
       "@browser/*": ["src/browser/*"],
+      "@state": ["src/state"],
       "@state/*": ["src/state/*"],
+      "@ui": ["src/ui"],
       "@ui/*": ["src/ui/*"]
     },
     "types": ["vite/client", "wxt/browser", "webextension-polyfill"]

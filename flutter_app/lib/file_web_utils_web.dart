@@ -86,3 +86,10 @@ void downloadBlob(Uint8List bytes, String filename) {
 void openExternalUrl(String url) {
   web.window.open(url, '_blank');
 }
+
+/// Saves DOCX bytes - on web this triggers a browser download (same as downloadBlob).
+/// Returns the filename that was downloaded.
+String saveDocxFile(Uint8List bytes, String suggestedName) {
+  downloadBlob(bytes, suggestedName);
+  return suggestedName;
+}

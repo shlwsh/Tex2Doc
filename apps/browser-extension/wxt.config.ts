@@ -1,20 +1,34 @@
 import { defineConfig } from 'wxt';
 import react from '@vitejs/plugin-react';
-import { resolve } from 'path';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const rootDir = __dirname;
+const srcDir = path.resolve(rootDir, 'src');
 
 export default defineConfig({
+  srcDir,
+
+  outBaseDir: '.output',
+
+  outDirTemplate: "{{browser}}-mv{{manifestVersion}}{{modeSuffix}}",
+
   plugins: [react()],
 
   alias: {
-    '@': resolve(__dirname, 'src'),
-    '@shared': resolve(__dirname, 'src/shared'),
-    '@api': resolve(__dirname, 'src/api'),
-    '@browser': resolve(__dirname, 'src/browser'),
-    '@state': resolve(__dirname, 'src/state'),
-    '@ui': resolve(__dirname, 'src/ui'),
+    '@': srcDir,
+    '@shared': path.join(srcDir, 'shared'),
+    '@api': path.join(srcDir, 'api'),
+    '@browser': path.join(srcDir, 'browser'),
+    '@state': path.join(srcDir, 'state'),
+    '@ui': path.join(srcDir, 'ui'),
   },
 
-  entrypointsDir: './src/entrypoints',
+  entrypointsDir: path.join(srcDir, 'entrypoints'),
+
+  publicDir: path.join(rootDir, 'public'),
 
   build: {
     rollupOptions: {
@@ -33,7 +47,7 @@ export default defineConfig({
     content: ['./src/**/*.{js,jsx,ts,tsx}', './src/**/*.html'],
   },
 
-  manifest: {
+  manifest: ({ mode }) => ({
     name: 'Tex2Doc - LaTeX to Word',
     version: '0.1.0',
     description: 'Convert LaTeX documents to Word (.docx) directly in your browser',
@@ -44,10 +58,11 @@ export default defineConfig({
       128: '/icons/icon128.png',
     },
     action: {
-      default_popup: 'popup/index.html',
+      default_popup: 'popup.html',
       default_title: 'Tex2Doc',
     },
     permissions: ['storage', 'downloads', 'contextMenus', 'notifications'],
+    ...(mode === 'edge' ? { side_panel: { default_path: 'sidepanel.html' } } : {}),
     host_permissions: ['https://api.tex2doc.cn/*'],
     optional_host_permissions: [
       'https://www.overleaf.com/*',
@@ -55,5 +70,5 @@ export default defineConfig({
       'https://arxiv.org/*',
       'https://*.arxiv.org/*',
     ],
-  },
+  }),
 });

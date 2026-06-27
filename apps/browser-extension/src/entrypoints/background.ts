@@ -20,7 +20,7 @@ import { AuthError } from '@/shared/errors';
 const activePolls = new Map<string, number>();
 const POLL_INTERVAL = 2000;
 
-export default defineBackgroundScript(() => {
+export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(() => {
     console.log('[Tex2Doc Background] Extension installed');
     createContextMenus();

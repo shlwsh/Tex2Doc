@@ -57,6 +57,31 @@ void downloadBlob(Uint8List bytes, String filename) {
   }
 }
 
+/// Saves DOCX bytes to a user-selected path (desktop only).
+/// Returns the saved file path, or null if cancelled/failed.
+Future<String?> saveDocxFile(Uint8List bytes, String suggestedName) async {
+  try {
+    final result = await FilePicker.platform.saveFile(
+      dialogTitle: 'Save DOCX file',
+      fileName: suggestedName,
+      type: FileType.custom,
+      allowedExtensions: ['docx'],
+    );
+
+    if (result == null) return null;
+
+    final file = File(result);
+    await file.writeAsBytes(bytes);
+    // ignore: avoid_print
+    print('[doc-engine] Saved: ${file.path}');
+    return result;
+  } on Object catch (e) {
+    // ignore: avoid_print
+    print('[doc-engine] Save failed: $e');
+    return null;
+  }
+}
+
 // Opens an external URL with the desktop default browser.
 void openExternalUrl(String url) {
   try {

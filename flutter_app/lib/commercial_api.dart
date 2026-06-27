@@ -432,6 +432,20 @@ class CommercialApiClient {
     );
   }
 
+  // ─── Local Conversion Quota ────────────────────────────────────────────────
+
+  Future<LocalQuotaCheckResponse> checkLocalConversion(String accessToken) async {
+    return LocalQuotaCheckResponse.fromJson(
+      await _postJson('local-conversions/check', const {}, accessToken: accessToken),
+    );
+  }
+
+  Future<LocalQuotaConsumeResponse> consumeLocalConversion(String accessToken) async {
+    return LocalQuotaConsumeResponse.fromJson(
+      await _postJson('local-conversions/consume', const {}, accessToken: accessToken),
+    );
+  }
+
   // ─── Feedback ────────────────────────────────────────────────────────────
 
   Future<List<FeedbackThread>> feedbackThreads(String accessToken) async {
@@ -919,6 +933,49 @@ class UsageSummary {
       countBalance: json['count_balance'] as int? ?? 0,
       dateValidUntil: json['date_valid_until'] as String?,
       entitlementSourceOrderId: json['entitlement_source_order_id'] as String?,
+    );
+  }
+}
+
+class LocalQuotaCheckResponse {
+  final bool allowed;
+  final bool validUntilActive;
+  final int countBalance;
+  final int used;
+  final int limit;
+
+  LocalQuotaCheckResponse({
+    required this.allowed,
+    required this.validUntilActive,
+    required this.countBalance,
+    required this.used,
+    required this.limit,
+  });
+
+  factory LocalQuotaCheckResponse.fromJson(Map<String, dynamic> json) {
+    return LocalQuotaCheckResponse(
+      allowed: json['allowed'] as bool? ?? false,
+      validUntilActive: json['valid_until_active'] as bool? ?? false,
+      countBalance: json['count_balance'] as int? ?? 0,
+      used: json['used'] as int? ?? 0,
+      limit: json['limit'] as int? ?? 0,
+    );
+  }
+}
+
+class LocalQuotaConsumeResponse {
+  final bool consumed;
+  final int balance;
+
+  LocalQuotaConsumeResponse({
+    required this.consumed,
+    required this.balance,
+  });
+
+  factory LocalQuotaConsumeResponse.fromJson(Map<String, dynamic> json) {
+    return LocalQuotaConsumeResponse(
+      consumed: json['consumed'] as bool? ?? false,
+      balance: json['balance'] as int? ?? 0,
     );
   }
 }
