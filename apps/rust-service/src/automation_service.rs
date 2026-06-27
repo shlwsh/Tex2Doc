@@ -100,6 +100,7 @@ pub struct RequestFilters {
     pub offset: Option<i64>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Clone, Serialize)]
 pub struct ActionRequest {
     pub reason: Option<String>,
@@ -186,6 +187,7 @@ pub struct AutomationService {
     pub pool: PgPool,
 }
 
+#[allow(dead_code)]
 impl AutomationService {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }

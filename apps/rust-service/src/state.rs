@@ -822,6 +822,7 @@ impl ServerState {
     /// 使用错误码和可选自定义消息失败 job。
     ///
     /// 优先使用带 `ConversionErrorCode` 的 `fail_job` 方法，此方法保留用于向后兼容。
+    #[allow(dead_code)]
     pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
         let err = ConversionErrorCode::from_code(error_code).unwrap_or(ConversionErrorCode::ConvertFailed);
         self.fail_job(job_id, err, error).await;

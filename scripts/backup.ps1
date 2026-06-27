@@ -20,16 +20,8 @@ if ($Retain -lt 1) {
 $outputRootPath = $OutputRoot
 New-Item -ItemType Directory -Force -Path $outputRootPath | Out-Null
 
-$serverVersion = Get-CleanLine (Invoke-Wsl @(
-    "env", "PGPASSWORD=$PgPassword",
-    "psql", "-h", $PgHost, "-p", "$PgPort", "-U", $PgUser, "-d", "postgres",
-    "-Atc", "show server_version;"
-))
-if (-not $serverVersion) {
-    throw "Unable to read PostgreSQL server_version from WSL."
-}
-
-$versionDirName = ($serverVersion -replace "[^A-Za-z0-9._-]", "_")
+$pgVersion = Invoke-PgVersionLabel -PgHost $PgHost -PgPort $PgPort -PgUser $PgUser -PgPassword $PgPassword
+$versionDirName = $pgVersion.Label
 $versionDir = Join-Path $outputRootPath $versionDirName
 New-Item -ItemType Directory -Force -Path $versionDir | Out-Null
 
@@ -37,7 +29,7 @@ $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $backupFile = Join-Path $versionDir "$Database-$timestamp.dump"
 $wslBackupFile = ConvertTo-WslPath $backupFile
 
-Write-Host "Backing up PostgreSQL database '$Database' (server $serverVersion) ..."
+Write-Host "Backing up PostgreSQL database '$Database' (server_version_num $($pgVersion.VersionNum), label $($pgVersion.Label)) ..."
 Write-Host "Output: $backupFile"
 
 Invoke-Wsl @(

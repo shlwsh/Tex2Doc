@@ -16,6 +16,7 @@ use crate::state::{ConversionReportRecord, ConversionStatus, ServerState};
 
 /// Redact user content from log messages to protect privacy.
 /// Replaces LaTeX content and user data with placeholders.
+#[allow(dead_code)]
 pub fn redact_content(content: &str) -> String {
     // Truncate long content
     if content.len() > 200 {
@@ -73,6 +74,7 @@ fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
     })
 }
 
+#[allow(dead_code)]
 struct ZipValidation {
     file_count: usize,
     total_uncompressed: u64,
@@ -131,9 +133,6 @@ async fn process_job(state: ServerState, job_id: String) {
 
     let Some(job) = state.get_job(&job_id).await else {
         tracing::warn!("job not found");
-        return;
-    };
-    let Some(upload) = state.get_upload(&job.upload_id).await else {
         return;
     };
     let Some(upload) = state.get_upload(&job.upload_id).await else {

@@ -454,7 +454,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 let result = crate::cloud_convert::convert_upload_blocking(
                     crate::cloud_convert::CloudUploadRequest {
                         base_url: &base_url,
-                        access_token: token,
+                        access_token: token.clone(),
                         zip_bytes: bytes,
                         file_name: &file_name,
                         main_tex: &main_tex_value,
@@ -480,11 +480,30 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 helpers::persist_recent_jobs(&app_for_thread);
                 let recent_jobs = helpers::recent_jobs_for_ui(&app_for_thread);
 
+                let usage_res = token.as_ref().and_then(|t| {
+                    crate::cloud_account::fetch_usage_blocking(&base_url, t).ok()
+                });
+
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
                         ui.set_is_converting(false);
                         ui.set_conversion_progress(1.0);
                         ui.set_recent_jobs(recent_jobs.into());
+
+                        if let Some(usage) = usage_res {
+                            let remaining = usage.cloud_conversions_limit.saturating_sub(usage.cloud_conversions_used) as i32;
+                            let total = usage.cloud_conversions_limit as i32;
+                            ui.set_quota_remaining(remaining);
+                            ui.set_quota_total(total);
+                            ui.set_usage_status(crate::cloud_account::usage_line(&usage).into());
+                            app_for_thread.set_quota_remaining(Some(remaining as usize));
+                            log::info!(
+                                "Quota refreshed after cloud conversion: used={}, limit={}, remaining={}",
+                                usage.cloud_conversions_used,
+                                usage.cloud_conversions_limit,
+                                remaining
+                            );
+                        }
 
                         match &result {
                             Ok(r) => {

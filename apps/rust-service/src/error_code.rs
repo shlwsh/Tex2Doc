@@ -74,6 +74,7 @@ pub enum ConversionErrorCode {
     InternalError,
 }
 
+#[allow(dead_code)]
 impl ConversionErrorCode {
     /// 返回机器可读的错误码字符串（如 "upload_invalid_zip"）。
     pub fn as_code(&self) -> &'static str {

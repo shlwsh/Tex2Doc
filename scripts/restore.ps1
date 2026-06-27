@@ -14,23 +14,15 @@ $ErrorActionPreference = "Stop"
 
 . "$PSScriptRoot\common.ps1"
 
-$serverVersion = Get-CleanLine (Invoke-Wsl @(
-    "env", "PGPASSWORD=$PgPassword",
-    "psql", "-h", $PgHost, "-p", "$PgPort", "-U", $PgUser, "-d", "postgres",
-    "-Atc", "show server_version;"
-))
-if (-not $serverVersion) {
-    throw "Unable to read PostgreSQL server_version from WSL."
-}
-
-$versionDirName = ($serverVersion -replace "[^A-Za-z0-9._-]", "_")
+$pgVersion = Invoke-PgVersionLabel -PgHost $PgHost -PgPort $PgPort -PgUser $PgUser -PgPassword $PgPassword
+$versionDirName = $pgVersion.Label
 $versionDir = Join-Path $InputRoot $versionDirName
 
 if ($BackupFile) {
     $selectedBackup = [System.IO.Path]::GetFullPath($BackupFile)
 } else {
     if (-not (Test-Path -LiteralPath $versionDir)) {
-        throw "No backup directory for PostgreSQL server version '$serverVersion': $versionDir"
+        throw "No backup directory for PostgreSQL label '$($pgVersion.Label)' (server_version_num $($pgVersion.VersionNum)): $versionDir"
     }
     $latest = Get-ChildItem -Path $versionDir -Filter "$Database-*.dump" -File |
         Sort-Object LastWriteTime -Descending |
@@ -45,7 +37,7 @@ if (-not (Test-Path -LiteralPath $selectedBackup)) {
     throw "Backup file does not exist: $selectedBackup"
 }
 
-Write-Host "Restoring PostgreSQL database '$Database' (server $serverVersion) ..."
+Write-Host "Restoring PostgreSQL database '$Database' (server_version_num $($pgVersion.VersionNum), label $($pgVersion.Label)) ..."
 Write-Host "Input: $selectedBackup"
 Write-Host "WARNING: this will terminate active connections, drop '$Database', recreate it, and restore the backup."
 
