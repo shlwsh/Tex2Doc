@@ -9,7 +9,7 @@ import {
     ListView,
     Switch,
 } from "std-widgets.slint";
-import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode, FeedbackThreadRow, QualityDimensions, SemanticLossItem, QualityReportSummary } from "types.slint";
+import { PlanEntry, JobRow, RechargeRow, CloudConversionRow, ConversionMode, FeedbackThreadRow, QualityDimensions, SemanticLossInfo, QualityReportSummary } from "types.slint";
 import { QualityResultDialog } from "components/quality-result-dialog.slint";
 
 component NavButton inherits Rectangle {
@@ -244,6 +244,14 @@ export component MainWindow inherits Window {
     in-out property <string> quick-activation-status: "未激活";
     in-out property <bool> quick-is-pro: false;
 
+    // Log panel properties
+    in-out property <[string]> log-entries: [];
+    in-out property <bool> log-panel-visible: false;
+    in-out property <bool> log-auto-scroll: true;
+    callback copy-logs();
+    callback clear-logs();
+    callback append-log(string);
+
     // Quality Report Dialog Properties
     in-out property <bool> show-quality-dialog: false;
     in-out property <int> dialog-quality-score: 0;
@@ -263,7 +271,7 @@ export component MainWindow inherits Window {
     in-out property <string> dialog-job-id: "";
     in-out property <string> dialog-profile: "";
     in-out property <string> dialog-engine-version: "";
-    in-out property <[SemanticLossItem]> dialog-semantic-loss-list: [];
+    in-out property <[SemanticLossInfo]> dialog-semantic-loss-list: [];
 
     in-out property <color> color-window-bg: #f6f8fb;
     in-out property <color> color-surface: #ffffff;
@@ -688,6 +696,10 @@ export component MainWindow inherits Window {
                             }
                             Button { text: t-convert-open-output; enabled: output-path != ""; clicked => { open-output-clicked(output-path); } }
                             Button { text: t-convert-open-report; enabled: output-path != ""; clicked => { open-report-clicked(output-path); } }
+                            Button {
+                                text: log-panel-visible ? "关闭日志" : "查看日志";
+                                clicked => { log-panel-visible = !log-panel-visible; }
+                            }
                         }
 
                         ProgressIndicator { progress: is-converting ? conversion-progress : 0.0; }
@@ -1373,7 +1385,7 @@ export component MainWindow inherits Window {
 
     // Quality Result Dialog
     QualityResultDialog {
-        visible: root.show-quality-dialog;
+        is-open: root.show-quality-dialog;
         quality-score: root.dialog-quality-score;
         parse-score: root.dialog-parse-score;
         semantic-score: root.dialog-semantic-score;
@@ -1425,6 +1437,93 @@ export component MainWindow inherits Window {
             spacing: 10px;
             Text { text: toast-message; horizontal-stretch: 1; font-size: 12px; color: color-text-primary; overflow: elide; vertical-alignment: center; }
             Button { text: "OK"; clicked => { toast-visible = false; } }
+        }
+    }
+
+    // Log Panel - Bottom drawer showing detailed conversion logs
+    if root.log-panel-visible: Rectangle {
+        x: 0;
+        y: root.height - 320px;
+        width: root.width;
+        height: 300px;
+        background: #1a1a2e;
+        border-color: #3a3a5e;
+        border-width: 1px;
+
+        VerticalBox {
+            padding: 8px;
+            spacing: 6px;
+
+            // Log header
+            HorizontalBox {
+                spacing: 8px;
+                alignment: center;
+
+                Text {
+                    text: "日志输出 (Logs)";
+                    font-size: 13px;
+                    font-weight: 700;
+                    color: #e0e0e0;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Auto-scroll toggle
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 4px;
+                    background: root.log-auto-scroll ? #2563eb : #3a3a5e;
+
+                    TouchArea { clicked => { root.log-auto-scroll = !root.log-auto-scroll; } }
+
+                    Text {
+                        text: "S";
+                        font-size: 10px;
+                        font-weight: 700;
+                        color: root.log-auto-scroll ? #ffffff : #888888;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                // Copy logs button
+                Button {
+                    text: "复制";
+                    clicked => { root.copy-logs(); }
+                }
+
+                // Clear logs button
+                Button {
+                    text: "清空";
+                    clicked => { root.clear-logs(); }
+                }
+
+                // Close button
+                Button {
+                    text: "关闭";
+                    clicked => { root.log-panel-visible = false; }
+                }
+            }
+
+            // Log content - using ListView for scrolling
+            Rectangle {
+                background: #0f0f1a;
+                border-radius: 6px;
+
+                ListView {
+                    vertical-stretch: 1;
+
+                    for entry in root.log-entries: Rectangle {
+                        Text {
+                            text: entry;
+                            font-size: 11px;
+                            font-family: "Consolas";
+                            color: #00ff88;
+                        }
+                    }
+                }
+            }
         }
     }
 }

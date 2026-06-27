@@ -13,7 +13,7 @@ export struct QualityDimensions {
 }
 
 // 语义丢失项
-export struct SemanticLossItem {
+export struct SemanticLossInfo {
     loss-type: string,     // macro/environment/table/figure/citation/formula
     severity: string,       // blocking/degrading/ignorable
     location: string,      // 文件:行号
@@ -36,9 +36,9 @@ export struct QualityReportSummary {
     quality-score: int,           // 0-100 加权总分
     dimension-scores: QualityDimensions,
     word-compatibility: WordCompatibilityInfo,
-    blocking-issues: [SemanticLossItem],
-    warnings: [SemanticLossItem],
-    semantic-loss-events: [SemanticLossItem],
+    blocking-issues: [SemanticLossInfo],
+    warnings: [SemanticLossInfo],
+    semantic-loss-events: [SemanticLossInfo],
     style-coverage-rate: float,   // 0.0-100.0
     visual-diff-percentage: float,
     created-at: string,

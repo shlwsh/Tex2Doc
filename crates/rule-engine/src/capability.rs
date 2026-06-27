@@ -268,7 +268,7 @@ pub fn builtin_capability_matrix() -> CapabilityMatrix {
         ("underline", "下划线文本", "使用 Word 下划线快捷键 Ctrl+U"),
         ("texttt", "等宽字体", "使用 Courier New 等宽字体"),
     ] {
-        let mut cap = MacroCapability::new(name)
+        let cap = MacroCapability::new(name)
             .with_support(S::Native)
             .with_impact(I::Ignorable)
             .with_description(desc)

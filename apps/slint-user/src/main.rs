@@ -3,6 +3,8 @@
 //! Provides a graphical interface for local TeX → DOCX conversion
 //! with journal profile auto-detection, quality reporting, and job history.
 
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod app_state;
 mod cloud_account;
 mod cloud_convert;
@@ -30,7 +32,37 @@ use ui::MainWindow;
 const DESKTOP_VERSION: &str = env!("TEX2DOC_DESKTOP_VERSION");
 const REDEEM_CODE_PURCHASE_URL: &str = "https://pay.ldxp.cn/item/ns8i2g";
 
+#[cfg(all(windows, debug_assertions))]
+fn suppress_icu4x_stderr() {
+    use std::ffi::c_void;
+    use std::fs::OpenOptions;
+    use std::os::windows::io::IntoRawHandle;
+
+    extern "system" {
+        fn SetStdHandle(nStdHandle: u32, hHandle: *mut c_void) -> i32;
+    }
+
+    const STD_ERROR_HANDLE: u32 = 0xFFFF_FFF4;
+
+    unsafe {
+        if let Ok(file) = OpenOptions::new().write(true).open("NUL") {
+            let handle = file.into_raw_handle();
+            // Redirect stderr to NUL to suppress ICU4X debug warnings
+            SetStdHandle(STD_ERROR_HANDLE, handle as *mut c_void);
+        }
+    }
+}
+
+#[cfg(not(all(windows, debug_assertions)))]
+fn suppress_icu4x_stderr() {}
+
 fn main() {
+    // Suppress ICU4X debug warnings about missing Japanese segmentation models.
+    // These warnings are only emitted in debug builds by linebender/parley via icu_segmenter
+    // and are harmless. We redirect the OS stderr handle to NUL to suppress them
+    // without affecting our own structured logging.
+    suppress_icu4x_stderr();
+
     // Initialize logger
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
@@ -275,8 +307,16 @@ fn main() {
         let app = Arc::clone(&app_state_clone);
         let ui_weak = ui_weak.clone();
 
+        // Set busy state immediately
+        let _ = ui_weak.upgrade().map(|ui| ui.set_is_billing_busy(true));
+
         let base_url = if let Some(ui) = ui_weak.upgrade() {
-            ui.get_api_base_url().to_string()
+            let url = ui.get_api_base_url().to_string();
+            if url.is_empty() {
+                "http://127.0.0.1:2624/v1/".to_string()
+            } else {
+                url
+            }
         } else {
             "http://127.0.0.1:2624/v1/".to_string()
         };

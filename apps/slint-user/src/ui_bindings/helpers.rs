@@ -64,6 +64,11 @@ pub(crate) fn job_history_for_ui(app_state: &AppState) -> Vec<JobRow> {
             opened_at: job.created_at.into(),
             error: job.error.unwrap_or_default().into(),
             html_report: job.report_path.unwrap_or_default().into(),
+            // Quality fields - defaults for local jobs
+            quality_score: 0,
+            quality_status: "unchecked".into(),
+            blocking_issues_count: 0,
+            warnings_count: 0,
         })
         .collect()
 }

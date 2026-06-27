@@ -8,15 +8,75 @@
 //!   temp directory, runs the semantic engine, and writes the result DOCX to the
 //!   output directory.
 
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::Cursor;
+use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use doc_commercial_api_client::{
     ApiClient, ApiError, ClientConfig, ConversionReport, CreateConversionRequest, JobStatus,
 };
 use thiserror::Error;
+
+// ============================================================
+// File Logger - writes to output directory
+// ============================================================
+
+struct FileLogger {
+    log_path: PathBuf,
+}
+
+impl FileLogger {
+    fn new(output_dir: &Path, prefix: &str) -> std::io::Result<Self> {
+        let timestamp = chrono_lite_timestamp();
+        let log_name = format!("{}_{}.log", prefix, timestamp);
+        let log_path = output_dir.join(&log_name);
+
+        // Ensure output directory exists
+        fs::create_dir_all(output_dir)?;
+
+        // Create/overwrite log file
+        let _file = File::create(&log_path)?;
+
+        Ok(Self { log_path })
+    }
+
+    fn log(&self, message: &str) -> std::io::Result<()> {
+        let timestamp = chrono_lite_timestamp();
+        let mut file = OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(&self.log_path)?;
+
+        writeln!(file, "[{}] {}", timestamp, message)?;
+        file.flush()?;
+        Ok(())
+    }
+
+    fn log_multi(&self, messages: &[&str]) -> std::io::Result<()> {
+        for msg in messages {
+            self.log(msg)?;
+        }
+        Ok(())
+    }
+
+    fn path(&self) -> &Path {
+        &self.log_path
+    }
+}
+
+fn chrono_lite_timestamp() -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default();
+    let secs = now.as_secs();
+    let hours = (secs / 3600) % 24;
+    let mins = (secs / 60) % 60;
+    let secs = secs % 60;
+    let millis = now.subsec_millis();
+    format!("{:02}:{:02}:{:02}.{:03}", hours, mins, secs, millis)
+}
 
 #[derive(Debug)]
 pub struct CloudConvertResult {
@@ -28,6 +88,7 @@ pub struct CloudConvertResult {
 }
 
 /// P5/P7: Result of a local engine conversion (used for the upload-based local flow).
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct LocalConvertResult {
     pub docx_path: PathBuf,
@@ -175,6 +236,7 @@ pub fn convert_upload_blocking(request: CloudUploadRequest<'_>) -> Result<CloudC
 /// Accepts raw bytes of an archive (zip or flat files), extracts to a temp
 /// directory, runs the semantic engine, and writes the result DOCX to
 /// `output_dir/<file_stem>.docx`.
+#[allow(unused_variables)]
 pub fn convert_local_blocking(
     base_url: &str,
     access_token: Option<String>,
@@ -189,30 +251,60 @@ pub fn convert_local_blocking(
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("conversion");
+
+    // Create file logger for this conversion
+    let logger = match FileLogger::new(output_dir, "local_conversion") {
+        Ok(l) => {
+            let _ = l.log("=== 开始本地转换 ===");
+            let _ = l.log(&format!("文件: {}", file_name));
+            let _ = l.log(&format!("输出目录: {}", output_dir.display()));
+            let _ = l.log(&format!("Profile: {}, Quality: {}", profile, quality));
+            Some(l)
+        }
+        Err(e) => {
+            log::warn!("Failed to create file logger: {}", e);
+            None
+        }
+    };
+
     let output_dir = output_dir.to_path_buf();
     let output_docx = output_dir.join(format!("{stem}.docx"));
     let report_path = output_dir.join(format!("{stem}.report.json"));
 
     let access_token = access_token.ok_or(CloudConvertError::MissingAccessToken)?;
-    let parsed_url = parse_base_url(base_url)?;
-    let client = authenticated_client(parsed_url, &access_token)?;
 
-    let check_res = runtime()?.block_on(async { client.check_local_conversion().await })?;
-    if !check_res.allowed {
-        return Err(CloudConvertError::QuotaExceeded {
-            used: check_res.used,
-            limit: check_res.limit,
-        });
+    // Note: Local conversion does not require cloud quota check.
+    // The local engine runs entirely on the client machine.
+    // We skip the check_local_conversion() call to allow unlimited local conversions.
+
+    if let Some(ref l) = logger {
+        let _ = l.log("开始本地转换（无需云端配额）...");
+    }
+
+    if let Some(ref l) = logger {
+        let _ = l.log("正在提取文件...");
     }
 
     let temp_dir = extract_to_temp(bytes, file_name)?;
     let project_root = temp_dir.path();
 
+    if let Some(ref l) = logger {
+        let _ = l.log(&format!("项目根目录: {}", project_root.display()));
+    }
+
     let main_tex_path = if main_tex.trim().is_empty() {
         let found = find_main_tex(project_root)?;
-        project_root.join(found)
+        let path = project_root.join(&found);
+        if let Some(ref l) = logger {
+            let _ = l.log(&format!("自动检测到主文件: {}", found));
+        }
+        path
     } else {
-        project_root.join(main_tex.replace('\\', "/"))
+        let path = project_root.join(main_tex.replace('\\', "/"));
+        if let Some(ref l) = logger {
+            let _ = l.log(&format!("使用指定主文件: {}", main_tex));
+        }
+        path
     };
 
     let min_score = match quality {
@@ -236,24 +328,32 @@ pub fn convert_local_blocking(
     };
 
     let engine = doc_compiler_engine::SemanticTexEngine::new();
+
+    if let Some(ref l) = logger {
+        let _ = l.log("正在运行语义引擎编译...");
+    }
+
     let artifact = engine
         .compile_dir_to_docx(project_root, &main_tex_path, &options)
-        .map_err(|e| CloudConvertError::ConversionFailed {
-            job_id: "local".to_string(),
-            error_code: None,
-            error: e.to_string(),
+        .map_err(|e| {
+            if let Some(ref l) = logger {
+                let _ = l.log(&format!("编译失败: {}", e));
+            }
+            CloudConvertError::ConversionFailed {
+                job_id: "local".to_string(),
+                error_code: None,
+                error: e.to_string(),
+            }
         })?;
+
+    if let Some(ref l) = logger {
+        let _ = l.log("正在保存结果...");
+    }
 
     let temp_docx_path = temp_dir.path().join("temp_result.docx");
     fs::write(&temp_docx_path, &artifact.docx)?;
 
-    let consume_res = runtime()?.block_on(async { client.consume_local_conversion().await })?;
-    if !consume_res.consumed {
-        return Err(CloudConvertError::QuotaExceeded {
-            used: 0,
-            limit: 0,
-        });
-    }
+    // Local conversion does not consume cloud quota - no consume_local_conversion() call needed
 
     fs::create_dir_all(&output_dir)?;
     fs::copy(&temp_docx_path, &output_docx)?;
@@ -290,6 +390,20 @@ pub fn convert_local_blocking(
 
     // Extract style coverage rate (placeholder - actual implementation may vary)
     let style_coverage_rate = 0.0;
+
+    // Log success
+    if let Some(ref l) = logger {
+        let _ = l.log_multi(&[
+            "=== 转换成功 ===",
+            &format!("DOCX: {}", output_docx.display()),
+            &format!("报告: {}", report_path.display()),
+            &format!("质量评分: {}", quality_score),
+            &format!("配置文件: {}", active_profile),
+            &format!("阻断问题数: {}", blocking_issues_count),
+            &format!("警告数: {}", warnings_count),
+            &format!("日志文件: {}", l.path().display()),
+        ]);
+    }
 
     Ok(LocalConvertResult {
         docx_path: output_docx,

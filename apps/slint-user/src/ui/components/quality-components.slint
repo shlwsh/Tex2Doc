@@ -2,6 +2,8 @@
 // QualityScoreGauge.slint - 质量评分仪表盘组件
 // ============================================================
 
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+
 export component QualityScoreGauge inherits Rectangle {
     in property <int> score: 0;
     in property <string> label: "Quality Score";
@@ -13,7 +15,7 @@ export component QualityScoreGauge inherits Rectangle {
     min-width: 160px;
     min-height: 100px;
     border-radius: 12px;
-    background: root.gauge-color + #15; // 带透明度的背景
+    background: #f0f8f5;
 
     VerticalBox {
         alignment: center;
@@ -48,7 +50,6 @@ export component QualityScoreGauge inherits Rectangle {
             font-size: 11px;
             color: #6b778c;
             horizontal-alignment: center;
-            margin-top: 4px;
         }
     }
 }
@@ -129,10 +130,10 @@ export component DimensionScoreBar inherits Rectangle {
 }
 
 // ============================================================
-// SemanticLossItem.slint - 语义丢失项
+// SemanticLossCard.slint - 语义丢失项
 // ============================================================
 
-export component SemanticLossItem inherits Rectangle {
+export component SemanticLossCard inherits Rectangle {
     in property <string> loss-type: "macro";
     in property <string> severity: "degrading";
     in property <string> location: "";
@@ -145,7 +146,7 @@ export component SemanticLossItem inherits Rectangle {
     property <string> type-icon: loss-type == "macro" ? "M" : (loss-type == "table" ? "T" : (loss-type == "figure" ? "F" : (loss-type == "citation" ? "C" : "?")));
 
     border-radius: 6px;
-    border-color: severity-color + #40;
+    border-color: #d7dee8;
     border-width: 1px;
     background: #ffffff;
 
@@ -178,7 +179,7 @@ export component SemanticLossItem inherits Rectangle {
                 spacing: 2px;
 
                 Text {
-                    text: loss-type == "macro" ? "宏命令" : (loss-type == "table" ? "表格" : (loss-type == "figure" ? "图表" : (loss-type == "citation" ? "引用" : (loss-type == "formula" ? "公式" : "其他")));
+                    text: loss-type == "macro" ? "宏命令" : (loss-type == "table" ? "表格" : (loss-type == "figure" ? "图表" : (loss-type == "citation" ? "引用" : (loss-type == "formula" ? "公式" : "其他"))));
                     font-size: 13px;
                     font-weight: 600;
                     color: #172033;
@@ -207,8 +208,6 @@ export component SemanticLossItem inherits Rectangle {
                     color: severity-color;
                     horizontal-alignment: center;
                     vertical-alignment: center;
-                    padding-left: 8px;
-                    padding-right: 8px;
                 }
             }
         }
@@ -225,7 +224,6 @@ export component SemanticLossItem inherits Rectangle {
         if root.suggestion != "": Rectangle {
             border-radius: 4px;
             background: #eff6ff;
-            padding: 6px;
 
             Text {
                 text: "💡 " + root.suggestion;
@@ -254,7 +252,7 @@ export component WordCompatibilityCard inherits Rectangle {
 
     border-radius: 8px;
     background: status-bg;
-    border-color: status-color + #40;
+    border-color: #d7dee8;
     border-width: 1px;
 
     VerticalBox {
@@ -303,7 +301,6 @@ export component WordCompatibilityCard inherits Rectangle {
             for err in errors: Rectangle {
                 border-radius: 4px;
                 background: #ffffff;
-                padding: 6px;
 
                 Text {
                     text: "• " + err;

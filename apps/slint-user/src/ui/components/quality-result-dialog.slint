@@ -2,10 +2,12 @@
 // QualityResultDialog.slint - 质量结果弹窗组件
 // ============================================================
 
-import { QualityScoreGauge, DimensionScoreBar, SemanticLossItem, WordCompatibilityCard, StyleCoverageIndicator } from "components/quality-components.slint";
+import { VerticalBox, HorizontalBox, ListView, Button } from "std-widgets.slint";
+import { QualityScoreGauge, DimensionScoreBar, WordCompatibilityCard, StyleCoverageIndicator, SemanticLossCard } from "quality-components.slint";
+import { SemanticLossInfo } from "../types.slint";
 
 export component QualityResultDialog inherits Rectangle {
-    in property <bool> visible: false;
+    in property <bool> is-open: false;
     in property <int> quality-score: 0;
     in property <int> parse-score: 0;
     in property <int> semantic-score: 0;
@@ -24,7 +26,7 @@ export component QualityResultDialog inherits Rectangle {
     in property <string> profile: "";
     in property <string> engine-version: "";
 
-    in-out property <[SemanticLossItem]> semantic-loss-list: [];
+    in property <[SemanticLossInfo]> semantic-loss-list: [];
 
     callback close();
     callback open-docx();
@@ -32,13 +34,13 @@ export component QualityResultDialog inherits Rectangle {
     callback export-diagnostics();
 
     // 对话框背景遮罩
-    if root.visible: Rectangle {
+    if root.is-open: Rectangle {
         background: #00000066;
         TouchArea { clicked => { root.close(); } }
     }
 
     // 对话框内容
-    if root.visible: Rectangle {
+    if root.is-open: Rectangle {
         x: (parent.width - 680px) / 2;
         y: 60px;
         width: 680px;
@@ -118,7 +120,7 @@ export component QualityResultDialog inherits Rectangle {
                         background: quality-score >= 75 ? #ecfdf5 : (quality-score >= 60 ? #fffbeb : #fef2f2);
 
                         Text {
-                            text: quality-score >= 90 ? "✓ 优秀 - 可直接投稿" : (quality-score >= 75 ? "✓ 良好 - 可使用" : (quality-score >= 60 ? "⚠ 一般 - 请检查" : "✗ 较差 - 需修复"));
+                            text: quality-score >= 90 ? "优秀" : (quality-score >= 75 ? "良好" : (quality-score >= 60 ? "一般" : "较差"));
                             font-size: 12px;
                             font-weight: 600;
                             color: quality-score >= 90 ? #0f8a5f : (quality-score >= 75 ? #2563eb : (quality-score >= 60 ? #b7791f : #c2413a));
@@ -156,14 +158,14 @@ export component QualityResultDialog inherits Rectangle {
 
             GridLayout {
                 spacing: 8px;
-                rows: 2;
-                columns: 3;
 
                 DimensionScoreBar {
                     dimension-name: "解析完整性";
                     score: root.parse-score;
                     description: parse-score >= 90 ? "完整解析" : (parse-score >= 75 ? "少量未知" : "较多未知");
                     accent: #2563eb;
+                    row: 0;
+                    col: 0;
                 }
 
                 DimensionScoreBar {
@@ -171,6 +173,8 @@ export component QualityResultDialog inherits Rectangle {
                     score: root.semantic-score;
                     description: semantic-score >= 90 ? "完全保真" : (semantic-score >= 75 ? "部分降级" : "较多降级");
                     accent: #7c3aed;
+                    row: 0;
+                    col: 1;
                 }
 
                 DimensionScoreBar {
@@ -178,6 +182,8 @@ export component QualityResultDialog inherits Rectangle {
                     score: root.docx-score;
                     description: docx-score >= 90 ? "完全合规" : (docx-score >= 75 ? "轻微问题" : "存在问题");
                     accent: #0891b2;
+                    row: 0;
+                    col: 2;
                 }
 
                 DimensionScoreBar {
@@ -185,6 +191,8 @@ export component QualityResultDialog inherits Rectangle {
                     score: root.visual-score;
                     description: visual-score >= 90 ? "版面一致" : (visual-score >= 75 ? "轻微差异" : "较大差异");
                     accent: #059669;
+                    row: 1;
+                    col: 0;
                 }
 
                 DimensionScoreBar {
@@ -192,6 +200,8 @@ export component QualityResultDialog inherits Rectangle {
                     score: root.editable-score;
                     description: editable-score >= 90 ? "可直接编辑" : (editable-score >= 75 ? "部分可编辑" : "受限");
                     accent: #dc2626;
+                    row: 1;
+                    col: 1;
                 }
 
                 DimensionScoreBar {
@@ -199,6 +209,8 @@ export component QualityResultDialog inherits Rectangle {
                     score: root.performance-score;
                     description: performance-score >= 90 ? "稳定快速" : (performance-score >= 75 ? "正常" : "较慢");
                     accent: #ca8a04;
+                    row: 1;
+                    col: 2;
                 }
             }
 
@@ -219,7 +231,7 @@ export component QualityResultDialog inherits Rectangle {
                     background: root.semantic-loss-list.length > 0 ? #fffbeb : #ecfdf5;
 
                     Text {
-                        text: "⚠ 语义丢失 (" + root.semantic-loss-list.length + " 项)";
+                        text: "语义丢失 (" + root.semantic-loss-list.length + " 项)";
                         font-size: 12px;
                         font-weight: 700;
                         color: root.semantic-loss-list.length > 0 ? #b7791f : #0f8a5f;
@@ -231,7 +243,7 @@ export component QualityResultDialog inherits Rectangle {
                 ListView {
                     max-height: 140px;
 
-                    for item in root.semantic-loss-list: SemanticLossItem {
+                    for item in root.semantic-loss-list: SemanticLossCard {
                         loss-type: item.loss-type;
                         severity: item.severity;
                         location: item.location;
@@ -252,7 +264,6 @@ export component QualityResultDialog inherits Rectangle {
             if root.visual-diff > 0.0: Rectangle {
                 border-radius: 6px;
                 background: #f1f5f9;
-                padding: 8px;
 
                 Text {
                     text: "视觉差异: " + visual-diff + "% | SSIM: --";
@@ -271,7 +282,6 @@ export component QualityResultDialog inherits Rectangle {
 
                 Button {
                     text: "打开 DOCX";
-                    primary: true;
                     clicked => { root.open-docx(); }
                 }
 
