@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-15-humanities-apa",
+  "corpus_name": "Humanities - APA 7th",
+  "corpus_name_zh": "APA 7th 人文社科",
+  "tier": "golden",
+  "profile": "apa-7",
+  "source": "synthetic",
+  "page_count_approx": 10,
+  "packages": ["apa7", "biblatex", "csquotes", "hyperref"],
+  "focus_areas": ["author_year_citation", "long_abstract", "apa7_formatting"],
+  "hard_elements": ["apa7 class", "biblatex APA style", "csquotes", "long abstract"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["apa7: specific formatting may require manual adjustment", "author-year citations may need style mapping"],
+  "expected_fallbacks": [],
+  "references": { "type": "biblatex", "count": 15 }
+}

@@ -28,6 +28,8 @@ pub fn wire_account(ui: &MainWindow, app_state: Arc<AppState>) {
                 );
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_account_busy(false);
+                        ui.set_toast_visible(false);
                         match result {
                             Ok(session) => {
                                 helpers::apply_account_session(&app, &ui, &base_url, session)
@@ -68,6 +70,8 @@ pub fn wire_account(ui: &MainWindow, app_state: Arc<AppState>) {
                 );
                 let invoke_result = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = ui_weak.upgrade() {
+                        ui.set_is_account_busy(false);
+                        ui.set_toast_visible(false);
                         match result {
                             Ok(session) => {
                                 helpers::apply_account_session(&app, &ui, &base_url, session)
@@ -100,6 +104,8 @@ pub fn wire_account(ui: &MainWindow, app_state: Arc<AppState>) {
                 crate::cloud_account::refresh_and_fetch_usage_blocking(&base_url, refresh_token);
             let invoke_result = slint::invoke_from_event_loop(move || {
                 if let Some(ui) = ui_weak.upgrade() {
+                    ui.set_is_account_busy(false);
+                    ui.set_toast_visible(false);
                     match result {
                         Ok(session) => {
                             helpers::apply_account_session(&app, &ui, &base_url, session)

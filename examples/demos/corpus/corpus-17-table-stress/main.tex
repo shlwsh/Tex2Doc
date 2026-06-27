@@ -1,0 +1,151 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,booktabs,tabularx,multirow,array,hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{Table Stress Test: Complex Table Structures}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests the handling of complex table structures including tabularx,
+tabulary, multirow with resizebox, and nested minipage structures.
+Focus: tabularx, multirow, nested minipage.
+\end{abstrct}
+
+\section{Test Tables}
+
+\subsection{tabularx with X column}
+
+\begin{table}[ht]
+\centering
+\caption{tabularx with X column for automatic width}
+\label{tab:tabularx}
+\begin{tabularx}{\linewidth}{|X|X|X|}
+\hline
+\textbf{Column A} & \textbf{Column B} & \textbf{Column C} \\
+\hline
+This is a long text that should wrap automatically within the cell boundaries &
+Another column with variable width content &
+Final column completing the table row \\
+\hline
+Shorter text &
+Somewhat longer text that wraps around &
+Short \\
+\hline
+\end{tabularx}
+\end{table}
+
+\subsection{Resizebox with tabular}
+
+\begin{table}[ht]
+\centering
+\caption{Table within resizebox}
+\label{tab:resize}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{|l|c|r|}
+\hline
+Left aligned & Centered & Right aligned \\
+\hline
+Item A & 100 & 0.123 \\
+Item B & 200 & 0.456 \\
+Item C & 300 & 0.789 \\
+\hline
+\end{tabular}
+}
+\end{table}
+
+\subsection{Multirow spanning cells}
+
+\begin{table}[ht]
+\centering
+\caption{Table with multirow spanning}
+\label{tab:multirow}
+\begin{tabular}{|l|c|c|}
+\hline
+Item & Value & Description \\
+\hline
+\hline
+\multirow{2}{*}{Group A} & 100 & First item in group \\
+                         & 200 & Second item in group \\
+\hline
+\hline
+multirow 3 row spanning &
+Long description that wraps &
+More content here \\
+                         &
+Additional cell content &
+Final cell \\
+                         &
+Still more &
+Last cell \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Nested minipage in table cell}
+
+\begin{table}[ht]
+\caption{Table with minipage in cell}
+\label{tab:minipage}
+\begin{tabular}{|p{3cm}|p{5cm}|}
+\hline
+Title & Content with minipage \\
+\hline
+Section 1 &
+{minipage}{\hsize}
+This cell contains a minipage with:
+\begin{itemize}
+  \item Bullet point one
+  \item Bullet point two
+  \item Bullet point three
+\end{itemize}
+\end{minipage}
+\\
+\hline
+Section 2 &
+\begin{minipage}{\hsize}
+Another nested structure:
+\begin{enumerate}
+  \item First item
+  \item Second item
+\end{enumerate}
+\end{minipage}
+\\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Tabulary for automatic width}
+
+\begin{table}[ht]
+\centering
+\caption{tabulary with automatic column widths}
+\label{tab:tabulary}
+\begin{tabulary}{\linewidth}{|L|C|R|}
+\hline
+Long left column header & Center header & Right column header \\
+\hline
+This is a longer text on the left &
+Centered medium &
+Short right text \\
+\hline
+Another row &
+More content here &
+Tiny \\
+\hline
+\end{tabulary}
+\end{table}
+
+\section{Conclusion}
+
+This corpus tests various complex table structures.
+
+\end{document}

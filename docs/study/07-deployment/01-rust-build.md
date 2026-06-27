@@ -1,4 +1,8 @@
 # 第七章 · Rust 核心构建
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 Rust 核心 crate 的完整构建流程：从依赖准备到 release 优化。
 

@@ -1,0 +1,90 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{siunitx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{rotating}
+
+\sisetup{
+  detect-all,
+  table-format=2.1
+}
+
+\graphicspath{{./figures/}}
+
+\title{Genome-wide analysis of regulatory elements in human disease}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a comprehensive analysis of regulatory elements across the human genome,
+integrating chromatin accessibility, histone modifications, and transcription factor
+binding data from multiple disease cohorts.
+\end{abstract}
+
+\section{Results}
+
+\subsection{Chromatin Accessibility}
+
+We identified \num{250000} accessible chromatin regions using ATAC-seq.
+These regions were annotated to potential regulatory elements.
+
+\begin{longtable}{lS[table-format=4.0]S[table-format=4.0]S[table-format=3.2]}
+\caption{Chromatin accessibility statistics by cell type. Values shown are mean $\pm$ standard deviation.}
+\label{tab:accessibility}\\
+\toprule
+Cell Type & Peaks & Peak Width (bp) & FRiP Score \\
+\midrule
+\endfirsthead
+\toprule
+Cell Type & Peaks & Peak Width (bp) & FRiP Score \\
+\midrule
+\endhead
+\midrule
+\endlastfoot
+HepG2 & 45023 & 342 $\pm$ 89 & 0.34 \\
+K562 & 52341 & 389 $\pm$ 102 & 0.41 \\
+GM12878 & 41256 & 298 $\pm$ 76 & 0.28 \\
+MCF-7 & 38456 & 312 $\pm$ 68 & 0.31 \\
+HeLa-S3 & 39876 & 356 $\pm$ 94 & 0.29 \\
+A549 & 42123 & 324 $\pm$ 82 & 0.32 \\
+IMR-90 & 35678 & 278 $\pm$ 71 & 0.26 \\
+NHLF & 34234 & 301 $\pm$ 79 & 0.25 \\
+H1-hESC & 51234 & 401 $\pm$ 112 & 0.38 \\
+HUVEC & 45678 & 367 $\pm$ 95 & 0.33 \\
+SK-N-SH & 38456 & 312 $\pm$ 68 & 0.30 \\
+PC-3 & 41234 & 345 $\pm$ 88 & 0.32 \\
+LNCaP & 39876 & 328 $\pm$ 81 & 0.31 \\
+MCF-10A & 36543 & 298 $\pm$ 72 & 0.27 \\
+BJ & 35234 & 289 $\pm$ 67 & 0.26 \\
+NHDF-Ad & 34876 & 285 $\pm$ 65 & 0.25 \\
+NT2-D1 & 38234 & 308 $\pm$ 74 & 0.29 \\
+CD14 & 42345 & 356 $\pm$ 92 & 0.34 \\
+CD20 & 41234 & 348 $\pm$ 89 & 0.33 \\
+CD34 & 45678 & 378 $\pm$ 98 & 0.36 \\
+GM19238 & 42345 & 356 $\pm$ 92 & 0.34 \\
+HMEC & 43876 & 362 $\pm$ 94 & 0.35 \\
+HSMM & 41234 & 345 $\pm$ 88 & 0.32 \\
+HSMT & 39876 & 328 $\pm$ 81 & 0.31 \\
+HTR8 & 38567 & 315 $\pm$ 77 & 0.30 \\
+LHCN-M2 & 37234 & 302 $\pm$ 73 & 0.29 \\
+\end{longtable}
+
+\section{Methods}
+
+Peak calling was performed using MACS2 with q-value $< 0.01$.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

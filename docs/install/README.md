@@ -1,4 +1,8 @@
 # Tex2Doc (Doc-engine) 安装与配置指南
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 本指南将帮助您在本地环境中快速配置、编译并运行 Tex2Doc 项目。
 

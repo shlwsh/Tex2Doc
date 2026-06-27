@@ -1,0 +1,38 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "paths": {
+      "@": ["../src"],
+      "@/*": ["../src/*"],
+      "@shared": ["../src/shared"],
+      "@shared/*": ["../src/shared/*"],
+      "@api": ["../src/api"],
+      "@api/*": ["../src/api/*"],
+      "@browser": ["../src/browser"],
+      "@browser/*": ["../src/browser/*"],
+      "@state": ["../src/state"],
+      "@state/*": ["../src/state/*"],
+      "@ui": ["../src/ui"],
+      "@ui/*": ["../src/ui/*"],
+      "~": ["../src"],
+      "~/*": ["../src/*"],
+      "@@": [".."],
+      "@@/*": ["../*"],
+      "~~": [".."],
+      "~~/*": ["../*"]
+    }
+  },
+  "include": [
+    "../**/*",
+    "./wxt.d.ts"
+  ],
+  "exclude": ["../.output"]
+}

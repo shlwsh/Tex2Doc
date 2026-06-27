@@ -1,4 +1,8 @@
 # 多期刊 TeX 到 DOCX 泛化能力验证方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22
 **范围**：项目默认支持的多种期刊 profile，对 `examples/paper2` 与 `examples/paper3` 两篇真实文稿进行专用格式转换验证，并将 DOCX、报告和核验结果统一输出到 `examples/output`。

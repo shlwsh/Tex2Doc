@@ -1,0 +1,5 @@
+interface:
+  display_name: "PR Production Release"
+  short_description: "PR 到生产发布验证的共享操作路径。"
+  default_prompt: "Use `$pr-production-release` to guide a PR through CI, merge, production deployment, verification, and rollback planning."
+

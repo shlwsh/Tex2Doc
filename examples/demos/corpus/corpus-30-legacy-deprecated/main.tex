@@ -1,0 +1,60 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,epsfig,eqnarray,times,latexsym,makeidx,hyperref}
+\usepackage{url}
+
+\makeindex
+
+\title{Legacy and Deprecated Packages Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests legacy and deprecated packages including epsfig, eqnarray,
+times font, and latexsym.
+Focus: epsfig, eqnarray, times, latexsym.
+\end{abstrct}
+
+\section{Eqnarray Test}
+
+The deprecated eqnarray environment:
+
+\begineqnarray
+E & = & mc^2 \label{eq:einstein} \\
+p & = & mv \label{eq:momentum}
+\endeqnarray
+
+Reference to equation~\ref{eq:einstein}.
+
+\section{Epsfig Test}
+
+Using the deprecated epsfig package:
+
+\epsfig{file=example.eps,width=5cm}
+
+\section{Latexsym Symbols}
+
+Using latexsym symbols: $\Diamond$ $\Box$ $\害怕$ \医疗保险
+
+\section{Times Font}
+
+Using times font for the document body.
+
+\section{Makeidx Test}
+
+\index{First term}\index{Second term}\index{Subcategory!Nested term}
+
+This text contains indexed terms.
+
+\printindex
+
+\section{Conclusion}
+
+Legacy packages tests complete.
+
+\end{document}

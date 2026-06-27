@@ -1,0 +1,375 @@
+// ============================================================
+// QualityScoreGauge.slint - 质量评分仪表盘组件
+// ============================================================
+
+import { VerticalBox, HorizontalBox } from "std-widgets.slint";
+
+export component QualityScoreGauge inherits Rectangle {
+    in property <int> score: 0;
+    in property <string> label: "Quality Score";
+    in property <bool> show-label: true;
+
+    // 颜色映射
+    property <color> gauge-color: score >= 90 ? #0f8a5f : (score >= 75 ? #2563eb : (score >= 60 ? #b7791f : #c2413a));
+
+    min-width: 160px;
+    min-height: 100px;
+    border-radius: 12px;
+    background: #f0f8f5;
+
+    VerticalBox {
+        alignment: center;
+        padding: 12px;
+
+        // 分数显示
+        Text {
+            text: root.score;
+            font-size: 36px;
+            font-weight: 900;
+            color: gauge-color;
+            horizontal-alignment: center;
+        }
+
+        // 进度条
+        Rectangle {
+            height: 8px;
+            border-radius: 4px;
+            background: #e5e7eb;
+
+            Rectangle {
+                height: parent.height;
+                width: parent.width * (root.score / 100);
+                border-radius: parent.border-radius;
+                background: gauge-color;
+            }
+        }
+
+        // 标签
+        if root.show-label: Text {
+            text: root.label;
+            font-size: 11px;
+            color: #6b778c;
+            horizontal-alignment: center;
+        }
+    }
+}
+
+// ============================================================
+// DimensionScoreBar.slint - 单维度评分条
+// ============================================================
+
+export component DimensionScoreBar inherits Rectangle {
+    in property <string> dimension-name: "Parse";
+    in property <int> score: 0;
+    in property <string> description: "";
+    in property <color> accent: #2563eb;
+
+    property <color> bar-color: score >= 90 ? #0f8a5f : (score >= 75 ? #2563eb : (score >= 60 ? #b7791f : #c2413a));
+
+    height: 72px;
+    border-radius: 8px;
+    background: #ffffff;
+    border-color: #d7dee8;
+    border-width: 1px;
+
+    VerticalBox {
+        padding: 10px;
+        spacing: 4px;
+
+        HorizontalBox {
+            spacing: 8px;
+
+            Text {
+                text: root.dimension-name;
+                font-size: 13px;
+                font-weight: 700;
+                color: #172033;
+                vertical-alignment: center;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: root.score;
+                font-size: 18px;
+                font-weight: 800;
+                color: bar-color;
+                vertical-alignment: center;
+            }
+
+            Text {
+                text: "/100";
+                font-size: 11px;
+                color: #6b778c;
+                vertical-alignment: center;
+            }
+        }
+
+        // 进度条
+        Rectangle {
+            height: 6px;
+            border-radius: 3px;
+            background: #e5e7eb;
+
+            Rectangle {
+                height: parent.height;
+                width: parent.width * (root.score / 100);
+                border-radius: parent.border-radius;
+                background: bar-color;
+            }
+        }
+
+        // 描述
+        if root.description != "": Text {
+            text: root.description;
+            font-size: 10px;
+            color: #6b778c;
+            overflow: elide;
+        }
+    }
+}
+
+// ============================================================
+// SemanticLossCard.slint - 语义丢失项
+// ============================================================
+
+export component SemanticLossCard inherits Rectangle {
+    in property <string> loss-type: "macro";
+    in property <string> severity: "degrading";
+    in property <string> location: "";
+    in property <string> description: "";
+    in property <string> suggestion: "";
+
+    property <color> severity-color: severity == "blocking" ? #c2413a : (severity == "degrading" ? #b7791f : #6b778c);
+    property <color> severity-bg: severity == "blocking" ? #fef2f2 : (severity == "degrading" ? #fffbeb : #f1f5f9);
+    property <string> severity-label: severity == "blocking" ? "阻断" : (severity == "degrading" ? "降级" : "可忽略");
+    property <string> type-icon: loss-type == "macro" ? "M" : (loss-type == "table" ? "T" : (loss-type == "figure" ? "F" : (loss-type == "citation" ? "C" : "?")));
+
+    border-radius: 6px;
+    border-color: #d7dee8;
+    border-width: 1px;
+    background: #ffffff;
+
+    VerticalBox {
+        padding: 10px;
+        spacing: 6px;
+
+        HorizontalBox {
+            spacing: 8px;
+            alignment: center;
+
+            // 类型图标
+            Rectangle {
+                width: 24px;
+                height: 24px;
+                border-radius: 4px;
+                background: severity-bg;
+
+                Text {
+                    text: type-icon;
+                    font-size: 12px;
+                    font-weight: 700;
+                    color: severity-color;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            VerticalBox {
+                spacing: 2px;
+
+                Text {
+                    text: loss-type == "macro" ? "宏命令" : (loss-type == "table" ? "表格" : (loss-type == "figure" ? "图表" : (loss-type == "citation" ? "引用" : (loss-type == "formula" ? "公式" : "其他"))));
+                    font-size: 13px;
+                    font-weight: 600;
+                    color: #172033;
+                }
+
+                Text {
+                    text: description;
+                    font-size: 11px;
+                    color: #6b778c;
+                    overflow: elide;
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            // 严重性标签
+            Rectangle {
+                height: 22px;
+                border-radius: 11px;
+                background: severity-bg;
+
+                Text {
+                    text: severity-label;
+                    font-size: 10px;
+                    font-weight: 700;
+                    color: severity-color;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+
+        // 位置
+        if root.location != "": HorizontalBox {
+            spacing: 4px;
+
+            Text { text: "位置:"; font-size: 10px; color: #6b778c; }
+            Text { text: root.location; font-size: 10px; color: #42526b; font-weight: 600; }
+        }
+
+        // 修复建议
+        if root.suggestion != "": Rectangle {
+            border-radius: 4px;
+            background: #eff6ff;
+
+            Text {
+                text: "💡 " + root.suggestion;
+                font-size: 10px;
+                color: #2563eb;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// ============================================================
+// WordCompatibilityCard.slint - Word 兼容性卡片
+// ============================================================
+
+export component WordCompatibilityCard inherits Rectangle {
+    in property <string> status: "unchecked";
+    in property <[string]> errors: [];
+    in property <string> check-method: "none";
+
+    property <color> status-color: status == "passed" ? #0f8a5f : (status == "warnings" ? #b7791f : #c2413a);
+    property <color> status-bg: status == "passed" ? #ecfdf5 : (status == "warnings" ? #fffbeb : #fef2f2);
+    property <string> status-icon: status == "passed" ? "✓" : (status == "warnings" ? "⚠" : "✗");
+    property <string> status-text: status == "passed" ? "通过" : (status == "warnings" ? "有警告" : (status == "failed" ? "失败" : "未检测"));
+    property <string> method-text: check-method == "word" ? "Microsoft Word" : (check-method == "libreoffice" ? "LibreOffice" : (check-method == "schema_only" ? "结构校验" : "无"));
+
+    border-radius: 8px;
+    background: status-bg;
+    border-color: #d7dee8;
+    border-width: 1px;
+
+    VerticalBox {
+        padding: 12px;
+        spacing: 8px;
+
+        // 标题行
+        HorizontalBox {
+            spacing: 8px;
+            alignment: center;
+
+            Text {
+                text: status-icon;
+                font-size: 16px;
+                color: status-color;
+            }
+
+            Text {
+                text: "Word 兼容性";
+                font-size: 14px;
+                font-weight: 700;
+                color: #172033;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: status-text;
+                font-size: 12px;
+                font-weight: 700;
+                color: status-color;
+            }
+        }
+
+        // 检查方法
+        if root.check-method != "none": Text {
+            text: "检测方式: " + method-text;
+            font-size: 10px;
+            color: #6b778c;
+        }
+
+        // 错误列表
+        if errors.length > 0: VerticalBox {
+            spacing: 4px;
+
+            for err in errors: Rectangle {
+                border-radius: 4px;
+                background: #ffffff;
+
+                Text {
+                    text: "• " + err;
+                    font-size: 10px;
+                    color: #c2413a;
+                    wrap: word-wrap;
+                }
+            }
+        }
+    }
+}
+
+// ============================================================
+// StyleCoverageIndicator.slint - 样式覆盖率指示器
+// ============================================================
+
+export component StyleCoverageIndicator inherits Rectangle {
+    in property <float> coverage-rate: 0.0;
+    in property <int> mapped-count: 0;
+    in property <int> total-count: 0;
+
+    property <color> coverage-color: coverage-rate >= 95.0 ? #0f8a5f : (coverage-rate >= 80.0 ? #2563eb : (coverage-rate >= 60.0 ? #b7791f : #c2413a));
+
+    border-radius: 8px;
+    background: #ffffff;
+    border-color: #d7dee8;
+    border-width: 1px;
+
+    VerticalBox {
+        padding: 10px;
+        spacing: 6px;
+
+        HorizontalBox {
+            Text {
+                text: "样式覆盖率";
+                font-size: 12px;
+                font-weight: 600;
+                color: #172033;
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: mapped-count + "/" + total-count;
+                font-size: 14px;
+                font-weight: 700;
+                color: coverage-color;
+            }
+        }
+
+        // 进度条
+        Rectangle {
+            height: 8px;
+            border-radius: 4px;
+            background: #e5e7eb;
+
+            Rectangle {
+                height: parent.height;
+                width: parent.width * (coverage-rate / 100);
+                border-radius: parent.border-radius;
+                background: coverage-color;
+            }
+        }
+
+        Text {
+            text: coverage-rate + "%";
+            font-size: 11px;
+            font-weight: 700;
+            color: coverage-color;
+        }
+    }
+}

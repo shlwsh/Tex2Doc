@@ -1,4 +1,8 @@
 # Flutter Desktop 使用
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 **Flutter Desktop**（Windows / macOS / Linux）的使用方式。最适合：本地化离线转换、批量任务、与系统集成。
 

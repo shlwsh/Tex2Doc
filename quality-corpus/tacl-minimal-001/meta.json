@@ -1,0 +1,11 @@
+{
+  "id": "tacl-minimal-001",
+  "source": "examples/journals/tacl/minimal.tex",
+  "document_type": "journal-article",
+  "page_count": 4,
+  "packages": ["amsmath", "graphicx", "natbib"],
+  "expected_profile": "tacl",
+  "authorization": "synthetic",
+  "tags": ["equations", "figures", "minimal"],
+  "notes": "TACL (Transactions of the Association for Computational Linguistics) 最小化测试"
+}

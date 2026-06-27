@@ -1,0 +1,54 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,fancyhdr,titletoc,hyperref}
+\usepackage{url}
+
+\fancyhf{}
+\fancyhead[LE,RO]{\thepage}
+\fancyhead[LO]{\leftmark}
+\fancyhead[RE]{\rightmark}
+\fancyfoot[C]{\centering Footer text}
+
+\graphicspath{{./figures/}}
+
+\title{Header, Footer and Page Style Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\thispagestyle{empty}
+
+\section{First Section}
+
+First section content with a new page style applied.
+
+\pagestyle{fancy}
+
+\section{Second Section}
+
+This page uses fancyhdr styling with headers and footers.
+
+\subsection{Subsection}
+
+Subsection content continues.
+
+\section{Third Section}
+
+More content on a new page.
+
+\pagestyle{plain}
+
+\section{Fourth Section}
+
+This section uses plain page style.
+
+\appendix
+\section{Appendix Section}
+
+Appendix content.
+
+\end{document}

@@ -76,7 +76,7 @@ pg_exec_out() {
 }
 
 pg_server_version() {
-  pg_exec_out -Atc "SELECT server_version;" | head -n1
+  pg_exec_out -Atc "SHOW server_version;" | head -n1
 }
 
 confirm() {

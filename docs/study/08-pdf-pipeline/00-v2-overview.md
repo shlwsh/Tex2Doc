@@ -1,4 +1,8 @@
 # 00 · V2 PDF 流水线整体综述
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章是 V2 设计与实现状态的"章前导读"。后 5 篇（[01](./01-pipeline-overview.md) ~ [05](./05-implementation-roadmap.md)）各自聚焦 1 个 crate 或 1 个阶段；本章站在更高一层回答：
 > 1. V2 是什么、要解决什么、相比 V1 多了什么；

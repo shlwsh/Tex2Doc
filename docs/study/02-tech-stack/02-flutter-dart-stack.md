@@ -1,4 +1,8 @@
 # Flutter / Dart 技术栈
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > Tex2Doc 的多端 UI 全部基于 Flutter 3.12+，通过 `dart:ffi`（桌面）和 `dart:js_interop`（Web）调 Rust 核心。本节列出 Flutter 侧依赖、桥接方式与平台配置。
 

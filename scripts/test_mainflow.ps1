@@ -437,16 +437,18 @@ print("WEB_FLOW_JSON:" + json.dumps(result, ensure_ascii=True, sort_keys=True))
         $binDir = Split-Path -Parent $TempRustBin
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
         $rustSource = @'
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports, unused_variables)]
 
 #[path = "../cloud_account.rs"]
 mod cloud_account;
 #[path = "../cloud_convert.rs"]
 mod cloud_convert;
+#[path = "../report.rs"]
+mod report;
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error::Error>> {
     if condition {
@@ -460,6 +462,63 @@ fn trace(message: impl AsRef<str>) {
     println!("SLINT_FLOW: {}", message.as_ref());
 }
 
+fn run_conversion(
+    base_url: &str,
+    access_token: Option<String>,
+    zip_path: &Path,
+    main_tex: &str,
+    output_docx: &Path,
+    profile: &str,
+    quality: &str,
+) -> Result<cloud_convert::CloudConvertResult, Box<dyn std::error::Error>> {
+    let bytes = fs::read(zip_path)?;
+    let file_name = zip_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload.zip")
+        .to_string();
+    let output_dir = output_docx
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&output_dir)?;
+    let stem = zip_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload")
+        .to_string();
+    let final_output = if output_docx.is_dir() {
+        output_docx.join(format!("{stem}.docx"))
+    } else {
+        output_docx.to_path_buf()
+    };
+    if let Some(parent) = final_output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let request = cloud_convert::CloudUploadRequest {
+        base_url,
+        access_token,
+        zip_bytes: bytes,
+        file_name: &file_name,
+        main_tex,
+        output_dir: &output_dir,
+        profile,
+        quality,
+    };
+    let result = cloud_convert::convert_upload_blocking(request)?;
+    if result.docx_path != final_output {
+        fs::create_dir_all(final_output.parent().unwrap_or_else(|| Path::new(".")))?;
+        fs::copy(&result.docx_path, &final_output)?;
+    }
+    Ok(cloud_convert::CloudConvertResult {
+        job_id: result.job_id,
+        docx_path: final_output,
+        docx_bytes: result.docx_bytes,
+        report_path: result.report_path,
+        report_text: result.report_text,
+    })
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = env::var("MAINFLOW_BASE")?;
     let email = env::var("MAINFLOW_SLINT_EMAIL")?;
@@ -468,9 +527,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paper3_zip = PathBuf::from(env::var("MAINFLOW_PAPER3_ZIP")?);
     let paper3_main_tex = env::var("MAINFLOW_PAPER3_MAIN_TEX")?;
     let temp_root = PathBuf::from(env::var("MAINFLOW_TEMP_ROOT")?).join("slint-project");
-    let output_docx = temp_root.join("output").join("result.docx");
+    let output_docx = temp_root.join("output").join("paper3.docx");
 
     let _ = fs::remove_dir_all(&temp_root);
+    fs::create_dir_all(output_docx.parent().unwrap())?;
     require(paper3_zip.is_file(), "paper3 upload.zip is missing")?;
     let paper3_bytes = fs::metadata(&paper3_zip)?.len();
     trace(format!(
@@ -498,18 +558,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     trace("balance after redeem verified: 10");
 
     trace("start cloud conversion through Slint adapter");
-    let converted = cloud_convert::convert_project_blocking(
+    let converted = run_conversion(
         &base_url,
         Some(session.access_token.clone()),
         &paper3_zip,
-        Some(&paper3_main_tex),
+        &paper3_main_tex,
         &output_docx,
         "auto",
         "standard",
     )?;
     require(converted.docx_bytes > 1000, "Slint DOCX is too small")?;
-    let docx = fs::read(&output_docx)?;
+    let docx = fs::read(&converted.docx_path)?;
     require(docx.starts_with(b"PK"), "Slint DOCX is not a zip/docx file")?;
+    require(docx.len() == converted.docx_bytes, "Slint DOCX bytes mismatch")?;
     trace(format!(
         "conversion completed: job={}, docx_bytes={}",
         converted.job_id, converted.docx_bytes
@@ -522,6 +583,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         usage_after_conversion.count_balance == 9,
         "Slint balance after conversion should be 9",
     )?;
+    trace(format!(
+        "balance after conversion verified: {} (cloud_conversions_used={})",
+        usage_after_conversion.count_balance, usage_after_conversion.cloud_conversions_used
+    ));
 
     trace("verify recharge/redeem table rows");
     let recharge_rows =
@@ -530,6 +595,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         recharge_rows.iter().any(|row| row.package.contains("count_10") && row.quantity == "10"),
         "Slint recharge/redeem table is missing the count_10 record",
     )?;
+    trace(format!("recharge table rows verified: {} entries", recharge_rows.len()));
 
     trace("verify conversion table storage metadata");
     let conversion_rows =
@@ -540,6 +606,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .any(|row| row.id == converted.job_id && row.has_docx && row.has_zip && row.has_log),
         "Slint conversion table is missing completed storage metadata",
     )?;
+    trace(format!(
+        "conversion table rows verified: {} entries (including {})",
+        conversion_rows.len(),
+        converted.job_id
+    ));
+
+    trace("verify report.json sidecar was generated");
+    require(
+        converted.report_path.is_file(),
+        "Slint report.json was not generated alongside DOCX",
+    )?;
+    let report_bytes = fs::metadata(&converted.report_path)?.len();
+    trace(format!(
+        "report.json verified: {} ({} bytes)",
+        converted.report_path.display(),
+        report_bytes
+    ));
+
     trace("Slint flow checks completed");
 
     println!(
@@ -548,6 +632,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "user": email,
             "job_id": converted.job_id,
             "docx_bytes": converted.docx_bytes,
+            "report_bytes": report_bytes,
             "balance_before": registered.usage.count_balance,
             "balance_after_redeem": usage_after_redeem.count_balance,
             "balance_after_conversion": usage_after_conversion.count_balance,

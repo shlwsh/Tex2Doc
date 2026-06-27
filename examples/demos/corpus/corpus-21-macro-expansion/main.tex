@@ -1,0 +1,58 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,xparse,etoolbox,hyperref}
+\usepackage{url}
+
+\ExplSyntaxOn
+\NewDocumentCommand{\mysignature}{m m}{%
+  #1~#2%
+}
+
+\NewDocumentCommand{\processlist}{m}{%
+  \clist_map_inline:nn {#1} {##1, }%
+}
+
+\NewDocumentCommand{\ifempty}{m m m}{%
+  \tl_if_empty:nTF {#1} {#2} {#3}%
+}
+
+\NewDocumentCommand{\tracingmacros}{m}{%
+  \typeout{Macro~#1~expanded~to:~\expandafter\meaning\csname #1\endcsname}%
+}
+
+\ExplSyntaxOff
+
+\title{Macro Expansion Stress Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests macro expansion with xparse, ExplSyntaxOn, recursive macros,
+and etoolbox patching.
+Focus: xparse, ExplSyntaxOn, recursive macros.
+\end{abstrct}
+
+\section{Introduction}
+
+Testing various LaTeX3 and macro expansion features.
+
+\section{Macro Tests}
+
+\subsection{Basic xparse commands}
+
+Name: \mysignature{John}{Doe}
+
+List processing: \processlist{item1,item2,item3}
+
+Conditional: \ifempty{}{Empty}{Not empty}
+
+\section{Conclusion}
+
+This tests complex macro expansion.
+
+\end{document}

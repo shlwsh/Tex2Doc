@@ -728,7 +728,10 @@ fn active_profile_style_map(active: &ActiveProfile) -> Option<doc_docx_writer::P
         let role = normalize_style_role(&entry.semantic);
         by_role.insert(role.to_string(), entry.docx_style.clone());
     }
-    Some(doc_docx_writer::ProfileStyleMap { by_role })
+    Some(doc_docx_writer::ProfileStyleMap {
+        by_role,
+        cjk_options: None,
+    })
 }
 
 fn normalize_style_role(role: &str) -> &str {
@@ -3404,12 +3407,19 @@ fn run_latex_runtime(
         .arg("-interaction=nonstopmode")
         .arg("-halt-on-error")
         .arg("-file-line-error");
-    // M2-1: XeLaTeX requires explicit -output-format=xdv to produce .xdv output
+    // M2-1: XeLaTeX requires explicit -no-pdf to produce .xdv output
     if matches!(engine, RuntimeEngine::XeLaTeX) {
-        command.arg("-output-format=xdv");
+        command.arg("-no-pdf");
     }
+
+    // Inject TEXINPUTS to allow recursive searching for figures/assets
+    // in case the zip archive layout broke \graphicspath{{../figures/}}
+    let sep = if cfg!(windows) { ";" } else { ":" };
+    let texinputs = format!(".{}{}//{}", sep, workdir.display(), sep);
+
     command
         .arg(main_tex)
+        .env("TEXINPUTS", &texinputs)
         .env("TEXMFVAR", &tex_cache)
         .env("TEXMFCACHE", &tex_cache)
         .current_dir(workdir);
@@ -3424,6 +3434,21 @@ fn run_latex_runtime(
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     let stdout = String::from_utf8_lossy(&output.stdout);
+
+    // TeX engines often exit with code 1 for missing fonts/citations,
+    // but still successfully generate the semantic sidecar and XDV.
+    // Instead of failing immediately, we log the error but return Ok(()).
+    // The caller will verify if the sidecar and XDV were actually produced.
+    if output.status.code() == Some(1) {
+        eprintln!(
+            "{} exited with status 1, but continuing. stdout tail: {}; stderr tail: {}",
+            engine.command(),
+            tail_for_diagnostic(&stdout),
+            tail_for_diagnostic(&stderr)
+        );
+        return Ok(());
+    }
+
     Err(EngineError::Unsupported(format!(
         "{} exited with status {}; stdout tail: {}; stderr tail: {}",
         engine.command(),

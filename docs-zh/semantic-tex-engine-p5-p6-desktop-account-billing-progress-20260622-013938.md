@@ -1,4 +1,8 @@
 # Semantic TeX Engine P5/P6 Desktop Account Billing 开发进展报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **时间戳**：20260622-013938  
 **基准计划**：`docs-zh/plan-0621.md`  

@@ -1,4 +1,8 @@
 # 关键技术 4：语义 AST → OOXML 序列化
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节深入解析 `doc-docx-writer`。解决的核心问题：把 `doc-semantic-ast::Document` 序列化为 ECMA-376 兼容的 docx。
 

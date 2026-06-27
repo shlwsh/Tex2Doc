@@ -1,0 +1,100 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,float,subcaption,hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{Figure Stress Test: Complex Figure Structures}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests the handling of complex figure structures including [H] forced placement,
+subcaptiongroup, minipage side-by-side, and long captions.
+Focus: [H] placement, subcaptiongroup.
+\end{abstrct}
+
+\section{Test Figures}
+
+\subsection{Forced [H] placement}
+
+\begin{figure}[H]
+  \centering
+  \rule{6cm}{4cm}
+  \caption{This figure uses [H] to force placement exactly here. This is a long
+    caption that describes the figure in detail and tests how long captions are
+    rendered in the conversion process.}
+  \label{fig:forced}
+\end{figure}
+
+The text continues here after the forced figure.
+
+\subsection{Subcaption with minipage}
+
+\begin{figure}[ht]
+  \centering
+  \begin{minipage}{0.45\textwidth}
+    \centering
+    \rule{\linewidth}{3cm}
+    \caption{Left subfigure}
+    \label{fig:left}
+  \end{minipage}
+  \hfill
+  \begin{minipage}{0.45\textwidth}
+    \centering
+    \rule{\linewidth}{3cm}
+    \caption{Right subfigure}
+    \label{fig:right}
+  \end{minipage}
+  \caption{Two figures side by side using minipage}
+  \label{fig:minipage}
+\end{figure}
+
+\subsection{Subcaptiongroup (if supported)}
+
+\begin{figure}[ht]
+  \centering
+  \subcaptionbox{First panel\label{fig:panel1}}{\rule{3cm}{2cm}}
+  \subcaptionbox{Second panel\label{fig:panel2}}{\rule{3cm}{2cm}}
+  \subcaptionbox{Third panel\label{fig:panel3}}{\rule{3cm}{2cm}}
+  \caption{Multiple panels with subcaptiongroup}
+  \label{fig:panels}
+\end{figure}
+
+\subsection{Many subfigures}
+
+\begin{figure}[ht]
+  \centering
+  \subfloat[Sub A]{\rule{2cm}{1.5cm}\label{fig:suba}}
+  \subfloat[Sub B]{\rule{2cm}{1.5cm}\label{fig:subb}}
+  \subfloat[Sub C]{\rule{2cm}{1.5cm}\label{fig:subc}}
+  \subfloat[Sub D]{\rule{2cm}{1.5cm}\label{fig:subd}}
+  \caption{Four subfigures in a row}
+  \label{fig:four}
+\end{figure}
+
+\subsection{Very long caption}
+
+\begin{figure}[ht]
+  \centering
+  \rule{5cm}{3cm}
+  \caption{This is an extremely long caption that goes on and on describing every
+    single detail of the figure including the methodology used to generate it,
+    the parameters chosen, the expected output, and various other details that
+    one might find in a real scientific figure caption. This tests how well
+    the converter handles long captions and whether they are truncated or
+    preserved in their entirety.}
+  \label{fig:long}
+\end{figure}
+
+\section{Conclusion}
+
+This corpus tests various complex figure structures.
+
+\end{document}

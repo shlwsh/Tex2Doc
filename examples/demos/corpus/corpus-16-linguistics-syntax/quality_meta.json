@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-16-linguistics-syntax",
+  "corpus_name": "Linguistics - Syntax Trees",
+  "corpus_name_zh": "语言学句法树",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["tikz-qtree", "forest", "gb4e", "amsmath", "hyperref"],
+  "focus_areas": ["syntax_tree", "glossed_examples", "linguistic_formatting"],
+  "hard_elements": ["tikz-qtree", "forest", "gb4e", "\\gll...\\glt"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["tikz-qtree: syntax trees may become images", "gb4e: interlinear gloss may not preserve alignment"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 8 }
+}

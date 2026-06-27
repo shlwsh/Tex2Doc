@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-10-physics-optics",
+  "corpus_name": "Physics Optics Report",
+  "corpus_name_zh": "光学物理报告",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["wrapfig", "floatrow", "siunitx", "chemfig", "amsmath", "hyperref"],
+  "focus_areas": ["wrap_figure", "wrap_table", "chemical_formula", "unit_notation"],
+  "hard_elements": ["wrapfig", "floatrow", "chemfig", "siunitx S column"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["wrapfig: text wrapping may not translate to DOCX", "chemfig: chemical structures may become images"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 8 }
+}

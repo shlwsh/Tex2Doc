@@ -1,4 +1,8 @@
 # 关键技术 1：多文件 LaTeX 拓扑与拼接
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节深入解析 `doc-latex-reader::include` 模块（Pass-1）。解决的核心问题：真实 LaTeX 工程是「多文件 + 互相 include + 图片散落各处」，转换器必须先解析出完整的源码图，才能做下游解析。
 

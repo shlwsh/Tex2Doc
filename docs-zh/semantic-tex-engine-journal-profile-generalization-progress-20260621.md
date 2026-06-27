@@ -1,4 +1,8 @@
 # Semantic TeX Engine 期刊 Profile 泛化 — 开发进展报告
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**: 2026-06-21
 **状态**: ✅ 全部完成

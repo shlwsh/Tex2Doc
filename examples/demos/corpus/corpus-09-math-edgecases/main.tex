@@ -1,0 +1,102 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{mathtools}
+\usepackage{tikz-cd}
+\usepackage{cases}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+
+\usetikzlibrary{cd}
+
+\graphicspath{{./figures/}}
+
+\title{Mathematical Equations: Edge Cases and Complex Structures}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This paper presents edge cases for mathematical equation typesetting, focusing
+on commutative diagrams, piecewise functions, and large matrices. These scenarios
+test the robustness of LaTeX-to-DOCX conversion tools.
+\end{abstract}
+
+\section{Commutative Diagrams}
+
+Commutative diagrams are essential in category theory and algebraic geometry:
+
+\begin{equation}
+\begin{tikzcd}
+A \arrow[r, "f"] \arrow[d, "g"] & B \arrow[d, "h"] \\
+C \arrow[r, "k"] & D \arrow[lu, "\exists! u"', dashed]
+\end{tikzcd} \label{eq:comm_diag}
+\end{equation}
+
+\section{Piecewise Functions}
+
+The sign function is defined using the cases environment:
+
+\begin{equation}
+\operatorname{sgn}(x) =
+\begin{cases}
+-1 & \text{if } x < 0, \\
+0  & \text{if } x = 0, \\
++1 & \text{if } x > 0.
+\end{cases} \label{eq:sign}
+\end{equation}
+
+Nested cases:
+\begin{numcases}{|x|=}
+x, & $x \ge 0$, \\
+-x, & $x < 0$.
+\end{numcases} \label{eq:abs}
+
+\section{Large Matrices}
+
+A $10 \times 10$ matrix demonstrates handling of large structures:
+
+\[
+\mathbf{A}_{10\times 10} =
+\begin{bmatrix}
+a_{11} & a_{12} & a_{13} & a_{14} & a_{15} & a_{16} & a_{17} & a_{18} & a_{19} & a_{110} \\
+a_{21} & a_{22} & a_{23} & a_{24} & a_{25} & a_{26} & a_{27} & a_{28} & a_{29} & a_{210} \\
+a_{31} & a_{32} & a_{33} & a_{34} & a_{35} & a_{36} & a_{37} & a_{38} & a_{39} & a_{310} \\
+a_{41} & a_{42} & a_{43} & a_{44} & a_{45} & a_{46} & a_{47} & a_{48} & a_{49} & a_{410} \\
+a_{51} & a_{52} & a_{53} & a_{54} & a_{55} & a_{56} & a_{57} & a_{58} & a_{59} & a_{510} \\
+a_{61} & a_{62} & a_{63} & a_{64} & a_{65} & a_{66} & a_{67} & a_{68} & a_{69} & a_{610} \\
+a_{71} & a_{72} & a_{73} & a_{74} & a_{75} & a_{76} & a_{77} & a_{78} & a_{79} & a_{710} \\
+a_{81} & a_{82} & a_{83} & a_{84} & a_{85} & a_{86} & a_{87} & a_{88} & a_{89} & a_{810} \\
+a_{91} & a_{92} & a_{93} & a_{94} & a_{95} & a_{96} & a_{97} & a_{98} & a_{99} & a_{910} \\
+a_{101} & a_{102} & a_{103} & a_{104} & a_{105} & a_{106} & a_{107} & a_{108} & a_{109} & a_{1010}
+\end{bmatrix}
+\] \label{eq:large_matrix}
+
+\section{Split Equations}
+
+Split allows breaking equations across lines:
+
+\begin{equation}
+\begin{split}
+(a+b)^3 &= (a+b)(a+b)(a+b) \\
+        &= (a+b)(a^2 + 2ab + b^2) \\
+        &= a^3 + 3a^2b + 3ab^2 + b^3 .
+\end{split} \label{eq:split}
+\end{equation}
+
+\section{Conclusion}
+
+These edge cases provide comprehensive testing scenarios for mathematical
+typesetting conversion.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

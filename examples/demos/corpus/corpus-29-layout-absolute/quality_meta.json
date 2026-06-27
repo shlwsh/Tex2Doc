@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-29-layout-absolute",
+  "corpus_name": "Absolute Positioning",
+  "corpus_name_zh": "绝对定位布局",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["eso-pic", "textpos", "tikz", "hyperref"],
+  "focus_areas": ["absolute_positioning", "overlays"],
+  "hard_elements": ["eso-pic watermarks", "textpos", "TikZ overlay"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Absolute positioning may not translate to DOCX"],
+  "expected_fallbacks": ["Watermarks and overlays may be lost"],
+  "references": { "type": "bibtex", "count": 2 }
+}

@@ -1,0 +1,89 @@
+\documentclass{aer}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{threeparttable}
+\usepackage{dcolumn}
+\usepackage{hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{Effects of Trade Policy on Economic Growth: Evidence from a Panel of Countries}
+
+\shorttitle{Trade Policy and Economic Growth}
+
+\author{First Author and Second Author}
+
+\abstract{
+This paper examines the relationship between trade policy and economic growth
+using panel data from 50 countries over the period 1990--2020.
+We employ instrumental variables estimation to address endogeneity concerns.
+Our results indicate that a one-percentage-point increase in trade openness
+is associated with a 0.3 percentage point increase in annual GDP growth.
+This effect is robust across different model specifications and sample periods.}
+
+\keywords{trade policy, economic growth, panel data, instrumental variables}
+
+\begin{document}
+
+\maketitle
+
+\section{Introduction}
+
+The relationship between international trade and economic growth has been
+a central topic in development economics for decades.
+
+\section{Data and Methodology}
+
+Our dataset covers 50 countries with annual observations from 1990 to 2020.
+
+\subsection{Variable Definitions}
+
+GDP growth rate is measured as the annual percentage change in real GDP per capita.
+Trade openness is defined as the sum of exports and imports as a percentage of GDP.
+
+\section{Results}
+
+\begin{table}[ht]
+\centering
+\caption{Effects of trade openness on economic growth: Panel IV estimates.}
+\label{tab:reg}
+\begin{threeparttable}
+\begin{tabular}{l*{3}{D{.}{.}{2.4}}}
+\toprule
+ & \multicolumn{1}{c}{(1)} & \multicolumn{1}{c}{(2)} & \multicolumn{1}{c}{(3)} \\
+Variable & \mc{1}{c}{Baseline} & \mc{1}{c}{Fixed Effects} & \mc{1}{c}{System GMM} \\
+\midrule
+Trade Openness & 0.234*** & 0.312*** & 0.289*** \\
+               & (0.056)  & (0.078)  & (0.065)  \\
+\midrule
+Controls & No & Yes & Yes \\
+Country FE & No & Yes & Yes \\
+Year FE & No & Yes & Yes \\
+\midrule
+Observations & 1,550 & 1,550 & 1,500 \\
+R-squared & 0.12 & 0.34 & 0.41 \\
+\end{tabular}
+\begin{tablenotes}
+\item Standard errors in parentheses. * p $<$ 0.10, ** p $<$ 0.05, *** p $<$ 0.01.
+\item Controls include: initial GDP, human capital, infrastructure, institutional quality.
+\end{tablenotes}
+\end{threeparttable}
+\end{table}
+
+\section{Conclusion}
+
+Our findings support the hypothesis that trade openness promotes economic growth,
+consistent with theoretical predictions from trade models.
+
+\section*{References}
+
+\begin{thebibliography}{99}
+\addtolength{\itemsep}{-0.5ex}
+\bibliographystyle{aer}
+\bibliography{refs}
+\end{thebibliography}
+
+\end{document}

@@ -1,0 +1,103 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{tikz-qtree}
+\usepackage{forest}
+\usepackage{gb4e}
+\usepackage{expex}
+\usepackage{hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{Syntactic Structure and Constituent Ordering in Natural Language}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+This paper investigates syntactic structures in natural language using formal
+grammars and treebank analyses. We examine constituent order variations
+across languages and their implications for linguistic theory.
+\endabstract}
+
+\section{Introduction}
+
+The study of syntactic structure is fundamental to understanding how natural
+languages encode meaning through grammatical constructions.
+
+\section{Syntax Trees}
+
+Syntactic trees provide a hierarchical representation of sentence structure:
+
+\ex Standard sentence structure
+\gll John loves Mary .
+John loves Mary .
+\glft `John loves Mary.'
+\endgl
+\xe
+
+The corresponding tree structure:
+
+\begin{exe}
+\ex
+\begin{forest}
+[S
+  [NP [Det [The]] [N [cat]]]
+  [VP [V [chased]] [NP [Det [the]] [N [dog]]]]]
+\end{forest}
+\xe
+
+Using \textbf{tikz-qtree}:
+
+\begin{center}
+\Tree [.S [.NP [.Det The ] [.N cat ] ]
+           [.VP [.V chased ]
+               [.NP [.Det the ] [.N dog ] ] ] ]
+\end{center}
+
+\section{Glossed Examples}
+
+Interlinear glossed text (IGT) is standard in linguistic publications:
+
+\ex Multiple morpheme example
+\gll wola-ka-$\emptyset$-a
+want-PRES-DECL-IND
+\glft `S/he wants it.'
+\xe
+
+\ex Complex verbal complex
+\gll chi-whelu-yu
+  1SUBJ-see-PAST
+\glft `I saw (him/her/it).'
+\xe
+
+\section{Binding Theory}
+
+\ex Binding Condition A
+\gll John$_i$ criticized himself$_i$.
+John criticize-PAST REFL
+\glft `John criticized himself.'
+\xe
+
+\ex Binding Condition B
+\gll He$_i$ criticized John$_i$.
+3SG criticize-PAST John
+\glft `He criticized John.'
+\xe
+
+\section{Conclusion}
+
+This paper has examined syntactic structures using modern linguistic methodology.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

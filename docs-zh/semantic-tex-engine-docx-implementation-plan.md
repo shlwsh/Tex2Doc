@@ -1,4 +1,8 @@
 # Semantic TeX Engine：XeLaTeX/CTeX 到 DOCX 高保真实现方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 当前实现进度、缺口和开发任务清单见：[semantic-tex-engine-progress-and-task-plan.md](./semantic-tex-engine-progress-and-task-plan.md)
 >

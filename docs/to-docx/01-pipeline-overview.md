@@ -1,4 +1,8 @@
 # 01 · 入口与产物（shell → python → docx）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章复刻 `scripts/build_docx.sh` 的全部行为，并标注 Rust 重构时应当保留的语义。
 

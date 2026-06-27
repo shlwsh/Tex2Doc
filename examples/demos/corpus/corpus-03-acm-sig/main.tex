@@ -1,0 +1,92 @@
+\documentclass[sigconf,anonymous,review]{acmart}
+\settopmatter{printacmref=true}
+\usepackage{booktabs}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage[utf8]{inputenc}
+\usepackage{hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{CCS Concepts for LaTeX-to-DOCX Conversion Benchmark}
+
+\author{First Author}
+\affiliation{\institution{Example University}
+  \city{City} \country{Country}}
+\author{Second Author}
+\affiliation{\institution{Another Institute}
+  \city{City} \country{Country}}
+
+% ---- ACM CCS Concepts ----
+\beginCCS
+\begin{textblock}{0.5}(-1.0,-0.5)
+\ccsdesc[500]{Software and its engineering~Software libraries}
+\ccsdesc[300]{Human-centered computing~Visualization techniques}
+\ccsdesc[100]{Computing methodologies~Machine learning}
+\end{textblock}
+\endCCS
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This paper presents a comprehensive benchmark for evaluating LaTeX-to-DOCX
+conversion tools. We assess conversion quality across multiple dimensions including
+mathematical notation, cross-references, bibliographic citations, and visual elements.
+Our findings reveal significant variations in conversion accuracy across different tools
+and document types.
+\end{abstract}
+
+\keywords{LaTeX, DOCX, document conversion, benchmark, evaluation}
+
+\section{Introduction}
+
+LaTeX is the de facto standard for scientific document preparation, particularly
+in fields requiring complex mathematical notation. However, the widespread use
+of Microsoft Word in academic and industry settings necessitates conversion of
+LaTeX documents to DOCX format.
+
+\section{Background}
+
+The conversion of LaTeX to DOCX presents several technical challenges. Mathematical
+equations must be converted to Office Math ML (OMML) format~\cite{lamport1994latex},
+while bibliographic citations require mapping between BibTeX and Word's citation system.
+
+\section{Experimental Setup}
+
+We evaluate four popular conversion tools on a diverse corpus of 50 scientific documents.
+
+\begin{table}[t]
+\caption{API usage comparison across three visualization libraries.}
+\label{tab:api}
+\begin{tabular}{l|p{4.5cm}|p{3.5cm}}
+  \toprule
+  Library & Typical Call Pattern & Extensibility \\
+  \midrule
+  D3.js & \texttt{d3.select().data().enter().append()} & High (JS) \\
+  Vega-Lite & \texttt{vl.markBar().encode(x,y).run()} & Medium (JSON) \\
+  Observable Plot & \texttt{Plot.plot(\{marks: [...] \})} & Medium (JS) \\
+  ECharts & \texttt{chart.setOption(\{\})} & High (JS) \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Results}
+
+Our experiments reveal that mathematical formula conversion remains the most
+challenging aspect, with an average accuracy of 78\% across tools.
+
+\section{Conclusion}
+
+This benchmark provides valuable insights for researchers and practitioners
+selecting LaTeX-to-DOCX conversion tools.
+
+\section{Acknowledgments}
+
+This work was supported by the Example Research Foundation.
+
+\bibliographystyle{ACM-Reference-Format}
+\bibliography{refs}
+
+\end{document}

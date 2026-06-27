@@ -228,6 +228,11 @@ pub enum Block {
         sizing: Option<FigureSizing>,
         /// Auto-generated figure number (e.g., "图 1").
         number: Option<String>,
+        /// LaTeX label for cross-referencing (e.g., "fig:main").
+        label: Option<String>,
+        /// Text direction: left-to-right, right-to-left, etc.
+        #[serde(default)]
+        text_direction: Option<TextDirection>,
         span: Span,
     },
     Equation {
@@ -327,6 +332,33 @@ pub struct TableCell {
     pub rowspan: u32,
     /// Background color as hex string (e.g., "#FF0000") or None
     pub bg_color: Option<String>,
+    /// Vertical alignment within cell: top / center / bottom / auto
+    #[serde(default)]
+    pub vertical_align: Option<VerticalAlign>,
+    /// Text direction within cell
+    #[serde(default)]
+    pub text_direction: Option<TextDirection>,
+}
+
+/// 单元格垂直对齐方式。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum VerticalAlign {
+    #[default]
+    Top,
+    Center,
+    Bottom,
+}
+
+/// 单元格文本方向。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum TextDirection {
+    #[default]
+    LeftToRight,
+    RightToLeft,
+    TopToBottom,
+    BottomToTop,
 }
 
 /// 文本运行（带样式）。
@@ -372,6 +404,56 @@ pub struct BibEntry {
     pub title: String,
     pub year: String,
     pub venue: Option<String>,
+    /// DOI identifier
+    #[serde(default)]
+    pub doi: Option<String>,
+    /// URL field
+    #[serde(default)]
+    pub url: Option<String>,
+    /// Pages range (e.g., "1-10")
+    #[serde(default)]
+    pub pages: Option<String>,
+    /// Volume number
+    #[serde(default)]
+    pub volume: Option<String>,
+    /// Issue number
+    #[serde(default)]
+    pub number: Option<String>,
+    /// Publisher name
+    #[serde(default)]
+    pub publisher: Option<String>,
+    /// Raw BibTeX entry type (article, inproceedings, book, etc.)
+    #[serde(default)]
+    pub entry_type: Option<String>,
+    /// Raw BibTeX fields for extensibility
+    #[serde(default)]
+    pub raw_fields: std::collections::HashMap<String, String>,
+}
+
+/// 参考文献引用样式。
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum CitationStyle {
+    /// 作者-年份格式: (Smith, 2020)
+    #[default]
+    AuthorYear,
+    /// 数字编号格式: [1]
+    Numeric,
+    /// 上标数字格式: ^1^
+    Superscript,
+    /// 混合格式: Smith et al. [1]
+    AuthorYearNumeric,
+}
+
+impl CitationStyle {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::AuthorYear => "author_year",
+            Self::Numeric => "numeric",
+            Self::Superscript => "superscript",
+            Self::AuthorYearNumeric => "author_year_numeric",
+        }
+    }
 }
 
 #[cfg(test)]

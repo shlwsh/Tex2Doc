@@ -1,4 +1,8 @@
 # Doc-engine V1.3 计划 + 实施归档（Flutter 桌面 / Chrome MV3 / crates/server）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 | 文档版本 | 时间 | 范围 |
 |---|---|---|

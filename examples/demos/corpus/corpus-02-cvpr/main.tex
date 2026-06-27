@@ -1,0 +1,113 @@
+\documentclass[conference]{IEEEtran}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{cite}
+\usepackage{hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\title{Learning Semantic Features for Image Understanding}
+
+\author{First Author, Second Author, and Third Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a novel approach for learning semantic features from images
+using deep neural networks. Our method combines convolutional feature extraction
+with attention mechanisms to capture both local and global context. Experiments
+on standard benchmarks demonstrate significant improvements over baseline methods.
+\end{abstract}
+
+\section{Introduction}
+
+Understanding images at a semantic level is a fundamental challenge in computer
+vision. Recent advances in deep learning have enabled remarkable progress in
+various vision tasks~\cite{alexnet,vggnet,resnet}.
+
+\section{Related Work}
+
+Convolutional neural networks have been the dominant approach for image
+understanding since AlexNet~\cite{alexnet}. VGGNet~\cite{vggnet} demonstrated
+that deeper networks with smaller filters achieve better performance.
+ResNet~\cite{resnet} introduced skip connections to enable training of
+very deep networks.
+
+\section{Proposed Method}
+
+Our method consists of three main components: feature extraction, attention
+module, and prediction head.
+
+% ---- Subfigure layout (CVPR style) ----
+\begin{figure}[t]
+  \centering
+  \subfloat[Input image]{\includegraphics[width=0.3\textwidth]{fig-input.png}\label{fig:input}}
+  \hfill
+  \subfloat[Feature map visualization]{\includegraphics[width=0.3\textwidth]{fig-features.png}\label{fig:features}}
+  \hfill
+  \subfloat[Prediction result]{\includegraphics[width=0.3\textwidth]{fig-prediction.png}\label{fig:pred}}
+  \caption{Qualitative results on the validation set. (a) Input image.
+    (b) Intermediate feature maps. (c) Final prediction overlay.}
+  \label{fig:qual}
+\end{figure}
+
+\section{Experiments}
+
+\subsection{Datasets}
+
+We evaluate on COCO-Stuff~\cite{cocostuff} and ADE20K~\cite{ade20k} datasets.
+
+\subsection{Implementation Details}
+
+We use ResNet-50 as the backbone and train with SGD optimizer.
+The learning rate is set to 0.01 with polynomial decay.
+
+% ---- Cross-page super-long equation ----
+\begin{equation}
+\mathcal{J}_{\text{CVPR}} =
+\underbrace{\frac{1}{|\mathcal{V}|}\sum_{v\in\mathcal{V}}
+  \mathcal{L}_{\text{mse}}\bigl(\hat{I}_v, I_v^\star\bigr)}_{\text{reconstruction}}
++ \lambda_1\underbrace{\sum_{(u,v)\in\mathcal{E}}
+  \bigl\|\nabla\phi(\hat{I}_u)-\nabla\phi(\hat{I}_v)\bigr\|^2}_{\text{smoothness}}
++ \lambda_2\underbrace{\sum_{v\in\mathcal{V}}
+  \mathcal{R}\bigl(\hat{I}_v\bigr)}_{\text{regularization}} \label{eq:cvpr-energy}
+\end{equation}
+
+% ---- Horizontal wide table ----
+\begin{table}[t]
+\centering
+\caption{Quantitative results on COCO-Stuff validation set.}
+\label{tab:quant}
+\resizebox{\linewidth}{!}{
+\begin{tabular}{l|rrrr|rrrr}
+  \toprule
+  \multirow{2}{*}{Method} & \multicolumn{4}{c|}{mIoU$\uparrow$} &
+                            \multicolumn{4}{c}{FPS$\uparrow$} \\
+  \cmidrule{2-5} \cmidrule{6-9}
+  & S & M & L & Avg & S & M & L & Avg \\
+  \midrule
+  DeepLabV3+~\cite{deeplabv3} & 31.2 & 41.6 & 54.8 & 42.5 & 8.1 & 8.1 & 8.1 & 8.1 \\
+  PSPNet~\cite{pspnet} & 32.8 & 42.6 & 55.2 & 43.6 & 7.2 & 7.2 & 7.2 & 7.2 \\
+  UperNet~\cite{upernet} & 33.1 & 43.2 & 56.1 & 44.1 & 9.5 & 9.5 & 9.5 & 9.5 \\
+  \textbf{Ours} & \textbf{35.7} & \textbf{46.2} & \textbf{59.1} & \textbf{47.0} &
+                 \textbf{15.4} & \textbf{15.4} & \textbf{15.4} & \textbf{15.4} \\
+  \bottomrule
+\end{tabular}
+}
+\end{table}
+
+\section{Conclusion}
+
+We presented a novel approach for semantic feature learning that achieves
+state-of-the-art results on multiple benchmarks~\cite{darknet,yolov4,solo,condinst}.
+
+\bibliographystyle{IEEEtran}
+\bibliography{refs}
+
+\end{document}

@@ -1,0 +1,96 @@
+\documentclass{elsarticle}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{chemfig}
+\usepackage{mhchem}
+\usepackage{bpchem}
+\usepackage{hyperref}
+\usepackage{url}
+
+\sisetup{
+  detect-all,
+  per-mode=symbol
+}
+
+\graphicspath{{./figures/}}
+
+\begin{frontmatter}
+
+\title{Synthesis and characterization of novel metal-organic frameworks for carbon capture}
+
+\author[aff1]{First Author}
+\address[aff1]{Department of Chemistry, Example University, City, Country}
+\author[aff2]{Second Author}
+\address[aff2]{Institute of Materials Science, Research Institute, Country}
+
+\begin{abst}
+\begin{abstract}
+Metal-organic frameworks (MOFs) have emerged as promising materials for
+carbon capture applications~\cite{li2012metal, furukawa2013water}.
+We report the synthesis of a novel Zr-based MOF with exceptional
+CO$_2$ adsorption capacity. The material demonstrates a record-high
+CO$_2$ uptake of \SI{8.5}{\mmol\per\gram} at \SI{298}{\kelvin}
+and \SI{1}{\bar}.
+\end{abstract}
+\end{abst}
+
+\keywords{Metal-organic framework; Carbon capture; CO$_2$ adsorption; Zirconium; Post-combustion}
+
+\end{frontmatter}
+
+\section{Introduction}
+
+Climate change driven by anthropogenic CO$_2$ emissions necessitates
+the development of efficient carbon capture technologies~\cite{gibson}.
+
+\section{Results and Discussion}
+
+The crystal structure was determined by single-crystal X-ray diffraction.
+The framework exhibits a cubic topology with a pore size of \SI{12.5}{\angstrom}.
+
+\subsection{Synthesis}
+
+The MOF was synthesized by solvothermal reaction:
+\begin{equation}
+\ce{ZrCl4 + H4L ->[DMF, 393 K] MOF}
+\end{equation}
+
+The ligand H$_4$L was prepared according to the literature procedure.
+
+\subsection{Gas Adsorption}
+
+CO$_2$ adsorption isotherms were measured at various temperatures:
+
+\begin{table}[ht]
+\centering
+\caption{CO$_2$ adsorption capacity at different conditions.}
+\label{tab:co2}
+\begin{tabular}{lS[table-format=2.1]S}
+  \toprule
+  Temperature (\si{\kelvin}) & \multicolumn{2}{c}{Uptake (\si{\mmol\per\gram})} \\
+  \cmidrule{2-3}
+   & \SI{0.15}{\bar} & \SI{1}{\bar} \\
+  \midrule
+  298 & 2.3 & 8.5 \\
+  323 & 1.8 & 6.9 \\
+  373 & 1.2 & 4.8 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+We have developed a novel Zr-based MOF with outstanding CO$_2$ capture
+performance. The material shows great promise for post-combustion carbon capture.
+
+\section*{Acknowledgments}
+
+This work was supported by the National Science Foundation.
+
+\bibliographystyle{elsarticle-num}
+\bibliography{refs}
+
+\end{document}

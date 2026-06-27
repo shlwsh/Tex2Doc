@@ -1600,6 +1600,7 @@ dependencies = [
  "sha2",
  "slint",
  "slint-build",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "url",
@@ -1770,6 +1771,7 @@ dependencies = [
  "chrono",
  "doc-compiler-engine",
  "doc-core",
+ "doc-quality",
  "http",
  "memchr",
  "mime",
@@ -2862,8 +2864,6 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-winit"
 version = "1.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4df6ec88d452e3c22e418d20c96bc1ccbc9509e81e6596426d3388bf226a5f9"
 dependencies = [
  "accesskit",
  "accesskit_winit",

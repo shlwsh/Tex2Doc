@@ -131,7 +131,7 @@ impl ProfileKind {
             ]
             .iter()
             .any(|s| s.eq_ignore_ascii_case(class)),
-            Self::JosPaper => ["article", "rjthesis"]
+            Self::JosPaper => ["article", "rjthesis", "ctexart"]
                 .iter()
                 .any(|s| s.eq_ignore_ascii_case(class)),
             Self::Tacl => ["acl"].iter().any(|s| s.eq_ignore_ascii_case(class)),
@@ -203,11 +203,10 @@ fn profile_package_compat(
             "IEEEtran" => (Supported, "IEEEtran is the primary class for JOS papers"),
             "amsmath" => (Supported, "amsmath is fully supported for JOS papers"),
             "graphicx" => (Supported, "graphicx is fully supported"),
-            "algorithm2e" => (
-                Warning,
-                "algorithm2e may lose fine styling in IEEE JOS format",
-            ),
-            "tabularx" => (Warning, "tabularx advanced layout may be simplified"),
+            // algorithm2e is already penalized by generic checks, return Supported here to avoid double penalty,
+            // or return None so no extra profile_limited_package warning is added.
+            "algorithm2e" => (Supported, "algorithm2e is tolerated in JOS papers but uses generic block lowering"),
+            "tabularx" => (Supported, "tabularx advanced layout is tolerated"),
             _ => return None,
         }),
 

@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-12-elsevier-chem",
+  "corpus_name": "Elsevier Chemistry",
+  "corpus_name_zh": "Elsevier 化学期刊",
+  "tier": "golden",
+  "profile": "elsevier-chem",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["elsarticle", "chemfig", "mhchem", "bpchem", "siunitx", "hyperref"],
+  "focus_areas": ["chemical_structure", "reaction_notation", "chemistry_units"],
+  "hard_elements": ["chemfig", "mhchem reactions", "bpchem", "siunitx S column"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["chemfig: molecular structures may become images", "mhchem: reaction arrows may degrade"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 10 }
+}

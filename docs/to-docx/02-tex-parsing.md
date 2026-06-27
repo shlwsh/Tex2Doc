@@ -1,4 +1,8 @@
 # 02 · LaTeX 解析算法
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 目标：在不调用 `pdflatex` / `xelatex` 的前提下，从源文件直接构建出**结构化的中间表示** `Manuscript`。
 > 本章复刻 `build_jos_docx.py` 中所有字符串/正则操作；Rust 端用 `regex` + 手写 `Reader` 即可等价实现。

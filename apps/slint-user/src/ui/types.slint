@@ -1,4 +1,60 @@
+// ============================================================
+// Quality Types - Phase 1: Six-Dimension Quality Display
+// ============================================================
+
+// 六维质量评分
+export struct QualityDimensions {
+    parse: int,        // 解析完整性 0-100
+    semantic: int,      // 语义保真 0-100
+    docx: int,         // DOCX 结构 0-100
+    visual: int,       // 版面一致 0-100
+    editable: int,     // 可编辑性 0-100
+    performance: int,  // 性能与稳定 0-100
+}
+
+// 语义丢失项
+export struct SemanticLossInfo {
+    loss-type: string,     // macro/environment/table/figure/citation/formula
+    severity: string,       // blocking/degrading/ignorable
+    location: string,      // 文件:行号
+    description: string,   // 具体描述
+    suggestion: string,     // 修复建议
+}
+
+// Word 兼容性信息
+export struct WordCompatibilityInfo {
+    status: string,        // passed/warnings/failed/unchecked
+    errors: [string],      // 错误列表
+    check-method: string,  // word/libreoffice/schema_only
+}
+
+// 质量报告摘要
+export struct QualityReportSummary {
+    job-id: string,
+    engine-version: string,
+    profile: string,
+    quality-score: int,           // 0-100 加权总分
+    dimension-scores: QualityDimensions,
+    word-compatibility: WordCompatibilityInfo,
+    blocking-issues: [SemanticLossInfo],
+    warnings: [SemanticLossInfo],
+    semantic-loss-events: [SemanticLossInfo],
+    style-coverage-rate: float,   // 0.0-100.0
+    visual-diff-percentage: float,
+    created-at: string,
+}
+
+// 质量趋势数据点
+export struct QualityTrendPoint {
+    date: string,
+    success-rate: float,
+    avg-quality: float,
+    conversion-count: int,
+}
+
+// ============================================================
 // Phase D: shared structured types used by pages and main window.
+// ============================================================
 
 export struct PlanEntry {
     id: string,
@@ -8,6 +64,7 @@ export struct PlanEntry {
     features: string,
 }
 
+// 增强的 JobRow，包含质量信息
 export struct JobRow {
     id: string,
     kind: string,
@@ -17,6 +74,11 @@ export struct JobRow {
     opened-at: string,
     error: string,
     html-report: string,
+    // 质量相关字段
+    quality-score: int,
+    quality-status: string,
+    blocking-issues-count: int,
+    warnings-count: int,
 }
 
 export struct RechargeRow {
@@ -54,6 +116,9 @@ export struct FeedbackThreadRow {
     latest-message-at: string,
     created-at: string,
     conversion-job-id: string,
+    // 自动化研发相关字段
+    automation-status: string,
+    automation-request-id: string,
 }
 
 export enum ConversionMode {

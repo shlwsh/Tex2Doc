@@ -1,4 +1,8 @@
 # Chrome MV3 扩展使用
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 **Chrome MV3 扩展** 形态的使用方式。最适合：在 Overleaf / arXiv 页面快速转换、无需离开浏览器。
 

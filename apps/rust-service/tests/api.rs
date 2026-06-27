@@ -913,3 +913,90 @@ async fn convert_zip_header_only_returns_400() {
     );
     let _ = shutdown.send(());
 }
+
+#[tokio::test]
+async fn p8_local_conversion_quota_checking_and_consumption() {
+    let (addr, shutdown) = spawn_test_server().await;
+    let client = test_client();
+    let token = register_preview_token(&client, addr).await;
+
+    // Get user id
+    let me_resp: serde_json::Value = client
+        .get(format!("http://{addr}/v1/me"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send me")
+        .json()
+        .await
+        .expect("me json");
+    let user_id = me_resp["id"].as_str().unwrap();
+
+    // 1. Check local conversion quota - should NOT be allowed initially (no preview limit for local)
+    let check_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/local-conversions/check"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send check")
+        .json()
+        .await
+        .expect("check json");
+    
+    assert_eq!(check_resp["allowed"], false);
+    assert_eq!(check_resp["count_balance"], 0);
+
+    // 2. Consume should fail with 402
+    let consume_fail_resp = client
+        .post(format!("http://{addr}/v1/local-conversions/consume"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send consume fail");
+    assert_eq!(consume_fail_resp.status(), 402);
+
+    // 3. Recharge via admin
+    let admin = admin_token(&client, addr).await;
+    let _order_resp = client
+        .post(format!("http://{addr}/admin/v1/manual-orders"))
+        .bearer_auth(&admin)
+        .json(&serde_json::json!({
+            "user_id": user_id,
+            "package_id": "count_10",
+            "recharge_type": "count"
+        }))
+        .send()
+        .await
+        .expect("send manual order")
+        .json::<serde_json::Value>()
+        .await
+        .expect("manual order json");
+
+    // 4. Check should now be allowed
+    let check2_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/local-conversions/check"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send check 2")
+        .json()
+        .await
+        .expect("check 2 json");
+    assert_eq!(check2_resp["allowed"], true);
+    assert_eq!(check2_resp["count_balance"], 10);
+
+    // 5. Consume should succeed
+    let consume_resp: serde_json::Value = client
+        .post(format!("http://{addr}/v1/local-conversions/consume"))
+        .bearer_auth(&token)
+        .send()
+        .await
+        .expect("send consume")
+        .json()
+        .await
+        .expect("consume json");
+    assert_eq!(consume_resp["consumed"], true);
+    assert_eq!(consume_resp["balance"], 9);
+
+    let _ = shutdown.send(());
+}

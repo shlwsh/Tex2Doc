@@ -1,4 +1,8 @@
 # Semantic TeX Engine PC 客户端商业化技术方案（Slint/Rust）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **方案版本**：20260621-152833  
 **目标**：为 Tex2Doc / Semantic TeX Engine 新增跨平台 PC 客户端入口，辅助商业化发布  

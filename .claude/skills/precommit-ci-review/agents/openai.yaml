@@ -1,0 +1,5 @@
+interface:
+  display_name: "Precommit CI Review"
+  short_description: "提交前 CI 与 GitHub 审核自查流程。"
+  default_prompt: "Use $precommit-ci-review to audit this repository before committing or pushing."
+

@@ -1,0 +1,11 @@
+{
+  "id": "generic-realistic-001",
+  "source": "examples/journals/generic/realistic-01.tex",
+  "document_type": "generic",
+  "page_count": 6,
+  "packages": ["amsmath", "graphicx", "natbib", "hyperref", "booktabs"],
+  "expected_profile": "generic-article",
+  "authorization": "synthetic",
+  "tags": ["equations", "tables", "figures", "references"],
+  "notes": "通用 article 风格测试样例"
+}

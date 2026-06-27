@@ -1,0 +1,62 @@
+{
+  "corpus_id": "corpus-01-ieee-trans",
+  "corpus_name": "IEEE Transactions Standard",
+  "corpus_name_zh": "IEEE 期刊标准模板",
+  "tier": "golden",
+  "profile": "ieee-trans",
+  "source": "synthetic",
+  "source_note": "基于 IEEEtran 官方模板合成，覆盖标准双栏论文全部元素",
+  "page_count_approx": 8,
+  "packages": [
+    "IEEEtran",
+    "amsmath",
+    "amssymb",
+    "graphicx",
+    "booktabs",
+    "algorithm",
+    "algpseudocode",
+    "cite",
+    "hyperref",
+    "url"
+  ],
+  "focus_areas": [
+    "float",
+    "algorithm_environment",
+    "cross_column_table",
+    "numeric_citation",
+    "equation_alignment"
+  ],
+  "hard_elements": [
+    "跨栏浮动体",
+    "算法伪代码（algorithmicx）",
+    "对齐方程（align*）",
+    "booktabs 三线表",
+    "图形与子图"
+  ],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 95
+  },
+  "expected_warnings": [
+    "algorithmicx: \\State may not be natively represented in DOCX; lowered to numbered list"
+  ],
+  "expected_fallbacks": [],
+  "markers_to_check": [
+    "Abstract",
+    "I. INTRODUCTION",
+    "II. METHODOLOGY",
+    "III. EXPERIMENTS",
+    "CONCLUSION",
+    "REFERENCES"
+  ],
+  "known_limitations": [],
+  "references": { "type": "bibtex", "count": 8 },
+  "figures": { "count": 3, "types": ["pdf", "svg", "png"] },
+  "tables": { "count": 2, "types": ["tabular", "booktabs"] },
+  "equations": { "count": 4, "types": ["equation", "align"] },
+  "algorithms": { "count": 1 }
+}

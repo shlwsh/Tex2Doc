@@ -1,0 +1,183 @@
+\documentclass[reqno]{amsart}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+
+% ---- Custom math operators ----
+\DeclareMathOperator{\dist}{dist}
+\DeclareMathOperator{\vol}{vol}
+\DeclareMathOperator{\supp}{supp}
+\DeclareMathOperator*{\argmin}{arg\,min}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator{\Dom}{Dom}
+\DeclareMathOperator{\Range}{Range}
+
+% ---- Theorem structures ----
+\newtheoremstyle{break}%
+  {9pt}{9pt}{\itshape}{}%
+  {\bfseries}{.}{\newline}{}
+
+\theoremstyle{plain}
+\newtheorem{axiom}{Axiom}[section]
+\newtheorem{conjecture}[axiom]{Conjecture}
+\newtheorem{ theorem}{Theorem}[section]
+\newtheorem{case}{Case}
+\newtheorem{corollar}{Corollary}
+\newtheorem{exercise}{Exercise}
+\newtheorem*{lemma}{Lemma}
+\newtheorem*{proposition}{Proposition}
+\newtheorem*{corollary}{Corollary}
+\newtheorem*{remark}{Remark}
+
+\theoremstyle{definition}
+\newtheorem{definition}[theorem]{Definition}
+\newtheorem{notation}[theorem]{Notation}
+\newtheorem{problem}[theorem]{Problem}
+
+\theoremstyle{note}
+\newtheorem{note}[theorem]{Note}
+\newtheorem*{summary}{Summary}
+
+\theoremstyle{Proof}
+\newtheorem*{proof}{Proof}
+
+\title{Geometric Analysis of Metric Spaces}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We study geometric properties of metric spaces with applications to analysis.
+Our main result establishes connections between Gromov-Hausdorff convergence
+and optimal transport theory.
+\end{abstract}
+
+\section{Preliminaries}
+
+\begin{definition}[Metric space]
+\label{def:metric}
+A \emph{metric space} is a pair $(X,d)$ where $X$ is a set and
+$d:X\times X\to\mathbb{R}_+$ satisfies:
+\begin{enumerate}
+  \item $d(x,y)=0 \iff x=y$ (identity of indiscernibles)
+  \item $d(x,y)=d(y,x)$ (symmetry)
+  \item $d(x,z)\le d(x,y)+d(y,z)$ (triangle inequality)
+\end{enumerate}
+\end{definition}
+
+\begin{notation}
+We denote by $\mathcal{M}$ the collection of all compact metric spaces.
+\end{notation}
+
+\section{Gromov-Hausdorff Distance}
+
+\begin{definition}[Gromov-Hausdorff distance]
+\label{def:gh}
+For two compact metric spaces $X$ and $Y$, the Gromov-Hausdorff distance
+is defined as
+\[
+  d_{GH}(X,Y) \;=\; \inf_{Z,f,g} d_H^Z\bigl(f(X),g(Y)\bigr),
+\]
+where the infimum runs over all metric spaces $Z$ and isometric embeddings
+$f:X\hookrightarrow Z$, $g:Y\hookrightarrow Z$, and $d_H^Z$ denotes the
+Hausdorff distance in $Z$.
+\end{definition}
+
+\begin{case}
+Assume $p > 2$. Then by H\"older's inequality we have
+\[
+  \Bigl\|\sum_{i=1}^n a_i\Bigr\|_p^p
+  \;\le\; n^{p-1}\sum_{i=1}^n \|a_i\|_p^p .
+\]
+\end{case}
+
+\begin{claim}
+The sequence $\{x_k\}$ converges to $x^\star$ in the $\|\cdot\|_\infty$ norm.
+\end{claim}
+
+\begin{claim*}
+We claim further that the convergence rate is geometric:
+$\|x_k - x^\star\|_\infty \le C\lambda^k$ for some $\lambda\in(0,1)$.
+\end{claim*}
+
+\begin{problem}
+Let $f:\mathbb{R}^n\to\mathbb{R}$ be convex and $L$-smooth.
+Show that gradient descent with step size $1/L$ satisfies
+$f(x_{k+1}) \le f(x_k) - \frac{1}{2L}\|\nabla f(x_k)\|^2$.
+\end{problem}
+
+\begin{note}
+The Gromov-Hausdorff distance satisfies the axioms of a metric on the
+isometry classes of compact metric spaces.
+\end{note}
+
+\section{Main Results}
+
+\begin{ theorem}
+\labelthm:main}
+Let $\{X_k\}$ be a sequence of compact metric spaces. Then the following
+are equivalent:
+\begin{enumerate}
+  \item $X_k \to X$ in Gromov-Hausdorff sense
+  \item For every $\epsilon > 0$, there exists $N$ such that for all $k \ge N$,
+        there exists an $\epsilon$-isometry between $X_k$ and $X$
+  \item $\sup\{d_{GH}(X_k,X)\} \to 0$
+\end{enumerate}
+\end{ theorem}
+
+\begin{proposition}
+The Gromov-Hausdorff distance $d_{GH}$ is a metric on $\mathcal{M}/\sim$,
+where $\sim$ denotes isometry equivalence.
+\end{proposition}
+
+\begin{ corollary}
+If $d_{GH}(X,Y) = 0$, then $X$ and $Y$ are isometric.
+\end{ corollary}
+
+\begin{Proof}
+The result follows directly from Theorem~\refthm:main} and the definition
+of Gromov-Hausdorff distance.
+
+We expand the left-hand side:
+\[
+  f(x_k - \tfrac{1}{L}\nabla f(x_k))
+  \;\le\; f(x_k) - \tfrac{1}{L}\nabla f(x_k)^\top\nabla f(x_k)
+              + \tfrac{L}{2}\Bigl\|\tfrac{1}{L}\nabla f(x_k)\Bigr\|^2
+  \;=\; f(x_k) - \tfrac{1}{2L}\|\nabla f(x_k)\|^2 .
+\]
+\Relineqed
+\end{Proof}
+
+\section{Optimal Transport}
+
+\begin{align}
+  W_p(\mu,\nu) &= \left(\inf_{\gamma\in\Gamma(\mu,\nu)}
+    \int_{X\times X} d(x,y)^p \, d\gamma(x,y)\right)^{1/p} \label{eq:ot} \\
+  \Gamma(\mu,\nu) &= \left\{\gamma \in \mathcal{P}(X\times X) :
+    \pi_1\#\gamma = \mu,\ \pi_2\#\gamma = \nu\right\} \label{eq:coupling}
+\end{align}
+
+\section{Convergence Results}
+
+\begin{align}
+  d_{GH}(X_n, X) &\le \frac{1}{2}\bigl(|\sup_X d_n - \sup_X d| + \epsilon_n\bigr) \label{eq:conv} \\
+  W_p(\mu_n, \mu) &\to 0 \quad \text{as } n\to\infty \label{eq:wass}
+\end{align}
+
+\section*{Acknowledgments}
+
+The author thanks the anonymous reviewers for their valuable comments.
+
+\begin{thebibliography}{99}
+\addtolength{\itemsep}{-0.5ex}
+\bibliographystyle{plain}
+\bibliography{refs}
+\end{thebibliography}
+
+\end{document}

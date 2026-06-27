@@ -25,12 +25,16 @@ use crate::state::{
 };
 
 const BUSINESS_SCHEMA: &str = include_str!("../../../docs-zh/money/001_docdb_business_schema.sql");
+const REDEEM_STOCK_SCHEMA: &str =
+    include_str!("../../../docs-zh/money/002_redeem_codes_stock_status.sql");
 const FEEDBACK_SCHEMA: &str =
     include_str!("../../../docs-zh/money/003_feedback_and_session_storage.sql");
+const AUTOMATION_SCHEMA: &str =
+    include_str!("../../../docs-zh/money/004_automation_rnd.sql");
 
 #[derive(Debug, Clone)]
 pub struct DbStore {
-    pool: PgPool,
+    pub pool: PgPool,
 }
 
 #[derive(Debug, Clone)]
@@ -94,7 +98,11 @@ impl DbStore {
 
     async fn init_schema(&self) -> Result<(), sqlx::Error> {
         sqlx::raw_sql(BUSINESS_SCHEMA).execute(&self.pool).await?;
+        sqlx::raw_sql(REDEEM_STOCK_SCHEMA)
+            .execute(&self.pool)
+            .await?;
         sqlx::raw_sql(FEEDBACK_SCHEMA).execute(&self.pool).await?;
+        sqlx::raw_sql(AUTOMATION_SCHEMA).execute(&self.pool).await?;
         self.seed_admin_from_env().await?;
         Ok(())
     }
@@ -400,16 +408,18 @@ impl DbStore {
         profile: String,
         quality: String,
         engine: String,
+        idempotency_key: Option<String>,
     ) -> Result<ConversionJobRecord, sqlx::Error> {
         let row = sqlx::query(
             r#"
-            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status)
-            VALUES ($1, $2, $3, $4, $5, $6, 'queued')
+            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status, idempotency_key, attempt_count, engine_version)
+            VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, 1, '1.0.0')
             RETURNING id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
                       result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                       zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                       EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+                      EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
+                      idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
             "#,
         )
         .bind(parse_uuid(&user_id)?)
@@ -418,6 +428,7 @@ impl DbStore {
         .bind(&profile)
         .bind(&quality)
         .bind(&engine)
+        .bind(&idempotency_key)
         .fetch_one(&self.pool)
         .await?;
         Ok(job_from_row(&row, None, None))
@@ -447,6 +458,18 @@ impl DbStore {
     pub async fn get_job(&self, job_id: &str) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
         let row = sqlx::query(&job_select_sql("WHERE id = $1"))
             .bind(parse_uuid(job_id)?)
+            .fetch_optional(&self.pool)
+            .await?;
+        Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
+    }
+
+    /// Find a job by idempotency key.
+    pub async fn find_job_by_idempotency_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
+        let row = sqlx::query(&job_select_sql("WHERE idempotency_key = $1 AND status != 'failed' ORDER BY created_at DESC LIMIT 1"))
+            .bind(key)
             .fetch_optional(&self.pool)
             .await?;
         Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
@@ -585,16 +608,14 @@ impl DbStore {
         let result = sqlx::query(
             r#"
             UPDATE conversion_jobs
-            SET status = CASE WHEN attempts >= 3 THEN 'failed' ELSE 'queued' END,
-                error_code = CASE WHEN attempts >= 3 THEN 'worker_timeout' ELSE error_code END,
-                error_message = CASE WHEN attempts >= 3 THEN 'worker timed out before completing this conversion' ELSE error_message END,
-                failed_at = CASE WHEN attempts >= 3 THEN now() ELSE failed_at END,
+            SET status = CASE WHEN attempt_count >= 3 THEN 'failed' ELSE 'queued' END,
+                error_code = CASE WHEN attempt_count >= 3 THEN 'worker_timeout' ELSE error_code END,
+                error_message = CASE WHEN attempt_count >= 3 THEN 'Max retry attempts exceeded' ELSE error_message END,
+                failed_at = CASE WHEN attempt_count >= 3 THEN now() ELSE failed_at END,
                 worker_id = NULL,
                 locked_at = NULL,
-                next_run_at = CASE
-                    WHEN attempts >= 3 THEN next_run_at
-                    ELSE now() + make_interval(secs => LEAST(60, GREATEST(1, attempts * 5)))
-                END,
+                last_error_code = error_code,
+                attempt_count = CASE WHEN attempt_count >= 3 THEN attempt_count ELSE attempt_count + 1 END,
                 updated_at = now()
             WHERE status IN ('normalizing', 'detecting', 'analyzing', 'compiling', 'rendering', 'verifying')
               AND locked_at IS NOT NULL
@@ -754,6 +775,109 @@ impl DbStore {
             None,
             "preview",
             Some("preview quota reserved for conversion"),
+        )
+        .await
+        .map_err(|_| used)?;
+        tx.commit().await.map_err(|_| used)?;
+        Ok(used + 1)
+    }
+
+    pub async fn consume_local_conversion(&self, user_id: &str) -> Result<u64, u64> {
+        let user_uuid = parse_uuid(user_id).map_err(|_| 0_u64)?;
+        let mut tx = self.pool.begin().await.map_err(|_| 0_u64)?;
+        let entitlement = sqlx::query(
+            r#"
+            INSERT INTO commercial_entitlements (user_id)
+            VALUES ($1)
+            ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
+            RETURNING count_balance, valid_until
+            "#,
+        )
+        .bind(user_uuid)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(|_| 0_u64)?;
+
+        let count_balance = entitlement.get::<i64, _>("count_balance");
+        let valid_until_active = entitlement
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("valid_until")
+            .ok()
+            .flatten()
+            .is_some_and(|value| value >= chrono::Utc::now());
+        let used = preview_conversions_used_tx(&mut tx, user_uuid)
+            .await
+            .map_err(|_| 0_u64)?;
+
+        if valid_until_active {
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                None,
+                "reserve",
+                0,
+                None,
+                "date_entitlement",
+                Some("local conversion using date entitlement"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
+        if count_balance > 0 {
+            let new_balance = count_balance - 1;
+            sqlx::query(
+                "UPDATE commercial_entitlements SET count_balance = $2, updated_at = now() WHERE user_id = $1",
+            )
+            .bind(user_uuid)
+            .bind(new_balance)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| used)?;
+
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                None,
+                "reserve",
+                1,
+                Some(new_balance),
+                "entitlement",
+                Some("count entitlement consumed for local conversion"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
+        if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
+            tx.rollback().await.ok();
+            return Err(used);
+        }
+
+        let period_id = ensure_usage_period(&mut tx, user_uuid)
+            .await
+            .map_err(|_| used)?;
+        sqlx::query(
+            "INSERT INTO usage_events (user_id, usage_period_id, event_type, quantity, source_id) VALUES ($1, $2, 'local_conversion', 1, $3)",
+        )
+        .bind(user_uuid)
+        .bind(period_id)
+        .bind("local")
+        .execute(&mut *tx)
+        .await
+        .map_err(|_| used)?;
+        insert_usage_ledger(
+            &mut tx,
+            user_uuid,
+            None,
+            "reserve",
+            1,
+            None,
+            "preview",
+            Some("preview quota reserved for local conversion"),
         )
         .await
         .map_err(|_| used)?;
@@ -1498,9 +1622,15 @@ impl DbStore {
             r#"
             SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
                    p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
-                   c.code_preview, c.key_version, c.status, c.redeemed_by::text,
+                   c.code_preview, c.key_version, c.status,
+                   c.stock_status,
+                   c.stocked_by::text,
+                   EXTRACT(EPOCH FROM c.stocked_at)::bigint AS stocked_at_secs,
+                   c.redeemed_by::text,
                    c.redeemed_recharge_id::text,
                    EXTRACT(EPOCH FROM c.redeemed_at)::bigint AS redeemed_at_secs,
+                   c.restocked_by::text,
+                   EXTRACT(EPOCH FROM c.restocked_at)::bigint AS restocked_at_secs,
                    EXTRACT(EPOCH FROM c.expires_at)::bigint AS expires_at_secs,
                    EXTRACT(EPOCH FROM c.created_at)::bigint AS created_at_secs
             FROM redeem_codes c
@@ -1581,7 +1711,7 @@ impl DbStore {
             .await
             .map_err(|_| RedeemFailure::InvalidCode)?;
         sqlx::query(
-            "UPDATE redeem_codes SET status = 'redeemed', redeemed_by = $2, redeemed_recharge_id = $3, redeemed_at = now(), updated_at = now() WHERE id = $1",
+            "UPDATE redeem_codes SET status = 'redeemed', stock_status = 'redeemed', redeemed_by = $2, redeemed_recharge_id = $3, redeemed_at = now(), updated_at = now() WHERE id = $1",
         )
         .bind(parse_uuid(&record.code_id).map_err(|_| RedeemFailure::InvalidCode)?)
         .bind(user_uuid)
@@ -1626,9 +1756,15 @@ impl DbStore {
             r#"
             SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
                    p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
-                   c.code_preview, c.key_version, c.status, c.redeemed_by::text,
+                   c.code_preview, c.key_version, c.status,
+                   c.stock_status,
+                   c.stocked_by::text,
+                   EXTRACT(EPOCH FROM c.stocked_at)::bigint AS stocked_at_secs,
+                   c.redeemed_by::text,
                    c.redeemed_recharge_id::text,
                    EXTRACT(EPOCH FROM c.redeemed_at)::bigint AS redeemed_at_secs,
+                   c.restocked_by::text,
+                   EXTRACT(EPOCH FROM c.restocked_at)::bigint AS restocked_at_secs,
                    EXTRACT(EPOCH FROM c.expires_at)::bigint AS expires_at_secs,
                    EXTRACT(EPOCH FROM c.created_at)::bigint AS created_at_secs
             FROM redeem_codes c
@@ -1642,6 +1778,188 @@ impl DbStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.iter().map(redeem_code_from_row).collect())
+    }
+
+    // ─── Admin: redeem code lifecycle (上货/使用/重置) ─────────────────────
+
+    pub async fn admin_list_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Result<Vec<RedeemCodeRecord>, sqlx::Error> {
+        // Always bind 6 positional params; use COALESCE so absent filters match all rows.
+        let s_status = stock_status.unwrap_or("");
+        let b_id = batch_id.unwrap_or("");
+        let p_id = package_id.unwrap_or("");
+        let search_term = search.unwrap_or("");
+
+        let rows = sqlx::query(
+            r#"
+            SELECT c.id::text, c.batch_id::text, b.batch_no, c.package_id, p.name AS package_name,
+                   p.package_type, p.quantity, c.code_hash, c.code_ciphertext, c.code_nonce,
+                   c.code_preview, c.key_version, c.status,
+                   COALESCE(c.stock_status, 'new') AS stock_status,
+                   c.stocked_by::text,
+                   EXTRACT(EPOCH FROM c.stocked_at)::bigint AS stocked_at_secs,
+                   c.redeemed_by::text,
+                   c.redeemed_recharge_id::text,
+                   EXTRACT(EPOCH FROM c.redeemed_at)::bigint AS redeemed_at_secs,
+                   c.restocked_by::text,
+                   EXTRACT(EPOCH FROM c.restocked_at)::bigint AS restocked_at_secs,
+                   EXTRACT(EPOCH FROM c.expires_at)::bigint AS expires_at_secs,
+                   EXTRACT(EPOCH FROM c.created_at)::bigint AS created_at_secs
+            FROM redeem_codes c
+            JOIN redeem_code_batches b ON b.id = c.batch_id
+            JOIN redeem_packages p ON p.id = c.package_id
+            WHERE ($1 = '' OR c.stock_status = $1)
+              AND ($2 = '' OR c.batch_id::text = $2)
+              AND ($3 = '' OR c.package_id = $3)
+              AND ($4 = '' OR c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')
+            ORDER BY c.created_at DESC
+            LIMIT $5 OFFSET $6
+            "#,
+        )
+        .bind(s_status)
+        .bind(b_id)
+        .bind(p_id)
+        .bind(search_term)
+        .bind(limit.unwrap_or(100).clamp(1, 1000) as i64)
+        .bind(offset.unwrap_or(0) as i64)
+        .fetch_all(&self.pool)
+        .await?;
+
+        Ok(rows.iter().map(redeem_code_from_row).collect())
+    }
+
+    pub async fn admin_count_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+    ) -> Result<u64, sqlx::Error> {
+        let s_status = stock_status.unwrap_or("");
+        let b_id = batch_id.unwrap_or("");
+        let p_id = package_id.unwrap_or("");
+        let search_term = search.unwrap_or("");
+
+        let row = sqlx::query(
+            r#"
+            SELECT COUNT(*)::bigint AS total
+            FROM redeem_codes c
+            JOIN redeem_code_batches b ON b.id = c.batch_id
+            WHERE ($1 = '' OR c.stock_status = $1)
+              AND ($2 = '' OR c.batch_id::text = $2)
+              AND ($3 = '' OR c.package_id = $3)
+              AND ($4 = '' OR c.code_preview ILIKE '%' || $4 || '%' OR b.batch_no ILIKE '%' || $4 || '%')
+            "#,
+        )
+        .bind(s_status)
+        .bind(b_id)
+        .bind(p_id)
+        .bind(search_term)
+        .fetch_one(&self.pool)
+        .await?;
+        let total: i64 = row.try_get("total").unwrap_or(0);
+        Ok(total.max(0) as u64)
+    }
+
+    pub async fn admin_stock_redeem_codes(
+        &self,
+        admin_id: &str,
+        code_ids: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        if code_ids.is_empty() {
+            return Ok(0);
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+        let mut affected: u64 = 0;
+        for code_id in code_ids {
+            let uuid = parse_uuid(code_id).map_err(|_| RedeemFailure::InvalidCode)?;
+            let result = sqlx::query(
+                "UPDATE redeem_codes \
+                 SET stock_status = 'stocked', stocked_at = now(), stocked_by = $2, updated_at = now() \
+                 WHERE id = $1 AND stock_status IN ('new', 'restocked')",
+            )
+            .bind(uuid)
+            .bind(parse_uuid(admin_id).map_err(|_| RedeemFailure::InvalidCode)?)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+            let rows = result.rows_affected();
+            if rows > 0 {
+                affected += rows;
+                insert_redeem_event(
+                    &mut tx,
+                    Some(uuid),
+                    Some(parse_uuid(admin_id).map_err(|_| RedeemFailure::InvalidCode)?),
+                    "stocked",
+                    Some("admin_bulk_stock"),
+                )
+                .await
+                .ok();
+            }
+        }
+        tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        Ok(affected)
+    }
+
+    pub async fn admin_restock_redeem_codes(
+        &self,
+        admin_id: &str,
+        codes: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        if codes.is_empty() {
+            return Ok(0);
+        }
+        let mut tx = self
+            .pool
+            .begin()
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+        let mut affected: u64 = 0;
+        let admin_uuid = parse_uuid(admin_id).map_err(|_| RedeemFailure::InvalidCode)?;
+        for raw in codes {
+            let normalized = match normalize_redeem_code(raw) {
+                Some(v) => v,
+                None => continue,
+            };
+            let hash = code_hash(&normalized);
+            let result = sqlx::query(
+                "UPDATE redeem_codes \
+                 SET stock_status = 'new', restocked_at = now(), restocked_by = $2, \
+                     stocked_at = NULL, stocked_by = NULL, updated_at = now() \
+                 WHERE code_hash = $1 AND stock_status IN ('stocked', 'restocked')",
+            )
+            .bind(&hash)
+            .bind(admin_uuid)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| RedeemFailure::InvalidCode)?;
+            let rows = result.rows_affected();
+            if rows > 0 {
+                affected += rows;
+                insert_redeem_event(
+                    &mut tx,
+                    None,
+                    Some(admin_uuid),
+                    "restocked",
+                    Some("admin_bulk_restock"),
+                )
+                .await
+                .ok();
+            }
+        }
+        tx.commit().await.map_err(|_| RedeemFailure::InvalidCode)?;
+        Ok(affected)
     }
 
     async fn record_redeem_failure(&self, user_id: Uuid, reason: &str) -> Result<(), sqlx::Error> {
@@ -2088,7 +2406,8 @@ fn job_select_sql(tail: &str) -> String {
                result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
-               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
+               EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
+               idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
         FROM conversion_jobs {tail}
         "#
     )
@@ -2134,6 +2453,16 @@ fn job_from_row(
             .ok()
             .flatten()
             .map(|v| v.max(0) as u64),
+        idempotency_key: row.get("idempotency_key"),
+        attempt_count: row
+            .try_get::<Option<i32>, _>("attempt_count")
+            .ok()
+            .flatten()
+            .unwrap_or(1) as u8,
+        worker_id: row.get("worker_id"),
+        engine_version: row.get::<String, _>("engine_version"),
+        profile_version: row.get("profile_version"),
+        last_error_code: row.get("last_error_code"),
     }
 }
 
@@ -2500,9 +2829,24 @@ fn redeem_code_from_row(row: &PgRow) -> RedeemCodeRecord {
         plaintext_code: String::new(),
         key_version: row.get("key_version"),
         status: row.get("status"),
+        stock_status: row
+            .try_get::<Option<String>, _>("stock_status")
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "new".to_string()),
+        stocked_by: row
+            .try_get::<Option<String>, _>("stocked_by")
+            .ok()
+            .flatten(),
+        stocked_at: epoch_col(row, "stocked_at_secs"),
         redeemed_by: row.get("redeemed_by"),
         redeemed_recharge_id: row.get("redeemed_recharge_id"),
         redeemed_at: epoch_col(row, "redeemed_at_secs"),
+        restocked_by: row
+            .try_get::<Option<String>, _>("restocked_by")
+            .ok()
+            .flatten(),
+        restocked_at: epoch_col(row, "restocked_at_secs"),
         expires_at: epoch_col(row, "expires_at_secs"),
         created_at: epoch_col(row, "created_at_secs").unwrap_or_else(now_timestamp),
     }
