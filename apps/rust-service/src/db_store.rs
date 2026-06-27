@@ -29,10 +29,12 @@ const REDEEM_STOCK_SCHEMA: &str =
     include_str!("../../../docs-zh/money/002_redeem_codes_stock_status.sql");
 const FEEDBACK_SCHEMA: &str =
     include_str!("../../../docs-zh/money/003_feedback_and_session_storage.sql");
+const AUTOMATION_SCHEMA: &str =
+    include_str!("../../../docs-zh/money/004_automation_rnd.sql");
 
 #[derive(Debug, Clone)]
 pub struct DbStore {
-    pool: PgPool,
+    pub pool: PgPool,
 }
 
 #[derive(Debug, Clone)]
@@ -100,6 +102,7 @@ impl DbStore {
             .execute(&self.pool)
             .await?;
         sqlx::raw_sql(FEEDBACK_SCHEMA).execute(&self.pool).await?;
+        sqlx::raw_sql(AUTOMATION_SCHEMA).execute(&self.pool).await?;
         self.seed_admin_from_env().await?;
         Ok(())
     }

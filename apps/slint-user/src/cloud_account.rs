@@ -531,6 +531,9 @@ pub struct FeedbackTableRow {
     pub latest_message_at: String,
     pub created_at: String,
     pub conversion_job_id: String,
+    // 自动化研发相关字段
+    pub automation_status: String,
+    pub automation_request_id: String,
 }
 
 impl FeedbackTableRow {
@@ -540,6 +543,10 @@ impl FeedbackTableRow {
             .clone()
             .or(thread.updated_at.clone())
             .unwrap_or_else(|| thread.created_at.clone());
+
+        let automation_status = thread.automation_status.unwrap_or_else(|| "none".to_string());
+        let automation_request_id = thread.automation_request_id.unwrap_or_default();
+
         Self {
             thread_id: thread.thread_id,
             title: thread.title,
@@ -550,6 +557,8 @@ impl FeedbackTableRow {
             latest_message_at,
             created_at: thread.created_at,
             conversion_job_id: thread.conversion_job_id.unwrap_or_else(|| "-".to_string()),
+            automation_status,
+            automation_request_id,
         }
     }
 }

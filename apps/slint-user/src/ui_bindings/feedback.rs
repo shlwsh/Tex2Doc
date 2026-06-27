@@ -113,5 +113,7 @@ fn feedback_row_for_ui(row: crate::cloud_account::FeedbackTableRow) -> FeedbackT
         latest_message_at: row.latest_message_at.into(),
         created_at: row.created_at.into(),
         conversion_job_id: row.conversion_job_id.into(),
+        automation_status: row.automation_status.into(),
+        automation_request_id: row.automation_request_id.into(),
     }
 }

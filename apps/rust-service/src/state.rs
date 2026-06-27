@@ -6,6 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::PgPool;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -262,6 +263,10 @@ impl ServerState {
             file_storage,
             feedback_store,
         })
+    }
+
+    pub fn pool(&self) -> &PgPool {
+        &self.db.pool
     }
 
     pub async fn register_user(

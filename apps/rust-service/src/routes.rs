@@ -14,6 +14,9 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
+use crate::automation_service::{
+    AutomationService, RequestFilters,
+};
 use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
 use crate::error_code::ConversionErrorCode;
@@ -194,6 +197,42 @@ pub fn router_with_state(state: ServerState) -> Router {
             post(admin_rollback_release),
         )
         .route("/admin/v1/release-audit", get(admin_release_audit))
+        // Automation R&D routes
+        .route("/admin/v1/automation/summary", get(automation_summary))
+        .route("/admin/v1/automation/requests", get(automation_list_requests))
+        .route(
+            "/admin/v1/automation/requests/:id",
+            get(automation_get_request),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/events",
+            get(automation_get_events),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/approve",
+            post(automation_approve),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/reject",
+            post(automation_reject),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/retry",
+            post(automation_retry),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/escalate",
+            post(automation_escalate),
+        )
+        .route("/admin/v1/automation/agents", get(automation_list_agents))
+        .route(
+            "/admin/v1/automation/agents/:id/pause",
+            post(automation_pause_agent),
+        )
+        .route(
+            "/admin/v1/automation/agents/:id/resume",
+            post(automation_resume_agent),
+        )
         .merge(static_router())
         .with_state(state)
         .layer(
@@ -2237,11 +2276,45 @@ async fn list_feedback_threads(
     let session = require_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.list_user_threads(&session.id).await;
-    let summaries: Vec<_> = threads
-        .into_iter()
-        .map(|t| thread_summary_from_summary(&t))
-        .collect();
+
+    // Get automation status for each thread (if any)
+    let automation_service = AutomationService::new(state.pool().clone());
+    let mut summaries = Vec::new();
+    for t in threads {
+        let auto_status = get_automation_status_for_feedback(
+            &automation_service,
+            &t.thread_id,
+        ).await;
+        summaries.push(thread_summary_from_summary(&t, auto_status));
+    }
     Ok(Json(serde_json::json!(summaries)))
+}
+
+async fn get_automation_status_for_feedback(
+    service: &AutomationService,
+    feedback_id: &str,
+) -> Option<(&'static str, &'static str)> {
+    // Query automation_requests table for this feedback thread
+    let pool = &service.pool;
+    let result = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT status, id FROM automation_requests
+        WHERE feedback_thread_id = $1
+        ORDER BY created_at DESC LIMIT 1
+        "#,
+    )
+    .bind(feedback_id)
+    .fetch_optional(pool)
+    .await;
+
+    match result {
+        Ok(Some((status, id))) => {
+            let status_str: &'static str = Box::leak(status.into_boxed_str());
+            let id_str: &'static str = Box::leak(id.into_boxed_str());
+            Some((status_str, id_str))
+        }
+        _ => None,
+    }
 }
 
 async fn get_feedback_thread(
@@ -2307,10 +2380,17 @@ async fn admin_list_feedback_threads(
     let _session = require_admin_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.admin_list(&params).await;
-    let summaries: Vec<_> = threads
-        .into_iter()
-        .map(|t| thread_summary_from_summary(&t))
-        .collect();
+
+    // Get automation status for each thread
+    let automation_service = AutomationService::new(state.pool().clone());
+    let mut summaries = Vec::new();
+    for t in threads {
+        let auto_status = get_automation_status_for_feedback(
+            &automation_service,
+            &t.thread_id,
+        ).await;
+        summaries.push(thread_summary_from_summary(&t, auto_status));
+    }
     Ok(Json(serde_json::json!(summaries)))
 }
 
@@ -2412,7 +2492,12 @@ fn thread_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value
 
 fn thread_summary_from_summary(
     t: &crate::feedback_service::FeedbackThreadSummary,
+    automation_status: Option<(&str, &str)>,
 ) -> serde_json::Value {
+    let (automation_status_str, automation_request_id) = automation_status
+        .map(|(s, id)| (s.to_string(), Some(id.to_string())))
+        .unwrap_or_else(|| ("none".to_string(), None));
+
     serde_json::json!({
         "thread_id": t.thread_id,
         "conversion_job_id": t.conversion_job_id,
@@ -2424,6 +2509,8 @@ fn thread_summary_from_summary(
         "latest_message_at": t.latest_message_at,
         "created_at": t.created_at,
         "updated_at": t.updated_at,
+        "automation_status": automation_status_str,
+        "automation_request_id": automation_request_id,
     })
 }
 
@@ -2459,4 +2546,140 @@ fn sanitize(name: &str) -> String {
         .unwrap_or(name)
         .trim_end_matches(".tex")
         .replace(['\\', ' '], "_")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation R&D handlers (admin-facing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn automation_summary(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let summary = store.get_summary().await?;
+    Ok(Json(serde_json::json!(summary)))
+}
+
+async fn automation_list_requests(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<RequestFilters>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let requests = store.list_requests(&params).await?;
+    Ok(Json(serde_json::json!(requests)))
+}
+
+async fn automation_get_request(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.get_request(&id).await?;
+    match request {
+        Some(r) => Ok(Json(serde_json::json!(r))),
+        None => Err(ApiError::NotFound("request not found".to_string())),
+    }
+}
+
+async fn automation_get_events(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let events = store.get_events(&id).await?;
+    Ok(Json(serde_json::json!(events)))
+}
+
+#[derive(Debug, Deserialize)]
+struct AutomationActionJson {
+    reason: Option<String>,
+    assignee: Option<String>,
+}
+
+async fn automation_approve(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.approve(&id, &session.id).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_reject(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<AutomationActionJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let reason = payload.reason.unwrap_or_else(|| "No reason provided".to_string());
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.reject(&id, &session.id, &reason).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_retry(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.retry(&id, &session.id).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_escalate(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<AutomationActionJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let assignee = payload.assignee.unwrap_or_else(|| "human".to_string());
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.escalate(&id, &session.id, &assignee).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_list_agents(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agents = store.list_agents().await?;
+    Ok(Json(serde_json::json!(agents)))
+}
+
+async fn automation_pause_agent(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agent = store.pause_agent(&id).await?;
+    Ok(Json(serde_json::json!(agent)))
+}
+
+async fn automation_resume_agent(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agent = store.resume_agent(&id).await?;
+    Ok(Json(serde_json::json!(agent)))
 }

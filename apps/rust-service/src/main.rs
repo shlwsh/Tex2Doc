@@ -18,6 +18,7 @@ mod db_store;
 mod error;
 mod error_code;
 mod excel_export;
+mod automation_service;
 mod feedback_service;
 mod file_storage;
 mod limits;

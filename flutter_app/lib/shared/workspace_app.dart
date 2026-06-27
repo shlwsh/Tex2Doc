@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../admin/pages/audit/admin_audit_panel.dart';
+import '../admin/pages/automation/admin_automation_panel.dart';
 import '../admin/pages/dashboard/admin_dashboard_panel.dart';
 import '../admin/pages/feedback/admin_feedback_panel.dart';
 import '../admin/pages/releases/admin_releases_panel.dart';
@@ -135,6 +136,7 @@ enum _NavSection {
   about,
   releases,
   audit,
+  automation,
 }
 
 extension _NavSectionMeta on _NavSection {
@@ -152,6 +154,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.about => Icons.info_outline,
     _NavSection.releases => Icons.rocket_launch_outlined,
     _NavSection.audit => Icons.manage_search_outlined,
+    _NavSection.automation => Icons.auto_awesome_motion_outlined,
   };
 
   String label(AppStrings s) => switch (this) {
@@ -168,6 +171,7 @@ extension _NavSectionMeta on _NavSection {
     _NavSection.about => s.t('nav.about'),
     _NavSection.releases => s.t('nav.releases'),
     _NavSection.audit => s.t('nav.audit'),
+    _NavSection.automation => s.t('nav.automation'),
   };
 }
 
@@ -219,6 +223,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       _NavSection.feedback,
       _NavSection.releases,
       _NavSection.audit,
+      _NavSection.automation,
       _NavSection.about,
     ],
   };
@@ -1070,6 +1075,9 @@ class _NavContent extends StatelessWidget {
       ],
       _NavSection.audit => <Widget>[
         AdminAuditPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
+      ],
+      _NavSection.automation => <Widget>[
+        AdminAutomationPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),
       ],
     };
 

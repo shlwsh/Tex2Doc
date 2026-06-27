@@ -1741,3 +1741,369 @@ class AdminRedeemCodeListResult {
   bool get hasNextPage => page < totalPages;
   bool get hasPrevPage => page > 1;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation R&D API Client
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Automation request summary for dashboard overview.
+class AutomationSummary {
+  final int pendingApproval;
+  final int waitingDev;
+  final int inDevelopment;
+  final int localFailed;
+  final int ciFailed;
+  final int deployed;
+  final int total;
+
+  AutomationSummary({
+    required this.pendingApproval,
+    required this.waitingDev,
+    required this.inDevelopment,
+    required this.localFailed,
+    required this.ciFailed,
+    required this.deployed,
+    required this.total,
+  });
+
+  factory AutomationSummary.fromJson(Map<String, dynamic> json) {
+    return AutomationSummary(
+      pendingApproval: (json['pending_approval'] as num?)?.toInt() ?? 0,
+      waitingDev: (json['waiting_dev'] as num?)?.toInt() ?? 0,
+      inDevelopment: (json['in_development'] as num?)?.toInt() ?? 0,
+      localFailed: (json['local_failed'] as num?)?.toInt() ?? 0,
+      ciFailed: (json['ci_failed'] as num?)?.toInt() ?? 0,
+      deployed: (json['deployed'] as num?)?.toInt() ?? 0,
+      total: (json['total'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+/// Automation request record.
+class AutomationRequest {
+  final String id;
+  final String shortId;
+  final String sourceType;
+  final String sourceId;
+  final String? feedbackThreadId;
+  final String title;
+  final String requestType;
+  final String status;
+  final String priority;
+  final String riskLevel;
+  final String? aiSummary;
+  final String? claimedBy;
+  final String? branchName;
+  final String? prUrl;
+  final String? ciRunUrl;
+  final String? deployedVersion;
+  final String createdAt;
+  final String updatedAt;
+
+  AutomationRequest({
+    required this.id,
+    required this.shortId,
+    required this.sourceType,
+    required this.sourceId,
+    this.feedbackThreadId,
+    required this.title,
+    required this.requestType,
+    required this.status,
+    required this.priority,
+    required this.riskLevel,
+    this.aiSummary,
+    this.claimedBy,
+    this.branchName,
+    this.prUrl,
+    this.ciRunUrl,
+    this.deployedVersion,
+    required this.createdAt,
+    required this.updatedAt,
+  });
+
+  factory AutomationRequest.fromJson(Map<String, dynamic> json) {
+    return AutomationRequest(
+      id: json['id'] as String? ?? '',
+      shortId: json['short_id'] as String? ?? '',
+      sourceType: json['source_type'] as String? ?? '',
+      sourceId: json['source_id'] as String? ?? '',
+      feedbackThreadId: json['feedback_thread_id'] as String?,
+      title: json['title'] as String? ?? '',
+      requestType: json['request_type'] as String? ?? 'unknown',
+      status: json['status'] as String? ?? 'submitted',
+      priority: json['priority'] as String? ?? 'normal',
+      riskLevel: json['risk_level'] as String? ?? 'unknown',
+      aiSummary: json['ai_summary'] as String?,
+      claimedBy: json['claimed_by'] as String?,
+      branchName: json['branch_name'] as String?,
+      prUrl: json['pr_url'] as String?,
+      ciRunUrl: json['ci_run_url'] as String?,
+      deployedVersion: json['deployed_version'] as String?,
+      createdAt: json['created_at'] as String? ?? '',
+      updatedAt: json['updated_at'] as String? ?? '',
+    );
+  }
+
+  String get statusLabel => _statusLabels[status] ?? status;
+  String get riskLabel => _riskLabels[riskLevel] ?? riskLevel;
+  String get typeLabel => _typeLabels[requestType] ?? requestType;
+  String get sourceLabel => _sourceLabels[sourceType] ?? sourceType;
+
+  static const _statusLabels = {
+    'submitted': 'Submitted',
+    'triaged': 'Triaged',
+    'needs_approval': 'Needs Approval',
+    'queued_for_dev': 'Queued',
+    'claimed': 'Claimed',
+    'coding': 'Coding',
+    'local_validating': 'Validating',
+    'local_failed': 'Local Failed',
+    'pr_open': 'PR Open',
+    'ci_running': 'CI Running',
+    'ci_failed': 'CI Failed',
+    'ready_for_merge': 'Ready',
+    'production_deployed': 'Deployed',
+    'notified': 'Notified',
+    'needs_human': 'Needs Human',
+    'blocked': 'Blocked',
+    'closed': 'Closed',
+    'rejected': 'Rejected',
+  };
+
+  static const _riskLabels = {
+    'low': 'Low',
+    'medium': 'Medium',
+    'high': 'High',
+    'critical': 'Critical',
+    'unknown': 'Unknown',
+  };
+
+  static const _typeLabels = {
+    'bug': 'Bug',
+    'requirement': 'Requirement',
+    'docs': 'Docs',
+    'test': 'Test',
+    'ops': 'Ops',
+    'unknown': 'Unknown',
+  };
+
+  static const _sourceLabels = {
+    'feedback': 'Feedback',
+    'github_issue': 'GitHub Issue',
+    'admin_manual': 'Manual',
+    'ci_failure': 'CI Failure',
+  };
+}
+
+/// Automation event for timeline.
+class AutomationEvent {
+  final String id;
+  final String requestId;
+  final String eventType;
+  final String actorType;
+  final String? actorId;
+  final String? actorName;
+  final String? fromStatus;
+  final String? toStatus;
+  final String message;
+  final Map<String, dynamic> payload;
+  final String createdAt;
+
+  AutomationEvent({
+    required this.id,
+    required this.requestId,
+    required this.eventType,
+    required this.actorType,
+    this.actorId,
+    this.actorName,
+    this.fromStatus,
+    this.toStatus,
+    required this.message,
+    required this.payload,
+    required this.createdAt,
+  });
+
+  factory AutomationEvent.fromJson(Map<String, dynamic> json) {
+    return AutomationEvent(
+      id: json['id'] as String? ?? '',
+      requestId: json['request_id'] as String? ?? '',
+      eventType: json['event_type'] as String? ?? '',
+      actorType: json['actor_type'] as String? ?? '',
+      actorId: json['actor_id'] as String?,
+      actorName: json['actor_name'] as String?,
+      fromStatus: json['from_status'] as String?,
+      toStatus: json['to_status'] as String?,
+      message: json['message'] as String? ?? '',
+      payload: (json['payload'] as Map<String, dynamic>?) ?? {},
+      createdAt: json['created_at'] as String? ?? '',
+    );
+  }
+}
+
+/// Automation agent record.
+class AutomationAgent {
+  final String id;
+  final String hostname;
+  final String agentVersion;
+  final String status;
+  final String? currentRequestId;
+  final Map<String, dynamic> capabilities;
+  final int totalTasksCompleted;
+  final int totalTasksFailed;
+  final String lastHeartbeatAt;
+  final String registeredAt;
+
+  AutomationAgent({
+    required this.id,
+    required this.hostname,
+    required this.agentVersion,
+    required this.status,
+    this.currentRequestId,
+    required this.capabilities,
+    required this.totalTasksCompleted,
+    required this.totalTasksFailed,
+    required this.lastHeartbeatAt,
+    required this.registeredAt,
+  });
+
+  factory AutomationAgent.fromJson(Map<String, dynamic> json) {
+    return AutomationAgent(
+      id: json['id'] as String? ?? '',
+      hostname: json['hostname'] as String? ?? '',
+      agentVersion: json['agent_version'] as String? ?? '',
+      status: json['status'] as String? ?? 'offline',
+      currentRequestId: json['current_request_id'] as String?,
+      capabilities: (json['capabilities'] as Map<String, dynamic>?) ?? {},
+      totalTasksCompleted: (json['total_tasks_completed'] as num?)?.toInt() ?? 0,
+      totalTasksFailed: (json['total_tasks_failed'] as num?)?.toInt() ?? 0,
+      lastHeartbeatAt: json['last_heartbeat_at'] as String? ?? '',
+      registeredAt: json['registered_at'] as String? ?? '',
+    );
+  }
+
+  double get successRate {
+    final total = totalTasksCompleted + totalTasksFailed;
+    if (total == 0) return 0;
+    return totalTasksCompleted / total * 100;
+  }
+}
+
+extension AutomationApiClientExt on CommercialApiClient {
+  Future<AutomationSummary> adminAutomationSummary(String adminToken) async {
+    final response = await _http.get(
+      _adminUri('automation/summary'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationSummary.fromJson(_decodeMap(response));
+  }
+
+  Future<List<AutomationRequest>> adminAutomationRequests(
+    String adminToken, {
+    String? status,
+    String? riskLevel,
+    String? sourceType,
+    String? search,
+    int? limit,
+    int? offset,
+  }) async {
+    final queryParams = <String, String>{};
+    if (status != null) queryParams['status'] = status;
+    if (riskLevel != null) queryParams['risk_level'] = riskLevel;
+    if (sourceType != null) queryParams['source_type'] = sourceType;
+    if (search != null) queryParams['search'] = search;
+    if (limit != null) queryParams['limit'] = limit.toString();
+    if (offset != null) queryParams['offset'] = offset.toString();
+
+    final uri = _adminUri('automation/requests').replace(
+      queryParameters: queryParams.isEmpty ? null : queryParams,
+    );
+
+    final response = await _http.get(uri, headers: _headers(accessToken: adminToken));
+    final list = _decodeList(response);
+    return list.map((json) => AutomationRequest.fromJson(json)).toList();
+  }
+
+  Future<AutomationRequest> adminAutomationRequest(String adminToken, String id) async {
+    final response = await _http.get(
+      _adminUri('automation/requests/$id'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationRequest.fromJson(_decodeMap(response));
+  }
+
+  Future<List<AutomationEvent>> adminAutomationEvents(String adminToken, String requestId) async {
+    final response = await _http.get(
+      _adminUri('automation/requests/$requestId/events'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final list = _decodeList(response);
+    return list.map((json) => AutomationEvent.fromJson(json)).toList();
+  }
+
+  Future<AutomationRequest> adminAutomationApprove(String adminToken, String requestId) async {
+    final response = await _http.post(
+      _adminUri('automation/requests/$requestId/approve'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationRequest.fromJson(_decodeMap(response));
+  }
+
+  Future<AutomationRequest> adminAutomationReject(
+    String adminToken,
+    String requestId,
+    String reason,
+  ) async {
+    final response = await _http.post(
+      _adminUri('automation/requests/$requestId/reject'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({'reason': reason}),
+    );
+    return AutomationRequest.fromJson(_decodeMap(response));
+  }
+
+  Future<AutomationRequest> adminAutomationRetry(String adminToken, String requestId) async {
+    final response = await _http.post(
+      _adminUri('automation/requests/$requestId/retry'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationRequest.fromJson(_decodeMap(response));
+  }
+
+  Future<AutomationRequest> adminAutomationEscalate(
+    String adminToken,
+    String requestId,
+    String assignee,
+  ) async {
+    final response = await _http.post(
+      _adminUri('automation/requests/$requestId/escalate'),
+      headers: _headers(accessToken: adminToken),
+      body: jsonEncode({'assignee': assignee}),
+    );
+    return AutomationRequest.fromJson(_decodeMap(response));
+  }
+
+  Future<List<AutomationAgent>> adminAutomationAgents(String adminToken) async {
+    final response = await _http.get(
+      _adminUri('automation/agents'),
+      headers: _headers(accessToken: adminToken),
+    );
+    final list = _decodeList(response);
+    return list.map((json) => AutomationAgent.fromJson(json)).toList();
+  }
+
+  Future<AutomationAgent> adminAutomationPauseAgent(String adminToken, String agentId) async {
+    final response = await _http.post(
+      _adminUri('automation/agents/$agentId/pause'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationAgent.fromJson(_decodeMap(response));
+  }
+
+  Future<AutomationAgent> adminAutomationResumeAgent(String adminToken, String agentId) async {
+    final response = await _http.post(
+      _adminUri('automation/agents/$agentId/resume'),
+      headers: _headers(accessToken: adminToken),
+    );
+    return AutomationAgent.fromJson(_decodeMap(response));
+  }
+}
