@@ -228,7 +228,11 @@ CREATE TABLE IF NOT EXISTS redeem_code_batches (
     expires_at TIMESTAMPTZ,
     created_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- auto_provision = true → anonymous callers (no Authorization header) can
+    -- redeem codes from this batch and have an account provisioned automatically.
+    -- Existing codes stay auto_provision = false unless explicitly upgraded.
+    auto_provision BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS redeem_codes (

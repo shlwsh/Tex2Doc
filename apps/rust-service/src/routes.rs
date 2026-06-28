@@ -413,6 +413,10 @@ struct AdminRedeemBatchBody {
     channel: Option<String>,
     note: Option<String>,
     expires_at: Option<String>,
+    /// When true, anonymous callers (no Authorization header) can redeem a
+    /// code from this batch and have an account provisioned automatically.
+    /// Defaults to false to preserve existing behavior.
+    auto_provision: Option<bool>,
 }
 
 /// Request body for the admin redeem-code list endpoint.
@@ -736,13 +740,51 @@ async fn redeem_code(
     headers: HeaderMap,
     Json(payload): Json<RedeemCodeBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&state, &headers).await?;
     let code = payload.code.unwrap_or_default();
+
+    // Try the existing-session path first if a bearer token is supplied.
+    // This keeps already-signed-in users on their existing account, with no
+    // chance of accidentally provisioning a new one.
+    if let Some(token) = bearer_token_from_headers(&headers) {
+        if let Ok(Some(user)) = state.user_for_token(&token).await {
+            let result = state
+                .redeem_code(user.id.clone(), code.clone())
+                .await
+                .map_err(redeem_failure_to_error)?;
+            return Ok(Json(redeem_result_json(&result)));
+        }
+        // Invalid/expired token: fall through to anonymous path so callers
+        // aren't penalized for a stale credential. The anonymous path will
+        // refuse with REDEEM_REQUIRES_LOGIN if the batch disallows it.
+    }
+
+    // Anonymous path — auto-provisions an account when the batch allows it.
     let result = state
-        .redeem_code(session.id, code)
+        .redeem_code_anonymous(code)
         .await
-        .map_err(redeem_failure_to_error)?;
+        .map_err(|failure| match failure {
+            // Map auto_provision=false onto a stable client-friendly code so
+            // older clients can prompt the user to sign in first.
+            RedeemFailure::InvalidCode => ApiError::Coded {
+                status: StatusCode::UNAUTHORIZED,
+                code: "redeem_requires_login",
+                message: "this redeem code requires sign-in; please log in and try again"
+                    .to_string(),
+            },
+            other => redeem_failure_to_error(other),
+        })?;
     Ok(Json(redeem_result_json(&result)))
+}
+
+/// Extract the bearer token from the `Authorization` header, if present.
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
 }
 
 async fn list_redeem_records(
@@ -773,6 +815,7 @@ async fn admin_create_redeem_batch(
             payload.note,
             payload.expires_at,
             admin.id,
+            payload.auto_provision.unwrap_or(false),
         )
         .await
         .map_err(redeem_failure_to_error)?;
@@ -1768,7 +1811,7 @@ fn redeem_batch_json(batch: &RedeemCodeBatchRecord, include_codes: bool) -> serd
 }
 
 fn redeem_result_json(result: &RedeemCodeResult) -> serde_json::Value {
-    json!({
+    let mut value = json!({
         "redeem_id": result.redeem_id,
         "recharge_id": result.recharge_id,
         "package_id": result.package_id,
@@ -1778,7 +1821,18 @@ fn redeem_result_json(result: &RedeemCodeResult) -> serde_json::Value {
         "count_balance": result.count_balance,
         "date_valid_until": result.date_valid_until,
         "redeemed_at": result.redeemed_at,
-    })
+        "is_new_account": result.is_new_account,
+    });
+    if let Some(token) = &result.access_token {
+        value["access_token"] = json!(token);
+    }
+    if let Some(token) = &result.refresh_token {
+        value["refresh_token"] = json!(token);
+    }
+    if let Some(user) = &result.user {
+        value["user"] = app_user_json(user);
+    }
+    value
 }
 
 fn redeem_record_json(record: &RedeemCodeRecord) -> serde_json::Value {

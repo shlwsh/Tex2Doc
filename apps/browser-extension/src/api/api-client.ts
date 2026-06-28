@@ -243,10 +243,16 @@ export class ApiClient {
   // ============================================
 
   /**
-   * Redeem a code
+   * Redeem a code.
+   *
+   * Anonymous callers (no bearer token) are supported for batches with
+   * `auto_provision = true` on the server. The response then carries
+   * `access_token`, `refresh_token`, `user`, and `is_new_account`. For
+   * non-auto-provision batches the server returns `redeem_requires_login`
+   * (HTTP 401) so the caller can prompt the user to sign in first.
    */
   async redeemCode(request: RedeemCodeRequest): Promise<RedeemCodeResult> {
-    return this.request<RedeemCodeResult>('POST', '/redeem-codes/redeem', request, true);
+    return this.request<RedeemCodeResult>('POST', '/redeem-codes/redeem', request, false);
   }
 
   /**

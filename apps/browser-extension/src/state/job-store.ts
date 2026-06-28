@@ -169,6 +169,42 @@ export async function updateJobReport(id: string, report: JobRecord['report']): 
 }
 
 /**
+ * Set job stage and progress together (used by cloud pipeline)
+ */
+export async function setJobStage(
+  id: string,
+  stage: NonNullable<JobRecord['stage']>,
+  status: JobRecord['status'],
+  progress: number
+): Promise<void> {
+  const job = await getJob(id);
+  if (!job) return;
+  job.stage = stage;
+  job.status = status;
+  job.progress = progress;
+  job.updated_at = Date.now();
+  await saveJob(job);
+}
+
+/**
+ * Get pending cloud jobs that need recovery after SW restart.
+ * Returns jobs that are mid-flight (uploading / creating / polling) with no terminal status.
+ */
+export async function getPendingCloudJobs(): Promise<JobRecord[]> {
+  const db = await getDB();
+  const inFlight = await db.getAllFromIndex(
+    STORES.JOBS,
+    'by-status',
+    IDBKeyRange.only('processing')
+  );
+  return inFlight.filter(
+    (j) =>
+      j.mode === 'cloud' &&
+      (j.stage === 'uploading' || j.stage === 'creating' || j.stage === 'polling' || j.stage === 'pending')
+  );
+}
+
+/**
  * Count jobs by status
  */
 export async function countJobsByStatus(status: JobRecord['status']): Promise<number> {

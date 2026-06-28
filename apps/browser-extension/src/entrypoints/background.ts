@@ -13,21 +13,26 @@
 import { ApiClient } from '@/api/api-client';
 import { login as apiLogin, register as apiRegister, refreshSession } from '@/api/auth';
 import { getUsage } from '@/api/usage';
-import { createAndPollConversion } from '@/api/conversions';
+import { createAndPollConversion, pollCloudConversion } from '@/api/conversions';
 import { redeemCode } from '@/api/feedback';
 import { startCheckout, openBillingPortal } from '@/api/billing';
 import { getSession, saveSession, clearSession, getAccessToken } from '@/state/session-store';
 import { getSettings, getApiBaseUrl } from '@/state/settings-store';
-import { saveJob, getJob, getAllJobs, updateJobStatus } from '@/state/job-store';
+import { saveJob, getJob, getAllJobs, updateJobStatus, setJobStage, getPendingCloudJobs } from '@/state/job-store';
 import { downloadBytes } from '@/browser/downloads';
 import { openUrl } from '@/browser/compat';
 import { convertLocal } from '@/conversion/local-wasm';
 import { CONTEXT_MENU_IDS, MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, ConversionJob } from '@/shared/types';
-import { AuthError } from '@/shared/errors';
+import { AuthError, ApiError } from '@/shared/errors';
 
 const activePolls = new Map<string, number>();
+// localJobId → cloudJobId. Survives only within a single SW lifetime.
+// On SW restart, restorePollingJobs rehydrates this map by reading IndexedDB.
+const activeCloudJobs = new Map<string, string>();
 const POLL_INTERVAL = 2000;
+// Mutex to avoid double-recovery when onStartup + onInstalled race.
+let restoreInFlight: Promise<void> | null = null;
 
 export default defineBackground({
   // ESM 输出：允许 dynamic import() 加载 wasm-bindgen 生成的 ESM 胶水；
@@ -37,11 +42,14 @@ export default defineBackground({
     browser.runtime.onInstalled.addListener(() => {
       console.log('[Tex2Doc Background] Extension installed');
       createContextMenus();
+      // After install we may also need to recover in-flight cloud jobs (e.g. browser restart
+      // without `onStartup` firing in some Chrome versions).
+      scheduleRestore();
     });
 
-    browser.runtime.onStartup.addListener(async () => {
+    browser.runtime.onStartup.addListener(() => {
       console.log('[Tex2Doc Background] Extension startup');
-      await restorePollingJobs();
+      scheduleRestore();
     });
 
     browser.runtime.onMessage.addListener(handleMessage);
@@ -335,50 +343,79 @@ async function handleRedeemCode(payload: Record<string, unknown>): Promise<unkno
 async function handleRedeemCodeAndLogin(payload: Record<string, unknown>): Promise<unknown> {
   const { code } = payload as { code: string };
   const baseUrl = await getApiBaseUrl();
-  // Use anonymous client; server may create an account behind the scenes
-  const client = new ApiClient({ baseUrl, apiKey: '' });
-  const result = await client.redeemCode({ code });
 
-  // If backend provisioned an account, persist the session
-  if (result.access_token && result.refresh_token && result.user) {
-    const SESSION_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
-    await saveSession({
-      access_token: result.access_token,
-      refresh_token: result.refresh_token,
-      user: result.user,
-      usage: {
-        plan_id: result.user.plan_id,
-        cloud_conversions_used: 0,
-        cloud_conversions_limit: 0,
-        count_balance: result.count_balance,
-        date_valid_until: result.date_valid_until,
-        storage_bytes_used: 0,
-        storage_bytes_limit: 0,
-        period_start: new Date().toISOString(),
-        period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
-      },
-      expires_at: Date.now() + SESSION_TOKEN_EXPIRY_MS,
-    });
+  // Prefer the existing access token if present, so signed-in users stay on
+  // their account. Fall back to an anonymous client when not signed in (or
+  // when the existing token has expired and a refresh isn't worth racing).
+  const existingAccess = await getAccessToken();
+  const client = new ApiClient({ baseUrl, apiKey: existingAccess ?? '' });
 
-    // Best-effort: refresh usage with the new token
-    try {
-      const authClient = new ApiClient({ baseUrl, apiKey: result.access_token });
-      const usage = await getUsage(authClient);
-      const session = await getSession();
-      if (session) {
-        session.usage = usage;
-        await saveSession(session);
-      }
-      notifyUI('SESSION_UPDATED', { signedIn: true, usage, isNewAccount: !!result.is_new_account });
-    } catch {
-      notifyUI('SESSION_UPDATED', { signedIn: true, isNewAccount: !!result.is_new_account });
+  let result;
+  try {
+    result = await client.redeemCode({ code });
+  } catch (error) {
+    // The server may signal that *this* code can only be redeemed by an
+    // already-signed-in user (i.e. the batch is not auto_provision). Surface
+    // a stable error so the popup can prompt the user to log in and retry.
+    if (error instanceof ApiError && error.code === 'redeem_requires_login') {
+      notifyUI('SESSION_UPDATED', {
+        signedIn: false,
+        redeemRequiresLogin: true,
+        error: error.message,
+      });
+      return {
+        success: false,
+        error: 'REDEEM_REQUIRES_LOGIN',
+        message: error.message,
+      };
     }
-
-    return { success: true, result, signedIn: true, isNewAccount: !!result.is_new_account };
+    throw error;
   }
 
-  // No account provisioned; user must sign in first
-  return { success: false, error: 'REDEEM_REQUIRES_LOGIN', result };
+  // Server issued tokens → persist the session immediately. We don't
+  // synthesize a hardcoded 30-day window anymore; usage limits are read
+  // fresh from the /usage endpoint below.
+  if (!result.access_token || !result.refresh_token || !result.user) {
+    notifyUI('SESSION_UPDATED', {
+      signedIn: false,
+      error: 'REDEEM_REQUIRES_LOGIN',
+      message: 'Server did not provision an account; please sign in and retry',
+    });
+    return {
+      success: false,
+      error: 'REDEEM_REQUIRES_LOGIN',
+      result,
+    };
+  }
+
+  const SESSION_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
+  await saveSession({
+    access_token: result.access_token,
+    refresh_token: result.refresh_token,
+    user: result.user,
+    usage: null,
+    expires_at: Date.now() + SESSION_TOKEN_EXPIRY_MS,
+  });
+
+  // Refresh usage with the new token so the popup shows an accurate balance
+  // right away. Failures here don't block the redeem — we'll retry on the
+  // next /usage call from the UI.
+  let usage = null;
+  try {
+    const authClient = new ApiClient({ baseUrl, apiKey: result.access_token });
+    usage = await getUsage(authClient);
+    const session = await getSession();
+    if (session) {
+      session.usage = usage;
+      await saveSession(session);
+    }
+  } catch (error) {
+    console.warn('[Tex2Doc Background] post-redeem /usage refresh failed:', error);
+  }
+
+  const isNewAccount = !!result.is_new_account;
+  notifyUI('SESSION_UPDATED', { signedIn: true, usage, isNewAccount });
+  return { success: true, result, signedIn: true, isNewAccount };
 }
 
 async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Promise<unknown> {
@@ -400,14 +437,18 @@ async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Prom
     mode: 'cloud',
     status: 'pending',
     progress: 0,
+    stage: 'pending',
     created_at: Date.now(),
     updated_at: Date.now(),
   };
   await saveJob(job);
-  notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'pending', progress: 0, stage: 'uploading' });
+  notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'pending', progress: 0, stage: 'pending' });
 
-  // Fire-and-forget the cloud pipeline; progress events come back via notifyUI
-  runCloudPipeline(localJobId, new Uint8Array(zipBytes), fileName, mainTex, profile, quality, baseUrl, accessToken);
+  // Fire-and-forget the cloud pipeline; progress events come back via notifyUI.
+  // zipBytes intentionally NOT persisted: SW recovery re-runs from stage='pending' /
+  // 'uploading' which re-uploads. This is acceptable because uploads are idempotent
+  // (uploadProjectZip returns a fresh upload_id) and avoids serializing MBs to disk.
+  void runCloudPipeline(localJobId, new Uint8Array(zipBytes), fileName, mainTex, profile, quality, baseUrl, accessToken);
   return { success: true, jobId: localJobId };
 }
 
@@ -425,59 +466,76 @@ async function runCloudPipeline(
   try {
     // Stage 1: upload
     notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 15, stage: 'uploading' });
-    await updateJobStatus(localJobId, 'processing', 15);
+    await setJobStage(localJobId, 'uploading', 'processing', 15);
     const upload = await client.uploadProjectZip(zipBytes, fileName);
+    await setJobStage(localJobId, 'uploading', 'processing', 25);
+    {
+      const stored = await getJob(localJobId);
+      if (stored) {
+        stored.uploadId = upload.upload_id;
+        await saveJob(stored);
+      }
+    }
 
     // Stage 2: create conversion job
     notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 30, stage: 'creating', uploadId: upload.upload_id });
-    await updateJobStatus(localJobId, 'processing', 30);
+    await setJobStage(localJobId, 'creating', 'processing', 30);
     const created = await client.createConversion({
       upload_id: upload.upload_id,
       main_tex: mainTex,
       profile,
       quality,
     }) as { job_id: string };
+    activeCloudJobs.set(localJobId, created.job_id);
+    {
+      const stored = await getJob(localJobId);
+      if (stored) {
+        stored.cloudJobId = created.job_id;
+        stored.job_id = created.job_id;
+        await saveJob(stored);
+      }
+    }
 
     // Stage 3: poll until terminal
     notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 50, stage: 'polling', cloudJobId: created.job_id });
-    await updateJobStatus(localJobId, 'processing', 50);
-    const finalJob = await createAndPollConversion(
+    await setJobStage(localJobId, 'polling', 'processing', 50);
+    const finalJob = await pollCloudConversion(
       client,
-      upload.upload_id,
-      mainTex,
-      profile,
-      quality,
+      created.job_id,
       (update) => {
+        const pct = update.status === 'completed' ? 100 : 70;
         notifyUI('JOB_UPDATED', {
           jobId: localJobId,
           status: update.status,
-          progress: update.status === 'completed' ? 100 : 70,
+          progress: pct,
           stage: 'polling',
+          cloudJobId: created.job_id,
         });
-        updateJobStatus(localJobId, update.status as JobRecord['status'], update.status === 'completed' ? 100 : 70);
-      }
+        updateJobStatus(localJobId, update.status as JobRecord['status'], pct);
+      },
+      { pollInterval: POLL_INTERVAL }
     );
 
+    activeCloudJobs.delete(localJobId);
     const stored = await getJob(localJobId);
     if (stored) {
       stored.job_id = finalJob.job_id;
+      stored.cloudJobId = finalJob.job_id;
       stored.status = 'completed';
+      stored.stage = 'completed';
       stored.progress = 100;
       stored.docx_ready = finalJob.docx_ready;
       stored.updated_at = Date.now();
       await saveJob(stored);
     }
     notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'completed', progress: 100, stage: 'completed', cloudJobId: finalJob.job_id });
-    browser.notifications?.create({
-      type: 'basic',
-      title: 'Tex2Doc',
-      message: 'Conversion completed!',
-      iconUrl: browser.runtime.getURL('/icons/icon48.png'),
-    });
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!');
   } catch (error) {
+    activeCloudJobs.delete(localJobId);
     const stored = await getJob(localJobId);
     if (stored) {
       stored.status = 'failed';
+      stored.stage = 'failed';
       stored.error_message = error instanceof Error ? error.message : 'Conversion failed';
       stored.updated_at = Date.now();
       await saveJob(stored);
@@ -489,12 +547,143 @@ async function runCloudPipeline(
       stage: 'failed',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    browser.notifications?.create({
+    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+/**
+ * Resume a cloud pipeline after SW restart.
+ *
+ * The original zip bytes were never persisted (see handleCloudConvertAndPoll), so
+ * recovery strategy depends on the job's last persisted stage:
+ *
+ *  - 'polling' + cloudJobId present  → just keep polling until terminal.
+ *  - 'creating' + cloudJobId present → keep polling (the server-side create has succeeded).
+ *  - 'uploading' / 'pending'         → mark failed with JOB_NOT_FOUND_AFTER_RESTART because we
+ *                                       no longer have the zip bytes. Users will need to retry.
+ *
+ * UI / popup subscribers reconnect when they re-open, and will see the final terminal state.
+ */
+async function resumeCloudPipeline(job: JobRecord): Promise<void> {
+  if (job.mode !== 'cloud') return;
+  const baseUrl = await getApiBaseUrl();
+  const accessToken = await getAccessToken();
+  if (!accessToken) {
+    // No session → mark failed, user will need to sign in.
+    await setJobStage(
+      job.id,
+      'failed',
+      'failed',
+      job.progress ?? 0
+    );
+    const stored = await getJob(job.id);
+    if (stored) {
+      stored.error_message = 'Session expired during conversion; please sign in and retry';
+      await saveJob(stored);
+    }
+    return;
+  }
+
+  const cloudJobId = job.cloudJobId ?? job.job_id;
+  if (!cloudJobId || (job.stage !== 'polling' && job.stage !== 'creating')) {
+    // Cannot recover upload bytes; mark failed.
+    await setJobStage(job.id, 'failed', 'failed', job.progress ?? 0);
+    const stored = await getJob(job.id);
+    if (stored) {
+      stored.error_message =
+        'Conversion interrupted by browser restart before upload completed; please retry';
+      stored.error_code = 'JOB_NOT_FOUND_AFTER_RESTART';
+      await saveJob(stored);
+    }
+    notifyUI('JOB_UPDATED', {
+      jobId: job.id,
+      status: 'failed',
+      stage: 'failed',
+      error: 'Conversion interrupted by browser restart; please retry',
+    });
+    await emitTerminalNotification('Conversion interrupted', 'Conversion interrupted by browser restart');
+    return;
+  }
+
+  activeCloudJobs.set(job.id, cloudJobId);
+  const client = new ApiClient({ baseUrl, apiKey: accessToken });
+  notifyUI('JOB_UPDATED', {
+    jobId: job.id,
+    status: 'processing',
+    progress: 50,
+    stage: 'polling',
+    cloudJobId,
+    resumed: true,
+  });
+
+  try {
+    const finalJob = await pollCloudConversion(
+      client,
+      cloudJobId,
+      (update) => {
+        const pct = update.status === 'completed' ? 100 : 70;
+        notifyUI('JOB_UPDATED', {
+          jobId: job.id,
+          status: update.status,
+          progress: pct,
+          stage: 'polling',
+          cloudJobId,
+        });
+        updateJobStatus(job.id, update.status as JobRecord['status'], pct);
+      },
+      { pollInterval: POLL_INTERVAL }
+    );
+    activeCloudJobs.delete(job.id);
+    const stored = await getJob(job.id);
+    if (stored) {
+      stored.job_id = finalJob.job_id;
+      stored.cloudJobId = finalJob.job_id;
+      stored.status = 'completed';
+      stored.stage = 'completed';
+      stored.progress = 100;
+      stored.docx_ready = finalJob.docx_ready;
+      stored.updated_at = Date.now();
+      await saveJob(stored);
+    }
+    notifyUI('JOB_UPDATED', {
+      jobId: job.id,
+      status: 'completed',
+      progress: 100,
+      stage: 'completed',
+      cloudJobId: finalJob.job_id,
+    });
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!');
+  } catch (error) {
+    activeCloudJobs.delete(job.id);
+    const stored = await getJob(job.id);
+    if (stored) {
+      stored.status = 'failed';
+      stored.stage = 'failed';
+      stored.error_message = error instanceof Error ? error.message : 'Conversion failed after restart';
+      stored.updated_at = Date.now();
+      await saveJob(stored);
+    }
+    notifyUI('JOB_UPDATED', {
+      jobId: job.id,
+      status: 'failed',
+      stage: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  }
+}
+
+async function emitTerminalNotification(title: string, message: string): Promise<void> {
+  if (!browser.notifications?.create) return;
+  try {
+    await browser.notifications.create({
       type: 'basic',
       title: 'Tex2Doc',
-      message: `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      message,
       iconUrl: browser.runtime.getURL('/icons/icon48.png'),
     });
+  } catch (error) {
+    console.error('[Tex2Doc Background] notification.create failed:', error);
   }
 }
 
@@ -517,17 +706,35 @@ async function handleCreateFeedback(payload: Record<string, unknown>): Promise<u
 async function handleContextMenuClick(): Promise<void> {}
 
 function notifyUI(type: string, data: Record<string, unknown>): void {
+  // Ignore errors: when popup/sidepanel isn't open, sendMessage rejects with
+  // "Could not establish connection". The terminal notification (browser.notifications)
+  // is the fallback, so silently dropping here is intentional.
   browser.runtime.sendMessage({ type, ...data }).catch(() => {});
 }
 
-async function restorePollingJobs(): Promise<void> {
-  const jobs = await getAllJobs();
-  const pendingJobs = jobs.filter((j) => j.status === 'processing' || j.status === 'pending');
-  for (const job of pendingJobs) {
-    if (job.job_id) {
-      console.log('[Tex2Doc Background] Restoring job:', job.id);
-    }
+/**
+ * Schedule a recovery run, de-duplicated across overlapping lifecycle events
+ * (onInstalled + onStartup may race on first browser launch).
+ */
+function scheduleRestore(): void {
+  if (restoreInFlight) {
+    return;
   }
+  restoreInFlight = restorePollingJobs().finally(() => {
+    restoreInFlight = null;
+  });
+}
+
+async function restorePollingJobs(): Promise<void> {
+  const inFlight = await getPendingCloudJobs();
+  if (inFlight.length === 0) {
+    console.log('[Tex2Doc Background] No in-flight cloud jobs to restore');
+    return;
+  }
+  console.log(`[Tex2Doc Background] Restoring ${inFlight.length} in-flight cloud job(s)`);
+  // Run recoveries concurrently — each tracks its own localJobId + cloudJobId
+  // through activeCloudJobs / IndexedDB and emit JOB_UPDATED as they go.
+  await Promise.allSettled(inFlight.map((job) => resumeCloudPipeline(job)));
 }
 
 async function handleStartWasmConversion(payload: Record<string, unknown>): Promise<unknown> {

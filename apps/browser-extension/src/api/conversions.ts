@@ -68,6 +68,64 @@ export async function createAndPollConversion(
 }
 
 /**
+ * Poll an existing cloud job until it reaches a terminal state.
+ *
+ * Used by SW recovery: after the SW restarts, the original upload/create steps
+ * already happened server-side, so we just need to keep polling until done.
+ *
+ * Unlike `createAndPollConversion`, this assumes the cloud job already exists
+ * and only retries the GET endpoint. It also tolerates `404 / expired` by
+ * throwing a non-retryable `ConversionError` so the caller can mark the job failed.
+ */
+export async function pollCloudConversion(
+  client: ApiClient,
+  cloudJobId: string,
+  onProgress?: (job: ConversionJob) => void,
+  options: {
+    pollInterval?: number;
+    maxPolls?: number;
+  } = {}
+): Promise<ConversionJob> {
+  const { pollInterval = 2000, maxPolls = 120 } = options;
+
+  for (let i = 0; i < maxPolls; i++) {
+    let currentJob: ConversionJob;
+    try {
+      currentJob = await client.getConversion(cloudJobId) as ConversionJob;
+    } catch (error) {
+      if (error instanceof ConversionError && error.code === 'NOT_FOUND') {
+        throw new ConversionError(
+          `Cloud job ${cloudJobId} not found after SW restart; original upload may have expired`,
+          'JOB_NOT_FOUND_AFTER_RESTART',
+          cloudJobId
+        );
+      }
+      throw error;
+    }
+
+    if (onProgress) {
+      onProgress(currentJob);
+    }
+
+    if (currentJob.status === 'completed' && currentJob.docx_ready) {
+      return currentJob;
+    }
+
+    if (currentJob.status === 'failed' || currentJob.status === 'expired') {
+      throw new ConversionError(
+        currentJob.error || 'Conversion failed',
+        currentJob.error_code || 'CONVERSION_FAILED',
+        currentJob.job_id
+      );
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, pollInterval));
+  }
+
+  throw new ConversionError('Conversion timed out after SW restart', 'TIMEOUT', cloudJobId);
+}
+
+/**
  * Get all conversion jobs
  */
 export async function getConversions(client: ApiClient): Promise<ConversionJob[]> {

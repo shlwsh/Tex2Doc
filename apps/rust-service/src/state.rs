@@ -166,6 +166,12 @@ pub struct RedeemCodeBatchRecord {
     pub created_by: String,
     pub created_at: String,
     pub codes: Vec<String>,
+    /// When `true`, an anonymous caller (no bearer token) can redeem a code
+    /// from this batch and have an account provisioned automatically. The
+    /// account email is derived from `sha256(code)[..16]@tex2doc.local`.
+    /// Default: `false` (requires existing session, like classic codes).
+    #[serde(default)]
+    pub auto_provision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -208,6 +214,18 @@ pub struct RedeemCodeResult {
     pub count_balance: u64,
     pub date_valid_until: Option<String>,
     pub redeemed_at: String,
+    /// Auto-provisioned account fields. Present only when the redeem batch
+    /// has `auto_provision = true` and the caller did NOT supply an Authorization
+    /// bearer token (anonymous redemption path).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<AppUser>,
+    /// `true` when the anonymous redeem just created a new account; `false`
+    /// when it returned an existing one (same email derived from code hash).
+    pub is_new_account: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -590,6 +608,7 @@ impl ServerState {
         note: Option<String>,
         expires_at: Option<String>,
         created_by: String,
+        auto_provision: bool,
     ) -> Result<RedeemCodeBatchRecord, RedeemFailure> {
         self.db
             .create_redeem_batch(
@@ -599,6 +618,7 @@ impl ServerState {
                 note,
                 expires_at,
                 created_by,
+                auto_provision,
             )
             .await
     }
@@ -636,6 +656,18 @@ impl ServerState {
         input_code: String,
     ) -> Result<RedeemCodeResult, RedeemFailure> {
         self.db.redeem_code(user_id, input_code).await
+    }
+
+    /// Anonymous redeem: provisions (or reuses) an account whose email is
+    /// derived from the code, and returns that account's tokens alongside the
+    /// recharge record. The DB layer enforces the `auto_provision = true` flag
+    /// on the redeem-code batch and the `UNIQUE` constraint on the derived
+    /// email guarantees idempotency.
+    pub async fn redeem_code_anonymous(
+        &self,
+        input_code: String,
+    ) -> Result<RedeemCodeResult, RedeemFailure> {
+        self.db.redeem_code_anonymous(input_code).await
     }
 
     pub async fn list_redeem_records(&self, user_id: &str) -> Vec<RedeemCodeRecord> {
@@ -877,6 +909,18 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = vec![0_u8; len];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     bytes
+}
+
+/// Random ASCII alphanumeric string suitable for placeholder credentials.
+/// Used by the anonymous redeem flow to provision a password the user will
+/// never see (login is via redeem-code only).
+pub fn random_string(len: usize) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let bytes = random_bytes(len);
+    bytes
+        .iter()
+        .map(|b| ALPHABET[(*b as usize) % ALPHABET.len()] as char)
+        .collect()
 }
 
 pub fn generate_redeem_code(batch_prefix: &str) -> String {

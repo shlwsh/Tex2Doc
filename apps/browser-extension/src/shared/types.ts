@@ -161,9 +161,14 @@ export interface ExtensionSettings {
 }
 
 // Conversion Types
+export type JobStage = 'pending' | 'uploading' | 'creating' | 'polling' | 'completed' | 'failed';
+
 export interface JobRecord {
   id: string;
   job_id?: string;
+  cloudJobId?: string;
+  uploadId?: string;
+  stage?: JobStage;
   file_name: string;
   main_tex: string;
   profile: string;
