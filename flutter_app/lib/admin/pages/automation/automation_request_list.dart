@@ -49,10 +49,8 @@ class AutomationRequestList extends StatelessWidget {
         // List
         Expanded(
           child: requests.isEmpty
-              ? EmptyState(
-                  icon: Icons.inbox_outlined,
-                  title: 'No requests',
-                  description: 'No automation requests match your filters',
+              ? const EmptyState(
+                  label: 'No requests',
                 )
               : ListView.separated(
                   itemCount: requests.length,

@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -27,7 +27,7 @@ import '../ui/quick_activation.dart';
 import '../ui/quick_assistant_panel.dart';
 import '../ui/quick_session.dart';
 import '../ui/recharge_records_panel.dart';
-import 'bridge.dart';
+import '../bridge.dart';
 
 const _appIconAsset = 'assets/app_icon.png';
 const _redeemCodePurchaseUrl = 'https://pay.ldxp.cn/item/ns8i2g';
@@ -456,13 +456,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
           return Column(
             children: [
               _TopBar(
-                compact: true,
-                mode: widget.mode,
+                platform: 'Web',
+                strings: AppStrings.of(context),
                 profile: _auth!.profile,
                 themeTone: widget.themeTone,
                 locale: widget.locale,
                 onThemeChanged: widget.onThemeChanged,
                 onLocaleChanged: widget.onLocaleChanged,
+                onSignedOut: _handleSignedOut,
               ),
               Expanded(child: content),
             ],
@@ -481,13 +482,14 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
               child: Column(
                 children: [
                   _TopBar(
-                    compact: false,
-                    mode: widget.mode,
+                    platform: 'Web',
+                    strings: AppStrings.of(context),
                     profile: _auth!.profile,
                     themeTone: widget.themeTone,
                     locale: widget.locale,
                     onThemeChanged: widget.onThemeChanged,
                     onLocaleChanged: widget.onLocaleChanged,
+                    onSignedOut: _handleSignedOut,
                   ),
                   Expanded(child: content),
                 ],
@@ -498,6 +500,7 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
       },
     );
   }
+}
 
 // ─── Sidebar ──────────────────────────────────────────────────────────────────
 

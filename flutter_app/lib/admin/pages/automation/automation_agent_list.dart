@@ -21,10 +21,8 @@ class AutomationAgentList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (agents.isEmpty) {
-      return EmptyState(
-        icon: Icons.terminal,
-        title: 'No agents',
-        description: 'No development machine agents are registered',
+      return const EmptyState(
+        label: 'No agents',
       );
     }
 

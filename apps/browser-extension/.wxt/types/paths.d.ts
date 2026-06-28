@@ -14,10 +14,7 @@ declare module "wxt/browser" {
     | "/popup.html"
     | "/sidepanel.html"
     | "/wasm/doc_engine_bg.wasm"
-    | "/wasm/doc_engine_bg.wasm.d.ts"
-    | "/wasm/doc_engine.d.ts"
     | "/wasm/doc_engine.js"
-    | "/wasm/package.json"
   type HtmlPublicPath = Extract<PublicPath, `${string}.html`>
   export interface WxtRuntime {
     getURL(path: PublicPath): string;

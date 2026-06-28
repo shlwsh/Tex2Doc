@@ -777,6 +777,21 @@ class CommercialApiClient {
         .toList(growable: false);
   }
 
+  Map<String, dynamic> _decodeMap(http.Response response) {
+    final value = _decode(response);
+    if (value is Map) {
+      return Map<String, dynamic>.from(value);
+    }
+    return <String, dynamic>{};
+  }
+
+  List<Map<String, dynamic>> _decodeList(http.Response response) {
+    final value = _decode(response) as List<dynamic>;
+    return value
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList(growable: false);
+  }
+
   static Uri _normalizeBaseUrl(String value) {
     final valueTrimmed = value.trim();
     final trimmed =

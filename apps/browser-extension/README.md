@@ -8,22 +8,27 @@ A cross-browser WebExtension for converting LaTeX documents to Word (.docx) dire
 - **Cloud Conversion**: Upload to Tex2Doc cloud service for complex documents
 - **Overleaf Integration**: One-click conversion from Overleaf projects
 - **arXiv Support**: Download and convert arXiv papers
+- **Side Panel Dashboard**: Full-featured SaaS-style management panel (Chrome/Edge only)
 - **Account Management**: Sign in to track usage, manage quotas, and access billing
 - **Quality Reports**: View detailed conversion quality reports
+- **Diagnostics Export**: Export diagnostic logs for troubleshooting
 
 ## Supported Browsers
 
-- Chrome / Chromium-based browsers (Edge, Brave, etc.)
-- Firefox
-- Safari (macOS and iOS)
+| Browser | Manifest Version | Support Status |
+|---------|-----------------|----------------|
+| **Chrome** | MV3 | ✅ Full Support |
+| **Edge** | MV3 | ✅ Full Support |
+| **Firefox** | MV2 | ✅ Supported |
+| **Safari** | MV2 | ⚠️ Limited (no Side Panel) |
 
 ## Development
 
 ### Prerequisites
 
 - Node.js 18+
-- Rust (for WASM compilation)
-- wasm-pack
+- Rust (for WASM compilation, optional for development)
+- wasm-pack (optional, pre-built WASM included)
 
 ### Setup
 
@@ -51,7 +56,6 @@ npm run extension:build
 # Build for specific browser
 npm run extension:build:chrome
 npm run extension:build:firefox
-npm run extension:build:safari
 
 # Create distribution zip
 npm run extension:zip

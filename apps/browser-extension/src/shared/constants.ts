@@ -1,6 +1,7 @@
 // API Constants
-export const API_BASE_URL = 'https://api.tex2doc.cn';
-export const API_VERSION = 'v1';
+// Note: Use VITE_ prefix for env vars to be accessible via import.meta.env
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://api.tex2doc.cn';
+export const API_VERSION = import.meta.env.VITE_API_VERSION || 'v1';
 
 // Storage Keys
 export const STORAGE_KEYS = {

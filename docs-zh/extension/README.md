@@ -7,6 +7,22 @@
 - [使用指南](#使用指南)
 - [开发构建](#开发构建)
 - [故障排除](#故障排除)
+- [完整手册](#完整手册)
+
+---
+
+## 完整手册
+
+如需详细的配置、部署与测试验证指南，请参阅：
+
+**[配置部署与测试验证手册](./配置部署与测试验证手册.md)**
+
+该手册包含：
+- 完整的环境配置说明
+- 本地开发详细流程
+- 各浏览器构建和部署步骤
+- 自动化测试与手动测试清单
+- 发布分发指南
 
 ---
 
@@ -18,6 +34,7 @@
 |--------|----------|----------|----------|
 | **Chrome** | MV3 | `npm run build:chrome` | `.output/chrome-mv3/` |
 | **Edge** | MV3 | `npm run build:edge` | `.output/chrome-mv3-edge/` |
+| **Firefox** | MV2 | `npm run build:firefox` | `.output/firefox-mv2/` |
 | **Safari** | MV2 | `npm run build:safari` | `.output/safari-mv2/` |
 
 ### 步骤 1：构建扩展
@@ -39,7 +56,14 @@ npm run build:safari
 4. 点击 **加载已解压的扩展程序**
 5. 选择 `.output/chrome-mv3/` 文件夹
 
-### 步骤 3：加载到 Edge
+### 步骤 3：加载到 Firefox
+
+1. 打开 Firefox 浏览器
+2. 访问 `about:debugging#/runtime/this-firefox`
+3. 点击 **临时加载扩展程序**
+4. 选择 `.output/firefox-mv2/` 文件夹下的 `manifest.json`
+
+### 步骤 4：加载到 Edge
 
 1. 打开 Edge 浏览器
 2. 访问 `edge://extensions/`
@@ -47,7 +71,7 @@ npm run build:safari
 4. 点击 **加载已解压的扩展程序**
 5. 选择 `.output/chrome-mv3-edge/` 文件夹
 
-### 步骤 4：加载到 Safari
+### 步骤 5：加载到 Safari
 
 > **注意**：Safari 扩展需要使用 Xcode 或 Safari Developer 工具加载。
 
@@ -57,7 +81,7 @@ npm run build:safari
 4. 选择 Safari 扩展的 scheme 并运行
 5. 在 Safari 中启用扩展：**Safari 设置** → **扩展** → 开启 Tex2Doc
 
-### 步骤 5：固定扩展图标（可选）
+### 步骤 6：固定扩展图标（可选）
 
 1. 在浏览器扩展页面找到 Tex2Doc 扩展
 2. 点击扩展图标旁的固定图标按钮
@@ -86,16 +110,17 @@ npm run build:safari
 | `downloads` | 下载转换后的 Word 文档 |
 | `contextMenus` | 右键菜单 |
 | `notifications` | 转换完成通知 |
+| `alarms` | 后台定时任务 |
 | `sidePanel` | 侧边面板功能（Chrome/Edge） |
 | `host_permissions` | 仅允许访问 `api.tex2doc.cn` |
 
 ### 浏览器差异
 
-| 功能 | Chrome | Edge | Safari |
-|------|--------|------|--------|
-| 侧边面板 | ✅ 支持 | ✅ 支持 | ❌ 不支持 |
-| 清单版本 | MV3 | MV3 | MV2 |
-| WebAssembly | ✅ 支持 | ✅ 支持 | ✅ 支持 |
+| 功能 | Chrome | Edge | Firefox | Safari |
+|------|--------|------|---------|--------|
+| 侧边面板 | ✅ 支持 | ✅ 支持 | ❌ 不支持 | ❌ 不支持 |
+| 清单版本 | MV3 | MV3 | MV2 | MV2 |
+| WebAssembly | ✅ 支持 | ✅ 支持 | ✅ 支持 | ✅ 支持 |
 
 ---
 
@@ -325,4 +350,6 @@ export default defineConfig({
 - 支持本地和云端转换
 - 支持 Overleaf 和 arXiv 集成
 - 账户管理和用量追踪
-- 多浏览器支持（Chrome、Edge、Safari）
+- 多浏览器支持（Chrome、Edge、Firefox、Safari）
+- 侧边面板管理界面（Chrome/Edge）
+- 诊断日志导出功能

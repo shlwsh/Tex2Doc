@@ -144,7 +144,6 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
         if (_error != null) ...[
           ErrorState(
             message: _error!,
-            onRetry: _refresh,
           ),
           const SizedBox(height: AppSpacing.lg),
         ],
@@ -174,7 +173,7 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
         // Tab content
         Expanded(
           child: _loading
-              ? const LoadingState()
+              ? const LoadingState(label: 'Loading...')
               : TabBarView(
                   controller: _tabController,
                   children: [
@@ -226,9 +225,7 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
 
     return Center(
       child: EmptyState(
-        icon: Icons.history,
-        title: strings.t('common.empty') ?? 'No data',
-        description: 'Event history will be displayed here',
+        label: 'No data',
       ),
     );
   }

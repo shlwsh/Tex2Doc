@@ -56,6 +56,9 @@ export default defineConfig({
 
   manifest: ({ browser, mode }) => {
     const isEdge = browser === 'chromium' && mode === 'edge';
+    // API base URL from env (supports localhost for dev, api.tex2doc.cn for prod)
+    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.tex2doc.cn';
+    const apiHost = apiBaseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
     return {
       name: 'Tex2Doc - LaTeX to Word',
       short_name: 'Tex2Doc',
@@ -82,7 +85,7 @@ export default defineConfig({
         extension_pages: "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self'",
       },
       ...(isEdge ? { side_panel: { default_path: 'sidepanel.html' } } : {}),
-      host_permissions: ['https://api.tex2doc.cn/*'],
+      host_permissions: [`https://${apiHost}/*`, `http://${apiHost}/*`],
       optional_host_permissions: [
         'https://www.overleaf.com/*',
         'https://*.overleaf.com/*',

@@ -569,6 +569,7 @@ export default function PopupApp() {
 
       {/* Conversion Card */}
       <Card className="space-y-3">
+        {/* ZIP File Selection */}
         <div>
           <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
             {t('selectZipFile')}
@@ -576,12 +577,7 @@ export default function PopupApp() {
           <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center hover:border-primary-400 transition-colors">
             <input
               type="file"
-              accept=".zip"
-              // @ts-ignore — webkitdirectory / directory are non-standard but widely supported
-              webkitdirectory=""
-              // @ts-ignore
-              directory=""
-              multiple
+              accept=".zip,application/zip"
               onChange={handleSourceSelect}
               className="hidden"
               id="source-input"
@@ -614,8 +610,21 @@ export default function PopupApp() {
           <span className="text-xs text-gray-400">{t('or')}</span>
           <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
         </div>
+
+        {/* Folder Selection */}
         <div>
-          <label htmlFor="source-input" className="cursor-pointer block">
+          <input
+            type="file"
+            // @ts-ignore — webkitdirectory / directory are non-standard but widely supported
+            webkitdirectory=""
+            // @ts-ignore
+            directory=""
+            multiple
+            onChange={handleSourceSelect}
+            className="hidden"
+            id="folder-input"
+          />
+          <label htmlFor="folder-input" className="cursor-pointer block">
             <div className="border border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-2 text-center hover:border-primary-400 transition-colors">
               <div className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400 text-xs">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
