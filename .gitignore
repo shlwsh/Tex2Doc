@@ -66,3 +66,4 @@ sessions/
 !.env.example
 !.env.*.example
 
+apps/browser-extension/.output/

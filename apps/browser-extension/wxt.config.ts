@@ -58,8 +58,13 @@ export default defineConfig({
     const isEdge = browser === 'chromium' && mode === 'edge';
     return {
       name: 'Tex2Doc - LaTeX to Word',
+      short_name: 'Tex2Doc',
       version: '0.1.0',
       description: 'Convert LaTeX documents to Word (.docx) directly in your browser',
+      author: 'Tex2Doc Project',
+      homepage_url: 'https://tex2doc.cn',
+      support_url: 'https://tex2doc.cn/support',
+      privacy_policy_url: 'https://tex2doc.cn/privacy',
       icons: {
         16: '/icons/icon16.png',
         32: '/icons/icon32.png',
@@ -71,8 +76,8 @@ export default defineConfig({
         default_title: 'Tex2Doc',
       },
       permissions: isEdge
-        ? ['storage', 'downloads', 'contextMenus', 'notifications', 'sidePanel']
-        : ['storage', 'downloads', 'contextMenus', 'notifications'],
+        ? ['storage', 'downloads', 'contextMenus', 'notifications', 'sidePanel', 'alarms']
+        : ['storage', 'downloads', 'contextMenus', 'notifications', 'alarms'],
       content_security_policy: {
         extension_pages: "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self'",
       },

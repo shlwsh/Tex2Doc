@@ -12,15 +12,18 @@ import Badge from '@/ui/components/Badge';
 import { Tabs } from '@/ui/components/Tabs';
 import { useI18n } from '@/ui/i18n/useI18n';
 import { getSettings, saveSettings } from '@/state/settings-store';
+import { sendToBackground } from '@/browser/messaging';
+import { MESSAGE_TYPES } from '@/shared/constants';
+import {
+  getDomains,
+  saveDomains,
+  refreshGrantedFlags,
+  toOriginPattern,
+  type PersistedDomain,
+} from '@/state/domain-store';
 import type { ExtensionSettings } from '@/shared/types';
 
 type SettingsTab = 'general' | 'conversion' | 'permissions' | 'about';
-
-interface DomainPermission {
-  id: string;
-  domain: string;
-  enabled: boolean;
-}
 
 export default function OptionsApp() {
   const { t, locale, setLocale } = useI18n();
@@ -28,15 +31,15 @@ export default function OptionsApp() {
   const [settings, setSettings] = useState<ExtensionSettings | null>(null);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [domains, setDomains] = useState<DomainPermission[]>([
-    { id: '1', domain: 'overleaf.com', enabled: true },
-    { id: '2', domain: 'arxiv.org', enabled: true },
-  ]);
+  const [isExportingFunnel, setIsExportingFunnel] = useState(false);
+  const [domains, setDomains] = useState<PersistedDomain[]>([]);
   const [newDomain, setNewDomain] = useState('');
   const [domainError, setDomainError] = useState<string | null>(null);
+  const [isDomainsLoading, setIsDomainsLoading] = useState(true);
 
   useEffect(() => {
     loadSettings();
+    loadDomains();
   }, []);
 
   const loadSettings = async () => {
@@ -80,7 +83,23 @@ export default function OptionsApp() {
     }
   };
 
-  const handleAddDomain = () => {
+  const loadDomains = async () => {
+    setIsDomainsLoading(true);
+    try {
+      const stored = await getDomains();
+      const reconciled = await refreshGrantedFlags(stored);
+      setDomains(reconciled);
+      if (reconciled.some((d) => d.granted !== d.enabled)) {
+        await saveDomains(reconciled);
+      }
+    } catch (err) {
+      console.warn('[Options] Failed to load domains:', err);
+    } finally {
+      setIsDomainsLoading(false);
+    }
+  };
+
+  const handleAddDomain = async () => {
     const trimmed = newDomain.trim().toLowerCase();
     if (!trimmed) return;
     if (!/^([a-z0-9-]+\.)+[a-z]{2,}$/.test(trimmed)) {
@@ -91,17 +110,98 @@ export default function OptionsApp() {
       setDomainError('Domain already exists');
       return;
     }
-    setDomains([...domains, { id: Date.now().toString(), domain: trimmed, enabled: true }]);
-    setNewDomain('');
     setDomainError(null);
+    // Ask the browser to grant the optional host permission. If the user
+    // rejects, we don't add to the local list — the prompt is the source
+    // of truth.
+    let granted = false;
+    try {
+      granted = await browser.permissions.request({ origins: [toOriginPattern(trimmed)] });
+    } catch (err) {
+      console.warn('[Options] permissions.request failed:', err);
+      granted = false;
+    }
+    if (!granted) {
+      setDomainError(`Permission denied for ${trimmed}`);
+      return;
+    }
+    const next: PersistedDomain = {
+      id: Date.now().toString(),
+      domain: trimmed,
+      enabled: true,
+      granted: true,
+      updatedAt: Date.now(),
+    };
+    const updated = [...domains, next];
+    setDomains(updated);
+    await saveDomains(updated);
+    setNewDomain('');
   };
 
-  const handleRemoveDomain = (id: string) => {
-    setDomains(domains.filter((d) => d.id !== id));
+  const handleRemoveDomain = async (id: string) => {
+    const target = domains.find((d) => d.id === id);
+    if (target) {
+      try {
+        await browser.permissions.remove({ origins: [toOriginPattern(target.domain)] });
+      } catch (err) {
+        console.warn('[Options] permissions.remove failed:', err);
+      }
+    }
+    const updated = domains.filter((d) => d.id !== id);
+    setDomains(updated);
+    await saveDomains(updated);
   };
 
-  const handleToggleDomain = (id: string) => {
-    setDomains(domains.map((d) => (d.id === id ? { ...d, enabled: !d.enabled } : d)));
+  const handleToggleDomain = async (id: string) => {
+    const target = domains.find((d) => d.id === id);
+    if (!target) return;
+    let granted = target.granted;
+    if (!target.enabled) {
+      // Turning ON: ask the browser. Roll back on rejection.
+      try {
+        granted = await browser.permissions.request({ origins: [toOriginPattern(target.domain)] });
+      } catch (err) {
+        console.warn('[Options] permissions.request failed:', err);
+        granted = false;
+      }
+      if (!granted) {
+        setDomainError(`Permission denied for ${target.domain}`);
+        return;
+      }
+    } else {
+      // Turning OFF: revoke via permissions.remove.
+      try {
+        await browser.permissions.remove({ origins: [toOriginPattern(target.domain)] });
+      } catch (err) {
+        console.warn('[Options] permissions.remove failed:', err);
+      }
+      granted = false;
+    }
+    const updated = domains.map((d) =>
+      d.id === id ? { ...d, enabled: !d.enabled, granted, updatedAt: Date.now() } : d
+    );
+    setDomains(updated);
+    await saveDomains(updated);
+  };
+
+  const handleExportFunnel = async () => {
+    setIsExportingFunnel(true);
+    try {
+      const result = await sendToBackground<{ success: boolean; filename?: string; error?: string }>({
+        type: MESSAGE_TYPES.EXPORT_FUNNEL,
+        windowDays: 7,
+      });
+      if (result?.success) {
+        setSaved(true);
+        setTimeout(() => setSaved(false), 3000);
+      } else {
+        setError(result?.error ?? 'Funnel export failed');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Funnel export failed');
+    } finally {
+      setIsExportingFunnel(false);
+    }
   };
 
   if (!settings) {
@@ -250,29 +350,44 @@ export default function OptionsApp() {
                 value={newDomain}
                 onChange={(e) => setNewDomain(e.target.value)}
                 placeholder={t('domainPlaceholder')}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    void handleAddDomain();
+                  }
+                }}
               />
-              <Button onClick={handleAddDomain}>{t('domainAdd')}</Button>
+              <Button onClick={() => void handleAddDomain()}>{t('domainAdd')}</Button>
             </div>
             {domainError && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{domainError}</p>}
 
-            {domains.length === 0 ? (
+            {isDomainsLoading ? (
+              <div className="text-center py-8 text-sm text-gray-500">{t('loading')}</div>
+            ) : domains.length === 0 ? (
               <div className="text-center py-8 text-sm text-gray-500">No domains configured yet.</div>
             ) : (
               <ul className="divide-y divide-gray-200 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg">
                 {domains.map((d) => (
                   <li key={d.id} className="flex items-center justify-between px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant={d.enabled ? 'success' : 'default'}>{d.domain}</Badge>
+                      <Badge variant={d.enabled && d.granted ? 'success' : d.granted ? 'warning' : 'default'}>
+                        {d.domain}
+                      </Badge>
+                      {d.enabled && !d.granted && (
+                        <span className="text-[10px] text-amber-600 dark:text-amber-400">
+                          Browser grant missing
+                        </span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
                       <button
-                        onClick={() => handleToggleDomain(d.id)}
+                        onClick={() => void handleToggleDomain(d.id)}
                         className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
                       >
                         {d.enabled ? 'Disable' : 'Enable'}
                       </button>
                       <button
-                        onClick={() => handleRemoveDomain(d.id)}
+                        onClick={() => void handleRemoveDomain(d.id)}
                         className="text-xs text-red-600 hover:text-red-700 dark:text-red-400"
                       >
                         {t('delete')}
@@ -304,6 +419,26 @@ export default function OptionsApp() {
               </div>
               <div className="pt-3 border-t border-gray-200 dark:border-gray-700 text-xs text-gray-500">
                 {t('aboutCopyright')} (c) Tex2Doc
+              </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-medium text-gray-900 dark:text-white">
+                      {t('funnel.title')}
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-0.5 leading-snug">
+                      {t('funnel.description')}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => void handleExportFunnel()}
+                    disabled={isExportingFunnel}
+                  >
+                    {isExportingFunnel ? t('loading') : t('funnel.export')}
+                  </Button>
+                </div>
               </div>
             </div>
           </Card>

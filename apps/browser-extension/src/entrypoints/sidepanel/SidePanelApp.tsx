@@ -17,6 +17,8 @@ import { Tabs } from '@/ui/components/Tabs';
 import { Modal } from '@/ui/components/Modal';
 import { Textarea } from '@/ui/components/Textarea';
 import { Avatar } from '@/ui/components/Avatar';
+import { RenewalHint } from '@/ui/components/RenewalHint';
+import { track, rotateSessionId } from '@/analytics/funnel';
 import { sendToBackground } from '@/browser/messaging';
 import { MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, Session, UsageSummary, FeedbackThread, PlanSummary } from '@/shared/types';
@@ -47,6 +49,7 @@ export default function SidePanelApp() {
 
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
 
   useEffect(() => {
     loadData();
@@ -113,6 +116,7 @@ export default function SidePanelApp() {
     await sendToBackground({ type: MESSAGE_TYPES.LOGOUT });
     setSession(null);
     setUsage(null);
+    await rotateSessionId();
   };
 
   const handleRedeemCode = async () => {
@@ -134,6 +138,7 @@ export default function SidePanelApp() {
 
   const handleCheckout = async (planId: string) => {
     try {
+      track('checkout_opened', { stage: 'sidepanel', meta: { plan_id: planId } });
       await sendToBackground({ type: MESSAGE_TYPES.CREATE_CHECKOUT, planId });
     } catch (error) {
       console.error('Checkout failed:', error);
@@ -171,6 +176,30 @@ export default function SidePanelApp() {
       loadFeedback();
     } catch (error) {
       setToast({ type: 'error', message: error instanceof Error ? error.message : t('errors.networkError') });
+    }
+  };
+
+  /**
+   * P1-3 — Build a sanitized diagnostics bundle and download it as a JSON
+   * file the user can attach to a feedback ticket.
+   */
+  const handleExportDiagnostics = async () => {
+    setIsExportingDiagnostics(true);
+    try {
+      const result = await sendToBackground<{ success: boolean; filename?: string; error?: string }>({
+        type: MESSAGE_TYPES.EXPORT_DIAGNOSTICS,
+        eventLimit: 200,
+      });
+      if (result?.success) {
+        setToast({ type: 'success', message: t('diagnostics.exportSuccess') });
+        track('diagnostics_exported', { stage: 'sidepanel' });
+      } else {
+        setToast({ type: 'error', message: result?.error ?? t('errors.unknown') });
+      }
+    } catch (error) {
+      setToast({ type: 'error', message: error instanceof Error ? error.message : t('errors.unknown') });
+    } finally {
+      setIsExportingDiagnostics(false);
     }
   };
 
@@ -421,26 +450,53 @@ export default function SidePanelApp() {
               <Card className="text-center py-8">
                 <p className="text-sm text-gray-500">{t('signInRequired')}</p>
               </Card>
-            ) : feedbackThreads.length === 0 ? (
-              <Card className="text-center py-8 space-y-1">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noFeedback.title')}</p>
-                <p className="text-xs text-gray-500">{t('empty.noFeedback.description')}</p>
-              </Card>
             ) : (
-              <div className="space-y-2">
-                {feedbackThreads.map((thread) => (
-                  <Card key={thread.thread_id}>
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">{thread.title}</h4>
-                        <p className="text-xs text-gray-500">{thread.feedback_type}</p>
-                      </div>
-                      <Badge variant={thread.status === 'open' ? 'warning' : 'default'}>
-                        {thread.status}
-                      </Badge>
+              <div className="space-y-3">
+                <Card className="space-y-2">
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                        {t('diagnostics.title')}
+                      </h3>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {t('diagnostics.description')}
+                      </p>
                     </div>
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={handleExportDiagnostics}
+                      disabled={isExportingDiagnostics}
+                    >
+                      {isExportingDiagnostics ? t('loading') : t('diagnostics.export')}
+                    </Button>
+                  </div>
+                  <p className="text-[11px] text-gray-500 leading-snug">
+                    {t('diagnostics.privacyNote')}
+                  </p>
+                </Card>
+                {feedbackThreads.length === 0 ? (
+                  <Card className="text-center py-8 space-y-1">
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noFeedback.title')}</p>
+                    <p className="text-xs text-gray-500">{t('empty.noFeedback.description')}</p>
                   </Card>
-                ))}
+                ) : (
+                  <div className="space-y-2">
+                    {feedbackThreads.map((thread) => (
+                      <Card key={thread.thread_id}>
+                        <div className="flex items-start justify-between">
+                          <div>
+                            <h4 className="text-sm font-medium text-gray-900 dark:text-white">{thread.title}</h4>
+                            <p className="text-xs text-gray-500">{thread.feedback_type}</p>
+                          </div>
+                          <Badge variant={thread.status === 'open' ? 'warning' : 'default'}>
+                            {thread.status}
+                          </Badge>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -464,6 +520,9 @@ export default function SidePanelApp() {
                       <span className="text-gray-900 dark:text-white">{session.user.plan_id}</span>
                     </div>
                   </div>
+                  {usage && (
+                    <RenewalHint dateValidUntil={usage.date_valid_until} variant="banner" className="mt-3" />
+                  )}
                 </Card>
 
                 {usage && (

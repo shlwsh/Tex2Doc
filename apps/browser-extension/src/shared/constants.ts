@@ -35,6 +35,14 @@ export const MESSAGE_TYPES = {
   REGISTER: 'REGISTER',
   REFRESH_SESSION: 'REFRESH_SESSION',
   FETCH_USAGE: 'FETCH_USAGE',
+  /**
+   * @deprecated Since v0.1.0. Replaced by `CLOUD_CONVERT_AND_POLL`, which
+   * sequences upload → createConversion → polling in a single message and
+   * survives MV3 service-worker restarts (see P0-2). This constant remains
+   * only because `content/arxiv.content.ts` and `content/overleaf.content.ts`
+   * still send it; those callers must migrate (tracked by P2-5) before the
+   * next minor bump removes it from the message bus entirely.
+   */
   START_CONVERSION: 'START_CONVERSION',
   CANCEL_CONVERSION: 'CANCEL_CONVERSION',
   START_WASM_CONVERSION: 'START_WASM_CONVERSION',
@@ -46,6 +54,8 @@ export const MESSAGE_TYPES = {
   CREATE_PORTAL: 'CREATE_PORTAL',
   REDEEM_CODE: 'REDEEM_CODE',
   REDEEM_CODE_AND_LOGIN: 'REDEEM_CODE_AND_LOGIN',
+  EXPORT_DIAGNOSTICS: 'EXPORT_DIAGNOSTICS',
+  EXPORT_FUNNEL: 'EXPORT_FUNNEL',
   FETCH_CONVERSIONS: 'FETCH_CONVERSIONS',
   FETCH_FEEDBACK: 'FETCH_FEEDBACK',
   CREATE_FEEDBACK: 'CREATE_FEEDBACK',

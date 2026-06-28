@@ -11,9 +11,15 @@ import Card from '../../ui/components/Card';
 import Select from '../../ui/components/Select';
 import Toast from '../../ui/components/Toast';
 import { Tabs } from '@/ui/components/Tabs';
+import { RenewalHint } from '@/ui/components/RenewalHint';
+import { track, rotateSessionId } from '@/analytics/funnel';
 import { sendToBackground } from '../../browser/messaging';
 import { MESSAGE_TYPES } from '../../shared/constants';
 import { analyzeZip, type TexFileInfo } from '../../conversion/local-wasm';
+import { scanFolder } from '../../conversion/folder-scanner';
+import { buildZipFromFolder } from '../../conversion/folder-packager';
+import type { FolderEntry } from '../../conversion/folder-types';
+import { MAX_FILE_COUNT } from '../../conversion/folder-types';
 import type { JobRecord, Session, UsageSummary } from '../../shared/types';
 import { useI18n } from '@/ui/i18n/useI18n';
 
@@ -21,17 +27,54 @@ type ConversionMode = 'local' | 'cloud';
 type ConversionStage = 'idle' | 'uploading' | 'creating' | 'polling' | 'completed' | 'failed';
 type AuthTab = 'signIn' | 'redeem';
 
+function sizeBucket(bytes: number): 'lt_1mb' | '1_to_5mb' | '5_to_10mb' | 'gt_10mb' {
+  const mb = bytes / (1024 * 1024);
+  if (mb < 1) return 'lt_1mb';
+  if (mb < 5) return '1_to_5mb';
+  if (mb < 10) return '5_to_10mb';
+  return 'gt_10mb';
+}
+
+function fileCountBucket(count: number): 'lt_10' | '10_to_50' | '50_to_200' | '200_to_1000' | 'gt_1000' {
+  if (count < 10) return 'lt_10';
+  if (count < 50) return '10_to_50';
+  if (count < 200) return '50_to_200';
+  if (count < 1000) return '200_to_1000';
+  return 'gt_1000';
+}
+
 interface ConversionState {
   stage: ConversionStage;
   progress: number;
   message: string;
   error?: string;
+  packaging?: {
+    phase: 'reading' | 'packing';
+    current: number;
+    total: number;
+  };
 }
 
 interface ZipAnalysis {
   texFiles: TexFileInfo[];
   detectedMainTex: string | null;
 }
+
+/** Unified source: either a user-selected ZIP file or a scanned folder. */
+interface ZipSource {
+  kind: 'zip';
+  file: File;
+}
+
+interface FolderSource {
+  kind: 'folder';
+  entries: FolderEntry[];
+  excludedCount: number;
+  totalSize: number;
+  truncated: boolean;
+}
+
+type SourceSelection = ZipSource | FolderSource | null;
 
 interface JobUpdatePayload {
   jobId?: string;
@@ -45,7 +88,7 @@ export default function PopupApp() {
   const { t, locale, setLocale } = useI18n();
   const [session, setSession] = useState<Session | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [source, setSource] = useState<SourceSelection>(null);
   const [mainTex, setMainTex] = useState('main.tex');
   const [mode, setMode] = useState<ConversionMode>('local');
   const [profile, setProfile] = useState('standard');
@@ -65,12 +108,15 @@ export default function PopupApp() {
   const [recentJobs, setRecentJobs] = useState<JobRecord[]>([]);
   const [zipAnalysis, setZipAnalysis] = useState<ZipAnalysis | null>(null);
   const [isAnalyzingZip, setIsAnalyzingZip] = useState(false);
+  const [isScanningFolder, setIsScanningFolder] = useState(false);
   const [zipError, setZipError] = useState<string | null>(null);
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSession();
     loadJobs();
+    // P1-2: anonymous funnel event when popup opens.
+    track('popup_open', { stage: 'popup' });
     const listener = (msg: { type?: string; [key: string]: unknown }) => {
       if (msg?.type === 'JOB_UPDATED' && msg.jobId === currentJobId) {
         applyJobUpdate(msg as JobUpdatePayload & { type: string });
@@ -173,8 +219,11 @@ export default function PopupApp() {
       if (result.success && result.signedIn) {
         setRedeemInput('');
         await loadSession();
+        // P1-2: redeem_used (success path)
+        track('redeem_used', { stage: 'popup', meta: { outcome: 'success', is_new_account: !!result.isNewAccount } });
       } else {
         setLoginError(result.error || t('redeemRequiresLogin'));
+        track('redeem_used', { stage: 'popup', meta: { outcome: 'requires_login' } });
       }
     } catch (error) {
       setLoginError(error instanceof Error ? error.message : t('redeemFailed'));
@@ -188,61 +237,163 @@ export default function PopupApp() {
       await sendToBackground({ type: MESSAGE_TYPES.LOGOUT });
       setSession(null);
       setUsage(null);
+      // P1-2: rotate session_id so the next signed-in user gets a clean funnel.
+      await rotateSessionId();
     } catch (error) {
       console.error('Logout failed:', error);
     }
   };
 
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setSelectedFile(file);
-      setZipError(null);
-      setConversion({ stage: 'idle', progress: 0, message: '' });
+  const resetConversion = () => {
+    setConversion({ stage: 'idle', progress: 0, message: '' });
+    setZipError(null);
+    setZipAnalysis(null);
+    setCurrentJobId(null);
+  };
 
-      if (file.name.toLowerCase().endsWith('.zip')) {
-        setIsAnalyzingZip(true);
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          const zipBytes = new Uint8Array(arrayBuffer);
-          const analysis = await analyzeZip(zipBytes);
+  /** Unified source selection: ZIP file OR folder. */
+  const handleSourceSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
 
-          setZipAnalysis({
-            texFiles: analysis.texFiles,
-            detectedMainTex: analysis.detectedMainTex,
-          });
+    resetConversion();
 
-          if (analysis.detectedMainTex) {
-            setMainTex(analysis.detectedMainTex);
-          } else if (analysis.texFiles.length === 0) {
-            setZipError(t('noTexFound'));
-            setMainTex('');
-          } else {
-            setMainTex('');
-          }
-        } catch (error) {
-          console.error('ZIP analysis failed:', error);
-          setZipError(t('errors.unknown'));
-          setZipAnalysis(null);
-        } finally {
-          setIsAnalyzingZip(false);
+    // Single .zip file → ZIP mode
+    if (files.length === 1 && files[0].name.toLowerCase().endsWith('.zip')) {
+      const file = files[0];
+      setSource({ kind: 'zip', file });
+      track('file_selected', { stage: 'popup', meta: { size_bucket: sizeBucket(file.size) } });
+      setIsAnalyzingZip(true);
+      try {
+        const arrayBuffer = await file.arrayBuffer();
+        const zipBytes = new Uint8Array(arrayBuffer);
+        const analysis = await analyzeZip(zipBytes);
+        setZipAnalysis({ texFiles: analysis.texFiles, detectedMainTex: analysis.detectedMainTex });
+        if (analysis.detectedMainTex) {
+          setMainTex(analysis.detectedMainTex);
+        } else if (analysis.texFiles.length === 0) {
+          setZipError(t('noTexFound'));
+          setMainTex('');
+        } else {
+          setMainTex('');
         }
+      } catch (error) {
+        console.error('ZIP analysis failed:', error);
+        setZipError(t('errors.unknown'));
+        setZipAnalysis(null);
+      } finally {
+        setIsAnalyzingZip(false);
       }
+      return;
+    }
+
+    // Multiple files (webkitdirectory) → Folder mode
+    setIsScanningFolder(true);
+    try {
+      const scan = await scanFolder(files);
+      setSource({
+        kind: 'folder',
+        entries: scan.entries,
+        excludedCount: scan.excludedCount,
+        totalSize: scan.totalSize,
+        truncated: scan.truncated,
+      });
+      setZipAnalysis({
+        texFiles: scan.texFiles.map((t) => ({ ...t, name: t.path.split('/').pop() || t.path })),
+        detectedMainTex: scan.detectedMainTex,
+      });
+      if (scan.detectedMainTex) {
+        setMainTex(scan.detectedMainTex);
+      } else if (scan.texFiles.length === 0) {
+        setZipError(t('noTexFound'));
+        setMainTex('');
+      } else {
+        setMainTex('');
+      }
+      if (scan.truncated) {
+        setZipError(t('folderTruncated', { max: MAX_FILE_COUNT }));
+      }
+      track('folder_selected', {
+        stage: 'popup',
+        meta: {
+          file_count_bucket: fileCountBucket(scan.entries.length),
+          size_bucket: sizeBucket(scan.totalSize),
+          excluded_count: scan.excludedCount,
+        },
+      });
+    } catch (error) {
+      console.error('Folder scan failed:', error);
+      setZipError(t('errors.folderScanFailed'));
+      setZipAnalysis(null);
+    } finally {
+      setIsScanningFolder(false);
     }
   };
 
   const handleConvert = async () => {
-    if (!selectedFile) return;
+    if (!source) return;
     if (!mainTex || mainTex.trim() === '') {
       setConversion({ stage: 'failed', progress: 0, message: t('mainTexFile'), error: t('mainTexFile') });
       return;
     }
 
     setConversion({ stage: 'uploading', progress: 0, message: t('cloud.uploading') });
+    track('convert_started', {
+      stage: 'popup',
+      meta: {
+        mode,
+        source: source.kind,
+        size_bucket: sizeBucket(source.kind === 'zip' ? source.file.size : source.totalSize),
+      },
+    });
 
     try {
-      const arrayBuffer = await selectedFile.arrayBuffer();
-      const zipBytes = new Uint8Array(arrayBuffer);
+      let zipBytes: Uint8Array;
+      let fileName: string;
+
+      if (source.kind === 'zip') {
+        zipBytes = new Uint8Array(await source.file.arrayBuffer());
+        fileName = source.file.name;
+      } else {
+        // Folder: pack in-memory, showing client-side progress (0-50%)
+        track('folder_packaging_started', {
+          stage: 'popup',
+          meta: { file_count_bucket: fileCountBucket(source.entries.length) },
+        });
+        try {
+          zipBytes = await buildZipFromFolder(source.entries, {
+            onProgress: (phase, current, total) => {
+              // Map 0-50% for client-side packing, SW will push 50-100%
+              const pct = Math.round((phase === 'reading' ? (current / total) * 0.45 : 0.5) * 100);
+              setConversion((c) => ({
+                ...c,
+                packaging: { phase, current, total },
+                progress: pct,
+                message: phase === 'reading' ? t('folderReading', { current, total }) : t('folderPacking', { current, total }),
+              }));
+            },
+          });
+          const baseName = source.entries[0]?.path.split('/')[0] || 'project';
+          fileName = `${baseName}.zip`;
+          setConversion((c) => ({ ...c, packaging: undefined }));
+          track('folder_packaging_completed', {
+            stage: 'popup',
+            meta: { output_size_bucket: sizeBucket(zipBytes.byteLength) },
+          });
+        } catch (error) {
+          track('folder_packaging_failed', { stage: 'popup', meta: { error_class: error instanceof Error ? error.name : 'unknown' } });
+          const isOOM =
+            error instanceof DOMException ||
+            (error instanceof Error && (error.name === 'RangeError' || error.name === 'QuotaExceededError'));
+          setConversion({
+            stage: 'failed',
+            progress: 0,
+            message: t('folderTooLarge'),
+            error: t('folderTooLarge'),
+          });
+          return;
+        }
+      }
 
       if (mode === 'local') {
         const result = await sendToBackground<{
@@ -254,13 +405,14 @@ export default function PopupApp() {
         }>({
           type: MESSAGE_TYPES.START_WASM_CONVERSION,
           zipBytes: Array.from(zipBytes),
-          fileName: selectedFile.name,
+          fileName,
           mainTex,
         });
 
         if (result.success) {
           setConversion({ stage: 'completed', progress: 100, message: t('conversionComplete') });
           await loadJobs();
+          track('convert_completed', { stage: 'popup', meta: { mode: 'local' } });
         } else {
           setConversion({
             stage: 'failed',
@@ -268,12 +420,13 @@ export default function PopupApp() {
             message: t('conversionFailed'),
             error: result.error || t('conversionFailed'),
           });
+          track('convert_failed', { stage: 'popup', meta: { mode: 'local' } });
         }
       } else {
         const result = await sendToBackground<{ success: boolean; jobId?: string; error?: string }>({
           type: MESSAGE_TYPES.CLOUD_CONVERT_AND_POLL,
           zipBytes: Array.from(zipBytes),
-          fileName: selectedFile.name,
+          fileName,
           mainTex,
           profile,
           quality,
@@ -281,7 +434,7 @@ export default function PopupApp() {
 
         if (result.success && result.jobId) {
           setCurrentJobId(result.jobId);
-          // progress updates are pushed via runtime.onMessage listener
+          track('convert_completed', { stage: 'popup', meta: { mode: 'cloud' } });
         } else {
           setConversion({
             stage: 'failed',
@@ -289,6 +442,7 @@ export default function PopupApp() {
             message: t('cloud.failed'),
             error: result.error || t('cloud.failed'),
           });
+          track('convert_failed', { stage: 'popup', meta: { mode: 'cloud' } });
         }
       }
     } catch (error) {
@@ -353,6 +507,10 @@ export default function PopupApp() {
         </div>
       </div>
 
+      {session && usage && (
+        <RenewalHint dateValidUntil={usage.date_valid_until} variant="banner" />
+      )}
+
       {/* Auth View (only when not signed in) */}
       {!session && (
         <Card className="space-y-3">
@@ -416,12 +574,27 @@ export default function PopupApp() {
             {t('selectZipFile')}
           </label>
           <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center hover:border-primary-400 transition-colors">
-            <input type="file" accept=".zip" onChange={handleFileSelect} className="hidden" id="file-input" />
-            <label htmlFor="file-input" className="cursor-pointer block">
-              {selectedFile ? (
+            <input
+              type="file"
+              accept=".zip"
+              // @ts-ignore — webkitdirectory / directory are non-standard but widely supported
+              webkitdirectory=""
+              // @ts-ignore
+              directory=""
+              multiple
+              onChange={handleSourceSelect}
+              className="hidden"
+              id="source-input"
+            />
+            <label htmlFor="source-input" className="cursor-pointer block">
+              {source ? (
                 <div className="text-sm">
-                  <p className="font-medium text-gray-900 dark:text-white">{selectedFile.name}</p>
-                  <p className="text-xs text-gray-500">{formatFileSize(selectedFile.size)}</p>
+                  <p className="font-medium text-gray-900 dark:text-white truncate">{source.kind === 'zip' ? source.file.name : source.entries[0]?.path.split('/')[0] || 'folder'}</p>
+                  <p className="text-xs text-gray-500">
+                    {source.kind === 'zip'
+                      ? formatFileSize(source.file.size)
+                      : `${formatFileSize(source.totalSize)} · ${source.entries.length} files`}
+                  </p>
                 </div>
               ) : (
                 <div className="text-gray-500 dark:text-gray-400 text-sm">
@@ -435,13 +608,33 @@ export default function PopupApp() {
           </div>
         </div>
 
-        {isAnalyzingZip && (
+        {/* Folder selection divider */}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+          <span className="text-xs text-gray-400">{t('or')}</span>
+          <div className="flex-1 h-px bg-gray-200 dark:bg-gray-700" />
+        </div>
+        <div>
+          <label htmlFor="source-input" className="cursor-pointer block">
+            <div className="border border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-2 text-center hover:border-primary-400 transition-colors">
+              <div className="flex items-center justify-center gap-2 text-gray-600 dark:text-gray-400 text-xs">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" />
+                </svg>
+                <span>{t('selectFolder')}</span>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-0.5">{t('selectFolderHint')}</p>
+            </div>
+          </label>
+        </div>
+
+        {(isAnalyzingZip || isScanningFolder) && (
           <div className="flex items-center gap-2 text-xs text-gray-500">
             <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
               <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
               <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
             </svg>
-            {t('loading')}
+            {isScanningFolder ? t('folderScanning') : t('loading')}
           </div>
         )}
 
@@ -454,14 +647,24 @@ export default function PopupApp() {
           </div>
         )}
 
-        {zipAnalysis && !isAnalyzingZip && (
+        {/* Folder excluded count */}
+        {source?.kind === 'folder' && source.excludedCount > 0 && !isScanningFolder && (
+          <div className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.879 16.122a3 3 0 01.365-5.855L18.59 8a3 3 0 010 5.06l-8.257 5.061a3 3 0 01-4.366-.002 3 3 0 01.365-5.855L7.879 11a3 3 0 010-5.06l8.257-5.061a3 3 0 014.366.002z" />
+            </svg>
+            {t('folderExcluded', { count: source.excludedCount })}
+          </div>
+        )}
+
+        {zipAnalysis && !isAnalyzingZip && !isScanningFolder && (
           <div className="space-y-2">
-            {zipAnalysis.texFiles.length === 1 && zipAnalysis.detectedMainTex && (
+            {zipAnalysis.texFiles.length === 1 && zipAnalysis.detectedMainTex && source !== null && (
               <div className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1.5">
                 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
-                {t('mainTexAutoDetected')}: {zipAnalysis.detectedMainTex}
+                {t(source.kind === 'folder' ? 'folderMainTexFromFolder' : 'mainTexAutoDetected')}: {zipAnalysis.detectedMainTex}
               </div>
             )}
             {zipAnalysis.texFiles.length > 1 && (
@@ -486,7 +689,7 @@ export default function PopupApp() {
           </div>
         )}
 
-        {!isAnalyzingZip && !zipAnalysis && selectedFile && (
+        {!isAnalyzingZip && !isScanningFolder && !zipAnalysis && source && (
           <Input
             label={t('mainTexFile')}
             value={mainTex}
@@ -543,7 +746,7 @@ export default function PopupApp() {
 
         <Button
           onClick={handleConvert}
-          disabled={!selectedFile || isConverting}
+          disabled={!source || isConverting}
           isLoading={isConverting}
           className="w-full"
           size="md"

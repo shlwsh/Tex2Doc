@@ -18,13 +18,15 @@ import { redeemCode } from '@/api/feedback';
 import { startCheckout, openBillingPortal } from '@/api/billing';
 import { getSession, saveSession, clearSession, getAccessToken } from '@/state/session-store';
 import { getSettings, getApiBaseUrl } from '@/state/settings-store';
-import { saveJob, getJob, getAllJobs, updateJobStatus, setJobStage, getPendingCloudJobs } from '@/state/job-store';
+import { saveJob, getJob, getAllJobs, updateJobStatus, setJobStage, getPendingCloudJobs, addEvent } from '@/state/job-store';
 import { downloadBytes } from '@/browser/downloads';
 import { openUrl } from '@/browser/compat';
 import { convertLocal } from '@/conversion/local-wasm';
 import { CONTEXT_MENU_IDS, MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, ConversionJob } from '@/shared/types';
 import { AuthError, ApiError } from '@/shared/errors';
+import { buildDiagnostics, exportDiagnosticsBlob } from '@/diagnostics/bundle';
+import { exportFunnelJson, track } from '@/analytics/funnel';
 
 const activePolls = new Map<string, number>();
 // localJobId → cloudJobId. Survives only within a single SW lifetime.
@@ -33,6 +35,26 @@ const activeCloudJobs = new Map<string, string>();
 const POLL_INTERVAL = 2000;
 // Mutex to avoid double-recovery when onStartup + onInstalled race.
 let restoreInFlight: Promise<void> | null = null;
+
+/**
+ * P2-1 — `chrome.alarms` is the only reliable way to wake an MV3 service
+ * worker after the browser has suspended it. We register a single 1-minute
+ * repeating alarm; the listener reuses `restorePollingJobs`, which no-ops
+ * when no jobs are in flight, so the cost is one IndexedDB range scan
+ * per minute at worst.
+ */
+const ALARM_RECOVERY = 'tex2doc.recovery.poll';
+const ALARM_RECOVERY_PERIOD_MIN = 1;
+
+function scheduleRecoveryAlarm(): void {
+  if (!browser.alarms?.create) return;
+  // Overwrite any existing alarm so period changes (e.g. for testing) take effect.
+  browser.alarms.create(ALARM_RECOVERY, {
+    periodInMinutes: ALARM_RECOVERY_PERIOD_MIN,
+  }).catch((error: unknown) => {
+    console.warn('[Tex2Doc Background] alarms.create failed:', error);
+  });
+}
 
 export default defineBackground({
   // ESM 输出：允许 dynamic import() 加载 wasm-bindgen 生成的 ESM 胶水；
@@ -45,15 +67,33 @@ export default defineBackground({
       // After install we may also need to recover in-flight cloud jobs (e.g. browser restart
       // without `onStartup` firing in some Chrome versions).
       scheduleRestore();
+      scheduleRecoveryAlarm();
     });
 
     browser.runtime.onStartup.addListener(() => {
       console.log('[Tex2Doc Background] Extension startup');
       scheduleRestore();
+      scheduleRecoveryAlarm();
     });
 
     browser.runtime.onMessage.addListener(handleMessage);
     browser.contextMenus.onClicked.addListener(handleContextMenuClick);
+
+    // P2-1: wake the SW at most once a minute so an in-flight cloud job keeps
+    // polling even after the browser has suspended the SW. The alarm fires
+    // regardless of whether anything is open, so we re-use the same
+    // restorePollingJobs path (which no-ops when nothing is pending).
+    if (browser.alarms?.onAlarm) {
+      browser.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === ALARM_RECOVERY) {
+          scheduleRestore();
+        }
+      });
+    }
+    // Always (re)arm on SW startup. chrome.alarms persists across SW lifetimes,
+    // so this is a no-op after the first install but matters after a manual SW
+    // restart triggered by `chrome.runtime.reload`.
+    scheduleRecoveryAlarm();
 
     // e2e 钩子：暴露一个全局函数供 Playwright service worker evaluate 调用，
     // 绕开 message channel。生产构建里同样有效，但只暴露最小 API。
@@ -112,6 +152,10 @@ async function handleMessage(message: Record<string, unknown>): Promise<unknown>
         return await handleCreateFeedback(payload);
       case MESSAGE_TYPES.CLOUD_CONVERT_AND_POLL:
         return await handleCloudConvertAndPoll(payload);
+      case MESSAGE_TYPES.EXPORT_DIAGNOSTICS:
+        return await handleExportDiagnostics(payload);
+      case MESSAGE_TYPES.EXPORT_FUNNEL:
+        return await handleExportFunnel(payload);
       case MESSAGE_TYPES.GET_SETTINGS:
         return await getSettings();
       default:
@@ -188,6 +232,15 @@ async function handleFetchUsage(): Promise<unknown> {
   return getUsage(client);
 }
 
+/**
+ * @deprecated Since v0.1.0. Use `CLOUD_CONVERT_AND_POLL` (which uploads the
+ * zip internally) instead of `START_CONVERSION`. This handler expects the
+ * caller to have already uploaded via `POST /uploads` and only forwards an
+ * `uploadId`; the new pipeline is one-shot and self-recovers after a
+ * service-worker restart. Content scripts (arxiv / overleaf) still trigger
+ * this path today — see P2-5 for the migration plan and
+ * `src/shared/messaging.md` §7 for the deprecation timeline.
+ */
 async function handleStartConversion(payload: Record<string, unknown>): Promise<unknown> {
   const { uploadId, mainTex, profile, quality, fileName, mode } = payload as {
     uploadId: string; mainTex: string; profile: string; quality: string; fileName: string; mode: 'local' | 'cloud';
@@ -217,6 +270,14 @@ async function handleStartConversion(payload: Record<string, unknown>): Promise<
   return { success: true, jobId };
 }
 
+/**
+ * @deprecated Since v0.1.0. Implementation behind the deprecated
+ * `START_CONVERSION` message; only `handleStartConversion` still invokes it.
+ * New flows use `runCloudPipeline` (driven by `CLOUD_CONVERT_AND_POLL`),
+ * which uploads the zip in-process and survives MV3 service-worker restarts.
+ * Removal target: next minor bump after `content/arxiv.content.ts` and
+ * `content/overleaf.content.ts` migrate (P2-5).
+ */
 async function startCloudConversion(
   localJobId: string, uploadId: string, mainTex: string, profile: string, quality: string,
   baseUrl: string, accessToken: string
@@ -449,6 +510,9 @@ async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Prom
   // 'uploading' which re-uploads. This is acceptable because uploads are idempotent
   // (uploadProjectZip returns a fresh upload_id) and avoids serializing MBs to disk.
   void runCloudPipeline(localJobId, new Uint8Array(zipBytes), fileName, mainTex, profile, quality, baseUrl, accessToken);
+  // P2-1: ensure the recovery alarm is armed so SW wake-up can resume polling
+  // even if the user closes the popup before the conversion finishes.
+  scheduleRecoveryAlarm();
   return { success: true, jobId: localJobId };
 }
 
@@ -529,7 +593,7 @@ async function runCloudPipeline(
       await saveJob(stored);
     }
     notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'completed', progress: 100, stage: 'completed', cloudJobId: finalJob.job_id });
-    await emitTerminalNotification('Conversion completed!', 'Conversion completed!');
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', { jobId: localJobId, level: 'info' });
   } catch (error) {
     activeCloudJobs.delete(localJobId);
     const stored = await getJob(localJobId);
@@ -547,7 +611,7 @@ async function runCloudPipeline(
       stage: 'failed',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { jobId: localJobId, level: 'error' });
   }
 }
 
@@ -601,7 +665,7 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'failed',
       error: 'Conversion interrupted by browser restart; please retry',
     });
-    await emitTerminalNotification('Conversion interrupted', 'Conversion interrupted by browser restart');
+    await emitTerminalNotification('Conversion interrupted', 'Conversion interrupted by browser restart', { jobId: job.id, level: 'warning' });
     return;
   }
 
@@ -652,7 +716,7 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'completed',
       cloudJobId: finalJob.job_id,
     });
-    await emitTerminalNotification('Conversion completed!', 'Conversion completed!');
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', { jobId: job.id, level: 'info' });
   } catch (error) {
     activeCloudJobs.delete(job.id);
     const stored = await getJob(job.id);
@@ -669,11 +733,18 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'failed',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { jobId: job.id, level: 'error' });
   }
 }
 
-async function emitTerminalNotification(title: string, message: string): Promise<void> {
+async function emitTerminalNotification(
+  title: string,
+  message: string,
+  options: { jobId?: string; level?: 'info' | 'warning' | 'error' } = {}
+): Promise<void> {
+  const level = options.level ?? 'info';
+  // Best-effort; never throw out of the diagnostic path.
+  addEvent(level, `${title}: ${message}`, undefined, options.jobId).catch(() => undefined);
   if (!browser.notifications?.create) return;
   try {
     await browser.notifications.create({
@@ -701,6 +772,69 @@ async function handleCreateFeedback(payload: Record<string, unknown>): Promise<u
     content,
     conversion_job_id: conversionJobId,
   });
+}
+
+/**
+ * P1-2 — Export the anonymous funnel events as a downloadable JSON.
+ * Default 7-day window. The file contains no PII by construction (see
+ * `analytics/funnel.ts` sanitizeMeta + DROP_KEY policy).
+ */
+async function handleExportFunnel(payload: Record<string, unknown>): Promise<unknown> {
+  const windowDays = (payload as { windowDays?: number }).windowDays ?? 7;
+  const json = await exportFunnelJson(windowDays);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const filename = `tex2doc-funnel-${stamp}.json`;
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  try {
+    await browser.downloads.download({ url, filename, saveAs: true });
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  track('funnel_exported', { stage: 'options' });
+  return { success: true, filename };
+}
+
+/**
+ * P1-3 — Build a sanitized diagnostics bundle for the requested job (or no
+ * job, for ad-hoc capture) and trigger a download via chrome.downloads.
+ *
+ * Two response modes:
+ *  - `download: true` (default): write to disk and return `{ success, filename }`
+ *  - `download: false`: return the bundle object directly so callers can
+ *      inline it into a feedback ticket.
+ */
+async function handleExportDiagnostics(payload: Record<string, unknown>): Promise<unknown> {
+  const jobId = (payload as { jobId?: string }).jobId;
+  const eventLimit = (payload as { eventLimit?: number }).eventLimit;
+  const download = (payload as { download?: boolean }).download !== false;
+
+  let job: JobRecord | null = null;
+  if (jobId) {
+    job = (await getJob(jobId)) ?? null;
+  }
+
+  if (download) {
+    const bundle = await buildDiagnostics({ job, eventLimit });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `tex2doc-diagnostics-${stamp}.json`;
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    try {
+      await browser.downloads.download({
+        url,
+        filename,
+        saveAs: true,
+      });
+    } finally {
+      // Release the object URL on the next tick so the download has a chance to start.
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+    return { success: true, filename, event_count: bundle.events.length };
+  }
+
+  const bundle = await buildDiagnostics({ job, eventLimit });
+  return { success: true, bundle };
 }
 
 async function handleContextMenuClick(): Promise<void> {}

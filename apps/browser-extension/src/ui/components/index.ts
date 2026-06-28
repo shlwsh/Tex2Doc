@@ -46,3 +46,6 @@ export type { DropdownProps, MenuItem } from './Dropdown';
 
 export { ErrorBoundary } from './ErrorBoundary';
 export type { ErrorBoundaryProps } from './ErrorBoundary';
+
+export { RenewalHint } from './RenewalHint';
+export type { RenewalHintProps } from './RenewalHint';

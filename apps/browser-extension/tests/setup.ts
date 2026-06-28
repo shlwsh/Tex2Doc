@@ -1,54 +1,56 @@
-import '@testing-library/jest-dom';
+import { beforeEach, vi } from 'vitest';
 
 // Mock browser APIs
-global.browser = {
+const mockBrowser = {
   runtime: {
     id: 'test-extension-id',
     getManifest: () => ({ version: '0.1.0' }),
-    sendMessage: jest.fn(),
-    onMessage: { addListener: jest.fn(), removeListener: jest.fn() },
+    sendMessage: vi.fn(),
+    onMessage: { addListener: vi.fn(), removeListener: vi.fn() },
   },
   storage: {
     local: {
-      get: jest.fn(),
-      set: jest.fn(),
-      remove: jest.fn(),
-      clear: jest.fn(),
+      get: vi.fn(),
+      set: vi.fn(),
+      remove: vi.fn(),
+      clear: vi.fn(),
     },
     sync: {
-      get: jest.fn(),
-      set: jest.fn(),
-      remove: jest.fn(),
-      clear: jest.fn(),
+      get: vi.fn(),
+      set: vi.fn(),
+      remove: vi.fn(),
+      clear: vi.fn(),
     },
-    onChanged: { addListener: jest.fn(), removeListener: jest.fn() },
+    onChanged: { addListener: vi.fn(), removeListener: vi.fn() },
   },
   downloads: {
-    download: jest.fn(),
-    search: jest.fn(),
+    download: vi.fn(),
+    search: vi.fn(),
   },
   notifications: {
-    create: jest.fn(),
+    create: vi.fn(),
   },
   tabs: {
-    create: jest.fn(),
-    query: jest.fn(),
-    sendMessage: jest.fn(),
+    create: vi.fn(),
+    query: vi.fn(),
+    sendMessage: vi.fn(),
   },
   contextMenus: {
-    create: jest.fn(),
-    onClicked: { addListener: jest.fn() },
+    create: vi.fn(),
+    onClicked: { addListener: vi.fn() },
   },
   permissions: {
-    contains: jest.fn(),
-    request: jest.fn(),
+    contains: vi.fn(),
+    request: vi.fn(),
   },
 };
 
+(global as Record<string, unknown>).browser = mockBrowser;
+
 // Mock fetch
-global.fetch = jest.fn();
+(global as Record<string, unknown>).fetch = vi.fn();
 
 // Reset mocks between tests
 beforeEach(() => {
-  jest.clearAllMocks();
+  vi.clearAllMocks();
 });

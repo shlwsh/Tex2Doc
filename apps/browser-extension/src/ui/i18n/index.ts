@@ -67,6 +67,19 @@ export const translations = {
     mainTexAutoDetected: 'Auto-detected main TeX',
     mainTexPickFromList: 'Found {count} .tex files — pick the main one',
     noTexFound: 'No .tex files found in the ZIP archive',
+    // Folder upload
+    or: 'or',
+    selectFolder: 'Select Folder',
+    selectFolderHint: "Pick a LaTeX project folder - no need to zip it first.",
+    folderScanning: 'Scanning folder...',
+    folderReading: 'Reading... ({current}/{total})',
+    folderPacking: 'Packing... ({current}/{total})',
+    folderDetected: 'Detected {count} files in folder',
+    folderExcluded: 'Excluded {count} build artifacts',
+    folderTruncated: 'Folder too large, showing first {max} files',
+    folderTooLarge: 'Project too large for browser memory',
+    folderNotSupported: 'Your browser does not support folder selection',
+    folderMainTexFromFolder: 'Main file detected in folder',
     profile: 'Profile',
     quality: 'Quality',
     mode: 'Mode',
@@ -121,6 +134,27 @@ export const translations = {
     portal: 'Billing Portal',
     rechargeSuccess: 'Recharge successful',
     noPlans: 'No plans available',
+    validUntil: 'Valid until {date}',
+    renewalHint: 'Renews on {date}',
+    expiresInDays: 'Expires in {days} days',
+    expiresToday: 'Expires today',
+    renewalWarningTitle: 'Plan expiring soon',
+
+    // Funnel analytics (P1-2)
+    funnel: {
+      title: 'Anonymous usage analytics',
+      description: 'Last 7 days of in-app events (no PII, no file content). Export to share with support.',
+      export: 'Export funnel JSON',
+    },
+
+    // Diagnostics (P1-3)
+    diagnostics: {
+      title: 'Diagnostics',
+      description: 'Download a sanitized report of the last 200 events to attach to a support ticket.',
+      export: 'Export diagnostics',
+      exportSuccess: 'Diagnostics bundle saved.',
+      privacyNote: 'Bundle excludes tokens, source files, file contents, and your email. Only event metadata is included.',
+    },
 
     // Feedback
     feedback: 'Feedback',
@@ -178,6 +212,7 @@ export const translations = {
       sessionExpired: 'Session expired. Please sign in again.',
       invalidCode: 'Invalid code format',
       unknown: 'An unexpected error occurred.',
+      folderScanFailed: 'Failed to scan folder',
     },
 
     // Empty / loading
@@ -289,6 +324,19 @@ export const translations = {
     mainTexAutoDetected: '已自动识别主 TeX 文件',
     mainTexPickFromList: '共识别到 {count} 个 .tex 文件，请选择主文件',
     noTexFound: 'ZIP 包内未找到任何 .tex 文件',
+    // Folder upload
+    or: '或',
+    selectFolder: '选择文件夹',
+    selectFolderHint: '直接选择 LaTeX 项目文件夹，无需先打包',
+    folderScanning: '正在扫描文件夹...',
+    folderReading: '正在读取...（{current}/{total}）',
+    folderPacking: '正在打包...（{current}/{total}）',
+    folderDetected: '已识别文件夹内 {count} 个文件',
+    folderExcluded: '已排除 {count} 个编译产物',
+    folderTruncated: '文件夹过大，仅显示前 {max} 个文件',
+    folderTooLarge: '文件夹过大，浏览器内存不足',
+    folderNotSupported: '当前浏览器不支持文件夹选择',
+    folderMainTexFromFolder: '已从文件夹中识别主文件',
     profile: '配置文件',
     quality: '质量',
     mode: '模式',
@@ -343,6 +391,27 @@ export const translations = {
     portal: '账单门户',
     rechargeSuccess: '充值成功',
     noPlans: '暂无可用套餐',
+    validUntil: '有效期至 {date}',
+    renewalHint: '将在 {date} 自动续费',
+    expiresInDays: '{days} 天后到期',
+    expiresToday: '今日到期',
+    renewalWarningTitle: '套餐即将到期',
+
+    // Funnel analytics (P1-2)
+    funnel: {
+      title: '匿名使用埋点',
+      description: '最近 7 天的应用内事件（不含 PII 与文件内容），可导出供客服分析。',
+      export: '导出埋点 JSON',
+    },
+
+    // Diagnostics (P1-3)
+    diagnostics: {
+      title: '诊断信息',
+      description: '导出最近 200 条事件的脱敏报告，方便附在反馈工单中。',
+      export: '导出诊断包',
+      exportSuccess: '诊断包已保存。',
+      privacyNote: '诊断包不包含 token、源文件、文件内容和邮箱；仅记录事件元数据。',
+    },
 
     // Feedback
     feedback: '反馈',
@@ -400,6 +469,7 @@ export const translations = {
       sessionExpired: '会话已过期，请重新登录。',
       invalidCode: '兑换码格式无效',
       unknown: '出现未知错误。',
+      folderScanFailed: '文件夹扫描失败',
     },
 
     // Empty / loading

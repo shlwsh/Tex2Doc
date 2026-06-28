@@ -273,7 +273,7 @@ export async function analyzeZip(zipBytes: Uint8Array): Promise<ZipAnalysis> {
  * 3. Shortest path file
  * 4. First alphabetically
  */
-function detectMainTex(texFiles: TexFileInfo[]): string {
+export function detectMainTex(texFiles: TexFileInfo[]): string {
   // Priority 1: Check for common main file names
   const commonNames = ['main.tex', 'main-page.tex', 'paper.tex', 'article.tex', 'thesis.tex'];
 

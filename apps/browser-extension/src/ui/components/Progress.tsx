@@ -1,5 +1,11 @@
 /**
  * Progress Bar Component
+ *
+ * Accessibility (P1-4):
+ *  - role="progressbar" + aria-valuenow / aria-valuemin / aria-valuemax
+ *  - aria-label defaults to a generic localized string; callers can override
+ *    for context-specific labels (e.g. "Uploading project.zip")
+ *  - `prefers-reduced-motion: reduce` removes the transition (CSS hook)
  */
 
 import React from 'react';
@@ -11,6 +17,8 @@ export interface ProgressProps {
   variant?: 'default' | 'success' | 'warning' | 'error';
   showLabel?: boolean;
   className?: string;
+  /** Optional accessible label; defaults to a generic message. */
+  ariaLabel?: string;
 }
 
 export const Progress: React.FC<ProgressProps> = ({
@@ -20,6 +28,7 @@ export const Progress: React.FC<ProgressProps> = ({
   variant = 'default',
   showLabel = false,
   className = '',
+  ariaLabel,
 }) => {
   const percentage = Math.min(100, Math.max(0, (value / max) * 100));
 
@@ -39,10 +48,15 @@ export const Progress: React.FC<ProgressProps> = ({
   return (
     <div className={`w-full ${className}`}>
       <div
+        role="progressbar"
+        aria-valuenow={Math.round(percentage)}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-label={ariaLabel ?? 'Progress'}
         className={`w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden ${sizeStyles[size]}`}
       >
         <div
-          className={`h-full rounded-full transition-all duration-300 ${variantStyles[variant]}`}
+          className={`h-full rounded-full transition-all duration-300 motion-reduce:transition-none ${variantStyles[variant]}`}
           style={{ width: `${percentage}%` }}
         />
       </div>

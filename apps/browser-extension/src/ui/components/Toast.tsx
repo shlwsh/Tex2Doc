@@ -12,6 +12,8 @@ export interface ToastProps {
   className?: string;
 }
 
+export type ToastType = NonNullable<ToastProps['type']>;
+
 export const Toast: React.FC<ToastProps> = ({
   type = 'info',
   title,

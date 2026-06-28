@@ -1,9 +1,30 @@
 /**
  * Modal/Dialog Component
+ *
+ * Accessibility (P1-4):
+ *  - role="dialog" + aria-modal="true" + aria-labelledby
+ *  - Esc closes when `closeOnEscape`
+ *  - Focus is moved to the panel on open and restored to the previously
+ *    focused element on close
+ *  - Tab / Shift+Tab cycle within focusable descendants (focus trap)
+ *  - `prefers-reduced-motion` users get a static panel (no scale-in animation)
  */
 
-import React, { useEffect, useCallback } from 'react';
+import React, { useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
+
+const FOCUSABLE_SELECTOR = [
+  'a[href]',
+  'area[href]',
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+  'audio[controls]',
+  'video[controls]',
+  '[contenteditable]:not([contenteditable="false"])',
+].join(',');
 
 export interface ModalProps {
   open: boolean;
@@ -28,10 +49,40 @@ export const Modal: React.FC<ModalProps> = ({
   closeOnEscape = true,
   showCloseButton = true,
 }) => {
-  const handleEscape = useCallback(
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+
+  const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
-      if (closeOnEscape && e.key === 'Escape') {
+      if (!panelRef.current) return;
+      if (e.key === 'Escape' && closeOnEscape) {
+        e.stopPropagation();
         onClose();
+        return;
+      }
+      if (e.key !== 'Tab') return;
+
+      // Focus trap: cycle Tab / Shift+Tab within the panel.
+      const focusable = panelRef.current.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR);
+      if (focusable.length === 0) {
+        e.preventDefault();
+        panelRef.current.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      const active = document.activeElement as HTMLElement | null;
+
+      if (e.shiftKey) {
+        if (active === first || !panelRef.current.contains(active)) {
+          e.preventDefault();
+          last.focus();
+        }
+      } else {
+        if (active === last) {
+          e.preventDefault();
+          first.focus();
+        }
       }
     },
     [closeOnEscape, onClose]
@@ -39,14 +90,29 @@ export const Modal: React.FC<ModalProps> = ({
 
   useEffect(() => {
     if (open) {
-      document.addEventListener('keydown', handleEscape);
+      previouslyFocusedRef.current = document.activeElement as HTMLElement | null;
+      document.addEventListener('keydown', handleKeyDown);
       document.body.style.overflow = 'hidden';
+      // Move initial focus into the panel after mount.
+      const id = window.requestAnimationFrame(() => {
+        if (!panelRef.current) return;
+        const focusable = panelRef.current.querySelector<HTMLElement>(FOCUSABLE_SELECTOR);
+        (focusable ?? panelRef.current).focus();
+      });
+      return () => {
+        document.removeEventListener('keydown', handleKeyDown);
+        document.body.style.overflow = '';
+        window.cancelAnimationFrame(id);
+        // Restore focus to the element that opened the modal.
+        const prev = previouslyFocusedRef.current;
+        if (prev && typeof prev.focus === 'function') {
+          prev.focus();
+        }
+        previouslyFocusedRef.current = null;
+      };
     }
-    return () => {
-      document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = '';
-    };
-  }, [open, handleEscape]);
+    return undefined;
+  }, [open, handleKeyDown]);
 
   if (!open) return null;
 
@@ -65,19 +131,22 @@ export const Modal: React.FC<ModalProps> = ({
     >
       {/* Overlay */}
       <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in"
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-fade-in motion-reduce:animate-none"
         onClick={closeOnOverlayClick ? onClose : undefined}
         aria-hidden="true"
       />
 
       {/* Modal Panel */}
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className={`
           relative w-full ${sizeStyles[size]}
           bg-white dark:bg-gray-900
           rounded-xl shadow-xl
-          animate-scale-in
+          animate-scale-in motion-reduce:animate-none
           max-h-[90vh] flex flex-col
+          focus:outline-none
         `}
       >
         {/* Header */}
