@@ -1,14 +1,10 @@
+(function(){
 /* @ts-self-types="./doc_engine.d.ts" */
-
-//#region exports
 
 /**
  * JS 可见的友好错误：把 `CoreError` 平铺到字符串。
  */
-export class WasmError {
-    constructor() {
-        throw new Error('cannot invoke `new` directly');
-    }
+class WasmError {
     __destroy_into_raw() {
         const ptr = this.__wbg_ptr;
         this.__wbg_ptr = 0;
@@ -26,14 +22,16 @@ export class WasmError {
         let deferred1_0;
         let deferred1_1;
         try {
-            if (this.__wbg_ptr == 0) throw new Error('Attempt to use a moved value');
-            _assertNum(this.__wbg_ptr);
-            const ret = wasm.wasmerror_message(this.__wbg_ptr);
-            deferred1_0 = ret[0];
-            deferred1_1 = ret[1];
-            return getStringFromWasm0(ret[0], ret[1]);
+            const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+            wasm.wasmerror_message(retptr, this.__wbg_ptr);
+            var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+            var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+            deferred1_0 = r0;
+            deferred1_1 = r1;
+            return getStringFromWasm0(r0, r1);
         } finally {
-            wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+            wasm.__wbindgen_add_to_stack_pointer(16);
+            wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
         }
     }
 }
@@ -53,18 +51,26 @@ if (Symbol.dispose) WasmError.prototype[Symbol.dispose] = WasmError.prototype.fr
  * @param {string | null} [options_js]
  * @returns {any}
  */
-export function convert_zip(zip_bytes, main_tex_path, options_js) {
-    const ptr0 = passArray8ToWasm0(zip_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(main_tex_path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    var ptr2 = isLikeNone(options_js) ? 0 : passStringToWasm0(options_js, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len2 = WASM_VECTOR_LEN;
-    const ret = wasm.convert_zip(ptr0, len0, ptr1, len1, ptr2, len2);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
+function convert_zip(zip_bytes, main_tex_path, options_js) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(zip_bytes, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(main_tex_path, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(options_js) ? 0 : passStringToWasm0(options_js, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len2 = WASM_VECTOR_LEN;
+        wasm.convert_zip(retptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
     }
-    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
@@ -76,98 +82,104 @@ export function convert_zip(zip_bytes, main_tex_path, options_js) {
  * @param {string | null} [options_js]
  * @returns {Uint8Array}
  */
-export function convert_zip_to_docx(zip_bytes, main_tex_path, options_js) {
-    const ptr0 = passArray8ToWasm0(zip_bytes, wasm.__wbindgen_malloc);
-    const len0 = WASM_VECTOR_LEN;
-    const ptr1 = passStringToWasm0(main_tex_path, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    const len1 = WASM_VECTOR_LEN;
-    var ptr2 = isLikeNone(options_js) ? 0 : passStringToWasm0(options_js, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
-    var len2 = WASM_VECTOR_LEN;
-    const ret = wasm.convert_zip_to_docx(ptr0, len0, ptr1, len1, ptr2, len2);
-    if (ret[2]) {
-        throw takeFromExternrefTable0(ret[1]);
+function convert_zip_to_docx(zip_bytes, main_tex_path, options_js) {
+    try {
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        const ptr0 = passArray8ToWasm0(zip_bytes, wasm.__wbindgen_export);
+        const len0 = WASM_VECTOR_LEN;
+        const ptr1 = passStringToWasm0(main_tex_path, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        const len1 = WASM_VECTOR_LEN;
+        var ptr2 = isLikeNone(options_js) ? 0 : passStringToWasm0(options_js, wasm.__wbindgen_export, wasm.__wbindgen_export2);
+        var len2 = WASM_VECTOR_LEN;
+        wasm.convert_zip_to_docx(retptr, ptr0, len0, ptr1, len1, ptr2, len2);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        var r2 = getDataViewMemory0().getInt32(retptr + 4 * 2, true);
+        if (r2) {
+            throw takeObject(r1);
+        }
+        return takeObject(r0);
+    } finally {
+        wasm.__wbindgen_add_to_stack_pointer(16);
     }
-    return takeFromExternrefTable0(ret[0]);
 }
 
 /**
  * 版本号（编译期常量）。
  * @returns {string}
  */
-export function version() {
+function version() {
     let deferred1_0;
     let deferred1_1;
     try {
-        const ret = wasm.version();
-        deferred1_0 = ret[0];
-        deferred1_1 = ret[1];
-        return getStringFromWasm0(ret[0], ret[1]);
+        const retptr = wasm.__wbindgen_add_to_stack_pointer(-16);
+        wasm.version(retptr);
+        var r0 = getDataViewMemory0().getInt32(retptr + 4 * 0, true);
+        var r1 = getDataViewMemory0().getInt32(retptr + 4 * 1, true);
+        deferred1_0 = r0;
+        deferred1_1 = r1;
+        return getStringFromWasm0(r0, r1);
     } finally {
-        wasm.__wbindgen_free(deferred1_0, deferred1_1, 1);
+        wasm.__wbindgen_add_to_stack_pointer(16);
+        wasm.__wbindgen_export3(deferred1_0, deferred1_1, 1);
     }
 }
-
-//#endregion
-
-//#region wasm imports
 function __wbg_get_imports() {
     const import0 = {
         __proto__: null,
-        __wbg_Error_fdd633d4bb5dd76a: function() { return logError(function (arg0, arg1) {
+        __wbg_Error_fdd633d4bb5dd76a: function(arg0, arg1) {
             const ret = Error(getStringFromWasm0(arg0, arg1));
-            return ret;
-        }, arguments); },
-        __wbg_String_8564e559799eccda: function() { return logError(function (arg0, arg1) {
-            const ret = String(arg1);
-            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_malloc, wasm.__wbindgen_realloc);
+            return addHeapObject(ret);
+        },
+        __wbg_String_8564e559799eccda: function(arg0, arg1) {
+            const ret = String(getObject(arg1));
+            const ptr1 = passStringToWasm0(ret, wasm.__wbindgen_export, wasm.__wbindgen_export2);
             const len1 = WASM_VECTOR_LEN;
             getDataViewMemory0().setInt32(arg0 + 4 * 1, len1, true);
             getDataViewMemory0().setInt32(arg0 + 4 * 0, ptr1, true);
-        }, arguments); },
+        },
         __wbg___wbindgen_throw_ea4887a5f8f9a9db: function(arg0, arg1) {
             throw new Error(getStringFromWasm0(arg0, arg1));
         },
-        __wbg_new_2e117a478906f062: function() { return logError(function () {
+        __wbg_new_2e117a478906f062: function() {
             const ret = new Object();
-            return ret;
-        }, arguments); },
-        __wbg_new_36e147a8ced3c6e0: function() { return logError(function () {
+            return addHeapObject(ret);
+        },
+        __wbg_new_36e147a8ced3c6e0: function() {
             const ret = new Array();
-            return ret;
-        }, arguments); },
-        __wbg_new_from_slice_543b875b27789a8f: function() { return logError(function (arg0, arg1) {
+            return addHeapObject(ret);
+        },
+        __wbg_new_from_slice_543b875b27789a8f: function(arg0, arg1) {
             const ret = new Uint8Array(getArrayU8FromWasm0(arg0, arg1));
-            return ret;
-        }, arguments); },
-        __wbg_set_6be42768c690e380: function() { return logError(function (arg0, arg1, arg2) {
-            arg0[arg1] = arg2;
-        }, arguments); },
-        __wbg_set_dc601f4a69da0bc2: function() { return logError(function (arg0, arg1, arg2) {
-            arg0[arg1 >>> 0] = arg2;
-        }, arguments); },
-        __wbindgen_cast_0000000000000001: function() { return logError(function (arg0) {
+            return addHeapObject(ret);
+        },
+        __wbg_set_6be42768c690e380: function(arg0, arg1, arg2) {
+            getObject(arg0)[takeObject(arg1)] = takeObject(arg2);
+        },
+        __wbg_set_dc601f4a69da0bc2: function(arg0, arg1, arg2) {
+            getObject(arg0)[arg1 >>> 0] = takeObject(arg2);
+        },
+        __wbindgen_cast_0000000000000001: function(arg0) {
             // Cast intrinsic for `F64 -> Externref`.
             const ret = arg0;
-            return ret;
-        }, arguments); },
-        __wbindgen_cast_0000000000000002: function() { return logError(function (arg0, arg1) {
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000002: function(arg0, arg1) {
             // Cast intrinsic for `Ref(String) -> Externref`.
             const ret = getStringFromWasm0(arg0, arg1);
-            return ret;
-        }, arguments); },
-        __wbindgen_cast_0000000000000003: function() { return logError(function (arg0) {
+            return addHeapObject(ret);
+        },
+        __wbindgen_cast_0000000000000003: function(arg0) {
             // Cast intrinsic for `U64 -> Externref`.
             const ret = BigInt.asUintN(64, arg0);
-            return ret;
-        }, arguments); },
-        __wbindgen_init_externref_table: function() {
-            const table = wasm.__wbindgen_externrefs;
-            const offset = table.grow(4);
-            table.set(0, undefined);
-            table.set(offset + 0, undefined);
-            table.set(offset + 1, null);
-            table.set(offset + 2, true);
-            table.set(offset + 3, false);
+            return addHeapObject(ret);
+        },
+        __wbindgen_object_clone_ref: function(arg0) {
+            const ret = getObject(arg0);
+            return addHeapObject(ret);
+        },
+        __wbindgen_object_drop_ref: function(arg0) {
+            takeObject(arg0);
         },
     };
     return {
@@ -176,16 +188,23 @@ function __wbg_get_imports() {
     };
 }
 
-
-//#endregion
 const WasmErrorFinalization = (typeof FinalizationRegistry === 'undefined')
     ? { register: () => {}, unregister: () => {} }
     : new FinalizationRegistry(ptr => wasm.__wbg_wasmerror_free(ptr, 1));
 
+function addHeapObject(obj) {
+    if (heap_next === heap.length) heap.push(heap.length + 1);
+    const idx = heap_next;
+    heap_next = heap[idx];
 
-//#region intrinsics
-function _assertNum(n) {
-    if (typeof(n) !== 'number') throw new Error(`expected a number argument, found ${typeof(n)}`);
+    heap[idx] = obj;
+    return idx;
+}
+
+function dropObject(idx) {
+    if (idx < 1028) return;
+    heap[idx] = heap_next;
+    heap_next = idx;
 }
 
 function getArrayU8FromWasm0(ptr, len) {
@@ -213,24 +232,15 @@ function getUint8ArrayMemory0() {
     return cachedUint8ArrayMemory0;
 }
 
+function getObject(idx) { return heap[idx]; }
+
+let heap = new Array(1024).fill(undefined);
+heap.push(undefined, null, true, false);
+
+let heap_next = heap.length;
+
 function isLikeNone(x) {
     return x === undefined || x === null;
-}
-
-function logError(f, args) {
-    try {
-        return f.apply(this, args);
-    } catch (e) {
-        let error = (function () {
-            try {
-                return e instanceof Error ? `${e.message}\n\nStack:\n${e.stack}` : e.toString();
-            } catch(_) {
-                return "<failed to stringify thrown value>";
-            }
-        }());
-        console.error("wasm-bindgen: imported JS function that was not marked as `catch` threw an error:", error);
-        throw e;
-    }
 }
 
 function passArray8ToWasm0(arg, malloc) {
@@ -241,7 +251,6 @@ function passArray8ToWasm0(arg, malloc) {
 }
 
 function passStringToWasm0(arg, malloc, realloc) {
-    if (typeof(arg) !== 'string') throw new Error(`expected a string argument, found ${typeof(arg)}`);
     if (realloc === undefined) {
         const buf = cachedTextEncoder.encode(arg);
         const ptr = malloc(buf.length, 1) >>> 0;
@@ -269,7 +278,7 @@ function passStringToWasm0(arg, malloc, realloc) {
         ptr = realloc(ptr, len, len = offset + arg.length * 3, 1) >>> 0;
         const view = getUint8ArrayMemory0().subarray(ptr + offset, ptr + len);
         const ret = cachedTextEncoder.encodeInto(arg, view);
-        if (ret.read !== arg.length) throw new Error('failed to pass whole string');
+
         offset += ret.written;
         ptr = realloc(ptr, len, offset, 1) >>> 0;
     }
@@ -278,10 +287,10 @@ function passStringToWasm0(arg, malloc, realloc) {
     return ptr;
 }
 
-function takeFromExternrefTable0(idx) {
-    const value = wasm.__wbindgen_externrefs.get(idx);
-    wasm.__externref_table_dealloc(idx);
-    return value;
+function takeObject(idx) {
+    const ret = getObject(idx);
+    dropObject(idx);
+    return ret;
 }
 
 let cachedTextDecoder = new TextDecoder('utf-8', { ignoreBOM: true, fatal: true });
@@ -313,10 +322,6 @@ if (!('encodeInto' in cachedTextEncoder)) {
 
 let WASM_VECTOR_LEN = 0;
 
-
-//#endregion
-
-//#region wasm loading
 let wasmModule, wasmInstance, wasm;
 function __wbg_finalize_init(instance, module) {
     wasmInstance = instance;
@@ -324,7 +329,6 @@ function __wbg_finalize_init(instance, module) {
     wasmModule = module;
     cachedDataViewMemory0 = null;
     cachedUint8ArrayMemory0 = null;
-    wasm.__wbindgen_start();
     return wasm;
 }
 
@@ -396,7 +400,7 @@ async function __wbg_init(module_or_path) {
     }
 
     if (module_or_path === undefined) {
-        module_or_path = new URL('doc_engine_bg.wasm', import.meta.url);
+        module_or_path = new URL('doc_engine_bg.wasm', globalThis.__tex2docBaseUrl);
     }
     const imports = __wbg_get_imports();
 
@@ -409,6 +413,26 @@ async function __wbg_init(module_or_path) {
     return __wbg_finalize_init(instance, module);
 }
 
-export { initSync, __wbg_init as default };
-//#endregion
-export { wasm as __wasm }
+globalThis.__tex2docWbg = {
+      initSync: initSync,
+      default: __wbg_init,
+    };
+    globalThis.__tex2docApi = {
+      convert_zip: typeof convert_zip === 'function' ? convert_zip : undefined,
+      convert_zip_to_docx: typeof convert_zip_to_docx === 'function' ? convert_zip_to_docx : undefined,
+      version: typeof version === 'function' ? version : undefined,
+      addHeapObject: typeof addHeapObject === 'function' ? addHeapObject : undefined,
+      dropObject: typeof dropObject === 'function' ? dropObject : undefined,
+      getArrayU8FromWasm0: typeof getArrayU8FromWasm0 === 'function' ? getArrayU8FromWasm0 : undefined,
+      getDataViewMemory0: typeof getDataViewMemory0 === 'function' ? getDataViewMemory0 : undefined,
+      getStringFromWasm0: typeof getStringFromWasm0 === 'function' ? getStringFromWasm0 : undefined,
+      getUint8ArrayMemory0: typeof getUint8ArrayMemory0 === 'function' ? getUint8ArrayMemory0 : undefined,
+      getObject: typeof getObject === 'function' ? getObject : undefined,
+      isLikeNone: typeof isLikeNone === 'function' ? isLikeNone : undefined,
+      passArray8ToWasm0: typeof passArray8ToWasm0 === 'function' ? passArray8ToWasm0 : undefined,
+      passStringToWasm0: typeof passStringToWasm0 === 'function' ? passStringToWasm0 : undefined,
+      takeObject: typeof takeObject === 'function' ? takeObject : undefined,
+      decodeText: typeof decodeText === 'function' ? decodeText : undefined,
+      initSync: typeof initSync === 'function' ? initSync : undefined,
+    };
+}).call(globalThis);

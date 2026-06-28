@@ -2,6 +2,14 @@
  * Background Service Worker for Tex2Doc Extension
  */
 
+// 在 MV3 service worker 里，dynamic `import()` 是被禁止的（HTML spec 限制）。
+// 这里必须用 top-level 静态 import 让 Vite/Rolldown 直接打进 bundle。
+// 注意：Node 内置模块（fs/promises、fs 等）在浏览器里需要 vite 把它们 inline 进来，
+// 或者改用 chrome.downloads 等 service-worker-native API。
+// 这里我们用 chrome.downloads.data URL 来保存（如果数据可放到 URL），
+// 或者通过 fs.writeFileSync（在扩展 background 里可行）。
+// 详见 scripts/post-build-wasm.mjs 关于 ESM 加载的说明。
+
 import { ApiClient } from '@/api/api-client';
 import { login as apiLogin, register as apiRegister, refreshSession } from '@/api/auth';
 import { getUsage } from '@/api/usage';
@@ -21,21 +29,32 @@ import { AuthError } from '@/shared/errors';
 const activePolls = new Map<string, number>();
 const POLL_INTERVAL = 2000;
 
-export default defineBackground(() => {
-  browser.runtime.onInstalled.addListener(() => {
-    console.log('[Tex2Doc Background] Extension installed');
-    createContextMenus();
-  });
+export default defineBackground({
+  // ESM 输出：允许 dynamic import() 加载 wasm-bindgen 生成的 ESM 胶水；
+  // 同时启用 chunk 分割、减小包体。Chrome MV3 only。
+  type: 'module',
+  main() {
+    browser.runtime.onInstalled.addListener(() => {
+      console.log('[Tex2Doc Background] Extension installed');
+      createContextMenus();
+    });
 
-  browser.runtime.onStartup.addListener(async () => {
-    console.log('[Tex2Doc Background] Extension startup');
-    await restorePollingJobs();
-  });
+    browser.runtime.onStartup.addListener(async () => {
+      console.log('[Tex2Doc Background] Extension startup');
+      await restorePollingJobs();
+    });
 
-  browser.runtime.onMessage.addListener(handleMessage);
-  browser.contextMenus.onClicked.addListener(handleContextMenuClick);
+    browser.runtime.onMessage.addListener(handleMessage);
+    browser.contextMenus.onClicked.addListener(handleContextMenuClick);
 
-  console.log('[Tex2Doc Background] Service worker started');
+    // e2e 钩子：暴露一个全局函数供 Playwright service worker evaluate 调用，
+    // 绕开 message channel。生产构建里同样有效，但只暴露最小 API。
+    (globalThis as unknown as { __tex2docConvertZip?: unknown }).__tex2docConvertZip =
+      handleStartWasmConversion;
+    (globalThis as unknown as { __tex2docDownloads?: unknown }).__tex2docDownloads = {
+      downloadBytes,
+    };
+  },
 });
 
 function createContextMenus(): void {
@@ -79,8 +98,12 @@ async function handleMessage(message: Record<string, unknown>): Promise<unknown>
         return await handleCreatePortal();
       case MESSAGE_TYPES.REDEEM_CODE:
         return await handleRedeemCode(payload);
+      case MESSAGE_TYPES.REDEEM_CODE_AND_LOGIN:
+        return await handleRedeemCodeAndLogin(payload);
       case MESSAGE_TYPES.CREATE_FEEDBACK:
         return await handleCreateFeedback(payload);
+      case MESSAGE_TYPES.CLOUD_CONVERT_AND_POLL:
+        return await handleCloudConvertAndPoll(payload);
       case MESSAGE_TYPES.GET_SETTINGS:
         return await getSettings();
       default:
@@ -309,6 +332,172 @@ async function handleRedeemCode(payload: Record<string, unknown>): Promise<unkno
   return { success: true, result };
 }
 
+async function handleRedeemCodeAndLogin(payload: Record<string, unknown>): Promise<unknown> {
+  const { code } = payload as { code: string };
+  const baseUrl = await getApiBaseUrl();
+  // Use anonymous client; server may create an account behind the scenes
+  const client = new ApiClient({ baseUrl, apiKey: '' });
+  const result = await client.redeemCode({ code });
+
+  // If backend provisioned an account, persist the session
+  if (result.access_token && result.refresh_token && result.user) {
+    const SESSION_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
+    await saveSession({
+      access_token: result.access_token,
+      refresh_token: result.refresh_token,
+      user: result.user,
+      usage: {
+        plan_id: result.user.plan_id,
+        cloud_conversions_used: 0,
+        cloud_conversions_limit: 0,
+        count_balance: result.count_balance,
+        date_valid_until: result.date_valid_until,
+        storage_bytes_used: 0,
+        storage_bytes_limit: 0,
+        period_start: new Date().toISOString(),
+        period_end: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+      },
+      expires_at: Date.now() + SESSION_TOKEN_EXPIRY_MS,
+    });
+
+    // Best-effort: refresh usage with the new token
+    try {
+      const authClient = new ApiClient({ baseUrl, apiKey: result.access_token });
+      const usage = await getUsage(authClient);
+      const session = await getSession();
+      if (session) {
+        session.usage = usage;
+        await saveSession(session);
+      }
+      notifyUI('SESSION_UPDATED', { signedIn: true, usage, isNewAccount: !!result.is_new_account });
+    } catch {
+      notifyUI('SESSION_UPDATED', { signedIn: true, isNewAccount: !!result.is_new_account });
+    }
+
+    return { success: true, result, signedIn: true, isNewAccount: !!result.is_new_account };
+  }
+
+  // No account provisioned; user must sign in first
+  return { success: false, error: 'REDEEM_REQUIRES_LOGIN', result };
+}
+
+async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Promise<unknown> {
+  const { zipBytes, fileName, mainTex, profile, quality } = payload as {
+    zipBytes: number[]; fileName: string; mainTex: string; profile: string; quality: string;
+  };
+  const baseUrl = await getApiBaseUrl();
+  const accessToken = await getAccessToken();
+  if (!accessToken) throw new AuthError('Not logged in', 'NOT_AUTHENTICATED');
+
+  const localJobId = crypto.randomUUID();
+  const job: JobRecord = {
+    id: localJobId,
+    job_id: undefined,
+    file_name: fileName,
+    main_tex: mainTex,
+    profile,
+    quality,
+    mode: 'cloud',
+    status: 'pending',
+    progress: 0,
+    created_at: Date.now(),
+    updated_at: Date.now(),
+  };
+  await saveJob(job);
+  notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'pending', progress: 0, stage: 'uploading' });
+
+  // Fire-and-forget the cloud pipeline; progress events come back via notifyUI
+  runCloudPipeline(localJobId, new Uint8Array(zipBytes), fileName, mainTex, profile, quality, baseUrl, accessToken);
+  return { success: true, jobId: localJobId };
+}
+
+async function runCloudPipeline(
+  localJobId: string,
+  zipBytes: Uint8Array,
+  fileName: string,
+  mainTex: string,
+  profile: string,
+  quality: string,
+  baseUrl: string,
+  accessToken: string
+): Promise<void> {
+  const client = new ApiClient({ baseUrl, apiKey: accessToken });
+  try {
+    // Stage 1: upload
+    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 15, stage: 'uploading' });
+    await updateJobStatus(localJobId, 'processing', 15);
+    const upload = await client.uploadProjectZip(zipBytes, fileName);
+
+    // Stage 2: create conversion job
+    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 30, stage: 'creating', uploadId: upload.upload_id });
+    await updateJobStatus(localJobId, 'processing', 30);
+    const created = await client.createConversion({
+      upload_id: upload.upload_id,
+      main_tex: mainTex,
+      profile,
+      quality,
+    }) as { job_id: string };
+
+    // Stage 3: poll until terminal
+    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 50, stage: 'polling', cloudJobId: created.job_id });
+    await updateJobStatus(localJobId, 'processing', 50);
+    const finalJob = await createAndPollConversion(
+      client,
+      upload.upload_id,
+      mainTex,
+      profile,
+      quality,
+      (update) => {
+        notifyUI('JOB_UPDATED', {
+          jobId: localJobId,
+          status: update.status,
+          progress: update.status === 'completed' ? 100 : 70,
+          stage: 'polling',
+        });
+        updateJobStatus(localJobId, update.status as JobRecord['status'], update.status === 'completed' ? 100 : 70);
+      }
+    );
+
+    const stored = await getJob(localJobId);
+    if (stored) {
+      stored.job_id = finalJob.job_id;
+      stored.status = 'completed';
+      stored.progress = 100;
+      stored.docx_ready = finalJob.docx_ready;
+      stored.updated_at = Date.now();
+      await saveJob(stored);
+    }
+    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'completed', progress: 100, stage: 'completed', cloudJobId: finalJob.job_id });
+    browser.notifications?.create({
+      type: 'basic',
+      title: 'Tex2Doc',
+      message: 'Conversion completed!',
+      iconUrl: browser.runtime.getURL('/icons/icon48.png'),
+    });
+  } catch (error) {
+    const stored = await getJob(localJobId);
+    if (stored) {
+      stored.status = 'failed';
+      stored.error_message = error instanceof Error ? error.message : 'Conversion failed';
+      stored.updated_at = Date.now();
+      await saveJob(stored);
+    }
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'failed',
+      progress: 0,
+      stage: 'failed',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    browser.notifications?.create({
+      type: 'basic',
+      title: 'Tex2Doc',
+      message: `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      iconUrl: browser.runtime.getURL('/icons/icon48.png'),
+    });
+  }
+}
+
 async function handleCreateFeedback(payload: Record<string, unknown>): Promise<unknown> {
   const { title, feedbackType, content, conversionJobId } = payload as {
     title: string; feedbackType: string; content: string; conversionJobId?: string;
@@ -348,12 +537,93 @@ async function handleStartWasmConversion(payload: Record<string, unknown>): Prom
     mainTex: string;
   };
 
+  const trace: string[] = [];
+  const addTrace = (msg: string) => {
+    const ts = new Date().toISOString().substr(11, 12);
+    trace.push(`[${ts}] ${msg}`);
+    console.log(`[Tex2Doc WASM] ${msg}`);
+  };
+
   try {
+    addTrace('enter handleStartWasmConversion');
     const bytes = new Uint8Array(zipBytes);
+    addTrace(`zip bytes: ${bytes.length}`);
+
+    // Validate zip magic bytes
+    if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
+      throw new Error(`Invalid ZIP file: magic bytes ${bytes[0]?.toString(16)} ${bytes[1]?.toString(16)} (expected 50 4b)`);
+    }
+    addTrace('zip magic bytes OK');
+
     const result = await convertLocal(bytes, { fileName, mainTex });
+    addTrace(`convertLocal done: docx ${result.docxBytes.length} bytes`);
+    addTrace(`elapsed: ${result.elapsedMs}ms`);
+
+    // e2e 钩子：当 payload 含 _e2eReturnBytes 时，把 docx 字节以 number[] 形式
+    // 返回给 Playwright evaluate 调用方（SW 不支持 fs.writeFile / URL.createObjectURL）。
+    // 调用方（e2e_wasm_convert.mjs）拿到字节后在 Node 端写文件。
+    const wantReturnBytes = payload._e2eReturnBytes as boolean | undefined;
+    if (wantReturnBytes) {
+      return {
+        success: true,
+        jobId: result.jobId,
+        docxBytes: Array.from(result.docxBytes),
+        docxFilename: result.docxFilename,
+        trace,
+      };
+    }
     await downloadBytes(result.docxBytes, result.docxFilename);
     return { success: true, jobId: result.jobId };
   } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'WASM conversion failed' };
+    addTrace(`ERROR: ${error instanceof Error ? error.message : String(error)}`);
+
+    // Extract detailed error info
+    let detailedMessage = 'WASM conversion failed';
+    let errorType = 'UnknownError';
+
+    if (error instanceof Error) {
+      detailedMessage = error.message;
+
+      // Check for WasmError (has message property)
+      if ('message' in error) {
+        errorType = 'WasmError';
+        // WasmError from wasm-bindgen has the actual Rust error in message
+        detailedMessage = error.message;
+        addTrace(`WasmError.message: ${error.message}`);
+      }
+
+      // Add stack trace to trace
+      if (error.stack) {
+        const stackLines = error.stack.split('\n').slice(0, 5);
+        stackLines.forEach(line => addTrace(`  ${line.trim()}`));
+      }
+    } else {
+      detailedMessage = String(error);
+    }
+
+    // Get current WASM state for debugging
+    const g = globalThis as unknown as Record<string, unknown>;
+    addTrace(`__tex2docWbg exists: ${!!g.__tex2docWbg}`);
+    addTrace(`__tex2docApi exists: ${!!g.__tex2docApi}`);
+    if (g.__tex2docApi && typeof g.__tex2docApi === 'object') {
+      const api = g.__tex2docApi as Record<string, unknown>;
+      addTrace(`  convert_zip: ${typeof api.convert_zip}`);
+      addTrace(`  convert_zip_to_docx: ${typeof api.convert_zip_to_docx}`);
+    }
+
+    return {
+      success: false,
+      error: detailedMessage,
+      errorType,
+      stack: error instanceof Error ? error.stack : null,
+      trace,
+      // Include helpful debugging info
+      debug: {
+        fileName,
+        mainTex,
+        zipBytesLength: zipBytes.length,
+        timestamp: new Date().toISOString(),
+      },
+    };
   }
 }

@@ -19,5 +19,14 @@ serde     = { workspace = true }
 serde_json = { workspace = true }
 zip       = { workspace = true }
 image     = { workspace = true }
-pdfium-render = { workspace = true }
+# pdfium-render 依赖 mio，mio 不支持 wasm32 目标；
+# 在 wasm 下完全跳过 pdfium（render_pdf_to_png 直接返回 None）。
+pdfium-render = { workspace = true, optional = true }
 tracing   = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+pdfium-render = { workspace = true }
+
+[features]
+default = []
+pdf = ["dep:pdfium-render"]  # 在 wasm 下不会启用，CLI/native 默认开

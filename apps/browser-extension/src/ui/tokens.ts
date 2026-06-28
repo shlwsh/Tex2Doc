@@ -47,6 +47,31 @@ export const tokens = {
     success: '#22c55e',
     warning: '#f59e0b',
     error: '#ef4444',
+    info: '#3b82f6',
+  },
+
+  // Surface tokens (light + dark) for commercial-grade calm SaaS look
+  surface: {
+    light: {
+      bg: '#ffffff',
+      bgMuted: '#f9fafb',
+      bgSubtle: '#f3f4f6',
+      border: '#e5e7eb',
+      borderStrong: '#d1d5db',
+      text: '#111827',
+      textMuted: '#6b7280',
+      textSubtle: '#9ca3af',
+    },
+    dark: {
+      bg: '#0b1220',
+      bgMuted: '#111827',
+      bgSubtle: '#1f2937',
+      border: '#1f2937',
+      borderStrong: '#374151',
+      text: '#f9fafb',
+      textMuted: '#9ca3af',
+      textSubtle: '#6b7280',
+    },
   },
 
   // Typography
@@ -62,6 +87,7 @@ export const tokens = {
       lg: '1.125rem',
       xl: '1.25rem',
       '2xl': '1.5rem',
+      '3xl': '1.875rem',
     },
     fontWeight: {
       normal: '400',
@@ -73,6 +99,11 @@ export const tokens = {
       tight: '1.25',
       normal: '1.5',
       relaxed: '1.75',
+    },
+    letterSpacing: {
+      tight: '-0.01em',
+      normal: '0',
+      wide: '0.04em',
     },
   },
 
@@ -93,6 +124,7 @@ export const tokens = {
     8: '2rem',
     10: '2.5rem',
     12: '3rem',
+    16: '4rem',
   },
 
   // Border radius
@@ -109,11 +141,22 @@ export const tokens = {
 
   // Shadows
   shadows: {
+    none: 'none',
     sm: '0 1px 2px 0 rgb(0 0 0 / 0.05)',
     DEFAULT: '0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1)',
     md: '0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)',
     lg: '0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1)',
     xl: '0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)',
+    focus: '0 0 0 3px rgb(14 165 233 / 0.35)',
+  },
+
+  // Motion
+  motion: {
+    durationFast: '120ms',
+    duration: '180ms',
+    durationSlow: '240ms',
+    easeStandard: 'cubic-bezier(0.2, 0, 0, 1)',
+    easeOut: 'cubic-bezier(0, 0, 0.2, 1)',
   },
 
   // Transitions
@@ -123,11 +166,21 @@ export const tokens = {
     slow: '300ms',
   },
 
-  // Popup specific
-  popup: {
-    width: '380px',
-    minHeight: '400px',
-    maxHeight: '600px',
+  // Layout sizes
+  layout: {
+    popup: {
+      width: '380px',
+      minHeight: '420px',
+      maxHeight: '600px',
+    },
+    sidepanel: {
+      width: '100%',
+      maxWidth: '420px',
+    },
+    options: {
+      width: '100%',
+      maxWidth: '880px',
+    },
   },
 
   // Content script badge

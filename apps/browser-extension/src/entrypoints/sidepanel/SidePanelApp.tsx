@@ -1,5 +1,8 @@
 /**
- * Side Panel Application - Full Commercial Dashboard
+ * Side Panel Application - Commercial Dashboard
+ *
+ * SaaS-style layout with toolbar (user + balance + language) + tabs
+ * (Jobs / Billing / Feedback / Account). All copy goes through useI18n().
  */
 
 import React, { useState, useEffect } from 'react';
@@ -9,6 +12,7 @@ import Card from '@/ui/components/Card';
 import Progress from '@/ui/components/Progress';
 import Select from '@/ui/components/Select';
 import Toast from '@/ui/components/Toast';
+import Input from '@/ui/components/Input';
 import { Tabs } from '@/ui/components/Tabs';
 import { Modal } from '@/ui/components/Modal';
 import { Textarea } from '@/ui/components/Textarea';
@@ -19,39 +23,39 @@ import type { JobRecord, Session, UsageSummary, FeedbackThread, PlanSummary } fr
 import { useI18n } from '@/ui/i18n/useI18n';
 import type { Tab } from '@/ui/components/Tabs';
 
-export default function SidePanelApp() {
-  const { t } = useI18n();
-  const [activeTab, setActiveTab] = useState<string>('jobs');
+type Panel = 'jobs' | 'billing' | 'feedback' | 'account';
 
-  // Session & Usage
+export default function SidePanelApp() {
+  const { t, locale, setLocale } = useI18n();
+  const [activeTab, setActiveTab] = useState<Panel>('jobs');
+
   const [session, setSession] = useState<Session | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
 
-  // Jobs
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedJob, setSelectedJob] = useState<JobRecord | null>(null);
 
-  // Billing
   const [plans, setPlans] = useState<PlanSummary[]>([]);
   const [redeemCode, setRedeemCode] = useState('');
+  const [isRedeeming, setIsRedeeming] = useState(false);
 
-  // Feedback
   const [feedbackThreads, setFeedbackThreads] = useState<FeedbackThread[]>([]);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [feedbackTitle, setFeedbackTitle] = useState('');
   const [feedbackContent, setFeedbackContent] = useState('');
   const [feedbackType, setFeedbackType] = useState<'issue' | 'requirement' | 'other'>('issue');
 
-  // Toast
   const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Load data on mount
   useEffect(() => {
     loadData();
   }, []);
 
   const loadData = async () => {
+    setIsLoading(true);
     await Promise.all([loadSession(), loadJobs(), loadPlans()]);
+    setIsLoading(false);
   };
 
   const loadSession = async () => {
@@ -89,6 +93,22 @@ export default function SidePanelApp() {
     }
   };
 
+  const loadFeedback = async () => {
+    if (!session) return;
+    try {
+      const threads = await sendToBackground<FeedbackThread[]>({ type: MESSAGE_TYPES.FETCH_FEEDBACK });
+      setFeedbackThreads(threads);
+    } catch (error) {
+      console.error('Failed to load feedback:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (activeTab === 'feedback' && session) {
+      loadFeedback();
+    }
+  }, [activeTab, session]);
+
   const handleLogout = async () => {
     await sendToBackground({ type: MESSAGE_TYPES.LOGOUT });
     setSession(null);
@@ -97,13 +117,18 @@ export default function SidePanelApp() {
 
   const handleRedeemCode = async () => {
     if (!redeemCode.trim()) return;
+    setIsRedeeming(true);
     try {
-      await sendToBackground({ type: MESSAGE_TYPES.REDEEM_CODE, code: redeemCode.trim() });
+      // If already signed in, plain top-up; if not, attempt auto-account redeem
+      const msgType = session ? MESSAGE_TYPES.REDEEM_CODE : MESSAGE_TYPES.REDEEM_CODE_AND_LOGIN;
+      await sendToBackground({ type: msgType, code: redeemCode.trim().toUpperCase() });
       await loadSession();
       setRedeemCode('');
-      setToast({ type: 'success', message: t('rechargeSuccess') });
+      setToast({ type: 'success', message: session ? t('rechargeSuccess') : t('redeemSuccessNewAccount') });
     } catch (error) {
-      setToast({ type: 'error', message: t('errors.networkError') });
+      setToast({ type: 'error', message: error instanceof Error ? error.message : t('redeemFailed') });
+    } finally {
+      setIsRedeeming(false);
     }
   };
 
@@ -135,7 +160,7 @@ export default function SidePanelApp() {
       await sendToBackground({
         type: MESSAGE_TYPES.CREATE_FEEDBACK,
         title: feedbackTitle.trim(),
-        feedbackType: feedbackType,
+        feedbackType,
         content: feedbackContent.trim(),
       });
       setShowFeedbackModal(false);
@@ -143,16 +168,12 @@ export default function SidePanelApp() {
       setFeedbackContent('');
       setFeedbackType('issue');
       setToast({ type: 'success', message: t('feedback') + ' ' + t('success').toLowerCase() });
+      loadFeedback();
     } catch (error) {
-      setToast({ type: 'error', message: t('errors.networkError') });
+      setToast({ type: 'error', message: error instanceof Error ? error.message : t('errors.networkError') });
     }
   };
 
-  const showToast = (type: 'success' | 'error' | 'info', message: string) => {
-    setToast({ type, message });
-  };
-
-  // Tab icons as SVG
   const icons = {
     jobs: (
       <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -191,59 +212,79 @@ export default function SidePanelApp() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Header */}
-      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4">
-        <div className="flex items-center justify-between mb-4">
+      {/* Toolbar */}
+      <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+        <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
-            <Avatar name={session?.user?.display_name || session?.user?.email || 'T'} size="lg" />
-            <div>
-              <h1 className="text-lg font-bold text-gray-900 dark:text-white">
+            <Avatar name={session?.user?.display_name || session?.user?.email || 'T'} size="md" />
+            <div className="leading-tight">
+              <h1 className="text-sm font-semibold text-gray-900 dark:text-white">
                 {t('appName')}
               </h1>
-              <p className="text-xs text-gray-500">
-                {session?.user?.email || t('errors.authError')}
+              <p className="text-[11px] text-gray-500 truncate max-w-[160px]">
+                {session?.user?.email || t('signInRequired')}
               </p>
             </div>
           </div>
 
-          {usage && (
-            <div className="text-right">
-              <p className="text-sm font-medium text-gray-900 dark:text-white">
-                {Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)} /{' '}
-                {usage.cloud_conversions_limit}
-              </p>
-              <p className="text-xs text-gray-500">{t('remaining')}</p>
-              <Progress
-                value={usage.cloud_conversions_used}
-                max={usage.cloud_conversions_limit}
-                size="sm"
-                className="w-24 mt-1"
-              />
-            </div>
-          )}
+          <div className="flex items-center gap-2">
+            {usage && (
+              <div className="text-right">
+                <p className="text-xs font-medium text-gray-900 dark:text-white">
+                  {Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)} /{' '}
+                  {usage.cloud_conversions_limit}
+                </p>
+                <p className="text-[10px] text-gray-500">{t('remaining')}</p>
+              </div>
+            )}
+            <select
+              value={locale}
+              onChange={(e) => setLocale(e.target.value as typeof locale)}
+              className="text-xs bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-1.5 py-1 text-gray-600 dark:text-gray-300"
+              aria-label={t('language')}
+            >
+              <option value="en">EN</option>
+              <option value="zh">中</option>
+            </select>
+          </div>
         </div>
 
-        {/* Tabs */}
-        <Tabs tabs={tabs} activeTab={activeTab} onChange={setActiveTab} variant="underline" />
+        {usage && (
+          <div className="px-4 pb-3">
+            <Progress value={usage.cloud_conversions_used} max={usage.cloud_conversions_limit} size="sm" />
+          </div>
+        )}
+
+        <div className="px-4">
+          <Tabs tabs={tabs} activeTab={activeTab} onChange={(id) => setActiveTab(id as Panel)} variant="underline" />
+        </div>
       </div>
 
       {/* Content */}
-      <div className="flex-1 overflow-auto p-4">
-        {/* Jobs Tab */}
-        {activeTab === 'jobs' && (
+      <div className="flex-1 overflow-auto p-4 space-y-4">
+        {isLoading && (
+          <div className="flex items-center justify-center py-12 text-sm text-gray-500">
+            <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {t('loading')}
+          </div>
+        )}
+
+        {!isLoading && activeTab === 'jobs' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t('jobHistory')}
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('jobHistory')}</h2>
               <Button size="sm" variant="secondary" onClick={loadJobs} leftIcon={icons.jobs}>
                 {t('refresh')}
               </Button>
             </div>
 
             {jobs.length === 0 ? (
-              <Card className="text-center py-8">
-                <p className="text-gray-500">{t('noJobs')}</p>
+              <Card className="text-center py-8 space-y-1">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noJobs.title')}</p>
+                <p className="text-xs text-gray-500">{t('empty.noJobs.description')}</p>
               </Card>
             ) : (
               <div className="space-y-2">
@@ -256,13 +297,13 @@ export default function SidePanelApp() {
                   >
                     <div className="flex items-center justify-between">
                       <div className="flex-1 min-w-0">
-                        <p className="font-medium text-gray-900 dark:text-white truncate">
+                        <p className="text-sm font-medium text-gray-900 dark:text-white truncate">
                           {job.file_name}
                         </p>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-xs text-gray-500">
                           {job.main_tex} · {job.profile} · {job.quality}
                         </p>
-                        <p className="text-xs text-gray-400">
+                        <p className="text-[11px] text-gray-400">
                           {new Date(job.created_at).toLocaleString()}
                         </p>
                       </div>
@@ -288,11 +329,10 @@ export default function SidePanelApp() {
                       </div>
                     </div>
 
-                    {/* Expanded View */}
                     {selectedJob?.id === job.id && job.report && (
-                      <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
-                        <h4 className="text-sm font-medium mb-2">Quality Report</h4>
-                        <div className="grid grid-cols-2 gap-2 text-sm">
+                      <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+                        <h4 className="text-xs font-medium mb-2 text-gray-700 dark:text-gray-300">Quality Report</h4>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
                           <div>
                             <span className="text-gray-500">Score:</span> {job.report.quality_score}%
                           </div>
@@ -309,65 +349,67 @@ export default function SidePanelApp() {
           </div>
         )}
 
-        {/* Billing Tab */}
-        {activeTab === 'billing' && (
+        {!isLoading && activeTab === 'billing' && (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-              {t('plans')}
-            </h2>
+            <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('plans')}</h2>
 
-            {plans.map((plan) => (
-              <Card key={plan.id}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{plan.name}</h3>
-                    <p className="text-sm text-gray-500">
-                      {plan.monthly_conversions} conversions/month
-                    </p>
-                  </div>
-                  <div className="text-right">
-                    <p className="text-lg font-bold text-gray-900 dark:text-white">
-                      ${(plan.price_cents / 100).toFixed(2)}
-                    </p>
-                    <p className="text-xs text-gray-500">/{plan.currency}</p>
-                  </div>
-                </div>
-                {session && (
-                  <Button className="w-full" onClick={() => handleCheckout(plan.id)}>
-                    {t('checkout')}
-                  </Button>
-                )}
+            {plans.length === 0 ? (
+              <Card className="text-center py-8 space-y-1">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noPlans.title')}</p>
+                <p className="text-xs text-gray-500">{t('empty.noPlans.description')}</p>
               </Card>
-            ))}
+            ) : (
+              <div className="space-y-3">
+                {plans.map((plan) => (
+                  <Card key={plan.id}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{plan.name}</h3>
+                        <p className="text-xs text-gray-500">
+                          {plan.monthly_conversions} conversions/month
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-lg font-bold text-gray-900 dark:text-white">
+                          ${(plan.price_cents / 100).toFixed(2)}
+                        </p>
+                        <p className="text-[11px] text-gray-500">/{plan.currency}</p>
+                      </div>
+                    </div>
+                    {session && (
+                      <Button className="w-full" size="sm" onClick={() => handleCheckout(plan.id)}>
+                        {t('checkout')}
+                      </Button>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
 
-            {/* Redeem Code */}
             <Card>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-3">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-2">
                 {t('redeemCode')}
               </h3>
+              <p className="text-xs text-gray-500 mb-3">{t('redeemDescription')}</p>
               <div className="flex gap-2">
-                <input
+                <Input
                   type="text"
                   value={redeemCode}
                   onChange={(e) => setRedeemCode(e.target.value)}
-                  placeholder={t('enterCode')}
-                  className="flex-1 px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
+                  placeholder={t('redeemPlaceholder')}
                 />
-                <Button onClick={handleRedeemCode} disabled={!redeemCode.trim()}>
-                  {t('redeemCode')}
+                <Button onClick={handleRedeemCode} disabled={!redeemCode.trim() || isRedeeming} isLoading={isRedeeming}>
+                  {t('redeem')}
                 </Button>
               </div>
             </Card>
           </div>
         )}
 
-        {/* Feedback Tab */}
-        {activeTab === 'feedback' && (
+        {!isLoading && activeTab === 'feedback' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-                {t('feedback')}
-              </h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('feedback')}</h2>
               {session && (
                 <Button size="sm" onClick={() => setShowFeedbackModal(true)}>
                   {t('submitFeedback')}
@@ -377,11 +419,12 @@ export default function SidePanelApp() {
 
             {!session ? (
               <Card className="text-center py-8">
-                <p className="text-gray-500">{t('errors.authError')}</p>
+                <p className="text-sm text-gray-500">{t('signInRequired')}</p>
               </Card>
             ) : feedbackThreads.length === 0 ? (
-              <Card className="text-center py-8">
-                <p className="text-gray-500">No feedback threads yet</p>
+              <Card className="text-center py-8 space-y-1">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noFeedback.title')}</p>
+                <p className="text-xs text-gray-500">{t('empty.noFeedback.description')}</p>
               </Card>
             ) : (
               <div className="space-y-2">
@@ -389,8 +432,8 @@ export default function SidePanelApp() {
                   <Card key={thread.thread_id}>
                     <div className="flex items-start justify-between">
                       <div>
-                        <h4 className="font-medium text-gray-900 dark:text-white">{thread.title}</h4>
-                        <p className="text-sm text-gray-500">{thread.feedback_type}</p>
+                        <h4 className="text-sm font-medium text-gray-900 dark:text-white">{thread.title}</h4>
+                        <p className="text-xs text-gray-500">{thread.feedback_type}</p>
                       </div>
                       <Badge variant={thread.status === 'open' ? 'warning' : 'default'}>
                         {thread.status}
@@ -403,16 +446,15 @@ export default function SidePanelApp() {
           </div>
         )}
 
-        {/* Account Tab */}
-        {activeTab === 'account' && (
+        {!isLoading && activeTab === 'account' && (
           <div className="space-y-4">
             {session ? (
               <>
                 <Card>
-                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
                     {t('account')}
                   </h3>
-                  <div className="space-y-2">
+                  <div className="space-y-2 text-xs">
                     <div className="flex justify-between">
                       <span className="text-gray-500">{t('email')}</span>
                       <span className="text-gray-900 dark:text-white">{session.user.email}</span>
@@ -426,12 +468,12 @@ export default function SidePanelApp() {
 
                 {usage && (
                   <Card>
-                    <h3 className="font-semibold text-gray-900 dark:text-white mb-2">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-3">
                       {t('usage')}
                     </h3>
-                    <div className="space-y-3">
+                    <div className="space-y-3 text-xs">
                       <div>
-                        <div className="flex justify-between text-sm mb-1">
+                        <div className="flex justify-between mb-1">
                           <span className="text-gray-500">Cloud Conversions</span>
                           <span>
                             {usage.cloud_conversions_used} / {usage.cloud_conversions_limit}
@@ -465,9 +507,10 @@ export default function SidePanelApp() {
                 </Button>
               </>
             ) : (
-              <Card className="text-center py-8">
-                <p className="text-gray-500 mb-4">Sign in to access your account</p>
-                <Button onClick={() => browser.action.openPopup()}>Sign In</Button>
+              <Card className="text-center py-8 space-y-2">
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('signInRequired')}</p>
+                <p className="text-xs text-gray-500">{t('signInOrRedeem')}</p>
+                <Button onClick={() => browser.action.openPopup()}>{t('signIn')}</Button>
               </Card>
             )}
           </div>
@@ -491,48 +534,30 @@ export default function SidePanelApp() {
         }
       >
         <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('feedbackTitle')}
-            </label>
-            <input
-              type="text"
-              value={feedbackTitle}
-              onChange={(e) => setFeedbackTitle(e.target.value)}
-              className="w-full px-3 py-2 rounded-lg border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-white"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('feedbackType')}
-            </label>
-            <Select
-              value={feedbackType}
-              onChange={(v) => setFeedbackType(v as typeof feedbackType)}
-              options={feedbackTypeOptions}
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-              {t('feedbackContent')}
-            </label>
-            <Textarea
-              value={feedbackContent}
-              onChange={setFeedbackContent}
-              placeholder={t('feedbackContent')}
-              rows={4}
-            />
-          </div>
+          <Input
+            type="text"
+            label={t('feedbackTitle')}
+            value={feedbackTitle}
+            onChange={(e) => setFeedbackTitle(e.target.value)}
+          />
+          <Select
+            label={t('feedbackType')}
+            value={feedbackType}
+            onChange={(v) => setFeedbackType(v as typeof feedbackType)}
+            options={feedbackTypeOptions}
+          />
+          <Textarea
+            label={t('feedbackContent')}
+            value={feedbackContent}
+            onChange={setFeedbackContent}
+            placeholder={t('feedbackContent')}
+            rows={4}
+          />
         </div>
       </Modal>
 
-      {/* Toast */}
       {toast && (
-        <Toast
-          type={toast.type}
-          message={toast.message}
-          onClose={() => setToast(null)}
-        />
+        <Toast type={toast.type} title={toast.message} onClose={() => setToast(null)} />
       )}
     </div>
   );

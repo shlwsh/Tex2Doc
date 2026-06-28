@@ -58,6 +58,11 @@ export interface RedeemCodeResult {
   count_balance: number;
   date_valid_until: string | null;
   redeemed_at: string;
+  // Auto-account fields: present when the redeem code also provisions an account
+  is_new_account?: boolean;
+  access_token?: string;
+  refresh_token?: string;
+  user?: UserProfile;
 }
 
 export interface RedeemCodeRequest {

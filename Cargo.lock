@@ -1671,7 +1671,6 @@ name = "doc-latex-reader"
 version = "0.1.0"
 dependencies = [
  "doc-semantic-ast",
- "doc-tex-facade",
  "doc-utils",
  "insta",
  "logos",

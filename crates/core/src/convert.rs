@@ -31,6 +31,10 @@ fn shorten_running_header(rh: &str) -> String {
 
 /// V1 设计：zip 内 `\includegraphics{*.pdf}` 时，docx-writer 端只接受 PNG/JPG，
 /// 所以这里把 PDF 翻译成 PNG byte 注入 image_assets（同 key）。
+///
+/// 注意：pdfium-render 依赖 mio，mio 不支持 wasm32 目标。因此在 wasm 下
+/// PDF → PNG 转换整体被 cfg 跳过（返回 None 表示「不渲染」，调用方走 fallback）。
+#[cfg(not(target_arch = "wasm32"))]
 fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
     use pdfium_render::prelude::Pdfium;
     let bindings = Pdfium::bind_to_system_library().ok()?;
@@ -51,6 +55,12 @@ fn render_pdf_to_png(pdf_bytes: &[u8]) -> Option<Vec<u8>> {
         )
         .ok()?;
     Some(png_bytes)
+}
+
+/// wasm 占位：浏览器端无法用 pdfium，PDF 图片直接忽略（docx-writer 走 fallback）。
+#[cfg(target_arch = "wasm32")]
+fn render_pdf_to_png(_pdf_bytes: &[u8]) -> Option<Vec<u8>> {
+    None
 }
 
 fn insert_image_asset_aliases(image_assets: &mut ImageAssets, path: &Path, bytes: Vec<u8>) {
@@ -226,6 +236,13 @@ pub fn convert_dir(
     })
 }
 
+/// 单个 zip 条目允许的最大解压字节数（128 MiB）。
+///
+/// 防御 zip bomb / 异常声明大小：超过此值直接拒绝，避免触发
+/// `Vec::with_capacity(u64 → usize)` 的 OOM 或 WASM 端
+/// `invalid malloc request` panic。
+const MAX_ZIP_ENTRY_BYTES: u64 = 128 * 1024 * 1024;
+
 /// WASM 友好入口：接受内存中的 zip 字节流（包含 `.tex` / `.bib` / 图片等），
 /// 内部用 [`zip::ZipArchive`] 解压到 VFS，再走标准解析 → 降级 → 打包。
 ///
@@ -254,9 +271,28 @@ pub fn convert_zip(
         if name.contains("..") {
             return Err(CoreError::Parse(format!("zip 包含不安全路径：{name}")));
         }
-        let mut buf = Vec::with_capacity(f.size() as usize);
+        // 防止 zip bomb / 异常声明大小：
+        // 1. u64 → usize 在 32 位 WASM 上会截断为 u32 / 0；
+        // 2. u64::MAX 这类异常大小会触发 alloc OOM。
+        // 这里先按声明大小做上限检查；实际读取仍由 `read_to_end`
+        // 配合 reserve 增长校验。
+        let declared = f.size();
+        if declared > MAX_ZIP_ENTRY_BYTES {
+            return Err(CoreError::Io(format!(
+                "zip 条目 {name} 声明大小 {declared} 字节超过 {MAX_ZIP_ENTRY_BYTES} 字节上限"
+            )));
+        }
+        // 防御 usize 截断：只在 `declared <= usize::MAX as u64` 时才转
+        let capacity = usize::try_from(declared).unwrap_or(0);
+        let mut buf = Vec::with_capacity(capacity);
         f.read_to_end(&mut buf)
             .map_err(|e| CoreError::Io(format!("读取 zip 条目 {name} 失败：{e}")))?;
+        if buf.len() as u64 > MAX_ZIP_ENTRY_BYTES {
+            return Err(CoreError::Io(format!(
+                "zip 条目 {name} 实际解压 {} 字节超过 {MAX_ZIP_ENTRY_BYTES} 字节上限",
+                buf.len()
+            )));
+        }
         entries.insert(PathBuf::from(name.replace('\\', "/")), buf);
     }
 

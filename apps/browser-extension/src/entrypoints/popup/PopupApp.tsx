@@ -1,5 +1,5 @@
 /**
- * Main Popup Application
+ * Main Popup Application - Commercial UI refactor
  */
 
 import React, { useState, useEffect } from 'react';
@@ -10,23 +10,39 @@ import Progress from '../../ui/components/Progress';
 import Card from '../../ui/components/Card';
 import Select from '../../ui/components/Select';
 import Toast from '../../ui/components/Toast';
+import { Tabs } from '@/ui/components/Tabs';
 import { sendToBackground } from '../../browser/messaging';
 import { MESSAGE_TYPES } from '../../shared/constants';
+import { analyzeZip, type TexFileInfo } from '../../conversion/local-wasm';
 import type { JobRecord, Session, UsageSummary } from '../../shared/types';
-import { t, type Locale } from '../../ui/i18n';
+import { useI18n } from '@/ui/i18n/useI18n';
 
 type ConversionMode = 'local' | 'cloud';
-type ConversionStatus = 'idle' | 'converting' | 'success' | 'error';
+type ConversionStage = 'idle' | 'uploading' | 'creating' | 'polling' | 'completed' | 'failed';
+type AuthTab = 'signIn' | 'redeem';
 
 interface ConversionState {
-  status: ConversionStatus;
+  stage: ConversionStage;
   progress: number;
   message: string;
   error?: string;
 }
 
+interface ZipAnalysis {
+  texFiles: TexFileInfo[];
+  detectedMainTex: string | null;
+}
+
+interface JobUpdatePayload {
+  jobId?: string;
+  status?: string;
+  progress?: number;
+  stage?: ConversionStage | string;
+  error?: string;
+}
+
 export default function PopupApp() {
-  const [locale, setLocale] = useState<Locale>('en');
+  const { t, locale, setLocale } = useI18n();
   const [session, setSession] = useState<Session | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -35,21 +51,58 @@ export default function PopupApp() {
   const [profile, setProfile] = useState('standard');
   const [quality, setQuality] = useState('balanced');
   const [conversion, setConversion] = useState<ConversionState>({
-    status: 'idle',
+    stage: 'idle',
     progress: 0,
     message: '',
   });
-  const [showLogin, setShowLogin] = useState(false);
+  const [authTab, setAuthTab] = useState<AuthTab>('signIn');
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [redeemInput, setRedeemInput] = useState('');
+  const [isRedeeming, setIsRedeeming] = useState(false);
   const [recentJobs, setRecentJobs] = useState<JobRecord[]>([]);
+  const [zipAnalysis, setZipAnalysis] = useState<ZipAnalysis | null>(null);
+  const [isAnalyzingZip, setIsAnalyzingZip] = useState(false);
+  const [zipError, setZipError] = useState<string | null>(null);
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
 
   useEffect(() => {
     loadSession();
     loadJobs();
-  }, []);
+    const listener = (msg: { type?: string; [key: string]: unknown }) => {
+      if (msg?.type === 'JOB_UPDATED' && msg.jobId === currentJobId) {
+        applyJobUpdate(msg as JobUpdatePayload & { type: string });
+      }
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (browser.runtime.onMessage as any).addListener(listener);
+    return () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (browser.runtime.onMessage as any).removeListener(listener);
+    };
+  }, [currentJobId]);
+
+  const applyJobUpdate = (msg: JobUpdatePayload & { type: string }) => {
+    const stage = (msg.stage as ConversionStage) || 'polling';
+    const progress = typeof msg.progress === 'number' ? msg.progress : 0;
+    let messageKey = 'converting';
+    if (stage === 'uploading') messageKey = 'cloud.uploading';
+    else if (stage === 'creating') messageKey = 'cloud.creating';
+    else if (stage === 'polling') messageKey = 'cloud.polling';
+    else if (stage === 'completed') messageKey = 'cloud.completed';
+    else if (stage === 'failed') messageKey = 'cloud.failed';
+    setConversion({
+      stage,
+      progress,
+      message: t(messageKey),
+      error: msg.error,
+    });
+    if (stage === 'completed') {
+      loadJobs();
+    }
+  };
 
   const loadSession = async () => {
     try {
@@ -87,17 +140,46 @@ export default function PopupApp() {
       });
 
       if (result.success) {
-        setShowLogin(false);
         setLoginEmail('');
         setLoginPassword('');
         await loadSession();
       } else {
-        setLoginError(result.error || 'Login failed');
+        setLoginError(result.error || t('errors.authError'));
       }
     } catch (error) {
-      setLoginError(error instanceof Error ? error.message : 'Login failed');
+      setLoginError(error instanceof Error ? error.message : t('errors.authError'));
     } finally {
       setIsLoggingIn(false);
+    }
+  };
+
+  const handleRedeemAndLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!redeemInput.trim()) return;
+    setIsRedeeming(true);
+    setLoginError('');
+
+    try {
+      const result = await sendToBackground<{
+        success: boolean;
+        signedIn?: boolean;
+        isNewAccount?: boolean;
+        error?: string;
+      }>({
+        type: MESSAGE_TYPES.REDEEM_CODE_AND_LOGIN,
+        code: redeemInput.trim().toUpperCase(),
+      });
+
+      if (result.success && result.signedIn) {
+        setRedeemInput('');
+        await loadSession();
+      } else {
+        setLoginError(result.error || t('redeemRequiresLogin'));
+      }
+    } catch (error) {
+      setLoginError(error instanceof Error ? error.message : t('redeemFailed'));
+    } finally {
+      setIsRedeeming(false);
     }
   };
 
@@ -111,27 +193,65 @@ export default function PopupApp() {
     }
   };
 
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       setSelectedFile(file);
-      if (file.name.endsWith('.zip')) {
-        setMainTex('main.tex');
+      setZipError(null);
+      setConversion({ stage: 'idle', progress: 0, message: '' });
+
+      if (file.name.toLowerCase().endsWith('.zip')) {
+        setIsAnalyzingZip(true);
+        try {
+          const arrayBuffer = await file.arrayBuffer();
+          const zipBytes = new Uint8Array(arrayBuffer);
+          const analysis = await analyzeZip(zipBytes);
+
+          setZipAnalysis({
+            texFiles: analysis.texFiles,
+            detectedMainTex: analysis.detectedMainTex,
+          });
+
+          if (analysis.detectedMainTex) {
+            setMainTex(analysis.detectedMainTex);
+          } else if (analysis.texFiles.length === 0) {
+            setZipError(t('noTexFound'));
+            setMainTex('');
+          } else {
+            setMainTex('');
+          }
+        } catch (error) {
+          console.error('ZIP analysis failed:', error);
+          setZipError(t('errors.unknown'));
+          setZipAnalysis(null);
+        } finally {
+          setIsAnalyzingZip(false);
+        }
       }
     }
   };
 
   const handleConvert = async () => {
     if (!selectedFile) return;
+    if (!mainTex || mainTex.trim() === '') {
+      setConversion({ stage: 'failed', progress: 0, message: t('mainTexFile'), error: t('mainTexFile') });
+      return;
+    }
 
-    setConversion({ status: 'converting', progress: 0, message: t(locale, 'converting') });
+    setConversion({ stage: 'uploading', progress: 0, message: t('cloud.uploading') });
 
     try {
       const arrayBuffer = await selectedFile.arrayBuffer();
       const zipBytes = new Uint8Array(arrayBuffer);
 
       if (mode === 'local') {
-        const result = await sendToBackground<{ success: boolean; error?: string }>({
+        const result = await sendToBackground<{
+          success: boolean;
+          error?: string;
+          errorType?: string;
+          trace?: string[];
+          debug?: Record<string, unknown>;
+        }>({
           type: MESSAGE_TYPES.START_WASM_CONVERSION,
           zipBytes: Array.from(zipBytes),
           fileName: selectedFile.name,
@@ -139,34 +259,44 @@ export default function PopupApp() {
         });
 
         if (result.success) {
-          setConversion({ status: 'success', progress: 100, message: t(locale, 'conversionComplete') });
+          setConversion({ stage: 'completed', progress: 100, message: t('conversionComplete') });
           await loadJobs();
         } else {
-          throw new Error(result.error || 'Conversion failed');
+          setConversion({
+            stage: 'failed',
+            progress: 0,
+            message: t('conversionFailed'),
+            error: result.error || t('conversionFailed'),
+          });
         }
       } else {
-        const result = await sendToBackground<{ success: boolean; error?: string }>({
-          type: MESSAGE_TYPES.START_CONVERSION,
+        const result = await sendToBackground<{ success: boolean; jobId?: string; error?: string }>({
+          type: MESSAGE_TYPES.CLOUD_CONVERT_AND_POLL,
+          zipBytes: Array.from(zipBytes),
           fileName: selectedFile.name,
           mainTex,
           profile,
           quality,
-          mode: 'cloud',
         });
 
-        if (result.success) {
-          setConversion({ status: 'success', progress: 100, message: t(locale, 'conversionComplete') });
-          await loadJobs();
+        if (result.success && result.jobId) {
+          setCurrentJobId(result.jobId);
+          // progress updates are pushed via runtime.onMessage listener
         } else {
-          throw new Error(result.error || 'Conversion failed');
+          setConversion({
+            stage: 'failed',
+            progress: 0,
+            message: t('cloud.failed'),
+            error: result.error || t('cloud.failed'),
+          });
         }
       }
     } catch (error) {
       setConversion({
-        status: 'error',
+        stage: 'failed',
         progress: 0,
-        message: t(locale, 'conversionFailed'),
-        error: error instanceof Error ? error.message : 'Unknown error',
+        message: t('conversionFailed'),
+        error: error instanceof Error ? error.message : t('errors.unknown'),
       });
     }
   };
@@ -175,124 +305,297 @@ export default function PopupApp() {
     browser.runtime.openOptionsPage();
   };
 
+  const formatFileSize = (bytes: number): string => {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const isConverting = ['uploading', 'creating', 'polling'].includes(conversion.stage);
+
   return (
-    <div className="w-full max-w-popup mx-auto p-4 space-y-4 bg-white dark:bg-gray-900 min-h-popup">
-      {/* Header */}
+    <div className="w-full max-w-popup mx-auto p-4 space-y-3 bg-white dark:bg-gray-900 min-h-popup">
+      {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 bg-primary-600 rounded-lg flex items-center justify-center">
-            <span className="text-white font-bold text-sm">T2D</span>
+          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-primary-700 flex items-center justify-center shadow-sm">
+            <span className="text-white font-bold text-xs">T2D</span>
           </div>
-          <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{t(locale, 'appName')}</h1>
+          <div className="leading-tight">
+            <h1 className="text-sm font-semibold text-gray-900 dark:text-white">{t('appName')}</h1>
+            <p className="text-[11px] text-gray-500">{t('tagline')}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <select
+            value={locale}
+            onChange={(e) => setLocale(e.target.value as typeof locale)}
+            className="text-xs bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-1.5 py-1 text-gray-600 dark:text-gray-300"
+          >
+            <option value="en">EN</option>
+            <option value="zh">中</option>
+          </select>
           {session ? (
-            <>
+            <div className="flex items-center gap-1">
               <Badge variant={usage && usage.count_balance > 0 ? 'success' : 'info'}>
                 {usage
-                  ? `${Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)} / ${usage.cloud_conversions_limit}`
+                  ? `${Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)}/${usage.cloud_conversions_limit}`
                   : '--'}
               </Badge>
-              <button onClick={handleLogout} className="text-sm text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
-                {t(locale, 'signOut')}
+              <button
+                onClick={handleLogout}
+                className="text-xs text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+              >
+                {t('signOut')}
               </button>
-            </>
-          ) : (
-            <button onClick={() => setShowLogin(true)} className="text-sm text-primary-600 hover:text-primary-700">
-              {t(locale, 'signIn')}
-            </button>
-          )}
+            </div>
+          ) : null}
         </div>
       </div>
 
-      {/* Login Form */}
-      {showLogin && !session && (
-        <Card className="animate-fade-in">
-          <form onSubmit={handleLogin} className="space-y-3">
-            <Input type="email" label={t(locale, 'email')} value={loginEmail} onChange={(e) => setLoginEmail(e.target.value)} placeholder="you@example.com" required />
-            <Input type="password" label={t(locale, 'password')} value={loginPassword} onChange={(e) => setLoginPassword(e.target.value)} placeholder="********" required />
-            {loginError && <p className="text-sm text-red-600 dark:text-red-400">{loginError}</p>}
-            <div className="flex gap-2">
-              <Button type="submit" isLoading={isLoggingIn} className="flex-1">{t(locale, 'signIn')}</Button>
-              <Button type="button" variant="secondary" onClick={() => setShowLogin(false)}>{t(locale, 'cancel')}</Button>
-            </div>
-          </form>
+      {/* Auth View (only when not signed in) */}
+      {!session && (
+        <Card className="space-y-3">
+          <Tabs
+            tabs={[
+              { id: 'signIn', label: t('authTabs.signIn') },
+              { id: 'redeem', label: t('authTabs.redeem') },
+            ]}
+            activeTab={authTab}
+            onChange={(id) => setAuthTab(id as AuthTab)}
+            variant="underline"
+          />
+          {authTab === 'signIn' ? (
+            <form onSubmit={handleLogin} className="space-y-3">
+              <Input
+                type="email"
+                label={t('email')}
+                value={loginEmail}
+                onChange={(e) => setLoginEmail(e.target.value)}
+                placeholder="you@example.com"
+                required
+              />
+              <Input
+                type="password"
+                label={t('password')}
+                value={loginPassword}
+                onChange={(e) => setLoginPassword(e.target.value)}
+                placeholder="********"
+                required
+              />
+              {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
+              <Button type="submit" isLoading={isLoggingIn} className="w-full">
+                {t('signIn')}
+              </Button>
+            </form>
+          ) : (
+            <form onSubmit={handleRedeemAndLogin} className="space-y-3">
+              <p className="text-xs text-gray-600 dark:text-gray-400">{t('redeemDescription')}</p>
+              <p className="text-xs text-primary-600 dark:text-primary-300">{t('redeemAutoRegister')}</p>
+              <Input
+                type="text"
+                label={t('redeemCodeShort')}
+                value={redeemInput}
+                onChange={(e) => setRedeemInput(e.target.value)}
+                placeholder={t('redeemPlaceholder')}
+                required
+              />
+              {loginError && <p className="text-xs text-red-600 dark:text-red-400">{loginError}</p>}
+              <Button type="submit" isLoading={isRedeeming} className="w-full" variant="primary">
+                {t('redeem')}
+              </Button>
+            </form>
+          )}
         </Card>
       )}
 
       {/* Conversion Card */}
-      <Card className="space-y-4">
+      <Card className="space-y-3">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t(locale, 'selectZipFile')}</label>
-          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-4 text-center hover:border-primary-400 transition-colors">
+          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">
+            {t('selectZipFile')}
+          </label>
+          <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-lg p-3 text-center hover:border-primary-400 transition-colors">
             <input type="file" accept=".zip" onChange={handleFileSelect} className="hidden" id="file-input" />
-            <label htmlFor="file-input" className="cursor-pointer">
+            <label htmlFor="file-input" className="cursor-pointer block">
               {selectedFile ? (
                 <div className="text-sm">
                   <p className="font-medium text-gray-900 dark:text-white">{selectedFile.name}</p>
-                  <p className="text-gray-500">{(selectedFile.size / 1024).toFixed(1)} KB</p>
+                  <p className="text-xs text-gray-500">{formatFileSize(selectedFile.size)}</p>
                 </div>
               ) : (
-                <div className="text-gray-500 dark:text-gray-400">
-                  <svg className="mx-auto h-8 w-8 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <div className="text-gray-500 dark:text-gray-400 text-sm">
+                  <svg className="mx-auto h-7 w-7 mb-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  <p>{t(locale, 'selectFile')}</p>
+                  <p>{t('selectZipHint')}</p>
                 </div>
               )}
             </label>
           </div>
         </div>
 
-        <Input label={t(locale, 'mainTexFile')} value={mainTex} onChange={(e) => setMainTex(e.target.value)} placeholder="main.tex" />
+        {isAnalyzingZip && (
+          <div className="flex items-center gap-2 text-xs text-gray-500">
+            <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {t('loading')}
+          </div>
+        )}
 
+        {zipError && (
+          <div className="text-xs text-red-600 dark:text-red-400 flex items-center gap-2">
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            {zipError}
+          </div>
+        )}
+
+        {zipAnalysis && !isAnalyzingZip && (
+          <div className="space-y-2">
+            {zipAnalysis.texFiles.length === 1 && zipAnalysis.detectedMainTex && (
+              <div className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1.5">
+                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                </svg>
+                {t('mainTexAutoDetected')}: {zipAnalysis.detectedMainTex}
+              </div>
+            )}
+            {zipAnalysis.texFiles.length > 1 && (
+              <div className="space-y-1">
+                <div className="text-xs text-gray-600 dark:text-gray-400">
+                  {t('mainTexPickFromList', { count: zipAnalysis.texFiles.length })}
+                </div>
+                <div className="max-h-28 overflow-y-auto border border-gray-200 dark:border-gray-700 rounded-lg divide-y divide-gray-200 dark:divide-gray-700">
+                  {zipAnalysis.texFiles.map((tex, index) => (
+                    <button
+                      key={index}
+                      onClick={() => setMainTex(tex.path)}
+                      className={`w-full px-3 py-1.5 text-left text-xs flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800 ${mainTex === tex.path ? 'bg-primary-50 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300' : 'text-gray-700 dark:text-gray-300'}`}
+                    >
+                      <span className="truncate">{tex.path}</span>
+                      <span className="text-[11px] text-gray-400 ml-2">{formatFileSize(tex.size)}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {!isAnalyzingZip && !zipAnalysis && selectedFile && (
+          <Input
+            label={t('mainTexFile')}
+            value={mainTex}
+            onChange={(e) => setMainTex(e.target.value)}
+            placeholder="main.tex"
+          />
+        )}
+
+        {/* Mode selector */}
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t(locale, 'mode')}</label>
-          <div className="flex gap-2">
-            <button onClick={() => setMode('local')} className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${mode === 'local' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-400'}`}>
-              {t(locale, 'localMode')}
+          <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1.5">{t('mode')}</label>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setMode('local')}
+              className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${mode === 'local' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-400'}`}
+            >
+              {t('localMode')}
             </button>
-            <button onClick={() => setMode('cloud')} className={`flex-1 py-2 px-3 rounded-lg border text-sm font-medium transition-colors ${mode === 'cloud' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-400'}`} disabled={!session} title={!session ? t(locale, 'errors.authError') : undefined}>
-              {t(locale, 'cloudMode')}
+            <button
+              onClick={() => setMode('cloud')}
+              disabled={!session}
+              className={`py-2 px-3 rounded-lg border text-xs font-medium transition-colors ${mode === 'cloud' ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-gray-400'} disabled:opacity-50 disabled:cursor-not-allowed`}
+              title={!session ? t('signInOrRedeem') : undefined}
+            >
+              {t('cloudMode')}
             </button>
           </div>
         </div>
 
-        {mode === 'cloud' && (
-          <div className="grid grid-cols-2 gap-3">
-            <Select label={t(locale, 'profile')} value={profile} onChange={setProfile} options={[{ value: 'standard', label: t(locale, 'profiles.standard') }, { value: 'academic', label: t(locale, 'profiles.academic') }, { value: 'publication', label: t(locale, 'profiles.publication') }]} />
-            <Select label={t(locale, 'quality')} value={quality} onChange={setQuality} options={[{ value: 'preview', label: t(locale, 'qualities.preview') }, { value: 'balanced', label: t(locale, 'qualities.balanced') }, { value: 'strict', label: t(locale, 'qualities.strict') }]} />
+        {mode === 'cloud' && session && (
+          <div className="grid grid-cols-2 gap-2">
+            <Select
+              label={t('profile')}
+              value={profile}
+              onChange={setProfile}
+              options={[
+                { value: 'standard', label: t('profiles.standard') },
+                { value: 'academic', label: t('profiles.academic') },
+                { value: 'publication', label: t('profiles.publication') },
+              ]}
+            />
+            <Select
+              label={t('quality')}
+              value={quality}
+              onChange={setQuality}
+              options={[
+                { value: 'preview', label: t('qualities.preview') },
+                { value: 'balanced', label: t('qualities.balanced') },
+                { value: 'strict', label: t('qualities.strict') },
+              ]}
+            />
           </div>
         )}
 
-        <Button onClick={handleConvert} disabled={!selectedFile || conversion.status === 'converting'} isLoading={conversion.status === 'converting'} className="w-full" size="lg">
-          {conversion.status === 'converting' ? t(locale, 'converting') : t(locale, 'convert')}
+        <Button
+          onClick={handleConvert}
+          disabled={!selectedFile || isConverting}
+          isLoading={isConverting}
+          className="w-full"
+          size="md"
+        >
+          {isConverting ? conversion.message : t('convert')}
         </Button>
 
-        {conversion.status === 'converting' && (
-          <div className="space-y-2">
+        {isConverting && (
+          <div className="space-y-1.5">
             <Progress value={conversion.progress} showLabel />
-            <p className="text-sm text-gray-500 text-center">{conversion.message}</p>
+            <p className="text-xs text-gray-500 text-center">{conversion.message}</p>
           </div>
         )}
 
-        {conversion.status === 'success' && <Toast type="success" title={t(locale, 'conversionComplete')}>{conversion.message}</Toast>}
-        {conversion.status === 'error' && <Toast type="error" title={t(locale, 'conversionFailed')}>{conversion.error || conversion.message}</Toast>}
+        {conversion.stage === 'completed' && (
+          <Toast type="success" title={t('conversionComplete')} onClose={() => setConversion({ stage: 'idle', progress: 0, message: '' })}>
+            {conversion.message}
+          </Toast>
+        )}
+        {conversion.stage === 'failed' && (
+          <Toast type="error" title={t('conversionFailed')} onClose={() => setConversion({ stage: 'idle', progress: 0, message: '' })}>
+            {conversion.error || t('errors.unknown')}
+          </Toast>
+        )}
       </Card>
 
       {/* Recent Jobs */}
       {recentJobs.length > 0 && (
-        <Card>
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">{t(locale, 'currentJob')}</h3>
-          <div className="space-y-2">
+        <Card className="space-y-2">
+          <h3 className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('currentJob')}</h3>
+          <div className="space-y-1.5">
             {recentJobs.map((job) => (
-              <div key={job.id} className="flex items-center justify-between py-2 border-b border-gray-100 dark:border-gray-700 last:border-0">
+              <div
+                key={job.id}
+                className="flex items-center justify-between py-1.5 border-b border-gray-100 dark:border-gray-700 last:border-0"
+              >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{job.file_name}</p>
-                  <p className="text-xs text-gray-500">{job.main_tex}</p>
+                  <p className="text-xs font-medium text-gray-900 dark:text-white truncate">{job.file_name}</p>
+                  <p className="text-[11px] text-gray-500">{job.main_tex}</p>
                 </div>
-                <Badge variant={job.status === 'completed' ? 'success' : job.status === 'failed' ? 'error' : job.status === 'processing' ? 'warning' : 'default'}>
-                  {t(locale, `jobStatus.${job.status}`)}
+                <Badge
+                  variant={
+                    job.status === 'completed'
+                      ? 'success'
+                      : job.status === 'failed'
+                        ? 'error'
+                        : job.status === 'processing'
+                          ? 'warning'
+                          : 'default'
+                  }
+                >
+                  {t(`jobStatus.${job.status}`)}
                 </Badge>
               </div>
             ))}
@@ -300,10 +603,17 @@ export default function PopupApp() {
         </Card>
       )}
 
-      {/* Footer Actions */}
-      <div className="flex justify-between pt-2 border-t border-gray-200 dark:border-gray-700">
-        <Button variant="ghost" size="sm" onClick={openSettings}>{t(locale, 'settings')}</Button>
-        <Button variant="ghost" size="sm">{t(locale, 'jobs')}</Button>
+      <div className="flex justify-between pt-1 border-t border-gray-200 dark:border-gray-700">
+        <Button variant="ghost" size="sm" onClick={openSettings}>
+          {t('settings')}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => browser.sidebarAction?.open?.()}
+        >
+          {t('jobs')}
+        </Button>
       </div>
     </div>
   );

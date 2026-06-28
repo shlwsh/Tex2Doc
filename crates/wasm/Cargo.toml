@@ -25,3 +25,9 @@ console_error_panic_hook = { version = "0.1", optional = true }
 [features]
 default = []
 console_error_panic_hook = ["dep:console_error_panic_hook"]
+
+# wasm-opt 默认会校验 bulk-memory 特性，但 zip / image 等 crate 已经生成
+# 使用 memory.copy 的指令；关闭 wasm-opt 跳过校验可显著减少构建时长
+# 并避免 wasm-opt 与 rustc 输出之间的版本冲突。
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
