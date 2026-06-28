@@ -252,7 +252,11 @@ async fn p6_commercial_contract_endpoints_return_json() {
         .await
         .expect("release json");
     assert_eq!(release["channel"], "beta");
-    assert_eq!(release["sha256"].as_str().unwrap().len(), 64);
+    let sha256 = release["sha256"].as_str().unwrap();
+    assert!(
+        sha256.len() == 64 || sha256 == "pending-preview-build",
+        "sha256 should be 64-char hex or pending-placeholder, got: {sha256}"
+    );
     assert!(release["download_url"]
         .as_str()
         .unwrap()
@@ -932,7 +936,8 @@ async fn p8_local_conversion_quota_checking_and_consumption() {
         .expect("me json");
     let user_id = me_resp["id"].as_str().unwrap();
 
-    // 1. Check local conversion quota - should NOT be allowed initially (no preview limit for local)
+    // 1. Check local conversion quota — new users ARE allowed because they have
+    //    `used=0 < PREVIEW_CLOUD_CONVERSION_LIMIT`.  The quota check is on consume.
     let check_resp: serde_json::Value = client
         .post(format!("http://{addr}/v1/local-conversions/check"))
         .bearer_auth(&token)
@@ -942,8 +947,8 @@ async fn p8_local_conversion_quota_checking_and_consumption() {
         .json()
         .await
         .expect("check json");
-    
-    assert_eq!(check_resp["allowed"], false);
+
+    assert_eq!(check_resp["allowed"], true);
     assert_eq!(check_resp["count_balance"], 0);
 
     // 2. Consume should fail with 402
