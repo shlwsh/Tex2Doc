@@ -2134,7 +2134,7 @@ fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
             message: format!("invalid zip entry #{index}: {e}"),
         })?;
         let name = file.name();
-        if name.contains('\\') || file.enclosed_name().is_none() {
+        if !is_safe_zip_entry_name(name) {
             return Err(ApiError::BadRequest {
                 code: "zip_slip",
                 message: format!("unsafe zip entry path: {name}"),
@@ -2161,6 +2161,17 @@ fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
         }
     }
     Ok(())
+}
+
+fn is_safe_zip_entry_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    let trimmed = normalized.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with('/') {
+        return false;
+    }
+    trimmed
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
 }
 
 /// 在 body 中找第一个 boundary 行。

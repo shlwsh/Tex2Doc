@@ -55,7 +55,7 @@ fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
 
         // Check for path traversal attacks
         let name = file.name();
-        if name.contains("..") || name.starts_with('/') || name.contains('\\') && !name.starts_with('\\') {
+        if !is_safe_zip_entry_name(name) {
             return Err(format!("Dangerous path in ZIP: {name}"));
         }
 
@@ -72,6 +72,17 @@ fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
         file_count,
         total_uncompressed,
     })
+}
+
+fn is_safe_zip_entry_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    let trimmed = normalized.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with('/') {
+        return false;
+    }
+    trimmed
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
 }
 
 #[allow(dead_code)]

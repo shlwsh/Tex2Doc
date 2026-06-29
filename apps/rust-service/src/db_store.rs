@@ -117,6 +117,14 @@ impl DbStore {
         )
         .execute(&self.pool)
         .await?;
+        sqlx::raw_sql(
+            r#"
+            ALTER TABLE conversion_jobs
+                ADD COLUMN IF NOT EXISTS trace_id TEXT;
+            "#,
+        )
+        .execute(&self.pool)
+        .await?;
         self.seed_admin_from_env().await?;
         Ok(())
     }
@@ -2743,7 +2751,7 @@ fn job_select_sql(tail: &str) -> String {
                zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
                EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
-               idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
+               idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code, trace_id
         FROM conversion_jobs {tail}
         "#
     )
@@ -2799,7 +2807,7 @@ fn job_from_row(
         engine_version: row.get::<String, _>("engine_version"),
         profile_version: row.get("profile_version"),
         last_error_code: row.get("last_error_code"),
-        trace_id: row.get("trace_id"),
+        trace_id: row.try_get("trace_id").ok().flatten(),
     }
 }
 
