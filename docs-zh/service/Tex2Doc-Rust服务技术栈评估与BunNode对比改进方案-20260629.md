@@ -326,19 +326,190 @@ Tex2Doc/
 
 ---
 
-## 5. 总结与优先级
+---
+
+## 6. 代码层面的具体改进建议
+
+### 6.1 前后端类型共享（高优先级）
+
+**现状问题**：
+- React 前端 `apps/react-web/src/api/types.ts` 手工维护 DTO 类型
+- Rust 侧 `routes.rs` 中的 `serde_json::json!` 与前端类型无自动同步机制
+- 字段命名不统一（如 `user_id` vs `id`，`job_id` vs `id`）
+
+**改进方案**：
+
+1. **创建共享类型包 `packages/api-types`**：
+```
+Tex2Doc/
+├── packages/
+│   └── api-types/          # 共享 TS 类型
+│       ├── src/index.ts
+│       ├── src/schemas/    # Zod schemas 用于运行时验证
+│       └── package.json
+├── apps/
+│   ├── react-web/          # import from @tex2doc/api-types
+│   └── rust-service/       # 运行时生成 OpenAPI spec
+```
+
+2. **Rust 端生成 OpenAPI Schema**：
+```toml
+# apps/rust-service/Cargo.toml
+utoipa = { version = "4", features = ["axum_extras"] }
+serde_yaml = "0.9"
+```
+
+3. **统一字段命名规范**：建议 Rust 端统一使用 `snake_case`，前端转换时使用 `zod` 进行自动转换。
+
+### 6.2 API SDK 增强（高优先级）
+
+**现状问题**：`apps/react-web/src/api/http.ts` 缺少请求拦截器、重试逻辑、取消机制。
+
+**改进方案**：
+```typescript
+// apps/react-web/src/api/http.ts 增强
+export class HttpClient {
+  private abortController: AbortController | null = null;
+
+  async request<T>(endpoint: string, options: RequestOptions): Promise<T> {
+    // 1. 自动注入 Authorization
+    // 2. 指数退避重试（3次，间隔 1s/2s/4s）
+    // 3. AbortController 取消支持
+    // 4. 错误分类：网络错误 vs API 错误
+  }
+
+  cancel() {
+    this.abortController?.abort();
+  }
+}
+```
+
+### 6.3 Worker 并发增强（高优先级）
+
+**现状问题**：`worker_service.rs` 第 100 行 `mpsc::channel(32)` + 单 worker loop，高并发时排队。
+
+**改进方案**：
+```rust
+// apps/rust-service/src/worker_service.rs
+pub async fn spawn_worker_state() -> Result<ServerState, sqlx::Error> {
+    let worker_count = std::env::var("CONVERSION_WORKERS")
+        .unwrap_or_else(|_| num_cpus::get().to_string())
+        .parse()
+        .unwrap_or(4);
+
+    let (tx, rx) = mpsc::channel(256); // 扩大队列
+    let state = ServerState::new(tx).await?;
+
+    for i in 0..worker_count {
+        let state = state.clone();
+        let rx = rx.clone();
+        tokio::spawn(async move {
+            worker_loop(state, rx, format!("worker-{}", i)).await;
+        });
+    }
+
+    Ok(state)
+}
+```
+
+### 6.4 数据库连接池动态配置（中优先级）
+
+**现状问题**：`state.rs` 中 `max_connections(10)` 对并发请求不足。
+
+**改进方案**：
+```rust
+// apps/rust-service/src/state.rs
+let pool_size = std::env::var("DATABASE_POOL_SIZE")
+    .unwrap_or_else(|_| (num_cpus::get() * 4).to_string())
+    .parse()
+    .unwrap_or(16);
+
+sqlx::postgres::PoolOptions::new()
+    .max_connections(pool_size)
+    .acquire_timeout(Duration::from_secs(30))
+```
+
+### 6.5 上传流式处理（中优先级）
+
+**现状问题**：`routes.rs` 第 1272 行 `axum::body::to_bytes(body, MAX_BODY)` 全量读入内存。
+
+**改进方案**：
+```rust
+// 使用 tower-http 的流式处理或 tempfile
+use tempfile::TempPath;
+
+async fn upload_project(
+    State(state): State<ServerState>,
+    mut request: Request,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let (parts, body) = request.into_parts();
+    let session = require_session(&state, &parts.headers).await?;
+
+    // 流式写入临时文件
+    let temp_file: TempPath = tokio::task::spawn_blocking(|| {
+        tempfile::Builder::new()
+            .suffix(".zip")
+            .tempfile_in(&std::env::temp_dir())
+    }).await??.into_temp_path();
+
+    let mut file = tokio::fs::File::from_std(
+        std::fs::File::create(temp_file.as_ref())?
+    );
+    tokio::io::copy(&mut body.into_body().into_data_stream(), &mut file).await?;
+
+    let bytes = tokio::fs::read(&temp_file).await?;
+    validate_project_zip(&bytes)?;
+    // ... 后续处理
+}
+```
+
+### 6.6 限流与熔断（中优先级）
+
+**现状问题**：未见全局 / IP / 用户级限流。
+
+**改进方案**：
+```rust
+// apps/rust-service/src/main.rs
+use axum_limiter::Limiter;
+use std::time::Duration;
+
+let app = router()
+    .layer(Limiter::new(
+        |req| async move {
+            let ip = req
+                .headers()
+                .get("x-forwarded-for")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("unknown");
+            Key::from(ip)
+        },
+        100,
+        Duration::from_secs(60),
+    ));
+```
+
+### 6.7 API 与 Worker 解耦部署（中优先级）
+
+**现状问题**：API 和 Worker 共进程，无法独立扩缩。
+
+**改进方案**：见文档第 3.2 节建议 6，架构图已在上方提供。
+
+---
+
+## 7. 总结与优先级
 
 | 优先级 | 改进项 | 工作量 | 价值 | 推荐行动 |
 |---|---|---|---|---|
 | **P0** | Worker 并发增强（多 worker）| 小 | 高 | 立即实现 |
 | **P0** | 数据库连接池动态配置 | 小 | 高 | 立即实现 |
 | **P0** | 上传流式处理 | 中 | 高 | 立即实现 |
+| **P1** | 前后端类型共享（packages/api-types）| 中 | 高 | 下个迭代 |
 | **P1** | API 层可观测性（Prometheus metrics）| 中 | 高 | 下个迭代 |
 | **P1** | 限流与熔断 | 中 | 高 | 下个迭代 |
-| **P1** | API + Worker 解耦部署 | 中 | 中 | 下个迭代 |
+| **P1** | API SDK 增强（重试/取消）| 小 | 中 | 下个迭代 |
+| **P2** | API + Worker 解耦部署 | 中 | 中 | Beta 上线后 |
 | **P2** | 文件存储迁移 S3 | 中 | 中 | Beta 上线后 |
 | **P2** | 引入 Redis 辅助队列 | 中 | 中 | Beta 上线后 |
-| **P2** | 共享类型包（packages/api-types）| 中 | 中 | React 联调期间 |
 | **P3** | Bun/Node 迁移评估 | 大 | 待定 | 触发信号出现时 |
 | **P3** | SSR 同构（如果有）| 大 | 待定 | 有需求时评估 |
 
@@ -351,5 +522,6 @@ Tex2Doc/
 2. **提升可观测性**（Prometheus metrics + Grafana 看板）。
 3. **架构解耦**（API/Worker 分离，文件存储外置）。
 4. **前后端类型共享**（packages/api-types）。
+5. **API SDK 增强**（重试、取消、错误分类）。
 
 Bun/Node 迁移作为**长期选项**保留，但应作为有明确业务信号驱动的主动决策，而非追赶技术潮流的冲动选择。
