@@ -18,7 +18,15 @@ import { redeemCode } from '@/api/feedback';
 import { startCheckout, openBillingPortal } from '@/api/billing';
 import { getSession, saveSession, clearSession, getAccessToken } from '@/state/session-store';
 import { getSettings, getApiBaseUrl } from '@/state/settings-store';
-import { saveJob, getJob, getAllJobs, updateJobStatus, setJobStage, getPendingCloudJobs, addEvent } from '@/state/job-store';
+import {
+  saveJob,
+  getJob,
+  getAllJobs,
+  updateJobStatus,
+  setJobStage,
+  getPendingCloudJobs,
+  addEvent,
+} from '@/state/job-store';
 import { downloadBytes } from '@/browser/downloads';
 import { openUrl } from '@/browser/compat';
 import { convertLocal } from '@/conversion/local-wasm';
@@ -27,6 +35,7 @@ import type { JobRecord, ConversionJob } from '@/shared/types';
 import { AuthError, ApiError } from '@/shared/errors';
 import { buildDiagnostics, exportDiagnosticsBlob } from '@/diagnostics/bundle';
 import { exportFunnelJson, track } from '@/analytics/funnel';
+import { defineBackground } from 'wxt/utils/define-background';
 
 const activePolls = new Map<string, number>();
 // localJobId → cloudJobId. Survives only within a single SW lifetime.
@@ -49,11 +58,13 @@ const ALARM_RECOVERY_PERIOD_MIN = 1;
 function scheduleRecoveryAlarm(): void {
   if (!browser.alarms?.create) return;
   // Overwrite any existing alarm so period changes (e.g. for testing) take effect.
-  browser.alarms.create(ALARM_RECOVERY, {
-    periodInMinutes: ALARM_RECOVERY_PERIOD_MIN,
-  }).catch((error: unknown) => {
-    console.warn('[Tex2Doc Background] alarms.create failed:', error);
-  });
+  browser.alarms
+    .create(ALARM_RECOVERY, {
+      periodInMinutes: ALARM_RECOVERY_PERIOD_MIN,
+    })
+    .catch((error: unknown) => {
+      console.warn('[Tex2Doc Background] alarms.create failed:', error);
+    });
 }
 
 export default defineBackground({
@@ -76,7 +87,13 @@ export default defineBackground({
       scheduleRecoveryAlarm();
     });
 
-    browser.runtime.onMessage.addListener(handleMessage);
+    browser.runtime.onMessage.addListener((message: unknown) =>
+      handleMessage(
+        typeof message === 'object' && message !== null
+          ? message as Record<string, unknown>
+          : {},
+      ),
+    );
     browser.contextMenus.onClicked.addListener(handleContextMenuClick);
 
     // P2-1: wake the SW at most once a minute so an in-flight cloud job keeps
@@ -84,7 +101,7 @@ export default defineBackground({
     // regardless of whether anything is open, so we re-use the same
     // restorePollingJobs path (which no-ops when nothing is pending).
     if (browser.alarms?.onAlarm) {
-      browser.alarms.onAlarm.addListener((alarm) => {
+      browser.alarms.onAlarm.addListener(alarm => {
         if (alarm.name === ALARM_RECOVERY) {
           scheduleRestore();
         }
@@ -128,6 +145,8 @@ async function handleMessage(message: Record<string, unknown>): Promise<unknown>
         return await handleRefreshSession();
       case MESSAGE_TYPES.FETCH_USAGE:
         return await handleFetchUsage();
+      case MESSAGE_TYPES.FETCH_SIGNUP_BONUS_CONFIG:
+        return await handleFetchSignupBonusConfig();
       case MESSAGE_TYPES.START_CONVERSION:
         return await handleStartConversion(payload);
       case MESSAGE_TYPES.CANCEL_CONVERSION:
@@ -183,7 +202,11 @@ async function handleLogin(payload: Record<string, unknown>): Promise<unknown> {
 }
 
 async function handleRegister(payload: Record<string, unknown>): Promise<unknown> {
-  const { email, password, displayName } = payload as { email: string; password: string; displayName?: string };
+  const { email, password, displayName } = payload as {
+    email: string;
+    password: string;
+    displayName?: string;
+  };
   const baseUrl = await getApiBaseUrl();
   const session = await apiRegister(baseUrl, email, password, displayName);
   await saveSession({
@@ -232,6 +255,12 @@ async function handleFetchUsage(): Promise<unknown> {
   return getUsage(client);
 }
 
+async function handleFetchSignupBonusConfig(): Promise<unknown> {
+  const baseUrl = await getApiBaseUrl();
+  const client = new ApiClient({ baseUrl });
+  return client.signupBonusConfig();
+}
+
 /**
  * @deprecated Since v0.1.0. Use `CLOUD_CONVERT_AND_POLL` (which uploads the
  * zip internally) instead of `START_CONVERSION`. This handler expects the
@@ -243,7 +272,12 @@ async function handleFetchUsage(): Promise<unknown> {
  */
 async function handleStartConversion(payload: Record<string, unknown>): Promise<unknown> {
   const { uploadId, mainTex, profile, quality, fileName, mode } = payload as {
-    uploadId: string; mainTex: string; profile: string; quality: string; fileName: string; mode: 'local' | 'cloud';
+    uploadId: string;
+    mainTex: string;
+    profile: string;
+    quality: string;
+    fileName: string;
+    mode: 'local' | 'cloud';
   };
   const baseUrl = await getApiBaseUrl();
   const accessToken = await getAccessToken();
@@ -279,14 +313,23 @@ async function handleStartConversion(payload: Record<string, unknown>): Promise<
  * `content/overleaf.content.ts` migrate (P2-5).
  */
 async function startCloudConversion(
-  localJobId: string, uploadId: string, mainTex: string, profile: string, quality: string,
-  baseUrl: string, accessToken: string
+  localJobId: string,
+  uploadId: string,
+  mainTex: string,
+  profile: string,
+  quality: string,
+  baseUrl: string,
+  accessToken: string
 ): Promise<void> {
   const client = new ApiClient({ baseUrl, apiKey: accessToken });
   try {
     await updateJobStatus(localJobId, 'processing', 10);
     const job = await createAndPollConversion(
-      client, uploadId, mainTex, profile, quality,
+      client,
+      uploadId,
+      mainTex,
+      profile,
+      quality,
       (update: ConversionJob) => {
         const progress = update.status === 'completed' ? 100 : 50;
         updateJobStatus(localJobId, update.status as JobRecord['status'], progress);
@@ -319,7 +362,11 @@ async function startCloudConversion(
       localJob.updated_at = Date.now();
       await saveJob(localJob);
     }
-    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'failed', error: error instanceof Error ? error.message : 'Conversion failed' });
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'failed',
+      error: error instanceof Error ? error.message : 'Conversion failed',
+    });
     browser.notifications?.create({
       type: 'basic',
       title: 'Tex2Doc',
@@ -348,7 +395,9 @@ async function handleDownloadDocx(payload: Record<string, unknown>): Promise<unk
   const client = new ApiClient({ baseUrl, apiKey: accessToken });
   const docxBytes = await client.downloadConversionDocx(cloudJobId);
   const job = await getJob(jobId);
-  const filename = job ? `${job.file_name.replace(/\.[^.]+$/, '')}.docx` : `conversion_${cloudJobId}.docx`;
+  const filename = job
+    ? `${job.file_name.replace(/\.[^.]+$/, '')}.docx`
+    : `conversion_${cloudJobId}.docx`;
   await downloadBytes(docxBytes, filename);
   return { success: true, filename };
 }
@@ -481,7 +530,11 @@ async function handleRedeemCodeAndLogin(payload: Record<string, unknown>): Promi
 
 async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Promise<unknown> {
   const { zipBytes, fileName, mainTex, profile, quality } = payload as {
-    zipBytes: number[]; fileName: string; mainTex: string; profile: string; quality: string;
+    zipBytes: number[];
+    fileName: string;
+    mainTex: string;
+    profile: string;
+    quality: string;
   };
   const baseUrl = await getApiBaseUrl();
   const accessToken = await getAccessToken();
@@ -509,7 +562,16 @@ async function handleCloudConvertAndPoll(payload: Record<string, unknown>): Prom
   // zipBytes intentionally NOT persisted: SW recovery re-runs from stage='pending' /
   // 'uploading' which re-uploads. This is acceptable because uploads are idempotent
   // (uploadProjectZip returns a fresh upload_id) and avoids serializing MBs to disk.
-  void runCloudPipeline(localJobId, new Uint8Array(zipBytes), fileName, mainTex, profile, quality, baseUrl, accessToken);
+  void runCloudPipeline(
+    localJobId,
+    new Uint8Array(zipBytes),
+    fileName,
+    mainTex,
+    profile,
+    quality,
+    baseUrl,
+    accessToken
+  );
   // P2-1: ensure the recovery alarm is armed so SW wake-up can resume polling
   // even if the user closes the popup before the conversion finishes.
   scheduleRecoveryAlarm();
@@ -529,7 +591,12 @@ async function runCloudPipeline(
   const client = new ApiClient({ baseUrl, apiKey: accessToken });
   try {
     // Stage 1: upload
-    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 15, stage: 'uploading' });
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'processing',
+      progress: 15,
+      stage: 'uploading',
+    });
     await setJobStage(localJobId, 'uploading', 'processing', 15);
     const upload = await client.uploadProjectZip(zipBytes, fileName);
     await setJobStage(localJobId, 'uploading', 'processing', 25);
@@ -542,14 +609,20 @@ async function runCloudPipeline(
     }
 
     // Stage 2: create conversion job
-    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 30, stage: 'creating', uploadId: upload.upload_id });
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'processing',
+      progress: 30,
+      stage: 'creating',
+      uploadId: upload.upload_id,
+    });
     await setJobStage(localJobId, 'creating', 'processing', 30);
-    const created = await client.createConversion({
+    const created = (await client.createConversion({
       upload_id: upload.upload_id,
       main_tex: mainTex,
       profile,
       quality,
-    }) as { job_id: string };
+    })) as { job_id: string };
     activeCloudJobs.set(localJobId, created.job_id);
     {
       const stored = await getJob(localJobId);
@@ -561,12 +634,18 @@ async function runCloudPipeline(
     }
 
     // Stage 3: poll until terminal
-    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'processing', progress: 50, stage: 'polling', cloudJobId: created.job_id });
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'processing',
+      progress: 50,
+      stage: 'polling',
+      cloudJobId: created.job_id,
+    });
     await setJobStage(localJobId, 'polling', 'processing', 50);
     const finalJob = await pollCloudConversion(
       client,
       created.job_id,
-      (update) => {
+      update => {
         const pct = update.status === 'completed' ? 100 : 70;
         notifyUI('JOB_UPDATED', {
           jobId: localJobId,
@@ -592,8 +671,17 @@ async function runCloudPipeline(
       stored.updated_at = Date.now();
       await saveJob(stored);
     }
-    notifyUI('JOB_UPDATED', { jobId: localJobId, status: 'completed', progress: 100, stage: 'completed', cloudJobId: finalJob.job_id });
-    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', { jobId: localJobId, level: 'info' });
+    notifyUI('JOB_UPDATED', {
+      jobId: localJobId,
+      status: 'completed',
+      progress: 100,
+      stage: 'completed',
+      cloudJobId: finalJob.job_id,
+    });
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', {
+      jobId: localJobId,
+      level: 'info',
+    });
   } catch (error) {
     activeCloudJobs.delete(localJobId);
     const stored = await getJob(localJobId);
@@ -611,7 +699,11 @@ async function runCloudPipeline(
       stage: 'failed',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { jobId: localJobId, level: 'error' });
+    await emitTerminalNotification(
+      'Conversion failed',
+      `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      { jobId: localJobId, level: 'error' }
+    );
   }
 }
 
@@ -634,12 +726,7 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
   const accessToken = await getAccessToken();
   if (!accessToken) {
     // No session → mark failed, user will need to sign in.
-    await setJobStage(
-      job.id,
-      'failed',
-      'failed',
-      job.progress ?? 0
-    );
+    await setJobStage(job.id, 'failed', 'failed', job.progress ?? 0);
     const stored = await getJob(job.id);
     if (stored) {
       stored.error_message = 'Session expired during conversion; please sign in and retry';
@@ -665,7 +752,11 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'failed',
       error: 'Conversion interrupted by browser restart; please retry',
     });
-    await emitTerminalNotification('Conversion interrupted', 'Conversion interrupted by browser restart', { jobId: job.id, level: 'warning' });
+    await emitTerminalNotification(
+      'Conversion interrupted',
+      'Conversion interrupted by browser restart',
+      { jobId: job.id, level: 'warning' }
+    );
     return;
   }
 
@@ -684,7 +775,7 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
     const finalJob = await pollCloudConversion(
       client,
       cloudJobId,
-      (update) => {
+      update => {
         const pct = update.status === 'completed' ? 100 : 70;
         notifyUI('JOB_UPDATED', {
           jobId: job.id,
@@ -716,14 +807,18 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'completed',
       cloudJobId: finalJob.job_id,
     });
-    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', { jobId: job.id, level: 'info' });
+    await emitTerminalNotification('Conversion completed!', 'Conversion completed!', {
+      jobId: job.id,
+      level: 'info',
+    });
   } catch (error) {
     activeCloudJobs.delete(job.id);
     const stored = await getJob(job.id);
     if (stored) {
       stored.status = 'failed';
       stored.stage = 'failed';
-      stored.error_message = error instanceof Error ? error.message : 'Conversion failed after restart';
+      stored.error_message =
+        error instanceof Error ? error.message : 'Conversion failed after restart';
       stored.updated_at = Date.now();
       await saveJob(stored);
     }
@@ -733,7 +828,11 @@ async function resumeCloudPipeline(job: JobRecord): Promise<void> {
       stage: 'failed',
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    await emitTerminalNotification('Conversion failed', `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`, { jobId: job.id, level: 'error' });
+    await emitTerminalNotification(
+      'Conversion failed',
+      `Conversion failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+      { jobId: job.id, level: 'error' }
+    );
   }
 }
 
@@ -760,7 +859,10 @@ async function emitTerminalNotification(
 
 async function handleCreateFeedback(payload: Record<string, unknown>): Promise<unknown> {
   const { title, feedbackType, content, conversionJobId } = payload as {
-    title: string; feedbackType: string; content: string; conversionJobId?: string;
+    title: string;
+    feedbackType: string;
+    content: string;
+    conversionJobId?: string;
   };
   const baseUrl = await getApiBaseUrl();
   const accessToken = await getAccessToken();
@@ -868,7 +970,7 @@ async function restorePollingJobs(): Promise<void> {
   console.log(`[Tex2Doc Background] Restoring ${inFlight.length} in-flight cloud job(s)`);
   // Run recoveries concurrently — each tracks its own localJobId + cloudJobId
   // through activeCloudJobs / IndexedDB and emit JOB_UPDATED as they go.
-  await Promise.allSettled(inFlight.map((job) => resumeCloudPipeline(job)));
+  await Promise.allSettled(inFlight.map(job => resumeCloudPipeline(job)));
 }
 
 async function handleStartWasmConversion(payload: Record<string, unknown>): Promise<unknown> {
@@ -892,7 +994,9 @@ async function handleStartWasmConversion(payload: Record<string, unknown>): Prom
 
     // Validate zip magic bytes
     if (bytes.length < 4 || bytes[0] !== 0x50 || bytes[1] !== 0x4b) {
-      throw new Error(`Invalid ZIP file: magic bytes ${bytes[0]?.toString(16)} ${bytes[1]?.toString(16)} (expected 50 4b)`);
+      throw new Error(
+        `Invalid ZIP file: magic bytes ${bytes[0]?.toString(16)} ${bytes[1]?.toString(16)} (expected 50 4b)`
+      );
     }
     addTrace('zip magic bytes OK');
 

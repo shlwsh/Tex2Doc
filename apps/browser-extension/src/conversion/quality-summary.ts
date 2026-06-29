@@ -106,7 +106,7 @@ function parseSummary(report: {
   };
 }
 
-function parseScores(report: { quality_score?: number }): ScoreBreakdown {
+function parseScores(report: { quality_score?: number; quality_gate?: QualityGate }): ScoreBreakdown {
   const scores: ScoreBreakdown = {};
 
   if (report.quality_gate) {

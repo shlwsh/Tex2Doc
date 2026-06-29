@@ -1636,6 +1636,7 @@ dependencies = [
  "image",
  "quick-xml 0.36.2",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
  "zip",
 ]

@@ -44,10 +44,7 @@ impl FileLogger {
 
     fn log(&self, message: &str) -> std::io::Result<()> {
         let timestamp = chrono_lite_timestamp();
-        let mut file = OpenOptions::new()
-            .write(true)
-            .append(true)
-            .open(&self.log_path)?;
+        let mut file = OpenOptions::new().append(true).open(&self.log_path)?;
 
         writeln!(file, "[{}] {}", timestamp, message)?;
         file.flush()?;
@@ -237,6 +234,7 @@ pub fn convert_upload_blocking(request: CloudUploadRequest<'_>) -> Result<CloudC
 /// directory, runs the semantic engine, and writes the result DOCX to
 /// `output_dir/<file_stem>.docx`.
 #[allow(unused_variables)]
+#[allow(clippy::too_many_arguments)]
 pub fn convert_local_blocking(
     base_url: &str,
     access_token: Option<String>,
@@ -386,7 +384,8 @@ pub fn convert_local_blocking(
     let (blocking_issues_count, warnings_count) = extract_issue_counts(&artifact.report);
 
     // Extract word compatibility info (simplified - actual implementation may vary)
-    let (word_status, word_errors, word_method) = ("unchecked".to_string(), Vec::new(), "none".to_string());
+    let (word_status, word_errors, word_method) =
+        ("unchecked".to_string(), Vec::new(), "none".to_string());
 
     // Extract style coverage rate (placeholder - actual implementation may vary)
     let style_coverage_rate = 0.0;
@@ -610,7 +609,7 @@ mod tests {
     fn test_engine_directly_on_upload_zip() {
         let bytes = std::fs::read("D:\\temp\\upload.zip").unwrap();
         let temp = extract_to_temp(&bytes, "upload.zip").unwrap();
-        
+
         let engine = doc_compiler_engine::SemanticTexEngine::new();
         let options = doc_compiler_engine::CompileOptions {
             profile_ref: Some(doc_compiler_engine::ProfileRef::Auto),
@@ -619,10 +618,10 @@ mod tests {
             min_compatibility_score_override: Some(75),
             ..Default::default()
         };
-        
+
         let main_tex = find_main_tex(temp.path()).unwrap();
         println!("Found main tex: {}", main_tex);
-        
+
         let res = engine.compile_dir_to_docx(temp.path(), &temp.path().join(main_tex), &options);
         match res {
             Ok(artifact) => println!("Engine OK! Docx size: {}", artifact.docx.len()),

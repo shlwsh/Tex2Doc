@@ -89,7 +89,7 @@ export default function OptionsApp() {
       const stored = await getDomains();
       const reconciled = await refreshGrantedFlags(stored);
       setDomains(reconciled);
-      if (reconciled.some((d) => d.granted !== d.enabled)) {
+      if (reconciled.some(d => d.granted !== d.enabled)) {
         await saveDomains(reconciled);
       }
     } catch (err) {
@@ -106,7 +106,7 @@ export default function OptionsApp() {
       setDomainError('Invalid domain format (e.g. example.com)');
       return;
     }
-    if (domains.some((d) => d.domain === trimmed)) {
+    if (domains.some(d => d.domain === trimmed)) {
       setDomainError('Domain already exists');
       return;
     }
@@ -139,7 +139,7 @@ export default function OptionsApp() {
   };
 
   const handleRemoveDomain = async (id: string) => {
-    const target = domains.find((d) => d.id === id);
+    const target = domains.find(d => d.id === id);
     if (target) {
       try {
         await browser.permissions.remove({ origins: [toOriginPattern(target.domain)] });
@@ -147,13 +147,13 @@ export default function OptionsApp() {
         console.warn('[Options] permissions.remove failed:', err);
       }
     }
-    const updated = domains.filter((d) => d.id !== id);
+    const updated = domains.filter(d => d.id !== id);
     setDomains(updated);
     await saveDomains(updated);
   };
 
   const handleToggleDomain = async (id: string) => {
-    const target = domains.find((d) => d.id === id);
+    const target = domains.find(d => d.id === id);
     if (!target) return;
     let granted = target.granted;
     if (!target.enabled) {
@@ -177,7 +177,7 @@ export default function OptionsApp() {
       }
       granted = false;
     }
-    const updated = domains.map((d) =>
+    const updated = domains.map(d =>
       d.id === id ? { ...d, enabled: !d.enabled, granted, updatedAt: Date.now() } : d
     );
     setDomains(updated);
@@ -187,7 +187,11 @@ export default function OptionsApp() {
   const handleExportFunnel = async () => {
     setIsExportingFunnel(true);
     try {
-      const result = await sendToBackground<{ success: boolean; filename?: string; error?: string }>({
+      const result = await sendToBackground<{
+        success: boolean;
+        filename?: string;
+        error?: string;
+      }>({
         type: MESSAGE_TYPES.EXPORT_FUNNEL,
         windowDays: 7,
       });
@@ -209,8 +213,19 @@ export default function OptionsApp() {
       <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
         <div className="flex items-center gap-2 text-sm text-gray-500">
           <svg className="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            <circle
+              className="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              strokeWidth="4"
+            ></circle>
+            <path
+              className="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
           </svg>
           {t('loading')}
         </div>
@@ -229,7 +244,7 @@ export default function OptionsApp() {
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
-      <div className="max-w-3xl mx-auto p-6 space-y-6">
+      <div className="max-w-4xl mx-auto p-4 sm:p-6 space-y-5">
         {/* Toolbar */}
         <div className="flex items-center justify-between bg-white dark:bg-gray-800 rounded-lg p-4 shadow-sm border border-gray-200 dark:border-gray-700">
           <div className="flex items-center gap-3">
@@ -237,14 +252,16 @@ export default function OptionsApp() {
               <span className="text-white font-bold text-sm">T2D</span>
             </div>
             <div className="leading-tight">
-              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">{t('appName')}</h1>
+              <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
+                {t('appName')}
+              </h1>
               <p className="text-xs text-gray-500">{t('settings')}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
             <select
               value={locale}
-              onChange={(e) => {
+              onChange={e => {
                 setLocale(e.target.value as typeof locale);
                 setSettings({ ...settings, language: e.target.value as 'en' | 'zh' });
               }}
@@ -256,9 +273,14 @@ export default function OptionsApp() {
           </div>
         </div>
 
-        <Card>
-          <Tabs tabs={tabItems} activeTab={activeTab} onChange={(id) => setActiveTab(id as SettingsTab)} variant="underline" />
-        </Card>
+        <div className="border-b border-gray-200 dark:border-gray-700">
+          <Tabs
+            tabs={tabItems}
+            activeTab={activeTab}
+            onChange={id => setActiveTab(id as SettingsTab)}
+            variant="underline"
+          />
+        </div>
 
         {/* General Tab */}
         {activeTab === 'general' && (
@@ -266,17 +288,19 @@ export default function OptionsApp() {
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
               {t('settingsTabs.general')}
             </h2>
-            <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <Input
                 label={t('apiBaseUrl')}
                 value={settings.api_base_url}
-                onChange={(e) => setSettings({ ...settings, api_base_url: e.target.value })}
+                onChange={e => setSettings({ ...settings, api_base_url: e.target.value })}
                 placeholder="https://api.tex2doc.cn"
               />
               <Select
                 label={t('theme')}
                 value={settings.theme}
-                onChange={(v) => setSettings({ ...settings, theme: v as 'light' | 'dark' | 'system' })}
+                onChange={v =>
+                  setSettings({ ...settings, theme: v as 'light' | 'dark' | 'system' })
+                }
                 options={[
                   { value: 'light', label: t('themeSettings.light') },
                   { value: 'dark', label: t('themeSettings.dark') },
@@ -293,11 +317,13 @@ export default function OptionsApp() {
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
               {t('settingsTabs.conversion')}
             </h2>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <Select
                 label={t('defaultMode')}
                 value={settings.default_mode}
-                onChange={(v) => setSettings({ ...settings, default_mode: v as 'auto' | 'local' | 'cloud' })}
+                onChange={v =>
+                  setSettings({ ...settings, default_mode: v as 'auto' | 'local' | 'cloud' })
+                }
                 options={[
                   { value: 'auto', label: t('autoMode') },
                   { value: 'local', label: t('localMode') },
@@ -307,7 +333,7 @@ export default function OptionsApp() {
               <Select
                 label={t('defaultProfile')}
                 value={settings.default_profile}
-                onChange={(v) => setSettings({ ...settings, default_profile: v })}
+                onChange={v => setSettings({ ...settings, default_profile: v })}
                 options={[
                   { value: 'standard', label: t('profiles.standard') },
                   { value: 'academic', label: t('profiles.academic') },
@@ -317,7 +343,7 @@ export default function OptionsApp() {
               <Select
                 label={t('defaultQuality')}
                 value={settings.default_quality}
-                onChange={(v) => setSettings({ ...settings, default_quality: v })}
+                onChange={v => setSettings({ ...settings, default_quality: v })}
                 options={[
                   { value: 'preview', label: t('qualities.preview') },
                   { value: 'balanced', label: t('qualities.balanced') },
@@ -328,8 +354,11 @@ export default function OptionsApp() {
                 label={t('fileSizeLimit')}
                 type="number"
                 value={(settings.wasm_file_size_limit / (1024 * 1024)).toString()}
-                onChange={(e) =>
-                  setSettings({ ...settings, wasm_file_size_limit: parseInt(e.target.value) * 1024 * 1024 })
+                onChange={e =>
+                  setSettings({
+                    ...settings,
+                    wasm_file_size_limit: parseInt(e.target.value) * 1024 * 1024,
+                  })
                 }
                 helperText="Size in MB"
               />
@@ -348,9 +377,9 @@ export default function OptionsApp() {
             <div className="flex gap-2 mb-4">
               <Input
                 value={newDomain}
-                onChange={(e) => setNewDomain(e.target.value)}
+                onChange={e => setNewDomain(e.target.value)}
                 placeholder={t('domainPlaceholder')}
-                onKeyDown={(e) => {
+                onKeyDown={e => {
                   if (e.key === 'Enter') {
                     e.preventDefault();
                     void handleAddDomain();
@@ -359,18 +388,26 @@ export default function OptionsApp() {
               />
               <Button onClick={() => void handleAddDomain()}>{t('domainAdd')}</Button>
             </div>
-            {domainError && <p className="text-xs text-red-600 dark:text-red-400 mb-3">{domainError}</p>}
+            {domainError && (
+              <p className="text-xs text-red-600 dark:text-red-400 mb-3">{domainError}</p>
+            )}
 
             {isDomainsLoading ? (
               <div className="text-center py-8 text-sm text-gray-500">{t('loading')}</div>
             ) : domains.length === 0 ? (
-              <div className="text-center py-8 text-sm text-gray-500">No domains configured yet.</div>
+              <div className="text-center py-8 text-sm text-gray-500">
+                No domains configured yet.
+              </div>
             ) : (
               <ul className="divide-y divide-gray-200 dark:divide-gray-700 border border-gray-200 dark:border-gray-700 rounded-lg">
-                {domains.map((d) => (
+                {domains.map(d => (
                   <li key={d.id} className="flex items-center justify-between px-3 py-2">
                     <div className="flex items-center gap-2">
-                      <Badge variant={d.enabled && d.granted ? 'success' : d.granted ? 'warning' : 'default'}>
+                      <Badge
+                        variant={
+                          d.enabled && d.granted ? 'success' : d.granted ? 'warning' : 'default'
+                        }
+                      >
                         {d.domain}
                       </Badge>
                       {d.enabled && !d.granted && (
@@ -413,7 +450,12 @@ export default function OptionsApp() {
               </div>
               <div className="flex justify-between">
                 <span className="text-gray-500">{t('aboutLinks')}</span>
-                <a href="https://tex2doc.cn" target="_blank" rel="noreferrer" className="text-primary-600 hover:underline">
+                <a
+                  href="https://tex2doc.cn"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary-600 hover:underline"
+                >
                   tex2doc.cn
                 </a>
               </div>
@@ -445,7 +487,7 @@ export default function OptionsApp() {
         )}
 
         {/* Footer actions */}
-        <div className="flex gap-3 justify-end pt-2">
+        <div className="sticky bottom-0 flex gap-3 justify-end border-t border-gray-200 bg-gray-50/95 py-3 backdrop-blur dark:border-gray-700 dark:bg-gray-900/95">
           <Button variant="secondary" onClick={handleReset}>
             Reset to Defaults
           </Button>

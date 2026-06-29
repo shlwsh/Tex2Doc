@@ -14,9 +14,7 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
-use crate::automation_service::{
-    AutomationService, RequestFilters,
-};
+use crate::automation_service::{AutomationService, RequestFilters};
 use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
 use crate::error_code::ConversionErrorCode;
@@ -29,7 +27,7 @@ use crate::limits::{
     MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_ZIP_BYTES,
 };
-use crate::logging::{file_hash, redact_json};
+use crate::logging::file_hash;
 use crate::state::{
     ConversionJobRecord, ConversionStatus, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
     RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
@@ -51,6 +49,8 @@ pub fn router_with_state(state: ServerState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/version", get(version))
+        .route("/v1/config/signup-bonus", get(signup_bonus_config))
+        .route("/api/v1/config/signup-bonus", get(signup_bonus_config))
         .route("/v1/downloads", get(downloads))
         .route("/api/v1/downloads", get(downloads))
         .route("/v1/waitlist", post(create_waitlist_lead))
@@ -126,9 +126,18 @@ pub fn router_with_state(state: ServerState) -> Router {
             get(list_conversions).post(create_conversion),
         )
         .route("/v1/local-conversions/check", post(check_local_conversion))
-        .route("/api/v1/local-conversions/check", post(check_local_conversion))
-        .route("/v1/local-conversions/consume", post(consume_local_conversion))
-        .route("/api/v1/local-conversions/consume", post(consume_local_conversion))
+        .route(
+            "/api/v1/local-conversions/check",
+            post(check_local_conversion),
+        )
+        .route(
+            "/v1/local-conversions/consume",
+            post(consume_local_conversion),
+        )
+        .route(
+            "/api/v1/local-conversions/consume",
+            post(consume_local_conversion),
+        )
         .route(
             "/api/v1/conversions",
             get(list_conversions).post(create_conversion),
@@ -146,7 +155,10 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/v1/conversions/:id/report", get(get_conversion_report))
         .route("/api/v1/conversions/:id/report", get(get_conversion_report))
         // QualityRun 多维质量报告（对应技术方案第 1.5 节）
-        .route("/v1/conversions/:id/quality-report", get(get_quality_report_json))
+        .route(
+            "/v1/conversions/:id/quality-report",
+            get(get_quality_report_json),
+        )
         .route(
             "/api/v1/conversions/:id/quality-report",
             get(get_quality_report_json),
@@ -200,7 +212,10 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route("/admin/v1/release-audit", get(admin_release_audit))
         // Automation R&D routes
         .route("/admin/v1/automation/summary", get(automation_summary))
-        .route("/admin/v1/automation/requests", get(automation_list_requests))
+        .route(
+            "/admin/v1/automation/requests",
+            get(automation_list_requests),
+        )
         .route(
             "/admin/v1/automation/requests/:id",
             get(automation_get_request),
@@ -694,6 +709,7 @@ async fn usage(
     let session = require_session(&state, &headers).await?;
     let used = state.cloud_conversions_used(&session.id).await;
     let entitlement = state.entitlement(&session.id).await;
+    let had_signup_bonus = entitlement.signup_bonus_valid_until.is_some();
     let date_valid = entitlement
         .valid_until
         .as_deref()
@@ -702,7 +718,9 @@ async fn usage(
             valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
         });
     Ok(Json(json!({
-        "plan_id": if date_valid {
+        "plan_id": if had_signup_bonus {
+            "free_trial"
+        } else if date_valid {
             "date"
         } else if entitlement.count_balance > 0 {
             "count"
@@ -710,15 +728,28 @@ async fn usage(
             "preview"
         },
         "cloud_conversions_used": used,
-        "cloud_conversions_limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
+        "cloud_conversions_limit": if had_signup_bonus { 0 } else { PREVIEW_CLOUD_CONVERSION_LIMIT },
         "count_balance": entitlement.count_balance,
-        "date_valid_until": entitlement.valid_until,
+        "date_valid_until": entitlement.valid_until.clone().or_else(|| entitlement.signup_bonus_valid_until.clone()),
+        "signup_bonus_balance": entitlement.signup_bonus_balance,
+        "signup_bonus_valid_until": entitlement.signup_bonus_valid_until,
+        "entitlement_source": if had_signup_bonus { "system_signup" } else { "standard" },
         "entitlement_source_order_id": entitlement.source_order_id,
         "storage_bytes_used": 0,
         "storage_bytes_limit": 1_073_741_824_u64,
         "period_start": "2026-06-01T00:00:00Z",
         "period_end": "2026-07-01T00:00:00Z",
     })))
+}
+
+async fn signup_bonus_config(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let config = state.signup_bonus_config();
+    Json(json!({
+        "enabled": config.enabled,
+        "default_quantity": config.default_quantity,
+        "validity_days": config.validity_days,
+        "package_name": config.package_name,
+    }))
 }
 
 async fn plans(State(state): State<ServerState>) -> Result<Json<serde_json::Value>, ApiError> {
@@ -1413,7 +1444,9 @@ async fn check_local_conversion(
             valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
         });
     let used = state.cloud_conversions_used(&session.id).await;
-    let allowed = valid_until_active || entitlement.count_balance > 0 || used < PREVIEW_CLOUD_CONVERSION_LIMIT;
+    let allowed = valid_until_active
+        || entitlement.count_balance > 0
+        || used < PREVIEW_CLOUD_CONVERSION_LIMIT;
     Ok(Json(json!({
         "allowed": allowed,
         "valid_until_active": valid_until_active,
@@ -1671,10 +1704,27 @@ async fn issue_auth_response(
         .issue_token(&user.id, "refresh")
         .await
         .map_err(db_error)?;
+    let used = state.cloud_conversions_used(&user.id).await;
+    let entitlement = state.entitlement(&user.id).await;
+    let had_signup_bonus = entitlement.signup_bonus_valid_until.is_some();
     Ok(Json(json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
         "user": app_user_json(user),
+        "usage": {
+            "plan_id": if had_signup_bonus { "free_trial" } else { "preview" },
+            "cloud_conversions_used": used,
+            "cloud_conversions_limit": if had_signup_bonus { 0 } else { PREVIEW_CLOUD_CONVERSION_LIMIT },
+            "count_balance": entitlement.count_balance,
+            "date_valid_until": entitlement.valid_until.clone().or_else(|| entitlement.signup_bonus_valid_until.clone()),
+            "signup_bonus_balance": entitlement.signup_bonus_balance,
+            "signup_bonus_valid_until": entitlement.signup_bonus_valid_until,
+            "entitlement_source": if had_signup_bonus { "system_signup" } else { "standard" },
+            "storage_bytes_used": 0,
+            "storage_bytes_limit": 1_073_741_824_u64,
+            "period_start": "2026-06-01T00:00:00Z",
+            "period_end": "2026-07-01T00:00:00Z"
+        }
     })))
 }
 
@@ -2439,10 +2489,8 @@ async fn list_feedback_threads(
     let automation_service = AutomationService::new(state.pool().clone());
     let mut summaries = Vec::new();
     for t in threads {
-        let auto_status = get_automation_status_for_feedback(
-            &automation_service,
-            &t.thread_id,
-        ).await;
+        let auto_status =
+            get_automation_status_for_feedback(&automation_service, &t.thread_id).await;
         summaries.push(thread_summary_from_summary(&t, auto_status));
     }
     Ok(Json(serde_json::json!(summaries)))
@@ -2543,10 +2591,8 @@ async fn admin_list_feedback_threads(
     let automation_service = AutomationService::new(state.pool().clone());
     let mut summaries = Vec::new();
     for t in threads {
-        let auto_status = get_automation_status_for_feedback(
-            &automation_service,
-            &t.thread_id,
-        ).await;
+        let auto_status =
+            get_automation_status_for_feedback(&automation_service, &t.thread_id).await;
         summaries.push(thread_summary_from_summary(&t, auto_status));
     }
     Ok(Json(serde_json::json!(summaries)))
@@ -2780,7 +2826,9 @@ async fn automation_reject(
     Json(payload): Json<AutomationActionJson>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let session = require_admin_session(&state, &headers).await?;
-    let reason = payload.reason.unwrap_or_else(|| "No reason provided".to_string());
+    let reason = payload
+        .reason
+        .unwrap_or_else(|| "No reason provided".to_string());
     let store = AutomationService::new(state.pool().clone());
     let request = store.reject(&id, &session.id, &reason).await?;
     Ok(Json(serde_json::json!(request)))

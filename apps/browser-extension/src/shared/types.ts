@@ -22,6 +22,16 @@ export interface UsageSummary {
   storage_bytes_limit: number;
   period_start: string;
   period_end: string;
+  signup_bonus_balance?: number;
+  signup_bonus_valid_until?: string | null;
+  entitlement_source?: string;
+}
+
+export interface SignupBonusConfig {
+  enabled: boolean;
+  default_quantity: number;
+  validity_days: number;
+  package_name: string;
 }
 
 export interface Session {

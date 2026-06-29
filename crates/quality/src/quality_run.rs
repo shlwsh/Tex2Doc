@@ -78,7 +78,7 @@ pub struct VisualDiffReport {
 }
 
 /// 单页差异。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PageDiff {
     /// 页码（从 1 开始）
     pub page: usize,
@@ -237,7 +237,7 @@ impl Default for WordCompatibility {
 }
 
 /// 质量运行的输出产物。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct QualityArtifacts {
     /// quality report JSON 路径。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -251,17 +251,6 @@ pub struct QualityArtifacts {
     /// 转换日志路径。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub log: Option<PathBuf>,
-}
-
-impl Default for QualityArtifacts {
-    fn default() -> Self {
-        Self {
-            report_json: None,
-            report_md: None,
-            docx: None,
-            log: None,
-        }
-    }
 }
 
 /// 统一质量运行报告（对外 API 返回格式）。
@@ -450,10 +439,8 @@ impl QualityRun {
     pub fn exit_code(&self) -> QualityExitCode {
         if !self.blocking_issues.is_empty() {
             // 检查是否有 structural/textual 来源的阻断
-            let has_structural_blocking = self
-                .blocking_issues
-                .iter()
-                .any(|i| i.layer == "structural");
+            let has_structural_blocking =
+                self.blocking_issues.iter().any(|i| i.layer == "structural");
             if has_structural_blocking {
                 return QualityExitCode::StructuralOrTextualFail;
             }

@@ -169,8 +169,8 @@ export const tokens = {
   // Layout sizes
   layout: {
     popup: {
-      width: '380px',
-      minHeight: '420px',
+      width: '480px',
+      minHeight: '560px',
       maxHeight: '600px',
     },
     sidepanel: {

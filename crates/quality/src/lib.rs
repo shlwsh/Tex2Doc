@@ -33,13 +33,13 @@ pub use docx_diff::{compare_docx, DocxDiffOptions, DocxDiffReport, DocxSnapshot}
 pub use error::QualityError;
 pub use layer::{Check, Layer, LayerResult, MarkerHit, QualityReport, Severity};
 pub use quality_run::{
-    BackendSummary, DimensionScores, QualityArtifacts, QualityExitCode, QualityIssue,
-    QualityRun, SemanticLossEvent, WordCompatibility,
+    BackendSummary, DimensionScores, QualityArtifacts, QualityExitCode, QualityIssue, QualityRun,
+    SemanticLossEvent, WordCompatibility,
 };
 pub use report::{write_json, write_markdown};
-pub use word_check::{CompatibilityStatus, WordCompatibilityChecker, WordCompatibilityResult};
 pub use thresholds::{StructuralThresholds, TextualThresholds, Thresholds, VisualThresholds};
 pub use visual::VisualRunner;
+pub use word_check::{CompatibilityStatus, WordCompatibilityChecker, WordCompatibilityResult};
 
 /// 当前 crate 版本（与 `Cargo.toml` 一致）。
 pub fn version() -> &'static str {

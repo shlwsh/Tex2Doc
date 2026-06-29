@@ -17,5 +17,5 @@ pub use packer::{pack, pack_with_assets, pack_with_page_setup, pack_with_templat
 pub use page_setup::PageSetup;
 pub use profile::{CjkOptions, ProfileStyleMap, StyleCoverageReport};
 pub use serializer::{serialize_document, EmbeddedImage};
-pub use validate::{OoxmlValidator, SchemaViolation};
 pub use template::{merge_styles, parse_styles_xml, parse_template, TemplateStyles};
+pub use validate::{OoxmlValidator, SchemaViolation};

@@ -21,9 +21,17 @@ import { RenewalHint } from '@/ui/components/RenewalHint';
 import { track, rotateSessionId } from '@/analytics/funnel';
 import { sendToBackground } from '@/browser/messaging';
 import { MESSAGE_TYPES } from '@/shared/constants';
-import type { JobRecord, Session, UsageSummary, FeedbackThread, PlanSummary } from '@/shared/types';
+import type {
+  JobRecord,
+  Session,
+  UsageSummary,
+  FeedbackThread,
+  PlanSummary,
+  SignupBonusConfig,
+} from '@/shared/types';
 import { useI18n } from '@/ui/i18n/useI18n';
 import type { Tab } from '@/ui/components/Tabs';
+import { CircleUserRound, ClipboardList, CreditCard, MessageSquare, Sparkles } from 'lucide-react';
 
 type Panel = 'jobs' | 'billing' | 'feedback' | 'account';
 
@@ -33,6 +41,7 @@ export default function SidePanelApp() {
 
   const [session, setSession] = useState<Session | null>(null);
   const [usage, setUsage] = useState<UsageSummary | null>(null);
+  const [signupBonus, setSignupBonus] = useState<SignupBonusConfig | null>(null);
 
   const [jobs, setJobs] = useState<JobRecord[]>([]);
   const [selectedJob, setSelectedJob] = useState<JobRecord | null>(null);
@@ -47,7 +56,10 @@ export default function SidePanelApp() {
   const [feedbackContent, setFeedbackContent] = useState('');
   const [feedbackType, setFeedbackType] = useState<'issue' | 'requirement' | 'other'>('issue');
 
-  const [toast, setToast] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(null);
+  const [toast, setToast] = useState<{
+    type: 'success' | 'error' | 'info';
+    message: string;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
 
@@ -57,7 +69,7 @@ export default function SidePanelApp() {
 
   const loadData = async () => {
     setIsLoading(true);
-    await Promise.all([loadSession(), loadJobs(), loadPlans()]);
+    await Promise.all([loadSession(), loadJobs(), loadPlans(), loadSignupBonus()]);
     setIsLoading(false);
   };
 
@@ -96,10 +108,22 @@ export default function SidePanelApp() {
     }
   };
 
+  const loadSignupBonus = async () => {
+    try {
+      setSignupBonus(
+        await sendToBackground<SignupBonusConfig>({ type: MESSAGE_TYPES.FETCH_SIGNUP_BONUS_CONFIG })
+      );
+    } catch {
+      setSignupBonus(null);
+    }
+  };
+
   const loadFeedback = async () => {
     if (!session) return;
     try {
-      const threads = await sendToBackground<FeedbackThread[]>({ type: MESSAGE_TYPES.FETCH_FEEDBACK });
+      const threads = await sendToBackground<FeedbackThread[]>({
+        type: MESSAGE_TYPES.FETCH_FEEDBACK,
+      });
       setFeedbackThreads(threads);
     } catch (error) {
       console.error('Failed to load feedback:', error);
@@ -128,9 +152,15 @@ export default function SidePanelApp() {
       await sendToBackground({ type: msgType, code: redeemCode.trim().toUpperCase() });
       await loadSession();
       setRedeemCode('');
-      setToast({ type: 'success', message: session ? t('rechargeSuccess') : t('redeemSuccessNewAccount') });
+      setToast({
+        type: 'success',
+        message: session ? t('rechargeSuccess') : t('redeemSuccessNewAccount'),
+      });
     } catch (error) {
-      setToast({ type: 'error', message: error instanceof Error ? error.message : t('redeemFailed') });
+      setToast({
+        type: 'error',
+        message: error instanceof Error ? error.message : t('redeemFailed'),
+      });
     } finally {
       setIsRedeeming(false);
     }
@@ -175,7 +205,10 @@ export default function SidePanelApp() {
       setToast({ type: 'success', message: t('feedback') + ' ' + t('success').toLowerCase() });
       loadFeedback();
     } catch (error) {
-      setToast({ type: 'error', message: error instanceof Error ? error.message : t('errors.networkError') });
+      setToast({
+        type: 'error',
+        message: error instanceof Error ? error.message : t('errors.networkError'),
+      });
     }
   };
 
@@ -186,7 +219,11 @@ export default function SidePanelApp() {
   const handleExportDiagnostics = async () => {
     setIsExportingDiagnostics(true);
     try {
-      const result = await sendToBackground<{ success: boolean; filename?: string; error?: string }>({
+      const result = await sendToBackground<{
+        success: boolean;
+        filename?: string;
+        error?: string;
+      }>({
         type: MESSAGE_TYPES.EXPORT_DIAGNOSTICS,
         eventLimit: 200,
       });
@@ -197,34 +234,25 @@ export default function SidePanelApp() {
         setToast({ type: 'error', message: result?.error ?? t('errors.unknown') });
       }
     } catch (error) {
-      setToast({ type: 'error', message: error instanceof Error ? error.message : t('errors.unknown') });
+      setToast({
+        type: 'error',
+        message: error instanceof Error ? error.message : t('errors.unknown'),
+      });
     } finally {
       setIsExportingDiagnostics(false);
     }
   };
 
   const icons = {
-    jobs: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-      </svg>
-    ),
-    billing: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z" />
-      </svg>
-    ),
-    feedback: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-      </svg>
-    ),
-    account: (
-      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
-      </svg>
-    ),
+    jobs: <ClipboardList className="h-4 w-4" />,
+    billing: <CreditCard className="h-4 w-4" />,
+    feedback: <MessageSquare className="h-4 w-4" />,
+    account: <CircleUserRound className="h-4 w-4" />,
   };
+  const totalRemaining = usage
+    ? Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used) +
+      usage.count_balance
+    : 0;
 
   const tabs: Tab[] = [
     { id: 'jobs', label: t('jobs'), icon: icons.jobs },
@@ -241,7 +269,7 @@ export default function SidePanelApp() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
-      {/* Toolbar */}
+      {/* Stable account overview */}
       <div className="flex-shrink-0 bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
         <div className="flex items-center justify-between p-4">
           <div className="flex items-center gap-3">
@@ -259,16 +287,15 @@ export default function SidePanelApp() {
           <div className="flex items-center gap-2">
             {usage && (
               <div className="text-right">
-                <p className="text-xs font-medium text-gray-900 dark:text-white">
-                  {Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used)} /{' '}
-                  {usage.cloud_conversions_limit}
+                <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                  {totalRemaining}
                 </p>
                 <p className="text-[10px] text-gray-500">{t('remaining')}</p>
               </div>
             )}
             <select
               value={locale}
-              onChange={(e) => setLocale(e.target.value as typeof locale)}
+              onChange={e => setLocale(e.target.value as typeof locale)}
               className="text-xs bg-transparent border border-gray-200 dark:border-gray-700 rounded-md px-1.5 py-1 text-gray-600 dark:text-gray-300"
               aria-label={t('language')}
             >
@@ -280,12 +307,36 @@ export default function SidePanelApp() {
 
         {usage && (
           <div className="px-4 pb-3">
-            <Progress value={usage.cloud_conversions_used} max={usage.cloud_conversions_limit} size="sm" />
+            <div className="mb-2 flex items-center justify-between text-[11px] text-gray-500">
+              <span>{usage.plan_id}</span>
+              <span>
+                {usage.signup_bonus_valid_until ||
+                  usage.date_valid_until ||
+                  t('accountOverview.noExpiry')}
+              </span>
+            </div>
+            <Progress
+              value={usage.cloud_conversions_used}
+              max={Math.max(1, usage.cloud_conversions_limit + usage.count_balance)}
+              size="sm"
+            />
+            <Button
+              size="sm"
+              className="mt-3 w-full"
+              onClick={() => setActiveTab(totalRemaining > 0 ? 'jobs' : 'billing')}
+            >
+              {totalRemaining > 0 ? t('accountOverview.newConversion') : t('upgrade')}
+            </Button>
           </div>
         )}
 
         <div className="px-4">
-          <Tabs tabs={tabs} activeTab={activeTab} onChange={(id) => setActiveTab(id as Panel)} variant="underline" />
+          <Tabs
+            tabs={tabs}
+            activeTab={activeTab}
+            onChange={id => setActiveTab(id as Panel)}
+            variant="underline"
+          />
         </div>
       </div>
 
@@ -294,8 +345,19 @@ export default function SidePanelApp() {
         {isLoading && (
           <div className="flex items-center justify-center py-12 text-sm text-gray-500">
             <svg className="animate-spin h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              ></circle>
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              ></path>
             </svg>
             {t('loading')}
           </div>
@@ -304,7 +366,9 @@ export default function SidePanelApp() {
         {!isLoading && activeTab === 'jobs' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('jobHistory')}</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                {t('jobHistory')}
+              </h2>
               <Button size="sm" variant="secondary" onClick={loadJobs} leftIcon={icons.jobs}>
                 {t('refresh')}
               </Button>
@@ -312,12 +376,14 @@ export default function SidePanelApp() {
 
             {jobs.length === 0 ? (
               <Card className="text-center py-8 space-y-1">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noJobs.title')}</p>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('empty.noJobs.title')}
+                </p>
                 <p className="text-xs text-gray-500">{t('empty.noJobs.description')}</p>
               </Card>
             ) : (
               <div className="space-y-2">
-                {jobs.map((job) => (
+                {jobs.map(job => (
                   <Card
                     key={job.id}
                     hover
@@ -360,10 +426,13 @@ export default function SidePanelApp() {
 
                     {selectedJob?.id === job.id && job.report && (
                       <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
-                        <h4 className="text-xs font-medium mb-2 text-gray-700 dark:text-gray-300">Quality Report</h4>
+                        <h4 className="text-xs font-medium mb-2 text-gray-700 dark:text-gray-300">
+                          Quality Report
+                        </h4>
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           <div>
-                            <span className="text-gray-500">Score:</span> {job.report.quality_score}%
+                            <span className="text-gray-500">Score:</span> {job.report.quality_score}
+                            %
                           </div>
                           <div>
                             <span className="text-gray-500">Profile:</span> {job.report.profile}
@@ -380,20 +449,47 @@ export default function SidePanelApp() {
 
         {!isLoading && activeTab === 'billing' && (
           <div className="space-y-4">
+            {signupBonus && (
+              <Card className="border-primary-200 bg-primary-50/60 dark:border-primary-800 dark:bg-primary-950/30">
+                <div className="flex gap-3">
+                  <Sparkles className="h-5 w-5 shrink-0 text-primary-600" />
+                  <div className="space-y-1">
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">
+                      {signupBonus.package_name}
+                    </p>
+                    <p className="text-xs leading-5 text-gray-600 dark:text-gray-300">
+                      {signupBonus.enabled
+                        ? t('bonus.guestOffer', {
+                            count: signupBonus.default_quantity,
+                            days: signupBonus.validity_days,
+                          })
+                        : t('bonus.disabledOffer')}
+                    </p>
+                    <p className="text-xs font-medium text-primary-700 dark:text-primary-300">
+                      {t('modeHelp.local')}
+                    </p>
+                  </div>
+                </div>
+              </Card>
+            )}
             <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('plans')}</h2>
 
             {plans.length === 0 ? (
               <Card className="text-center py-8 space-y-1">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noPlans.title')}</p>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('empty.noPlans.title')}
+                </p>
                 <p className="text-xs text-gray-500">{t('empty.noPlans.description')}</p>
               </Card>
             ) : (
               <div className="space-y-3">
-                {plans.map((plan) => (
+                {plans.map(plan => (
                   <Card key={plan.id}>
                     <div className="flex items-center justify-between mb-3">
                       <div>
-                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">{plan.name}</h3>
+                        <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                          {plan.name}
+                        </h3>
                         <p className="text-xs text-gray-500">
                           {plan.monthly_conversions} conversions/month
                         </p>
@@ -424,10 +520,14 @@ export default function SidePanelApp() {
                 <Input
                   type="text"
                   value={redeemCode}
-                  onChange={(e) => setRedeemCode(e.target.value)}
+                  onChange={e => setRedeemCode(e.target.value)}
                   placeholder={t('redeemPlaceholder')}
                 />
-                <Button onClick={handleRedeemCode} disabled={!redeemCode.trim() || isRedeeming} isLoading={isRedeeming}>
+                <Button
+                  onClick={handleRedeemCode}
+                  disabled={!redeemCode.trim() || isRedeeming}
+                  isLoading={isRedeeming}
+                >
                   {t('redeem')}
                 </Button>
               </div>
@@ -438,7 +538,9 @@ export default function SidePanelApp() {
         {!isLoading && activeTab === 'feedback' && (
           <div className="space-y-4">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">{t('feedback')}</h2>
+              <h2 className="text-sm font-semibold text-gray-900 dark:text-white">
+                {t('feedback')}
+              </h2>
               {session && (
                 <Button size="sm" onClick={() => setShowFeedbackModal(true)}>
                   {t('submitFeedback')}
@@ -458,9 +560,7 @@ export default function SidePanelApp() {
                       <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
                         {t('diagnostics.title')}
                       </h3>
-                      <p className="text-xs text-gray-500 mt-1">
-                        {t('diagnostics.description')}
-                      </p>
+                      <p className="text-xs text-gray-500 mt-1">{t('diagnostics.description')}</p>
                     </div>
                     <Button
                       size="sm"
@@ -477,16 +577,20 @@ export default function SidePanelApp() {
                 </Card>
                 {feedbackThreads.length === 0 ? (
                   <Card className="text-center py-8 space-y-1">
-                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('empty.noFeedback.title')}</p>
+                    <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                      {t('empty.noFeedback.title')}
+                    </p>
                     <p className="text-xs text-gray-500">{t('empty.noFeedback.description')}</p>
                   </Card>
                 ) : (
                   <div className="space-y-2">
-                    {feedbackThreads.map((thread) => (
+                    {feedbackThreads.map(thread => (
                       <Card key={thread.thread_id}>
                         <div className="flex items-start justify-between">
                           <div>
-                            <h4 className="text-sm font-medium text-gray-900 dark:text-white">{thread.title}</h4>
+                            <h4 className="text-sm font-medium text-gray-900 dark:text-white">
+                              {thread.title}
+                            </h4>
                             <p className="text-xs text-gray-500">{thread.feedback_type}</p>
                           </div>
                           <Badge variant={thread.status === 'open' ? 'warning' : 'default'}>
@@ -521,7 +625,11 @@ export default function SidePanelApp() {
                     </div>
                   </div>
                   {usage && (
-                    <RenewalHint dateValidUntil={usage.date_valid_until} variant="banner" className="mt-3" />
+                    <RenewalHint
+                      dateValidUntil={usage.date_valid_until}
+                      variant="banner"
+                      className="mt-3"
+                    />
                   )}
                 </Card>
 
@@ -545,9 +653,7 @@ export default function SidePanelApp() {
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Count Balance</span>
-                        <span className="text-gray-900 dark:text-white">
-                          {usage.count_balance}
-                        </span>
+                        <span className="text-gray-900 dark:text-white">{usage.count_balance}</span>
                       </div>
                     </div>
                   </Card>
@@ -567,7 +673,9 @@ export default function SidePanelApp() {
               </>
             ) : (
               <Card className="text-center py-8 space-y-2">
-                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('signInRequired')}</p>
+                <p className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {t('signInRequired')}
+                </p>
                 <p className="text-xs text-gray-500">{t('signInOrRedeem')}</p>
                 <Button onClick={() => browser.action.openPopup()}>{t('signIn')}</Button>
               </Card>
@@ -586,7 +694,10 @@ export default function SidePanelApp() {
             <Button variant="secondary" onClick={() => setShowFeedbackModal(false)}>
               {t('cancel')}
             </Button>
-            <Button onClick={handleSubmitFeedback} disabled={!feedbackTitle.trim() || !feedbackContent.trim()}>
+            <Button
+              onClick={handleSubmitFeedback}
+              disabled={!feedbackTitle.trim() || !feedbackContent.trim()}
+            >
               {t('submitFeedback')}
             </Button>
           </div>
@@ -597,12 +708,12 @@ export default function SidePanelApp() {
             type="text"
             label={t('feedbackTitle')}
             value={feedbackTitle}
-            onChange={(e) => setFeedbackTitle(e.target.value)}
+            onChange={e => setFeedbackTitle(e.target.value)}
           />
           <Select
             label={t('feedbackType')}
             value={feedbackType}
-            onChange={(v) => setFeedbackType(v as typeof feedbackType)}
+            onChange={v => setFeedbackType(v as typeof feedbackType)}
             options={feedbackTypeOptions}
           />
           <Textarea
@@ -615,9 +726,7 @@ export default function SidePanelApp() {
         </div>
       </Modal>
 
-      {toast && (
-        <Toast type={toast.type} title={toast.message} onClose={() => setToast(null)} />
-      )}
+      {toast && <Toast type={toast.type} title={toast.message} onClose={() => setToast(null)} />}
     </div>
   );
 }

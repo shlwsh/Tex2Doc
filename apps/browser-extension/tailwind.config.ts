@@ -38,18 +38,18 @@ export default {
         mono: ['JetBrains Mono', 'Consolas', 'monospace'],
       },
       spacing: {
-        popup: '420px',
+        popup: '480px',
         panel: '100%',
       },
       minWidth: {
-        popup: '320px',
-        'popup-max': '420px',
+        popup: '480px',
+        'popup-max': '480px',
       },
       maxWidth: {
-        popup: '420px',
+        popup: '480px',
       },
       minHeight: {
-        popup: '400px',
+        popup: '560px',
         'popup-max': '600px',
       },
       animation: {

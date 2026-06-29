@@ -55,6 +55,18 @@ export function getTotalRemaining(): number {
   return getRemainingMonthly() + getCountBalance();
 }
 
+export function getTotalRemainingForUsage(usage: UsageSummary | null): number {
+  if (!usage) return 0;
+  return (
+    Math.max(0, usage.cloud_conversions_limit - usage.cloud_conversions_used) +
+    Math.max(0, usage.count_balance)
+  );
+}
+
+export function canUseCloud(usage: UsageSummary | null, signedIn: boolean): boolean {
+  return signedIn && getTotalRemainingForUsage(usage) > 0;
+}
+
 /**
  * Check if user has quota available
  */
@@ -139,10 +151,7 @@ export function formatQuota(usage: UsageSummary | null): string {
     return '--';
   }
 
-  const remaining = Math.max(
-    0,
-    usage.cloud_conversions_limit - usage.cloud_conversions_used
-  ) + usage.count_balance;
+  const remaining = getTotalRemainingForUsage(usage);
 
   return `${remaining} / ${usage.cloud_conversions_limit} (+${usage.count_balance})`;
 }

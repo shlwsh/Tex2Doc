@@ -2,6 +2,8 @@
  * Tabs utilities
  */
 
+import type Browser from 'webextension-polyfill';
+
 export interface TabInfo {
   id: number;
   url: string;
@@ -13,7 +15,7 @@ export interface TabInfo {
 /**
  * Get current active tab
  */
-export async function getCurrentTab(): Promise<browser.Tabs.Tab | null> {
+export async function getCurrentTab(): Promise<Browser.Tabs.Tab | null> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return tab || null;
 }
@@ -21,7 +23,7 @@ export async function getCurrentTab(): Promise<browser.Tabs.Tab | null> {
 /**
  * Get all tabs
  */
-export async function getAllTabs(): Promise<browser.Tabs.Tab[]> {
+export async function getAllTabs(): Promise<Browser.Tabs.Tab[]> {
   return browser.tabs.query({});
 }
 
@@ -33,7 +35,7 @@ export async function createTab(options: {
   active?: boolean;
   pinned?: boolean;
   index?: number;
-}): Promise<browser.Tabs.Tab> {
+}): Promise<Browser.Tabs.Tab> {
   return browser.tabs.create(options);
 }
 
@@ -48,7 +50,7 @@ export async function updateTab(
     pinned?: boolean;
     highlighted?: boolean;
   }
-): Promise<browser.Tabs.Tab | null> {
+): Promise<Browser.Tabs.Tab | null> {
   return browser.tabs.update(tabId, options);
 }
 
@@ -109,7 +111,7 @@ export async function hasHostPermission(url: string): Promise<boolean> {
 /**
  * Get tab by URL
  */
-export async function getTabByUrl(url: string): Promise<browser.Tabs.Tab | null> {
+export async function getTabByUrl(url: string): Promise<Browser.Tabs.Tab | null> {
   const tabs = await browser.tabs.query({ url });
   return tabs[0] || null;
 }

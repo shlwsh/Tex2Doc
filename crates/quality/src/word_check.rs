@@ -69,9 +69,7 @@ impl WordCompatibilityChecker {
             None => {
                 return WordCompatibilityResult {
                     status: CompatibilityStatus::Warnings,
-                    error_message: Some(
-                        "LibreOffice 未找到，跳过 Word 兼容性检查".to_string(),
-                    ),
+                    error_message: Some("LibreOffice 未找到，跳过 Word 兼容性检查".to_string()),
                     pdf_path: None,
                     elapsed_ms: start.elapsed().as_millis() as u64,
                 };
@@ -186,7 +184,6 @@ impl Default for WordCompatibilityChecker {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]
@@ -200,7 +197,7 @@ mod tests {
     #[test]
     fn test_check_empty_file() {
         let checker = WordCompatibilityChecker::new();
-        let temp = NamedTempFile::with_extension("docx").unwrap();
+        let temp = NamedTempFile::with_suffix(".docx").unwrap();
         let result = checker.check(Path::new(temp.path()));
         // 空文件会失败或警告，但不是 passed
         assert_ne!(result.status, CompatibilityStatus::Passed);

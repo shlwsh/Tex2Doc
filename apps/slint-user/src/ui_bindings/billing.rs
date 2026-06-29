@@ -177,10 +177,14 @@ pub fn wire_billing_cloud(ui: &MainWindow, app_state: Arc<AppState>) {
                                     )
                                     .into(),
                                 );
-                                
+
                                 // Persist the redeem code and anonymous email so it fetches on startup
                                 let anonymous_email = format!("t2d-code-{}@anonymous.local", code);
-                                crate::ui_bindings::helpers::persist_redeem_code(&code, &base_url, &anonymous_email);
+                                crate::ui_bindings::helpers::persist_redeem_code(
+                                    &code,
+                                    &base_url,
+                                    &anonymous_email,
+                                );
                             }
                             Err(error) => {
                                 ui.set_billing_status(format!("Redeem failed: {}", error).into())

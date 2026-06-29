@@ -21,15 +21,13 @@ class AutomationAgentList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (agents.isEmpty) {
-      return const EmptyState(
-        label: 'No agents',
-      );
+      return const EmptyState(label: 'No agents');
     }
 
     return ListView.separated(
       padding: const EdgeInsets.all(AppSpacing.md),
       itemCount: agents.length,
-      separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.md),
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.md),
       itemBuilder: (context, index) {
         final agent = agents[index];
         return _AgentCard(
@@ -80,7 +78,10 @@ class _AgentCardState extends State<_AgentCard> {
   Future<void> _pause() async {
     setState(() => _actionInProgress = true);
     try {
-      await widget.api.adminAutomationPauseAgent(widget.accessToken, widget.agent.id);
+      await widget.api.adminAutomationPauseAgent(
+        widget.accessToken,
+        widget.agent.id,
+      );
       widget.onActionCompleted();
     } catch (e) {
       if (mounted) {
@@ -98,7 +99,10 @@ class _AgentCardState extends State<_AgentCard> {
   Future<void> _resume() async {
     setState(() => _actionInProgress = true);
     try {
-      await widget.api.adminAutomationResumeAgent(widget.accessToken, widget.agent.id);
+      await widget.api.adminAutomationResumeAgent(
+        widget.accessToken,
+        widget.agent.id,
+      );
       widget.onActionCompleted();
     } catch (e) {
       if (mounted) {
@@ -216,7 +220,9 @@ class _AgentCardState extends State<_AgentCard> {
               Container(
                 padding: const EdgeInsets.all(AppSpacing.sm),
                 decoration: BoxDecoration(
-                  color: theme.colorScheme.primaryContainer.withValues(alpha: 0.3),
+                  color: theme.colorScheme.primaryContainer.withValues(
+                    alpha: 0.3,
+                  ),
                   borderRadius: BorderRadius.circular(AppRadius.sm),
                 ),
                 child: Row(
@@ -246,10 +252,7 @@ class _AgentCardState extends State<_AgentCard> {
                 runSpacing: AppSpacing.xs,
                 children: agent.capabilities.entries.map((e) {
                   return Chip(
-                    label: Text(
-                      e.key,
-                      style: theme.textTheme.labelSmall,
-                    ),
+                    label: Text(e.key, style: theme.textTheme.labelSmall),
                     backgroundColor: theme.colorScheme.surfaceContainerHighest,
                     padding: EdgeInsets.zero,
                     materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,

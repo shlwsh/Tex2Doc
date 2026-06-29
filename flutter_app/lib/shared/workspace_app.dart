@@ -1,4 +1,4 @@
-﻿import 'dart:async';
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -27,7 +27,6 @@ import '../ui/quick_activation.dart';
 import '../ui/quick_assistant_panel.dart';
 import '../ui/quick_session.dart';
 import '../ui/recharge_records_panel.dart';
-import '../bridge.dart';
 
 const _appIconAsset = 'assets/app_icon.png';
 const _redeemCodePurchaseUrl = 'https://pay.ldxp.cn/item/ns8i2g';
@@ -215,7 +214,8 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
   // Quick assistant state
   _WorkspaceMode _workspaceMode = _WorkspaceMode.quick;
   QuickSession? _quickSession;
-  String? _quickActivationStatus; // 'idle', 'restoring', 'activating', 'activated', 'error'
+  String?
+  _quickActivationStatus; // 'idle', 'restoring', 'activating', 'activated', 'error'
   String? _quickErrorText;
   bool _quickBusy = false;
 
@@ -337,7 +337,6 @@ class _WorkspaceShellState extends State<_WorkspaceShell> {
 
   @override
   Widget build(BuildContext context) {
-    final strings = AppStrings.of(context);
     final platform = widget.mode == DocEngineAppMode.admin
         ? 'Web Admin'
         : widget.isWeb
@@ -1178,10 +1177,7 @@ class _NavContent extends StatelessWidget {
         ),
       ],
       _NavSection.redeemCodes => <Widget>[
-        AdminRedeemCodesPanel(
-          apiBaseUrl: apiBaseUrl,
-          adminToken: accessToken,
-        ),
+        AdminRedeemCodesPanel(apiBaseUrl: apiBaseUrl, adminToken: accessToken),
       ],
       _NavSection.convert => <Widget>[
         _ConvertPanel(apiBaseUrl: apiBaseUrl, accessToken: accessToken),

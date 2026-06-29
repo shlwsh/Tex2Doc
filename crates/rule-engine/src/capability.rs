@@ -188,19 +188,17 @@ impl CapabilityMatrix {
     }
 
     /// 按支持级别筛选。
-    pub fn by_support_level(
-        &self,
-        level: SupportLevel,
-    ) -> impl Iterator<Item = &MacroCapability> {
-        self.capabilities.values().filter(move |c| c.support_level == level)
+    pub fn by_support_level(&self, level: SupportLevel) -> impl Iterator<Item = &MacroCapability> {
+        self.capabilities
+            .values()
+            .filter(move |c| c.support_level == level)
     }
 
     /// 按影响级别筛选。
-    pub fn by_impact_level(
-        &self,
-        level: ImpactLevel,
-    ) -> impl Iterator<Item = &MacroCapability> {
-        self.capabilities.values().filter(move |c| c.impact_level == level)
+    pub fn by_impact_level(&self, level: ImpactLevel) -> impl Iterator<Item = &MacroCapability> {
+        self.capabilities
+            .values()
+            .filter(move |c| c.impact_level == level)
     }
 
     /// 生成能力覆盖率报告。
@@ -217,8 +215,17 @@ impl CapabilityMatrix {
 
         CapabilityCoverageReport {
             total,
-            by_support: SupportLevelCounts { native, lowered, text_fallback, unsupported },
-            by_impact: ImpactLevelCounts { blocking, degraded, ignorable },
+            by_support: SupportLevelCounts {
+                native,
+                lowered,
+                text_fallback,
+                unsupported,
+            },
+            by_impact: ImpactLevelCounts {
+                blocking,
+                degraded,
+                ignorable,
+            },
             support_rate: if total > 0 {
                 (native + lowered) as f64 / total as f64
             } else {
@@ -255,8 +262,8 @@ pub struct ImpactLevelCounts {
 
 /// 内置标准宏/环境能力矩阵。
 pub fn builtin_capability_matrix() -> CapabilityMatrix {
-    use SupportLevel as S;
     use ImpactLevel as I;
+    use SupportLevel as S;
 
     let mut matrix = CapabilityMatrix::new();
 
@@ -277,10 +284,7 @@ pub fn builtin_capability_matrix() -> CapabilityMatrix {
     }
 
     // 文本格式（无 hint 的）
-    for (name, desc) in [
-        ("sout", "删除线文本"),
-        ("textsf", "无衬线字体"),
-    ] {
+    for (name, desc) in [("sout", "删除线文本"), ("textsf", "无衬线字体")] {
         matrix.register(
             MacroCapability::new(name)
                 .with_support(S::Native)
@@ -291,9 +295,9 @@ pub fn builtin_capability_matrix() -> CapabilityMatrix {
 
     // 列表环境
     for (name, desc) in [
-        ("itemize", "无序列表",),
-        ("enumerate", "有序列表",),
-        ("description", "描述列表",),
+        ("itemize", "无序列表"),
+        ("enumerate", "有序列表"),
+        ("description", "描述列表"),
     ] {
         matrix.register(
             MacroCapability::for_environment(name)
@@ -327,7 +331,11 @@ pub fn builtin_capability_matrix() -> CapabilityMatrix {
     for (name, desc, hint) in [
         ("figure", "图片浮动体", Some("保留 caption 和 label")),
         ("table", "表格浮动体", Some("保留 caption 和 label")),
-        ("includegraphics", "图片插入", Some("支持 width/height/scale 选项")),
+        (
+            "includegraphics",
+            "图片插入",
+            Some("支持 width/height/scale 选项"),
+        ),
         ("subcaption", "子图 caption", Some("转换为独立 caption")),
     ] {
         let mut cap = MacroCapability::new(name)

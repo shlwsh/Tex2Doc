@@ -22,11 +22,8 @@ export function getExtensionId(): string {
  * Check for extension updates
  */
 export async function checkForUpdate(): Promise<boolean> {
-  return new Promise((resolve) => {
-    (browser as Browser).runtime.requestUpdateCheck((result: string) => {
-      resolve(result === 'update_available');
-    });
-  });
+  const [result] = await (browser as Browser).runtime.requestUpdateCheck();
+  return result === 'update_available';
 }
 
 /**

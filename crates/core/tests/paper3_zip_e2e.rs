@@ -24,11 +24,17 @@ fn workspace_root() -> PathBuf {
 }
 
 fn paper3_latex_root() -> PathBuf {
-    workspace_root().join("examples").join("paper3").join("latex")
+    workspace_root()
+        .join("examples")
+        .join("paper3")
+        .join("latex")
 }
 
 fn paper3_figures_root() -> PathBuf {
-    workspace_root().join("examples").join("paper3").join("figures")
+    workspace_root()
+        .join("examples")
+        .join("paper3")
+        .join("figures")
 }
 
 /// 把 `examples/paper3/latex` 下的全部文件 + `examples/paper3/figures` 下的
@@ -64,7 +70,11 @@ fn build_paper3_zip() -> Vec<u8> {
                 if !entry.is_file() {
                     continue;
                 }
-                let name = entry.file_name().expect("file_name").to_string_lossy().to_string();
+                let name = entry
+                    .file_name()
+                    .expect("file_name")
+                    .to_string_lossy()
+                    .to_string();
                 if !name.to_lowercase().ends_with(".png") {
                     continue;
                 }
@@ -82,7 +92,9 @@ fn walkdir(root: &std::path::Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let mut stack = vec![root.to_path_buf()];
     while let Some(p) = stack.pop() {
-        let Ok(rd) = std::fs::read_dir(&p) else { continue };
+        let Ok(rd) = std::fs::read_dir(&p) else {
+            continue;
+        };
         for e in rd.flatten() {
             let path = e.path();
             if path.is_dir() {
@@ -113,16 +125,23 @@ fn paper3_zip_full_professional_pipeline() {
 
     // docx 结构断言
     assert!(result.docx.starts_with(b"PK\x03\x04"));
-    let mut z = zip::ZipArchive::new(std::io::Cursor::new(&result.docx)).expect("docx zip 可打开");
+    let z = zip::ZipArchive::new(std::io::Cursor::new(&result.docx)).expect("docx zip 可打开");
     let mut names: Vec<String> = z.file_names().map(|s| s.to_string()).collect();
     names.sort();
     let has_doc = names.iter().any(|n| n == "word/document.xml");
     let has_styles = names.iter().any(|n| n == "word/styles.xml");
     assert!(has_doc, "docx 缺 word/document.xml");
     assert!(has_styles, "docx 缺 word/styles.xml");
-    let media: Vec<&String> = names.iter().filter(|n| n.starts_with("word/media/")).collect();
+    let media: Vec<&String> = names
+        .iter()
+        .filter(|n| n.starts_with("word/media/"))
+        .collect();
     eprintln!("🖼  docx 内嵌图片: {} 张", media.len());
-    assert!(media.len() >= 5, "paper3 至少应嵌入 5 张 figure，但只有 {}", media.len());
+    assert!(
+        media.len() >= 5,
+        "paper3 至少应嵌入 5 张 figure，但只有 {}",
+        media.len()
+    );
 
     // 重新解析 + 断言文本与结构（用本地 latex 目录直接走 vfs，
     // 跟 convert_zip 内部的解析逻辑同一份代码）
@@ -170,46 +189,84 @@ fn paper3_zip_full_professional_pipeline() {
     for b in &doc.blocks {
         match b {
             Block::Paragraph { runs, .. } => {
-                for r in runs { all.push_str(&r.text); all.push('\n'); }
+                for r in runs {
+                    all.push_str(&r.text);
+                    all.push('\n');
+                }
             }
             Block::List { items, .. } => {
                 for item in items {
                     for sub in item {
                         if let Block::Paragraph { runs, .. } = sub {
-                            for r in runs { all.push_str(&r.text); all.push('\n'); }
+                            for r in runs {
+                                all.push_str(&r.text);
+                                all.push('\n');
+                            }
                         }
                     }
                 }
             }
-            Block::Heading { text, .. } => { all.push_str(text); all.push('\n'); }
-            Block::Equation { latex, .. } => { all.push_str(latex); all.push('\n'); }
+            Block::Heading { text, .. } => {
+                all.push_str(text);
+                all.push('\n');
+            }
+            Block::Equation { latex, .. } => {
+                all.push_str(latex);
+                all.push('\n');
+            }
             _ => {}
         }
     }
-    if let Some(t) = &doc.metadata.title { all.push_str(t); all.push('\n'); }
-    for a in &doc.metadata.authors { all.push_str(a); all.push('\n'); }
-    if let Some(abs) = &doc.metadata.abstract_text { all.push_str(abs); all.push('\n'); }
-    for k in &doc.metadata.keywords { all.push_str(k); all.push('\n'); }
+    if let Some(t) = &doc.metadata.title {
+        all.push_str(t);
+        all.push('\n');
+    }
+    for a in &doc.metadata.authors {
+        all.push_str(a);
+        all.push('\n');
+    }
+    if let Some(abs) = &doc.metadata.abstract_text {
+        all.push_str(abs);
+        all.push('\n');
+    }
+    for k in &doc.metadata.keywords {
+        all.push_str(k);
+        all.push('\n');
+    }
 
     // 关键短语：摘要 / 作者 / 主题
-    assert!(all.contains("微服务架构下"), "中文摘要关键短语 '微服务架构下' 缺失");
+    assert!(
+        all.contains("微服务架构下"),
+        "中文摘要关键短语 '微服务架构下' 缺失"
+    );
     assert!(all.contains("石洪雷"), "作者 '石洪雷' 缺失");
     assert!(all.contains("赵涓涓"), "作者 '赵涓涓' 缺失");
     assert!(all.contains("网关"), "论文主题 '网关' 缺失");
-    assert!(all.contains("Grafana Loki") || all.contains("Loki"), "Loki 关键短语缺失");
+    assert!(
+        all.contains("Grafana Loki") || all.contains("Loki"),
+        "Loki 关键短语缺失"
+    );
 
     // 反向断言：LaTeX 杂质必须被剥掉
     for forbid in [
-        "\\documentclass", "\\usepackage", "\\begin{CJK}", "\\end{CJK}",
-        "\\hypersetup", "\\rjtitle", "\\rjauthor", "\\newcommand",
-        "\\bibliographystyle", "\\bibliography{",
-        "\\songti", "\\kaishu", "\\heiti", "\\wuhao",
-        "{ctexart}", "{rjthesis}",
+        "\\documentclass",
+        "\\usepackage",
+        "\\begin{CJK}",
+        "\\end{CJK}",
+        "\\hypersetup",
+        "\\rjtitle",
+        "\\rjauthor",
+        "\\newcommand",
+        "\\bibliographystyle",
+        "\\bibliography{",
+        "\\songti",
+        "\\kaishu",
+        "\\heiti",
+        "\\wuhao",
+        "{ctexart}",
+        "{rjthesis}",
     ] {
-        assert!(
-            !all.contains(forbid),
-            "正文仍残留 LaTeX 杂质：{forbid:?}"
-        );
+        assert!(!all.contains(forbid), "正文仍残留 LaTeX 杂质：{forbid:?}");
     }
 
     // 写出 docx 供人工复核

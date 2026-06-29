@@ -25,7 +25,11 @@ export function parseValidUntil(
   locale: 'en' | 'zh' = 'en'
 ): ParsedDate {
   if (!raw) return { date: null, daysUntil: null, formatted: null };
-  const d = new Date(raw);
+  const numeric = /^\d+$/.test(raw) ? Number(raw) : null;
+  const d =
+    numeric === null
+      ? new Date(raw)
+      : new Date(numeric < 10_000_000_000 ? numeric * 1000 : numeric);
   if (Number.isNaN(d.getTime())) {
     return { date: null, daysUntil: null, formatted: null };
   }

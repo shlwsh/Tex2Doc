@@ -184,7 +184,10 @@ async fn p1_register_rejects_duplicate_email() {
     let err: Value = second.json().await.expect("error json");
     // Error body is { "error": "conflict", "message": "user already exists: ..." }
     let msg = err["message"].as_str().unwrap();
-    assert!(msg.contains(&email[..email.len().min(10)]), "message should mention the email: got '{msg}'");
+    assert!(
+        msg.contains(&email[..email.len().min(10)]),
+        "message should mention the email: got '{msg}'"
+    );
     let _ = shutdown.send(());
 }
 
@@ -355,7 +358,9 @@ async fn p2_admin_create_and_list_manual_order() {
         .expect("list json");
     let orders = list.as_array().expect("orders array");
     assert!(
-        orders.iter().any(|o| o["order_id"].as_str() == Some(order_id)),
+        orders
+            .iter()
+            .any(|o| o["order_id"].as_str() == Some(order_id)),
         "created order should appear in list"
     );
     let _ = shutdown.send(());
@@ -486,13 +491,16 @@ async fn p3_user_get_feedback_thread() {
             .json()
             .await
             .expect("list json");
-        list.as_array().expect("threads array")
+        list.as_array()
+            .expect("threads array")
             .first()
             .expect("at least one thread")
-            .as_object().expect("thread is object")
+            .as_object()
+            .expect("thread is object")
             .get("thread_id")
             .expect("has thread_id")
-            .as_str().unwrap()
+            .as_str()
+            .unwrap()
             .to_string()
     };
 
@@ -507,7 +515,11 @@ async fn p3_user_get_feedback_thread() {
         let thread_resp: Value = created_get_resp.json().await.expect("thread json");
         // Response is { "thread": {...}, "messages": [...] }
         let inner = thread_resp["thread"].as_object().expect("thread object");
-        assert!(inner.contains_key("title"), "thread should have title: {:?}", inner);
+        assert!(
+            inner.contains_key("title"),
+            "thread should have title: {:?}",
+            inner
+        );
     } else {
         assert!(
             created_get_resp.status() == 404,
@@ -538,22 +550,36 @@ async fn p3_user_add_feedback_message() {
 
     let thread_id: String = if created_resp.status() == 200 {
         created_resp.json::<Value>().await.expect("thread json")["thread_id"]
-            .as_str().unwrap().to_string()
+            .as_str()
+            .unwrap()
+            .to_string()
     } else {
         let list: Value = client
             .get(format!("http://{addr}/v1/feedback/threads"))
             .bearer_auth(&token)
-            .send().await.expect("list threads")
-            .json().await.expect("list json");
-        list.as_array().expect("threads array")
-            .first().expect("at least one thread")
-            .as_object().expect("thread is object")
-            .get("thread_id").expect("has thread_id")
-            .as_str().unwrap().to_string()
+            .send()
+            .await
+            .expect("list threads")
+            .json()
+            .await
+            .expect("list json");
+        list.as_array()
+            .expect("threads array")
+            .first()
+            .expect("at least one thread")
+            .as_object()
+            .expect("thread is object")
+            .get("thread_id")
+            .expect("has thread_id")
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     let reply: Value = client
-        .post(format!("http://{addr}/v1/feedback/threads/{thread_id}/messages"))
+        .post(format!(
+            "http://{addr}/v1/feedback/threads/{thread_id}/messages"
+        ))
         .bearer_auth(&token)
         .json(&serde_json::json!({
             "content": "Here is the additional information you requested."
@@ -601,7 +627,7 @@ async fn p3_admin_list_feedback_threads() {
         .json()
         .await
         .expect("list json");
-    let arr = threads.as_array().expect("threads array");
+    let _arr = threads.as_array().expect("threads array");
     // arr is already verified as an array by as_array()
     let _ = shutdown.send(());
 }
@@ -613,7 +639,9 @@ async fn p3_admin_export_feedback_threads_returns_xlsx() {
     let admin = admin_token(&client, addr).await;
 
     let resp = client
-        .get(format!("http://{addr}/admin/v1/feedback/threads/export.xlsx"))
+        .get(format!(
+            "http://{addr}/admin/v1/feedback/threads/export.xlsx"
+        ))
         .bearer_auth(&admin)
         .send()
         .await
@@ -646,22 +674,37 @@ async fn p3_admin_update_feedback_thread() {
 
     let thread_id: String = if created_resp.status() == 200 {
         created_resp.json::<Value>().await.expect("thread json")["thread_id"]
-            .as_str().unwrap().to_string()
+            .as_str()
+            .unwrap()
+            .to_string()
     } else {
         let admin_threads: Value = client
             .get(format!("http://{addr}/admin/v1/feedback/threads"))
             .bearer_auth(&admin)
-            .send().await.expect("admin list")
-            .json().await.expect("admin list json");
-        admin_threads.as_array().expect("threads array")
-            .first().expect("at least one thread")
-            .as_object().expect("thread is object")
-            .get("thread_id").expect("has thread_id")
-            .as_str().unwrap().to_string()
+            .send()
+            .await
+            .expect("admin list")
+            .json()
+            .await
+            .expect("admin list json");
+        admin_threads
+            .as_array()
+            .expect("threads array")
+            .first()
+            .expect("at least one thread")
+            .as_object()
+            .expect("thread is object")
+            .get("thread_id")
+            .expect("has thread_id")
+            .as_str()
+            .unwrap()
+            .to_string()
     };
 
     let updated: Value = client
-        .patch(format!("http://{addr}/admin/v1/feedback/threads/{thread_id}"))
+        .patch(format!(
+            "http://{addr}/admin/v1/feedback/threads/{thread_id}"
+        ))
         .bearer_auth(&admin)
         .json(&serde_json::json!({
             "status": "in_progress",
@@ -702,7 +745,9 @@ async fn p3_admin_reply_feedback_message() {
     let thread_id = created["thread_id"].as_str().unwrap();
 
     let reply: Value = client
-        .post(format!("http://{addr}/admin/v1/feedback/threads/{thread_id}/messages"))
+        .post(format!(
+            "http://{addr}/admin/v1/feedback/threads/{thread_id}/messages"
+        ))
         .bearer_auth(&admin)
         .json(&serde_json::json!({
             "content": "We will add TikZ support in the next release.",
@@ -811,7 +856,9 @@ async fn p4_cloud_conversion_download_zip() {
     let job_id = conv["job_id"].as_str().unwrap();
 
     let resp = client
-        .get(format!("http://{addr}/v1/conversions/{job_id}/download/zip"))
+        .get(format!(
+            "http://{addr}/v1/conversions/{job_id}/download/zip"
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -876,7 +923,9 @@ async fn p4_cloud_conversion_get_quality_report_json() {
     }
 
     let quality: Value = client
-        .get(format!("http://{addr}/v1/conversions/{job_id}/quality-report"))
+        .get(format!(
+            "http://{addr}/v1/conversions/{job_id}/quality-report"
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -941,7 +990,9 @@ async fn p4_cloud_conversion_download_log() {
     }
 
     let resp = client
-        .get(format!("http://{addr}/v1/conversions/{job_id}/download/log"))
+        .get(format!(
+            "http://{addr}/v1/conversions/{job_id}/download/log"
+        ))
         .bearer_auth(&token)
         .send()
         .await
@@ -1010,7 +1061,10 @@ async fn p4_conversion_idempotency_returns_same_job() {
         .expect("second json");
     let second_id = second["job_id"].as_str().unwrap();
 
-    assert_eq!(first_id, second_id, "same idempotency_key should return same job");
+    assert_eq!(
+        first_id, second_id,
+        "same idempotency_key should return same job"
+    );
     let _ = shutdown.send(());
 }
 
@@ -1114,7 +1168,7 @@ async fn p9_automation_list_requests_returns_array() {
         .json()
         .await
         .expect("list json");
-    let arr = list.as_array().expect("requests array");
+    let _arr = list.as_array().expect("requests array");
     // arr is already verified as an array by as_array()
     let _ = shutdown.send(());
 }
@@ -1134,7 +1188,7 @@ async fn p9_automation_list_agents_returns_array() {
         .json()
         .await
         .expect("list json");
-    let arr = list.as_array().expect("agents array");
+    let _arr = list.as_array().expect("agents array");
     // arr is already verified as an array by as_array()
     let _ = shutdown.send(());
 }
@@ -1147,7 +1201,9 @@ async fn p9_automation_404_for_unknown_request_id() {
     let fake_id = uuid::Uuid::new_v4().to_string();
 
     let resp = client
-        .get(format!("http://{addr}/admin/v1/automation/requests/{fake_id}"))
+        .get(format!(
+            "http://{addr}/admin/v1/automation/requests/{fake_id}"
+        ))
         .bearer_auth(&admin)
         .send()
         .await
@@ -1164,7 +1220,9 @@ async fn p9_automation_agents_404_for_unknown_agent() {
     let fake_id = uuid::Uuid::new_v4().to_string();
 
     let resp = client
-        .post(format!("http://{addr}/admin/v1/automation/agents/{fake_id}/pause"))
+        .post(format!(
+            "http://{addr}/admin/v1/automation/agents/{fake_id}/pause"
+        ))
         .bearer_auth(&admin)
         .send()
         .await
@@ -1290,7 +1348,7 @@ async fn p9_admin_release_audit_returns_array() {
         .json()
         .await
         .expect("audit json");
-    let logs = audit["logs"].as_array().expect("logs array");
+    let _logs = audit["logs"].as_array().expect("logs array");
     // logs is already verified as an array by as_array()
     let _ = shutdown.send(());
 }
@@ -1437,7 +1495,9 @@ async fn p2_admin_list_waitlist() {
         .await
         .expect("waitlist json");
     let leads = resp["leads"].as_array().expect("leads array");
-    assert!(leads.iter().any(|l| l["email"] == "waitlist-test@example.com"));
+    assert!(leads
+        .iter()
+        .any(|l| l["email"] == "waitlist-test@example.com"));
     let _ = shutdown.send(());
 }
 

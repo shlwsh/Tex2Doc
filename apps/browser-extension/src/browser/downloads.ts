@@ -2,6 +2,8 @@
  * Downloads utilities
  */
 
+import type Browser from 'webextension-polyfill';
+
 export interface DownloadOptions {
   url: string;
   filename?: string;
@@ -118,8 +120,8 @@ export async function cancelDownload(id: number): Promise<void> {
  */
 export async function searchDownloads(query: {
   id?: number;
-  state?: string;
-}): Promise<browser.Downloads.DownloadItem[]> {
+  state?: Browser.Downloads.State;
+}): Promise<Browser.Downloads.DownloadItem[]> {
   return browser.downloads.search(query);
 }
 

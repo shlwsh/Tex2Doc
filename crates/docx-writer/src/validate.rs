@@ -40,8 +40,10 @@ impl OoxmlValidator {
         let file = match File::open(docx_path) {
             Ok(f) => f,
             Err(e) => {
-                let mut v = Self::default();
-                v.passed = false;
+                let mut v = Self {
+                    passed: false,
+                    ..Self::default()
+                };
                 v.schema_violations.push(SchemaViolation {
                     element: "root".into(),
                     attribute: None,
@@ -54,8 +56,10 @@ impl OoxmlValidator {
         let mut archive = match ZipArchive::new(reader) {
             Ok(a) => a,
             Err(e) => {
-                let mut v = Self::default();
-                v.passed = false;
+                let mut v = Self {
+                    passed: false,
+                    ..Self::default()
+                };
                 v.schema_violations.push(SchemaViolation {
                     element: "root".into(),
                     attribute: None,
@@ -121,7 +125,8 @@ impl OoxmlValidator {
             // 解析 rels 并验证目标文件存在
             // 简化：检查常见的必要 rels
             if !content.contains("officeDocument") {
-                self.missing_relationships.push("officeDocument relationship".into());
+                self.missing_relationships
+                    .push("officeDocument relationship".into());
             }
         }
     }
@@ -166,7 +171,6 @@ impl OoxmlValidator {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::Write;
     use tempfile::NamedTempFile;
 
     #[test]

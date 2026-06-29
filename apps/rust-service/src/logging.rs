@@ -6,6 +6,8 @@
 //! - TraceID 生成与透传
 //! - 敏感字段脱敏
 
+#![allow(dead_code)]
+
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufWriter, Write};
 use std::path::PathBuf;
@@ -22,7 +24,7 @@ use chrono::Local;
 use sha2::{Digest, Sha256};
 use tower::{Layer, Service};
 use tracing_appender::non_blocking::WorkerGuard;
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::{prelude::*, EnvFilter};
 use uuid::Uuid;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -145,8 +147,7 @@ pub fn init() {
     }
 
     // 构建 EnvFilter
-    let env_filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new("info"));
+    let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
 
     // 创建文件 appender
     let file = SizeRotatingFile::new(
@@ -238,6 +239,7 @@ pub fn init() {
 }
 
 /// 构建文件层
+#[allow(dead_code)]
 fn build_file_layer(
     config: &LogConfig,
 ) -> (
@@ -251,29 +253,30 @@ fn build_file_layer(
     );
     let (non_blocking, guard) = tracing_appender::non_blocking(file);
 
-    let layer: Box<dyn tracing_subscriber::layer::Layer<tracing_subscriber::Registry> + Send + Sync> =
-        match config.format {
-            LogFormat::Json => Box::new(
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_writer(non_blocking)
-                    .with_target(true)
-                    .with_thread_ids(false)
-                    .with_thread_names(false)
-                    .with_file(true)
-                    .with_line_number(true),
-            ),
-            LogFormat::Compact => Box::new(
-                tracing_subscriber::fmt::layer()
-                    .compact()
-                    .with_writer(non_blocking)
-                    .with_target(true)
-                    .with_thread_ids(false)
-                    .with_thread_names(false)
-                    .with_file(true)
-                    .with_line_number(true),
-            ),
-        };
+    let layer: Box<
+        dyn tracing_subscriber::layer::Layer<tracing_subscriber::Registry> + Send + Sync,
+    > = match config.format {
+        LogFormat::Json => Box::new(
+            tracing_subscriber::fmt::layer()
+                .json()
+                .with_writer(non_blocking)
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .with_file(true)
+                .with_line_number(true),
+        ),
+        LogFormat::Compact => Box::new(
+            tracing_subscriber::fmt::layer()
+                .compact()
+                .with_writer(non_blocking)
+                .with_target(true)
+                .with_thread_ids(false)
+                .with_thread_names(false)
+                .with_file(true)
+                .with_line_number(true),
+        ),
+    };
 
     (Some(guard), layer)
 }
@@ -345,14 +348,19 @@ impl SizeRotatingFile {
         // 生成滚动文件名
         let now = Local::now();
         let timestamp = now.format("%Y%m%d-%H%M%S");
-        let stem = self.path.file_stem().and_then(|s| s.to_str()).unwrap_or("log");
-        let ext = self.path.extension().and_then(|s| s.to_str()).unwrap_or("log");
-        let rotated_path = self.path.with_file_name(format!(
-            "{}.{}.1.{}",
-            stem,
-            timestamp,
-            ext
-        ));
+        let stem = self
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("log");
+        let ext = self
+            .path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("log");
+        let rotated_path = self
+            .path
+            .with_file_name(format!("{}.{}.1.{}", stem, timestamp, ext));
         // 重命名当前文件
         fs::rename(&self.path, &rotated_path)?;
         // 删除旧滚动文件
@@ -361,8 +369,16 @@ impl SizeRotatingFile {
     }
 
     fn clean_old_files(&self) -> io::Result<()> {
-        let stem = self.path.file_stem().and_then(|s| s.to_str()).unwrap_or("log");
-        let ext = self.path.extension().and_then(|s| s.to_str()).unwrap_or("log");
+        let stem = self
+            .path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("log");
+        let ext = self
+            .path
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("log");
         let dir = self.path.parent().unwrap_or(std::path::Path::new("."));
 
         let mut files: Vec<_> = fs::read_dir(dir)?
@@ -420,7 +436,7 @@ impl Write for SizeRotatingFile {
 // ─────────────────────────────────────────────────────────────────────────────
 
 thread_local! {
-    static TRACE_ID: Mutex<Option<String>> = Mutex::new(None);
+    static TRACE_ID: Mutex<Option<String>> = const { Mutex::new(None) };
 }
 
 /// 生成新的 TraceID
@@ -507,19 +523,10 @@ pub fn redact_value(key: &str, value: &str) -> String {
         let hash = hash_bytes(value.as_bytes());
         format!("***REDACTED({})***", &hash[..12])
     }
-    // UUID 直接记录（不脱敏）
-    else if is_uuid(value) {
-        value.to_string()
-    }
     // 默认返回原值
     else {
         value.to_string()
     }
-}
-
-/// 检查字符串是否为 UUID
-fn is_uuid(s: &str) -> bool {
-    s.len() == 36 && s.chars().all(|c| c.is_ascii_hexdigit() || c == '-')
 }
 
 /// 对 JSON 对象进行脱敏
@@ -534,7 +541,10 @@ pub fn redact_json(json: &serde_json::Value) -> serde_json::Value {
                     if let Some(email_str) = value.as_str() {
                         if let Some(at_pos) = email_str.find('@') {
                             let domain = &email_str[at_pos..];
-                            result.insert(key.clone(), serde_json::Value::String(format!("***@{}", domain)));
+                            result.insert(
+                                key.clone(),
+                                serde_json::Value::String(format!("***@{}", domain)),
+                            );
                         } else {
                             result.insert(key.clone(), value.clone());
                         }
@@ -543,7 +553,7 @@ pub fn redact_json(json: &serde_json::Value) -> serde_json::Value {
                     }
                 }
                 // 检查完全匹配的敏感字段
-                else if SENSITIVE_KEYS.iter().any(|k| *k == key_lower.as_str()) {
+                else if SENSITIVE_KEYS.contains(&key_lower.as_str()) {
                     let hash = hash_bytes(value.to_string().as_bytes());
                     result.insert(
                         key.clone(),
@@ -643,11 +653,7 @@ pub fn db_query_result(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// 记录安全事件
-pub fn security_event(
-    event_type: &str,
-    message: &str,
-    details: Option<&serde_json::Value>,
-) {
+pub fn security_event(event_type: &str, message: &str, details: Option<&serde_json::Value>) {
     if let Some(d) = details {
         tracing::warn!(
             target: "security",
@@ -725,7 +731,9 @@ where
 {
     type Response = S::Response;
     type Error = S::Error;
-    type Future = std::pin::Pin<Box<dyn Send + std::future::Future<Output = Result<Self::Response, Self::Error>>>>;
+    type Future = std::pin::Pin<
+        Box<dyn Send + std::future::Future<Output = Result<Self::Response, Self::Error>>>,
+    >;
 
     fn poll_ready(
         &mut self,
@@ -765,11 +773,7 @@ where
                 .to_string();
 
             // 估算请求体大小
-            let request_bytes = request
-                .body()
-                .size_hint()
-                .upper()
-                .unwrap_or(0);
+            let request_bytes = request.body().size_hint().upper().unwrap_or(0);
 
             tracing::info!(
                 target: "api",
@@ -797,11 +801,7 @@ where
 
             // 获取响应状态码和大小
             let status = response.status().as_u16();
-            let response_bytes = response
-                .body()
-                .size_hint()
-                .upper()
-                .unwrap_or(0);
+            let response_bytes = response.body().size_hint().upper().unwrap_or(0);
 
             // 记录请求结束
             tracing::info!(
@@ -923,7 +923,12 @@ mod tests {
         let redacted = redact_json(&json);
         let map = redacted.as_object().unwrap();
         assert!(map.get("email").unwrap().as_str().unwrap().contains("@"));
-        assert!(map.get("password").unwrap().as_str().unwrap().starts_with("***"));
+        assert!(map
+            .get("password")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .starts_with("***"));
         assert_eq!(map.get("name").unwrap().as_str().unwrap(), "John");
     }
 

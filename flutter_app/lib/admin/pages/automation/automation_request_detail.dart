@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import '../../../commercial_api.dart';
-import '../../../ui/app_components.dart';
 import '../../../ui/app_tokens.dart';
 import 'automation_status.dart';
 
@@ -79,7 +78,10 @@ class _AutomationRequestDetailDialogState
     if (confirmed != true) return;
 
     await _doAction(() async {
-      await widget.api.adminAutomationApprove(widget.accessToken, widget.requestId);
+      await widget.api.adminAutomationApprove(
+        widget.accessToken,
+        widget.requestId,
+      );
     });
   }
 
@@ -88,7 +90,11 @@ class _AutomationRequestDetailDialogState
     if (reason == null || reason.isEmpty) return;
 
     await _doAction(() async {
-      await widget.api.adminAutomationReject(widget.accessToken, widget.requestId, reason);
+      await widget.api.adminAutomationReject(
+        widget.accessToken,
+        widget.requestId,
+        reason,
+      );
     });
   }
 
@@ -101,7 +107,10 @@ class _AutomationRequestDetailDialogState
     if (confirmed != true) return;
 
     await _doAction(() async {
-      await widget.api.adminAutomationRetry(widget.accessToken, widget.requestId);
+      await widget.api.adminAutomationRetry(
+        widget.accessToken,
+        widget.requestId,
+      );
     });
   }
 
@@ -110,7 +119,11 @@ class _AutomationRequestDetailDialogState
     if (assignee == null || assignee.isEmpty) return;
 
     await _doAction(() async {
-      await widget.api.adminAutomationEscalate(widget.accessToken, widget.requestId, assignee);
+      await widget.api.adminAutomationEscalate(
+        widget.accessToken,
+        widget.requestId,
+        assignee,
+      );
     });
   }
 
@@ -237,10 +250,7 @@ class _AutomationRequestDetailDialogState
               ),
               child: Row(
                 children: [
-                  Text(
-                    'Request Details',
-                    style: theme.textTheme.titleMedium,
-                  ),
+                  Text('Request Details', style: theme.textTheme.titleMedium),
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.close),
@@ -255,37 +265,37 @@ class _AutomationRequestDetailDialogState
               child: _loading
                   ? const Center(child: CircularProgressIndicator())
                   : _error != null
-                      ? Center(
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(_error!),
-                              const SizedBox(height: AppSpacing.md),
-                              FilledButton(
-                                onPressed: _loadData,
-                                child: const Text('Retry'),
-                              ),
-                            ],
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(_error!),
+                          const SizedBox(height: AppSpacing.md),
+                          FilledButton(
+                            onPressed: _loadData,
+                            child: const Text('Retry'),
                           ),
-                        )
-                      : SingleChildScrollView(
-                          padding: const EdgeInsets.all(AppSpacing.md),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              // Summary
-                              _buildSummary(),
-                              const SizedBox(height: AppSpacing.lg),
+                        ],
+                      ),
+                    )
+                  : SingleChildScrollView(
+                      padding: const EdgeInsets.all(AppSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Summary
+                          _buildSummary(),
+                          const SizedBox(height: AppSpacing.lg),
 
-                              // Actions
-                              _buildActions(),
-                              const SizedBox(height: AppSpacing.lg),
+                          // Actions
+                          _buildActions(),
+                          const SizedBox(height: AppSpacing.lg),
 
-                              // Timeline
-                              _buildTimeline(),
-                            ],
-                          ),
-                        ),
+                          // Timeline
+                          _buildTimeline(),
+                        ],
+                      ),
+                    ),
             ),
           ],
         ),
@@ -341,10 +351,7 @@ class _AutomationRequestDetailDialogState
         const SizedBox(height: AppSpacing.md),
 
         // Title
-        Text(
-          request.title,
-          style: theme.textTheme.titleLarge,
-        ),
+        Text(request.title, style: theme.textTheme.titleLarge),
         const SizedBox(height: AppSpacing.md),
 
         // Meta info grid
@@ -382,10 +389,7 @@ class _AutomationRequestDetailDialogState
                   ),
                 ),
                 const SizedBox(height: AppSpacing.xs),
-                Text(
-                  request.aiSummary!,
-                  style: theme.textTheme.bodySmall,
-                ),
+                Text(request.aiSummary!, style: theme.textTheme.bodySmall),
               ],
             ),
           ),
@@ -429,10 +433,7 @@ class _AutomationRequestDetailDialogState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Actions',
-          style: theme.textTheme.titleSmall,
-        ),
+        Text('Actions', style: theme.textTheme.titleSmall),
         const SizedBox(height: AppSpacing.sm),
         Wrap(
           spacing: AppSpacing.sm,
@@ -480,10 +481,7 @@ class _AutomationRequestDetailDialogState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Timeline',
-          style: theme.textTheme.titleSmall,
-        ),
+        Text('Timeline', style: theme.textTheme.titleSmall),
         const SizedBox(height: AppSpacing.md),
         if (_events.isEmpty)
           Center(

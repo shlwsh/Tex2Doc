@@ -418,7 +418,7 @@ impl BlockNode {
                     scale: *scale,
                     sizing: sizing.clone(),
                     label: label.clone(),
-                    text_direction: text_direction.clone(),
+                    text_direction: *text_direction,
                 }),
                 source_span: Some(*span),
                 label: None,
@@ -997,6 +997,8 @@ mod tests {
                 scale: 0.8,
                 sizing: sizing.clone(),
                 number: Some("图 1".to_string()),
+                label: None,
+                text_direction: None,
                 span: Span::new(0, 5, SourceId(0)),
             }],
         };

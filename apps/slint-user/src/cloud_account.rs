@@ -544,7 +544,9 @@ impl FeedbackTableRow {
             .or(thread.updated_at.clone())
             .unwrap_or_else(|| thread.created_at.clone());
 
-        let automation_status = thread.automation_status.unwrap_or_else(|| "none".to_string());
+        let automation_status = thread
+            .automation_status
+            .unwrap_or_else(|| "none".to_string());
         let automation_request_id = thread.automation_request_id.unwrap_or_default();
 
         Self {

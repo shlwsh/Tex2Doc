@@ -3,15 +3,11 @@
 use doc_compiler_engine::{CompileOptions, ProfileRef, SemanticBackendKind, SemanticTexEngine};
 use doc_core::{convert_zip, ConvertOptions};
 use doc_quality::quality_run::BackendSummary;
-use serde_json;
 use tokio::sync::mpsc;
-use zip;
 use tokio::time::{self, Duration};
 
 use crate::error_code::ConversionErrorCode;
-use crate::limits::{
-    MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_UNCOMPRESSED_BYTES,
-};
+use crate::limits::{MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES};
 use crate::state::{ConversionReportRecord, ConversionStatus, ServerState};
 
 /// Redact user content from log messages to protect privacy.
@@ -22,7 +18,8 @@ pub fn redact_content(content: &str) -> String {
     if content.len() > 200 {
         format!("{}... [REDACTED_CONTENT]", &content[..200])
     } else {
-        content.replace("\\begin", "[REDACTED_LATEX]")
+        content
+            .replace("\\begin", "[REDACTED_LATEX]")
             .replace("\\end", "[/REDACTED_LATEX]")
     }
 }
@@ -36,11 +33,16 @@ fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
     let mut file_count: usize = 0;
 
     for i in 0..archive.len() {
-        let file = archive.by_index(i).map_err(|e| format!("Cannot read file {i}: {e}"))?;
+        let file = archive
+            .by_index(i)
+            .map_err(|e| format!("Cannot read file {i}: {e}"))?;
         file_count += 1;
 
         if file_count > MAX_UPLOAD_FILE_COUNT {
-            return Err(format!("Too many files: {file_count} > {}", MAX_UPLOAD_FILE_COUNT));
+            return Err(format!(
+                "Too many files: {file_count} > {}",
+                MAX_UPLOAD_FILE_COUNT
+            ));
         }
 
         let uncompressed_size = file.size();
@@ -60,7 +62,7 @@ fn validate_zip(zip_bytes: &[u8]) -> Result<ZipValidation, String> {
         }
 
         // Check individual file size
-        if uncompressed_size > MAX_UPLOAD_FILE_BYTES as u64 {
+        if uncompressed_size > MAX_UPLOAD_FILE_BYTES {
             return Err(format!(
                 "File too large: {name} is {} > {} bytes",
                 uncompressed_size, MAX_UPLOAD_FILE_BYTES
@@ -143,11 +145,26 @@ async fn process_job(state: ServerState, job_id: String) {
         .and_then(|j| j.trace_id.clone())
         .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
 
-    let upload_id = job.as_ref().map(|j| j.upload_id.clone()).unwrap_or_else(|| "unknown".to_string());
-    let user_id = job.as_ref().map(|j| j.user_id.clone()).unwrap_or_else(|| "unknown".to_string());
-    let engine = job.as_ref().map(|j| j.engine.clone()).unwrap_or_else(|| "unknown".to_string());
-    let profile = job.as_ref().map(|j| j.profile.clone()).unwrap_or_else(|| "unknown".to_string());
-    let quality = job.as_ref().map(|j| j.quality.clone()).unwrap_or_else(|| "unknown".to_string());
+    let upload_id = job
+        .as_ref()
+        .map(|j| j.upload_id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let user_id = job
+        .as_ref()
+        .map(|j| j.user_id.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let engine = job
+        .as_ref()
+        .map(|j| j.engine.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let profile = job
+        .as_ref()
+        .map(|j| j.profile.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+    let quality = job
+        .as_ref()
+        .map(|j| j.quality.clone())
+        .unwrap_or_else(|| "unknown".to_string());
 
     tracing::info!(
         target: "conversion",
@@ -203,9 +220,8 @@ async fn process_job(state: ServerState, job_id: String) {
 
     // 保存当前 span 用于 spawn_blocking
     let span = tracing::Span::current();
-    let result = tokio::task::spawn_blocking(move || {
-        span.in_scope(|| execute_conversion(input))
-    }).await;
+    let result =
+        tokio::task::spawn_blocking(move || span.in_scope(|| execute_conversion(input))).await;
 
     let output = match result {
         Ok(Ok(result)) => {
@@ -277,7 +293,9 @@ async fn process_job(state: ServerState, job_id: String) {
     };
 
     tracing::info!(target: "conversion", event = "conversion.job.complete", trace_id = %trace_id, job_id = %job_id, docx_bytes = %output.docx.len(), quality_score = %output.quality_score, "conversion job completed");
-    state.complete_job(&job_id, output.docx, report, Some(trace_id)).await;
+    state
+        .complete_job(&job_id, output.docx, report, Some(trace_id))
+        .await;
 }
 
 #[derive(Debug)]
@@ -380,12 +398,15 @@ fn execute_semantic(input: &ConversionJobInput) -> Result<ConversionJobOutput, S
         .iter()
         .map(|diagnostic| format!("{}: {}", diagnostic.code, diagnostic.message))
         .collect::<Vec<_>>();
-    if report.backend.fallback_from.is_some() {
-        let fallback_from = report.backend.fallback_from.as_ref().unwrap();
+    if let Some(fallback_from) = &report.backend.fallback_from {
         let selected = report.backend.selected.id();
         warnings.insert(
             0,
-            format!("semantic backend fallback: {} -> {}", fallback_from.id(), selected),
+            format!(
+                "semantic backend fallback: {} -> {}",
+                fallback_from.id(),
+                selected
+            ),
         );
     }
 
@@ -411,22 +432,13 @@ fn build_quality_run(
     diagnostics: &[doc_compiler_engine::EngineDiagnostic],
     quality_gate: Option<&doc_compiler_engine::QualityGateResult>,
 ) -> Option<String> {
-    use doc_quality::quality_run::{
-        DimensionScores, QualityIssue, QualityRun, SemanticLossEvent,
-    };
+    use doc_quality::quality_run::{DimensionScores, QualityIssue, QualityRun, SemanticLossEvent};
 
     // 从 diagnostics 提取 semantic loss events
     let semantic_losses: Vec<SemanticLossEvent> = diagnostics
         .iter()
         .filter(|d| d.severity == doc_compiler_engine::DiagnosticSeverity::Warning)
-        .map(|d| {
-            SemanticLossEvent::new(
-                &d.code,
-                "text_fallback",
-                "degraded",
-                &d.message,
-            )
-        })
+        .map(|d| SemanticLossEvent::new(&d.code, "text_fallback", "degraded", &d.message))
         .collect();
 
     // 从 quality_gate 提取 issues
@@ -611,7 +623,11 @@ fn convert_quality_check_to_issue(
         name: check.name.clone(),
         severity,
         description: check.message.clone(),
-        suggestion: if check.passed { None } else { Some(check.message.clone()) },
+        suggestion: if check.passed {
+            None
+        } else {
+            Some(check.message.clone())
+        },
         layer: layer.to_string(),
     }
 }

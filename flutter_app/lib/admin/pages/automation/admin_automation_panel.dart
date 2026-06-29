@@ -112,7 +112,8 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
             Expanded(
               child: AppSectionHeader(
                 title: strings.t('nav.automation'),
-                description: 'AI-powered automated development workflow management',
+                description:
+                    'AI-powered automated development workflow management',
               ),
             ),
             const SizedBox(width: AppSpacing.md),
@@ -142,9 +143,7 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
 
         // Error state
         if (_error != null) ...[
-          ErrorState(
-            message: _error!,
-          ),
+          ErrorState(message: _error!),
           const SizedBox(height: AppSpacing.lg),
         ],
 
@@ -154,15 +153,15 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
           tabs: [
             Tab(
               icon: const Icon(Icons.list_alt),
-              text: strings.t('automation.requests') ?? 'Requests',
+              text: strings.t('automation.requests'),
             ),
             Tab(
               icon: const Icon(Icons.terminal),
-              text: strings.t('automation.agents') ?? 'Agents',
+              text: strings.t('automation.agents'),
             ),
             Tab(
               icon: const Icon(Icons.history),
-              text: strings.t('automation.history') ?? 'History',
+              text: strings.t('automation.history'),
             ),
           ],
           labelColor: theme.colorScheme.primary,
@@ -221,12 +220,6 @@ class _AdminAutomationPanelState extends State<AdminAutomationPanel>
   }
 
   Widget _buildHistoryTab() {
-    final strings = AppStrings.of(context);
-
-    return Center(
-      child: EmptyState(
-        label: 'No data',
-      ),
-    );
+    return Center(child: EmptyState(label: 'No data'));
   }
 }

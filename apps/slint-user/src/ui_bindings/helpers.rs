@@ -134,11 +134,7 @@ pub(crate) fn persist_settings(
     }
 }
 
-pub(crate) fn persist_redeem_code(
-    code: &str,
-    api_base_url: &str,
-    login_email: &str,
-) {
+pub(crate) fn persist_redeem_code(code: &str, api_base_url: &str, login_email: &str) {
     let mut settings = crate::settings::Settings::load();
     if !code.trim().is_empty() {
         settings.last_redeem_code = Some(code.to_string());

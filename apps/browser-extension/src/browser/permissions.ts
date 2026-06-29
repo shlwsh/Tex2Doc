@@ -2,6 +2,8 @@
  * Permissions utilities
  */
 
+import type Browser from 'webextension-polyfill';
+
 export interface PermissionStatus {
   granted: boolean;
   permissions: string[];
@@ -45,9 +47,9 @@ export async function requestPermissions(
     return true;
   }
 
-  const request: browser.Permissions.Permissions = {};
+  const request: Browser.Permissions.Permissions = {};
   if (permissions?.length) {
-    request.permissions = permissions;
+    request.permissions = permissions as Browser.Permissions.Permissions['permissions'];
   }
   if (origins?.length) {
     request.origins = origins;
@@ -75,9 +77,9 @@ export async function removePermissions(
     return true;
   }
 
-  const request: browser.Permissions.Permissions = {};
+  const request: Browser.Permissions.Permissions = {};
   if (permissions?.length) {
-    request.permissions = permissions;
+    request.permissions = permissions as Browser.Permissions.Permissions['permissions'];
   }
   if (origins?.length) {
     request.origins = origins;

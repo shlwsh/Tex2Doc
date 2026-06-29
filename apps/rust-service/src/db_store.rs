@@ -17,23 +17,22 @@ use crate::feedback_service::{
     FeedbackMessage, FeedbackPriority, FeedbackStatus, FeedbackThread, FeedbackThreadSummary,
     FeedbackType, SenderType, ThreadFilters,
 };
+use crate::logging::db_operation;
 use crate::state::{
     code_hash, decrypt_code, encrypt_code, generate_redeem_code, group_redeem_code, hash_bytes,
     hash_text, normalize_redeem_code, now_timestamp, random_bytes, random_string,
     redeem_checksum_valid, redeem_package, ConversionJobRecord, ConversionReportRecord,
-    ConversionStatus, EntitlementRecord, RechargeRecord, RedeemCodeBatchRecord,
-    RedeemCodeRecord, RedeemCodeResult, RedeemFailure, RedeemPackage, UploadRecord,
+    ConversionStatus, EntitlementRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
+    RedeemCodeResult, RedeemFailure, RedeemPackage, SignupBonusConfig, UploadRecord,
     PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
-use crate::logging::db_operation;
 
 const BUSINESS_SCHEMA: &str = include_str!("../../../docs-zh/money/001_docdb_business_schema.sql");
 const REDEEM_STOCK_SCHEMA: &str =
     include_str!("../../../docs-zh/money/002_redeem_codes_stock_status.sql");
 const FEEDBACK_SCHEMA: &str =
     include_str!("../../../docs-zh/money/003_feedback_and_session_storage.sql");
-const AUTOMATION_SCHEMA: &str =
-    include_str!("../../../docs-zh/money/004_automation_rnd.sql");
+const AUTOMATION_SCHEMA: &str = include_str!("../../../docs-zh/money/004_automation_rnd.sql");
 
 #[derive(Debug, Clone)]
 pub struct DbStore {
@@ -121,6 +120,10 @@ impl DbStore {
             r#"
             ALTER TABLE conversion_jobs
                 ADD COLUMN IF NOT EXISTS trace_id TEXT;
+            ALTER TABLE commercial_entitlements
+                ADD COLUMN IF NOT EXISTS signup_bonus_balance BIGINT NOT NULL DEFAULT 0
+                    CHECK (signup_bonus_balance >= 0),
+                ADD COLUMN IF NOT EXISTS signup_bonus_valid_until TIMESTAMPTZ;
             "#,
         )
         .execute(&self.pool)
@@ -162,7 +165,9 @@ impl DbStore {
         email: &str,
         display_name: Option<&str>,
         password: &str,
+        signup_bonus: &SignupBonusConfig,
     ) -> Result<AppUser, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
         let row = sqlx::query(
             r#"
             INSERT INTO app_users (email, password_hash, display_name, default_plan_id, status)
@@ -173,9 +178,43 @@ impl DbStore {
         .bind(email)
         .bind(hash_text(password))
         .bind(display_name)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
-        Ok(app_user_from_row(&row))
+        let user = app_user_from_row(&row);
+        if signup_bonus.enabled {
+            let user_uuid = parse_uuid(&user.id)?;
+            let provider_trade_id = format!("system_signup_{}", user.id);
+            let recharge = insert_recharge(
+                &mut tx,
+                user_uuid,
+                "count",
+                "signup_bonus",
+                signup_bonus.default_quantity,
+                0,
+                "paid",
+                "system_signup",
+                &provider_trade_id,
+            )
+            .await?;
+            apply_entitlement_sql(&mut tx, user_uuid, &recharge).await?;
+            sqlx::query(
+                r#"
+                UPDATE commercial_entitlements
+                SET signup_bonus_balance = signup_bonus_balance + $2,
+                    signup_bonus_valid_until = now() + ($3::text || ' days')::interval,
+                    updated_at = now()
+                WHERE user_id = $1
+                "#,
+            )
+            .bind(user_uuid)
+            .bind(signup_bonus.default_quantity as i64)
+            .bind(signup_bonus.validity_days as i64)
+            .execute(&mut *tx)
+            .await?;
+            insert_grant_ledger(&mut tx, user_uuid, &recharge, "system_signup").await?;
+        }
+        tx.commit().await?;
+        Ok(user)
     }
 
     pub async fn login_user(
@@ -422,6 +461,7 @@ impl DbStore {
         Ok(row.map(|row| upload_from_row(&row, Vec::new())))
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_job(
         &self,
         user_id: String,
@@ -516,10 +556,12 @@ impl DbStore {
         &self,
         key: &str,
     ) -> Result<Option<ConversionJobRecord>, sqlx::Error> {
-        let row = sqlx::query(&job_select_sql("WHERE idempotency_key = $1 AND status != 'failed' ORDER BY created_at DESC LIMIT 1"))
-            .bind(key)
-            .fetch_optional(&self.pool)
-            .await?;
+        let row = sqlx::query(&job_select_sql(
+            "WHERE idempotency_key = $1 AND status != 'failed' ORDER BY created_at DESC LIMIT 1",
+        ))
+        .bind(key)
+        .fetch_optional(&self.pool)
+        .await?;
         Ok(row.map(|row| job_from_row(&row, None, report_from_row(&row))))
     }
 
@@ -758,9 +800,15 @@ impl DbStore {
             INSERT INTO commercial_entitlements (user_id)
             VALUES ($1)
             ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            RETURNING user_id::text, count_balance,
+            RETURNING user_id::text,
+                      GREATEST(0, count_balance - CASE
+                          WHEN signup_bonus_valid_until IS NOT NULL AND signup_bonus_valid_until < now()
+                          THEN signup_bonus_balance ELSE 0 END) AS count_balance,
                       EXTRACT(EPOCH FROM valid_until)::bigint AS valid_until_secs,
                       source_order_id,
+                      CASE WHEN signup_bonus_valid_until IS NOT NULL AND signup_bonus_valid_until >= now()
+                          THEN signup_bonus_balance ELSE 0 END AS signup_bonus_balance,
+                      EXTRACT(EPOCH FROM signup_bonus_valid_until)::bigint AS signup_bonus_valid_until_secs,
                       EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs
             "#,
         )
@@ -779,7 +827,7 @@ impl DbStore {
             INSERT INTO commercial_entitlements (user_id)
             VALUES ($1)
             ON CONFLICT (user_id) DO UPDATE SET user_id = EXCLUDED.user_id
-            RETURNING count_balance, valid_until
+            RETURNING count_balance, valid_until, signup_bonus_balance, signup_bonus_valid_until
             "#,
         )
         .bind(user_uuid)
@@ -787,6 +835,14 @@ impl DbStore {
         .await
         .map_err(|_| 0_u64)?;
         let count_balance = entitlement.get::<i64, _>("count_balance");
+        let signup_bonus_balance = entitlement.get::<i64, _>("signup_bonus_balance");
+        let signup_bonus_valid_until = entitlement
+            .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("signup_bonus_valid_until")
+            .ok()
+            .flatten();
+        let signup_bonus_active = signup_bonus_valid_until
+            .as_ref()
+            .is_some_and(|value| *value >= chrono::Utc::now());
         let valid_until_active = entitlement
             .try_get::<Option<chrono::DateTime<chrono::Utc>>, _>("valid_until")
             .ok()
@@ -813,7 +869,36 @@ impl DbStore {
             return Ok(used);
         }
 
-        if count_balance > 0 {
+        if signup_bonus_active && signup_bonus_balance > 0 {
+            let new_balance = count_balance - 1;
+            let new_signup_balance = signup_bonus_balance - 1;
+            sqlx::query(
+                "UPDATE commercial_entitlements SET count_balance = $2, signup_bonus_balance = $3, updated_at = now() WHERE user_id = $1",
+            )
+            .bind(user_uuid)
+            .bind(new_balance)
+            .bind(new_signup_balance)
+            .execute(&mut *tx)
+            .await
+            .map_err(|_| used)?;
+            insert_usage_ledger(
+                &mut tx,
+                user_uuid,
+                Some(job_uuid),
+                "reserve",
+                1,
+                Some(new_balance),
+                "signup_bonus",
+                Some("signup bonus reserved for conversion"),
+            )
+            .await
+            .map_err(|_| used)?;
+            tx.commit().await.map_err(|_| used)?;
+            return Ok(used);
+        }
+
+        let paid_count_balance = count_balance - signup_bonus_balance;
+        if paid_count_balance > 0 {
             let new_balance = count_balance - 1;
             sqlx::query(
                 "UPDATE commercial_entitlements SET count_balance = $2, updated_at = now() WHERE user_id = $1",
@@ -837,6 +922,11 @@ impl DbStore {
             .map_err(|_| used)?;
             tx.commit().await.map_err(|_| used)?;
             return Ok(used);
+        }
+
+        if signup_bonus_valid_until.is_some() {
+            tx.rollback().await.ok();
+            return Err(used);
         }
 
         if used >= PREVIEW_CLOUD_CONVERSION_LIMIT {
@@ -1022,6 +1112,22 @@ impl DbStore {
                 r#"
                 UPDATE commercial_entitlements
                 SET count_balance = count_balance + $2, updated_at = now()
+                WHERE user_id = $1
+                RETURNING count_balance
+                "#,
+            )
+            .bind(user_uuid)
+            .bind(quantity)
+            .fetch_one(&mut *tx)
+            .await?;
+            Some(row.get::<i64, _>("count_balance"))
+        } else if source == "signup_bonus" {
+            let row = sqlx::query(
+                r#"
+                UPDATE commercial_entitlements
+                SET count_balance = count_balance + $2,
+                    signup_bonus_balance = signup_bonus_balance + $2,
+                    updated_at = now()
                 WHERE user_id = $1
                 RETURNING count_balance
                 "#,
@@ -1527,6 +1633,7 @@ impl DbStore {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_redeem_batch(
         &self,
         package_id: &str,
@@ -3016,6 +3123,8 @@ fn entitlement_from_row(row: &PgRow) -> EntitlementRecord {
         count_balance: row.get::<i64, _>("count_balance").max(0) as u64,
         valid_until: epoch_col(row, "valid_until_secs"),
         source_order_id: row.get("source_order_id"),
+        signup_bonus_balance: row.get::<i64, _>("signup_bonus_balance").max(0) as u64,
+        signup_bonus_valid_until: epoch_col(row, "signup_bonus_valid_until_secs"),
         updated_at: epoch_col(row, "updated_at_secs").unwrap_or_else(now_timestamp),
     }
 }

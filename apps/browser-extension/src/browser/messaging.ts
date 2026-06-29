@@ -2,8 +2,10 @@
  * Messaging utilities
  */
 
+import type Browser from 'webextension-polyfill';
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export type MessageHandler = (message: any, sender: browser.Runtime.MessageSender) => Promise<any> | any;
+export type MessageHandler = (message: any, sender: Browser.Runtime.MessageSender) => Promise<any> | any;
 
 export interface MessageOptions {
   expectResponse?: boolean;
@@ -53,25 +55,16 @@ export async function sendToContentScript<T = unknown>(
  * Create a message listener
  */
 export function createMessageListener(handlers: Record<string, MessageHandler>): () => void {
-  const listener = (
+  const listener: Browser.Runtime.OnMessageListener = (
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     message: any,
-    sender: browser.Runtime.MessageSender,
-    sendResponse: () => void
+    sender: Browser.Runtime.MessageSender
   ) => {
     const handler = handlers[message.type as string];
     if (!handler) {
-      sendResponse();
-      return;
+      return Promise.resolve(undefined);
     }
-
-    const result = handler(message, sender);
-    if (result instanceof Promise) {
-      result.then(() => sendResponse()).catch(() => sendResponse());
-      return;
-    }
-
-    sendResponse();
+    return Promise.resolve(handler(message, sender));
   };
 
   browser.runtime.onMessage.addListener(listener);

@@ -135,7 +135,9 @@ impl ConversionErrorCode {
         match self {
             Self::UploadInvalidZip => "请重新打包项目，避免嵌套危险路径或损坏的压缩包。",
             Self::MainTexNotFound => "请指定 main.tex 路径或检查压缩包结构。",
-            Self::PreflightUnsupportedPackage => "可尝试使用 strict 质量级别或移除不支持的宏包后重试。",
+            Self::PreflightUnsupportedPackage => {
+                "可尝试使用 strict 质量级别或移除不支持的宏包后重试。"
+            }
             Self::SemanticParseFailed => "查看报告中源文件的问题位置，尝试简化或修复相关宏命令。",
             Self::BackendRuntimeUnavailable => "服务端 TeX 运行时暂时不可用，请稍后重试。",
             Self::DocxRenderFailed => "DOCX 渲染失败，请联系支持并附上 job id。",

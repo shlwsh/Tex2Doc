@@ -94,7 +94,7 @@ fn normalize_api_base_url(value: &str) -> String {
     if trimmed.is_empty() || trimmed == LEGACY_ONLINE_API_BASE_URL {
         return DEFAULT_API_BASE_URL.to_string();
     }
-    
+
     // Self-healing: if it's completely wrong like a path, reset to default.
     if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
         return DEFAULT_API_BASE_URL.to_string();

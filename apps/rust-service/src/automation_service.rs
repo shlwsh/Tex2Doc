@@ -1,11 +1,11 @@
 //! Automation R&D Service
 //! Handles AI-powered automated development workflow
 
+use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sqlx::{PgPool, Row};
 use std::result::Result as StdResult;
-use axum::http::StatusCode;
 use uuid::Uuid;
 
 use crate::error::ApiError;
@@ -224,7 +224,10 @@ impl AutomationService {
     }
 
     // List requests with filters
-    pub async fn list_requests(&self, filters: &RequestFilters) -> StdResult<Vec<AutomationRequest>, ApiError> {
+    pub async fn list_requests(
+        &self,
+        filters: &RequestFilters,
+    ) -> StdResult<Vec<AutomationRequest>, ApiError> {
         let limit = filters.limit.unwrap_or(50).min(200);
         let offset = filters.offset.unwrap_or(0);
 
@@ -269,7 +272,11 @@ impl AutomationService {
         let rows = sqlx::query(&query)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         let requests = rows.iter().map(automation_request_from_row).collect();
         Ok(requests)
@@ -283,13 +290,21 @@ impl AutomationService {
                 .bind(uuid)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?
+                .map_err(|e| ApiError::Coded {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "db_error",
+                    message: e.to_string(),
+                })?
         } else {
             sqlx::query("SELECT * FROM automation_requests WHERE short_id = $1")
                 .bind(id)
                 .fetch_all(&self.pool)
                 .await
-                .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?
+                .map_err(|e| ApiError::Coded {
+                    status: StatusCode::INTERNAL_SERVER_ERROR,
+                    code: "db_error",
+                    message: e.to_string(),
+                })?
         };
 
         Ok(rows.first().map(automation_request_from_row))
@@ -297,8 +312,10 @@ impl AutomationService {
 
     // Get events for a request
     pub async fn get_events(&self, request_id: &str) -> StdResult<Vec<AutomationEvent>, ApiError> {
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         let rows = sqlx::query(
             r#"
@@ -310,32 +327,51 @@ impl AutomationService {
         .bind(uuid)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         let events = rows.iter().map(automation_event_from_row).collect();
         Ok(events)
     }
 
     // Approve request
-    pub async fn approve(&self, request_id: &str, operator_id: &str) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+    pub async fn approve(
+        &self,
+        request_id: &str,
+        operator_id: &str,
+    ) -> StdResult<AutomationRequest, ApiError> {
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
         // Check if already approved
         if request.status == "queued_for_dev" || request.admin_approver_id.is_some() {
-            return Err(ApiError::BadRequest { code: "already_approved", message: "Request already approved".to_string() });
+            return Err(ApiError::BadRequest {
+                code: "already_approved",
+                message: "Request already approved".to_string(),
+            });
         }
 
         // Check risk level - high/critical cannot be auto-approved
         if request.risk_level == "high" || request.risk_level == "critical" {
-            return Err(ApiError::BadRequest { code: "auto_approve_denied", message: "High/Critical risk requests cannot be auto-approved".to_string() });
+            return Err(ApiError::BadRequest {
+                code: "auto_approve_denied",
+                message: "High/Critical risk requests cannot be auto-approved".to_string(),
+            });
         }
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
-        let operator_uuid = Uuid::parse_str(operator_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid operator id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
+        let operator_uuid = Uuid::parse_str(operator_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid operator id".to_string(),
+        })?;
 
         // Update status
         sqlx::query(
@@ -351,7 +387,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         // Record event
         self.record_event(
@@ -379,18 +419,26 @@ impl AutomationService {
         operator_id: &str,
         reason: &str,
     ) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
         if request.status == "rejected" || request.status == "closed" {
-            return Err(ApiError::BadRequest { code: "already_closed", message: "Request already closed".to_string() });
+            return Err(ApiError::BadRequest {
+                code: "already_closed",
+                message: "Request already closed".to_string(),
+            });
         }
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
-        let operator_uuid = Uuid::parse_str(operator_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid operator id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
+        let operator_uuid = Uuid::parse_str(operator_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid operator id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -407,7 +455,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.record_event(
             request_id,
@@ -434,12 +486,15 @@ impl AutomationService {
         operator_id: &str,
         assignee: &str,
     ) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -454,7 +509,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.record_event(
             request_id,
@@ -475,14 +534,22 @@ impl AutomationService {
     }
 
     // Retry failed request
-    pub async fn retry(&self, request_id: &str, operator_id: &str) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+    pub async fn retry(
+        &self,
+        request_id: &str,
+        operator_id: &str,
+    ) -> StdResult<AutomationRequest, ApiError> {
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
         let valid_retry_statuses = ["local_failed", "ci_failed", "blocked"];
         if !valid_retry_statuses.contains(&request.status.as_str()) {
-            return Err(ApiError::BadRequest { code: "cannot_retry", message: format!("Cannot retry request in status: {}", request.status) });
+            return Err(ApiError::BadRequest {
+                code: "cannot_retry",
+                message: format!("Cannot retry request in status: {}", request.status),
+            });
         }
 
         // Determine next status based on where it failed
@@ -492,8 +559,10 @@ impl AutomationService {
             _ => "queued_for_dev",
         };
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -506,7 +575,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.record_event(
             request_id,
@@ -531,7 +604,11 @@ impl AutomationService {
         let rows = sqlx::query("SELECT * FROM automation_agents ORDER BY last_heartbeat_at DESC")
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         let agents = rows.iter().map(automation_agent_from_row).collect();
         Ok(agents)
@@ -539,19 +616,27 @@ impl AutomationService {
 
     // Pause agent
     pub async fn pause_agent(&self, agent_id: &str) -> StdResult<AutomationAgent, ApiError> {
-        let agent = self.get_agent(agent_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Agent {} not found", agent_id))
-        })?;
+        let agent = self
+            .get_agent(agent_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Agent {} not found", agent_id)))?;
 
         if agent.status == "paused" {
-            return Err(ApiError::BadRequest { code: "already_paused", message: "Agent already paused".to_string() });
+            return Err(ApiError::BadRequest {
+                code: "already_paused",
+                message: "Agent already paused".to_string(),
+            });
         }
 
         sqlx::query("UPDATE automation_agents SET status = 'paused' WHERE id = $1")
             .bind(agent_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         self.get_agent(agent_id)
             .await?
@@ -560,19 +645,27 @@ impl AutomationService {
 
     // Resume agent
     pub async fn resume_agent(&self, agent_id: &str) -> StdResult<AutomationAgent, ApiError> {
-        let agent = self.get_agent(agent_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Agent {} not found", agent_id))
-        })?;
+        let agent = self
+            .get_agent(agent_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Agent {} not found", agent_id)))?;
 
         if agent.status != "paused" {
-            return Err(ApiError::BadRequest { code: "not_paused", message: "Agent is not paused".to_string() });
+            return Err(ApiError::BadRequest {
+                code: "not_paused",
+                message: "Agent is not paused".to_string(),
+            });
         }
 
         sqlx::query("UPDATE automation_agents SET status = 'online' WHERE id = $1")
             .bind(agent_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         self.get_agent(agent_id)
             .await?
@@ -606,7 +699,11 @@ impl AutomationService {
         .bind(capabilities)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.get_agent(agent_id)
             .await?
@@ -615,29 +712,44 @@ impl AutomationService {
 
     // Agent heartbeat
     pub async fn agent_heartbeat(&self, agent_id: &str) -> StdResult<(), ApiError> {
-        sqlx::query(
-            "UPDATE automation_agents SET last_heartbeat_at = now() WHERE id = $1",
-        )
-        .bind(agent_id)
-        .execute(&self.pool)
-        .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        sqlx::query("UPDATE automation_agents SET last_heartbeat_at = now() WHERE id = $1")
+            .bind(agent_id)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         Ok(())
     }
 
     // Claim request
-    pub async fn claim_request(&self, agent_id: &str, request_id: &str) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+    pub async fn claim_request(
+        &self,
+        agent_id: &str,
+        request_id: &str,
+    ) -> StdResult<AutomationRequest, ApiError> {
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
         if request.status != "queued_for_dev" {
-            return Err(ApiError::BadRequest { code: "not_claimable", message: format!("Request is not available for claiming (status: {})", request.status) });
+            return Err(ApiError::BadRequest {
+                code: "not_claimable",
+                message: format!(
+                    "Request is not available for claiming (status: {})",
+                    request.status
+                ),
+            });
         }
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -652,7 +764,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         sqlx::query(
             "UPDATE automation_agents SET status = 'busy', current_request_id = $1, last_task_at = now() WHERE id = $2",
@@ -689,9 +805,10 @@ impl AutomationService {
         passed: bool,
         log: &str,
     ) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
         let (new_status, event_type) = if passed {
             ("pr_open", "local_validation_passed")
@@ -699,8 +816,10 @@ impl AutomationService {
             ("local_failed", "local_validation_failed")
         };
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -715,7 +834,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.record_event(
             request_id,
@@ -725,7 +848,11 @@ impl AutomationService {
             None,
             Some(&request.status),
             Some(new_status),
-            if passed { "Local validation passed" } else { "Local validation failed" },
+            if passed {
+                "Local validation passed"
+            } else {
+                "Local validation failed"
+            },
             json!({"passed": passed, "log_length": log.len()}),
         )
         .await?;
@@ -736,13 +863,21 @@ impl AutomationService {
     }
 
     // Update PR info
-    pub async fn update_pr(&self, request_id: &str, agent_id: &str, pr_url: &str) -> StdResult<AutomationRequest, ApiError> {
-        let request = self.get_request(request_id).await?.ok_or_else(|| {
-            ApiError::NotFound(format!("Request {} not found", request_id))
-        })?;
+    pub async fn update_pr(
+        &self,
+        request_id: &str,
+        agent_id: &str,
+        pr_url: &str,
+    ) -> StdResult<AutomationRequest, ApiError> {
+        let request = self
+            .get_request(request_id)
+            .await?
+            .ok_or_else(|| ApiError::NotFound(format!("Request {} not found", request_id)))?;
 
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -756,7 +891,11 @@ impl AutomationService {
         .bind(uuid)
         .execute(&self.pool)
         .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        .map_err(|e| ApiError::Coded {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            code: "db_error",
+            message: e.to_string(),
+        })?;
 
         self.record_event(
             request_id,
@@ -782,12 +921,17 @@ impl AutomationService {
             .bind(agent_id)
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         Ok(rows.first().map(automation_agent_from_row))
     }
 
     // Helper: record event
+    #[allow(clippy::too_many_arguments)]
     async fn record_event(
         &self,
         request_id: &str,
@@ -800,8 +944,10 @@ impl AutomationService {
         message: &str,
         payload: Value,
     ) -> StdResult<(), ApiError> {
-        let uuid = Uuid::parse_str(request_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid request id".to_string() })?;
+        let uuid = Uuid::parse_str(request_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid request id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -834,12 +980,14 @@ impl AutomationService {
         feedback_type: &str,
         priority: &str,
     ) -> StdResult<AutomationRequest, ApiError> {
-        let short_id: String = sqlx::query_scalar(
-            "SELECT generate_automation_short_id()"
-        )
-        .fetch_one(&self.pool)
-        .await
-        .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;
+        let short_id: String = sqlx::query_scalar("SELECT generate_automation_short_id()")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| ApiError::Coded {
+                status: StatusCode::INTERNAL_SERVER_ERROR,
+                code: "db_error",
+                message: e.to_string(),
+            })?;
 
         let request_type = match feedback_type {
             "issue" => "bug",
@@ -853,8 +1001,10 @@ impl AutomationService {
         };
 
         let id = Uuid::new_v4();
-        let feedback_uuid = Uuid::parse_str(feedback_id)
-            .map_err(|_| ApiError::BadRequest { code: "invalid_id", message: "invalid feedback id".to_string() })?;
+        let feedback_uuid = Uuid::parse_str(feedback_id).map_err(|_| ApiError::BadRequest {
+            code: "invalid_id",
+            message: "invalid feedback id".to_string(),
+        })?;
 
         sqlx::query(
             r#"
@@ -870,7 +1020,7 @@ impl AutomationService {
         .bind(request_type)
         .bind(priority)
         .bind(risk_level)
-        .bind(&format!("Auto-generated from feedback: {}", title))
+        .bind(format!("Auto-generated from feedback: {}", title))
         .execute(&self.pool)
         .await
         .map_err(|e| ApiError::Coded { status: StatusCode::INTERNAL_SERVER_ERROR, code: "db_error", message: e.to_string() })?;

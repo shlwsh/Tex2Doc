@@ -48,7 +48,7 @@ fn suppress_icu4x_stderr() {
         if let Ok(file) = OpenOptions::new().write(true).open("NUL") {
             let handle = file.into_raw_handle();
             // Redirect stderr to NUL to suppress ICU4X debug warnings
-            SetStdHandle(STD_ERROR_HANDLE, handle as *mut c_void);
+            SetStdHandle(STD_ERROR_HANDLE, handle);
         }
     }
 }
@@ -123,13 +123,20 @@ fn main() {
                 let ui_weak = ui.as_weak();
                 std::thread::spawn(move || {
                     let r_token = app.refresh_token();
-                    let result = cloud_account::refresh_and_fetch_usage_blocking(&base_url, r_token);
+                    let result =
+                        cloud_account::refresh_and_fetch_usage_blocking(&base_url, r_token);
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(ui) = ui_weak.upgrade() {
                             if let Ok(session) = result {
                                 if !email_str.contains('@') {
-                                    let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
-                                    ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                                    let remaining = session
+                                        .usage
+                                        .cloud_conversions_limit
+                                        .saturating_sub(session.usage.cloud_conversions_used);
+                                    ui.set_quick_activation_status(
+                                        format!("Activated (激活成功，可用额度: {})", remaining)
+                                            .into(),
+                                    );
                                     ui.set_is_quick_activated(true);
                                 }
                                 apply_account_session(&app, &ui, &base_url, session);
@@ -323,21 +330,13 @@ fn main() {
 
         std::thread::spawn(move || {
             // Step 1: Login
-            let login_res = cloud_account::login_and_fetch_usage_blocking(
-                &base_url,
-                &code,
-                &code,
-            );
+            let login_res = cloud_account::login_and_fetch_usage_blocking(&base_url, &code, &code);
 
             let session_res = match login_res {
                 Ok(session) => Ok(session),
                 Err(_) => {
                     // Step 2: Register if login fails
-                    cloud_account::register_and_fetch_usage_blocking(
-                        &base_url,
-                        &code,
-                        &code,
-                    )
+                    cloud_account::register_and_fetch_usage_blocking(&base_url, &code, &code)
                 }
             };
 
@@ -351,7 +350,8 @@ fn main() {
                     );
 
                     // Refetch usage to ensure balance is updated
-                    let final_usage = cloud_account::fetch_usage_blocking(&base_url, &session.access_token);
+                    let final_usage =
+                        cloud_account::fetch_usage_blocking(&base_url, &session.access_token);
                     match final_usage {
                         Ok(usage) => {
                             let mut updated_session = session;
@@ -370,10 +370,22 @@ fn main() {
                     match final_result {
                         Ok(session) => {
                             let email_value = ui.get_login_email().to_string();
-                            persist_settings(None, None, None, None, Some(&base_url), Some(&email_value));
+                            persist_settings(
+                                None,
+                                None,
+                                None,
+                                None,
+                                Some(&base_url),
+                                Some(&email_value),
+                            );
                             persist_redeem_code(&code);
-                            let remaining = session.usage.cloud_conversions_limit.saturating_sub(session.usage.cloud_conversions_used);
-                            ui.set_quick_activation_status(format!("Activated (激活成功，可用额度: {})", remaining).into());
+                            let remaining = session
+                                .usage
+                                .cloud_conversions_limit
+                                .saturating_sub(session.usage.cloud_conversions_used);
+                            ui.set_quick_activation_status(
+                                format!("Activated (激活成功，可用额度: {})", remaining).into(),
+                            );
                             ui.set_is_quick_activated(true);
                             apply_account_session(&app, &ui, &base_url, session);
                             ui.set_toast_message("Activated successfully! (激活成功)".into());
@@ -381,7 +393,9 @@ fn main() {
                             ui.set_toast_visible(true);
                         }
                         Err(error) => {
-                            ui.set_quick_activation_status(format!("Activation failed: {}", error).into());
+                            ui.set_quick_activation_status(
+                                format!("Activation failed: {}", error).into(),
+                            );
                             ui.set_toast_message(format!("Activation failed: {}", error).into());
                             ui.set_toast_level("error".into());
                             ui.set_toast_visible(true);

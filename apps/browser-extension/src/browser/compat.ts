@@ -2,6 +2,8 @@
  * Browser Compatibility Layer
  */
 
+import type Browser from 'webextension-polyfill';
+
 export type BrowserName = 'chrome' | 'firefox' | 'safari' | 'edge' | 'unknown';
 
 /**
@@ -103,7 +105,7 @@ export async function sendMessageToTab<T = unknown>(
 /**
  * Get current tab
  */
-export async function getCurrentTab(): Promise<browser.Tabs.Tab | null> {
+export async function getCurrentTab(): Promise<Browser.Tabs.Tab | null> {
   const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   return tab || null;
 }
@@ -111,7 +113,7 @@ export async function getCurrentTab(): Promise<browser.Tabs.Tab | null> {
 /**
  * Open a new tab with optional URL
  */
-export async function openTab(url?: string, active = true): Promise<browser.Tabs.Tab | null> {
+export async function openTab(url?: string, active = true): Promise<Browser.Tabs.Tab | null> {
   if (url) {
     return browser.tabs.create({ url, active });
   }

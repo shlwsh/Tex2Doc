@@ -3,7 +3,7 @@ use std::sync::Arc;
 use crate::app_state::{AppState, JobUpdate};
 use crate::ui::MainWindow;
 use crate::ui_bindings::helpers;
-use slint::{ComponentHandle, SharedString, VecModel, Model};
+use slint::{ComponentHandle, Model, SharedString, VecModel};
 
 // ============================================================
 // Log Panel Helpers
@@ -16,7 +16,7 @@ pub fn append_log_to_ui(ui: &MainWindow, message: &str) {
 
     let entries = ui.get_log_entries();
     let current_len = entries.iter().count();
-    let mut vec: Vec<SharedString> = entries.iter().map(|s| s.clone()).collect();
+    let mut vec: Vec<SharedString> = entries.iter().collect();
     vec.push(log_entry.into());
 
     // Keep max 1000 entries
@@ -45,7 +45,7 @@ fn chrono_lite_timestamp() -> String {
 // ============================================================
 
 #[allow(dead_code)]
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
 pub struct QualityDimensions {
     pub parse: u8,
     pub semantic: u8,
@@ -88,19 +88,6 @@ pub struct QualityReportSummary {
     pub style_coverage_rate: f64,
     pub visual_diff_percentage: f64,
     pub created_at: String,
-}
-
-impl Default for QualityDimensions {
-    fn default() -> Self {
-        Self {
-            parse: 0,
-            semantic: 0,
-            docx: 0,
-            visual: 0,
-            editable: 0,
-            performance: 0,
-        }
-    }
 }
 
 impl Default for WordCompatibilityInfo {
@@ -151,8 +138,18 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                 quality_level
             );
 
-            let upload = upload_path.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
-            let main_tex_str = main_tex.to_string().trim().trim_matches('"').trim_matches('\'').to_string();
+            let upload = upload_path
+                .to_string()
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
+            let main_tex_str = main_tex
+                .to_string()
+                .trim()
+                .trim_matches('"')
+                .trim_matches('\'')
+                .to_string();
             let profile = detected_profile.to_string();
             let quality = quality_level.to_string();
             let out_dir = output_dir.to_string();
@@ -253,7 +250,11 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
 
                 // Extract result info before passing to closures
                 let result_summary = match &result {
-                    Ok(r) => format!("转换成功! DOCX大小: {} bytes\n输出文件: {}", r.docx_bytes, r.docx_path.display()),
+                    Ok(r) => format!(
+                        "转换成功! DOCX大小: {} bytes\n输出文件: {}",
+                        r.docx_bytes,
+                        r.docx_path.display()
+                    ),
                     Err(e) => format!("转换失败: {}", e),
                 };
 
@@ -299,7 +300,10 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
                         ui.set_recent_jobs(recent_jobs.into());
 
                         if let Some(usage) = usage_res {
-                            let remaining = usage.cloud_conversions_limit.saturating_sub(usage.cloud_conversions_used) as i32;
+                            let remaining = usage
+                                .cloud_conversions_limit
+                                .saturating_sub(usage.cloud_conversions_used)
+                                as i32;
                             let total = usage.cloud_conversions_limit as i32;
                             ui.set_quota_remaining(remaining);
                             ui.set_quota_total(total);
@@ -642,7 +646,11 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
     ui.on_copy_logs(move || {
         if let Some(ui) = ui_weak.upgrade() {
             let entries = ui.get_log_entries();
-            let text: String = entries.iter().map(|s| s.to_string()).collect::<Vec<_>>().join("\n");
+            let text: String = entries
+                .iter()
+                .map(|s| s.to_string())
+                .collect::<Vec<_>>()
+                .join("\n");
             // Note: Slint doesn't have native clipboard support, so we show a toast instead
             ui.set_toast_message("日志已复制 (查看控制台或日志文件)".into());
             ui.set_toast_level("success".into());
@@ -664,7 +672,7 @@ pub fn wire_conversion(ui: &MainWindow, app_state: Arc<AppState>) {
     let ui_weak = ui.as_weak();
     ui.on_append_log(move |message: SharedString| {
         if let Some(ui) = ui_weak.upgrade() {
-            append_log_to_ui(&ui, &message.to_string());
+            append_log_to_ui(&ui, message.as_ref());
         }
     });
 }
@@ -717,7 +725,7 @@ pub fn populate_quality_dialog(ui: &MainWindow, report: &QualityReportSummary) {
 
 // pub fn fetch_quality_report(base_url: &str, token: &str, job_id: &str) -> Result<QualityReportSummary, String> {
 //     let url = format!("{}/api/v1/conversions/{}/quality-report", base_url.trim_end_matches('/'), job_id);
-// 
+//
 //     let client = reqwest::blocking::Client::new();
 //     let response = client
 //         .get(&url)
@@ -725,11 +733,11 @@ pub fn populate_quality_dialog(ui: &MainWindow, report: &QualityReportSummary) {
 //         .timeout(std::time::Duration::from_secs(30))
 //         .send()
 //         .map_err(|e| format!("Failed to fetch quality report: {}", e))?;
-// 
+//
 //     if !response.status().is_success() {
 //         return Err(format!("API error: {}", response.status()));
 //     }
-// 
+//
 //     response
 //         .json::<QualityReportSummary>()
 //         .map_err(|e| format!("Failed to parse quality report: {}", e))
@@ -741,26 +749,11 @@ pub fn populate_quality_dialog(ui: &MainWindow, report: &QualityReportSummary) {
 
 #[allow(dead_code)]
 pub fn parse_dimension_scores(json: &serde_json::Value) -> QualityDimensions {
-    let parse = json
-        .get("parse")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u8;
-    let semantic = json
-        .get("semantic")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u8;
-    let docx = json
-        .get("docx")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u8;
-    let visual = json
-        .get("visual")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u8;
-    let editable = json
-        .get("editable")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as u8;
+    let parse = json.get("parse").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    let semantic = json.get("semantic").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    let docx = json.get("docx").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    let visual = json.get("visual").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
+    let editable = json.get("editable").and_then(|v| v.as_u64()).unwrap_or(0) as u8;
     let performance = json
         .get("performance")
         .and_then(|v| v.as_u64())

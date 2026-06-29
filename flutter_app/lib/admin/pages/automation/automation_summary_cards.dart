@@ -6,16 +6,12 @@ import '../../../ui/app_tokens.dart';
 class AutomationSummaryCards extends StatelessWidget {
   final AutomationSummary summary;
 
-  const AutomationSummaryCards({
-    super.key,
-    required this.summary,
-  });
+  const AutomationSummaryCards({super.key, required this.summary});
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final crossAxisCount = constraints.maxWidth > 800 ? 4 : 2;
         return Wrap(
           spacing: AppSpacing.md,
           runSpacing: AppSpacing.md,
@@ -92,10 +88,7 @@ class _MetricCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: theme.colorScheme.surfaceContainerHighest,
         borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(
-          color: theme.colorScheme.outlineVariant,
-          width: 1,
-        ),
+        border: Border.all(color: theme.colorScheme.outlineVariant, width: 1),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,

@@ -36,6 +36,7 @@ export const MESSAGE_TYPES = {
   REGISTER: 'REGISTER',
   REFRESH_SESSION: 'REFRESH_SESSION',
   FETCH_USAGE: 'FETCH_USAGE',
+  FETCH_SIGNUP_BONUS_CONFIG: 'FETCH_SIGNUP_BONUS_CONFIG',
   /**
    * @deprecated Since v0.1.0. Replaced by `CLOUD_CONVERT_AND_POLL`, which
    * sequences upload → createConversion → polling in a single message and

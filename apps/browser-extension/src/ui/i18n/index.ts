@@ -34,11 +34,33 @@ export const translations = {
     signOutSuccess: 'Signed out successfully',
     authTabs: {
       signIn: 'Sign In',
+      register: 'Register',
       redeem: 'Redeem Code',
+    },
+    workspace: 'Open workspace',
+    bonus: {
+      guestOffer: 'Register to receive {count} cloud conversions, valid for {days} days.',
+      disabledOffer: 'Use local conversion free, or purchase and redeem cloud credit.',
+      remainingCount: '{count} left',
+      exhausted: 'Cloud credit is exhausted. Upgrade or redeem a code to continue.',
+    },
+    source: {
+      title: 'LaTeX project',
+      prompt: 'Choose a LaTeX ZIP or project folder',
+      supported: 'Supports .zip and direct folder selection',
+    },
+    modeHelp: {
+      local: 'Local conversion keeps files in your browser and uses no cloud credit.',
+      cloud: 'Cloud conversion handles complex projects and uses one cloud credit.',
+    },
+    accountOverview: {
+      newConversion: 'Start a new conversion',
+      noExpiry: 'No expiry',
     },
     redeemTitle: 'Redeem a Code',
     redeemDescription: 'Paste your code below to unlock cloud conversions.',
-    redeemAutoRegister: 'No account yet? A new account will be created and signed in automatically.',
+    redeemAutoRegister:
+      'No account yet? A new account will be created and signed in automatically.',
     redeemPlaceholder: 'Enter your code (e.g. T2D-XXXX-XXXX)',
     redeemRequiresLogin: 'Please sign in first, or use a code that provisions an account.',
     redeemSuccessNewAccount: 'Account created and signed in.',
@@ -70,7 +92,7 @@ export const translations = {
     // Folder upload
     or: 'or',
     selectFolder: 'Select Folder',
-    selectFolderHint: "Pick a LaTeX project folder - no need to zip it first.",
+    selectFolderHint: 'Pick a LaTeX project folder - no need to zip it first.',
     folderScanning: 'Scanning folder...',
     folderReading: 'Reading... ({current}/{total})',
     folderPacking: 'Packing... ({current}/{total})',
@@ -143,17 +165,20 @@ export const translations = {
     // Funnel analytics (P1-2)
     funnel: {
       title: 'Anonymous usage analytics',
-      description: 'Last 7 days of in-app events (no PII, no file content). Export to share with support.',
+      description:
+        'Last 7 days of in-app events (no PII, no file content). Export to share with support.',
       export: 'Export funnel JSON',
     },
 
     // Diagnostics (P1-3)
     diagnostics: {
       title: 'Diagnostics',
-      description: 'Download a sanitized report of the last 200 events to attach to a support ticket.',
+      description:
+        'Download a sanitized report of the last 200 events to attach to a support ticket.',
       export: 'Export diagnostics',
       exportSuccess: 'Diagnostics bundle saved.',
-      privacyNote: 'Bundle excludes tokens, source files, file contents, and your email. Only event metadata is included.',
+      privacyNote:
+        'Bundle excludes tokens, source files, file contents, and your email. Only event metadata is included.',
     },
 
     // Feedback
@@ -291,7 +316,28 @@ export const translations = {
     signOutSuccess: '已成功退出登录',
     authTabs: {
       signIn: '登录',
+      register: '注册',
       redeem: '兑换码',
+    },
+    workspace: '打开工作台',
+    bonus: {
+      guestOffer: '注册即获 {count} 次云端转换额度，有效期 {days} 天。',
+      disabledOffer: '注册后可免费使用本地转换，也可购买或兑换云端额度。',
+      remainingCount: '剩余 {count} 次',
+      exhausted: '云端额度已用尽，请升级套餐或使用兑换码充值。',
+    },
+    source: {
+      title: 'LaTeX 项目',
+      prompt: '选择 LaTeX ZIP 或项目文件夹',
+      supported: '支持 .zip，也可直接选择文件夹',
+    },
+    modeHelp: {
+      local: '本地转换不消耗云端额度，文件不会离开浏览器。',
+      cloud: '云端转换适合复杂项目，每次消耗 1 次云端额度。',
+    },
+    accountOverview: {
+      newConversion: '开始新转换',
+      noExpiry: '长期有效',
     },
     redeemTitle: '兑换码登录 / 充值',
     redeemDescription: '在下方粘贴兑换码，即可解锁云端转换。',

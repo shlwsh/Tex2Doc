@@ -27,8 +27,8 @@ fn make_zip_bomb() -> Vec<u8> {
     {
         let cursor = std::io::Cursor::new(&mut buf);
         let mut zip = zip::ZipWriter::new(cursor);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         zip.start_file("main.tex", opts).unwrap();
         zip.write_all(b"\\documentclass{article}\n\\begin{document}Hi\\end{document}\n")
             .unwrap();
@@ -67,7 +67,10 @@ fn convert_zip_rejects_zip_bomb_declaration() {
     // 我们的修复期望：要么被 zip 库校验挡住（IO 错），要么被 size limit 挡住。
     // 关键是不能 panic / abort / `invalid malloc request`。
     let err = match res {
-        Ok(r) => panic!("convert_zip should reject oversized zip entries, got docx.len={}", r.docx.len()),
+        Ok(r) => panic!(
+            "convert_zip should reject oversized zip entries, got docx.len={}",
+            r.docx.len()
+        ),
         Err(e) => e,
     };
     let msg = format!("{err}");
@@ -88,8 +91,8 @@ fn convert_zip_accepts_normal_small_zip() {
     {
         let cursor = std::io::Cursor::new(&mut buf);
         let mut zip = zip::ZipWriter::new(cursor);
-        let opts: zip::write::SimpleFileOptions =
-            zip::write::SimpleFileOptions::default().compression_method(zip::CompressionMethod::Stored);
+        let opts: zip::write::SimpleFileOptions = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored);
         zip.start_file("main.tex", opts).unwrap();
         zip.write_all(b"\\documentclass{article}\n\\begin{document}Hello\\end{document}\n")
             .unwrap();

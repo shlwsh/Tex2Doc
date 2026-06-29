@@ -19,13 +19,22 @@
 .PARAMETER NoBrowser
     Do not open the React URL after both services are healthy.
 
+.PARAMETER DatabaseUrl
+    PostgreSQL connection string for doc-server. Defaults to DATABASE_URL
+    from the current environment; if unset, doc-server uses its built-in
+    default postgres://postgres:postgres@127.0.0.1:5432/docdb.
+
 .EXAMPLE
     .\scripts\run_react.ps1
+
+.EXAMPLE
+    .\scripts\run_react.ps1 -DatabaseUrl "postgres://postgres:postgres@127.0.0.1:5432/docdb"
 #>
 
 param(
     [int]$ReactPort = 2630,
     [int]$ServerPort = 2624,
+    [string]$DatabaseUrl = $env:DATABASE_URL,
     [switch]$KeepExisting,
     [switch]$NoBrowser
 )
@@ -40,6 +49,7 @@ $ServerHost = "127.0.0.1"
 $ServerHealthUrl = "http://${ServerHost}:${ServerPort}/api/v1/health"
 $ReactUrl = "http://${ServerHost}:${ReactPort}/react"
 $ProxyHealthUrl = "http://${ServerHost}:${ReactPort}/api/v1/health"
+$DocServerProcess = $null
 
 function Write-Info($Message) { Write-Host "[run-react] $Message" -ForegroundColor Cyan }
 function Write-Ok($Message) { Write-Host "[run-react] OK: $Message" -ForegroundColor Green }
@@ -129,6 +139,9 @@ function Stop-ReactWorkspaceProcesses {
 
 function Wait-JsonHealth([string]$Url, [string]$Name, [int]$Attempts = 60) {
     for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if ($script:DocServerProcess -and $script:DocServerProcess.HasExited) {
+            throw "doc-server exited with code $($script:DocServerProcess.ExitCode). See logs under $LogRoot."
+        }
         try {
             $response = Invoke-RestMethod -Uri $Url -TimeoutSec 2
             if ($response.status -eq "ok") {
@@ -175,13 +188,15 @@ if (-not (Test-PortOpen $ServerPort)) {
     $serverOut = Join-Path $LogRoot "doc-server.out.log"
     $serverErr = Join-Path $LogRoot "doc-server.err.log"
     $oldDocServerAddr = $env:DOC_SERVER_ADDR
+    $oldDatabaseUrl = $env:DATABASE_URL
     $oldAdminEmail = $env:TEX2DOC_BOOTSTRAP_ADMIN_EMAIL
     $oldAdminPassword = $env:TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD
     try {
         $env:DOC_SERVER_ADDR = "${ServerHost}:${ServerPort}"
+        if (-not [string]::IsNullOrWhiteSpace($DatabaseUrl)) { $env:DATABASE_URL = $DatabaseUrl }
         $env:TEX2DOC_BOOTSTRAP_ADMIN_EMAIL = "demo@example.com"
         $env:TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD = "demo"
-        $serverProcess = Start-Process -FilePath $cargoExe `
+        $DocServerProcess = Start-Process -FilePath $cargoExe `
             -ArgumentList @("run", "-p", "doc-server") `
             -WorkingDirectory $Root `
             -RedirectStandardOutput $serverOut `
@@ -190,10 +205,11 @@ if (-not (Test-PortOpen $ServerPort)) {
             -PassThru
     } finally {
         if ($null -eq $oldDocServerAddr) { Remove-Item Env:\DOC_SERVER_ADDR -ErrorAction SilentlyContinue } else { $env:DOC_SERVER_ADDR = $oldDocServerAddr }
+        if ($null -eq $oldDatabaseUrl) { Remove-Item Env:\DATABASE_URL -ErrorAction SilentlyContinue } else { $env:DATABASE_URL = $oldDatabaseUrl }
         if ($null -eq $oldAdminEmail) { Remove-Item Env:\TEX2DOC_BOOTSTRAP_ADMIN_EMAIL -ErrorAction SilentlyContinue } else { $env:TEX2DOC_BOOTSTRAP_ADMIN_EMAIL = $oldAdminEmail }
         if ($null -eq $oldAdminPassword) { Remove-Item Env:\TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD -ErrorAction SilentlyContinue } else { $env:TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD = $oldAdminPassword }
     }
-    Write-Info "doc-server PID $($serverProcess.Id), logs: $serverOut / $serverErr"
+    Write-Info "doc-server PID $($DocServerProcess.Id), logs: $serverOut / $serverErr"
 }
 
 Wait-JsonHealth $ServerHealthUrl "doc-server"

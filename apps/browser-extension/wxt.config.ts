@@ -12,13 +12,16 @@ const srcDir = path.resolve(rootDir, 'src');
 export default defineConfig({
   srcDir,
 
-  outBaseDir: '.output',
-
   outDirTemplate: "{{browser}}-mv{{manifestVersion}}{{modeSuffix}}",
 
   modules: ['@wxt-dev/module-react'],
 
-  plugins: [react()],
+  vite: () => ({
+    plugins: [react()],
+    build: {
+      modulePreload: false,
+    },
+  }),
 
   alias: {
     '@': srcDir,
@@ -33,29 +36,7 @@ export default defineConfig({
 
   publicDir: path.join(rootDir, 'public'),
 
-  build: {
-    // Vite 默认会为 dynamic import 生成 `window.dispatchEvent('vite:preloadError', ...)`
-    // 形式的 preload error handler，但 Chrome MV3 service worker 没有 `window` 全局，
-    // 会在 import() 完成前抛 `ReferenceError: window is not defined`。
-    // 关掉 modulePreload 可彻底去掉这段包装代码。
-    modulePreload: false,
-  },
-
-  vite: () => ({
-    build: {
-      // 强制 modulePreload: false。WXT 内部已经会接管一些 vite 选项，
-      // 在这里再设一次避免被覆盖。
-      modulePreload: false,
-    },
-  }),
-
-  tailwind: {
-    darkMode: 'class',
-    content: ['./src/**/*.{js,jsx,ts,tsx}', './src/**/*.html'],
-  },
-
-  manifest: ({ browser, mode }) => {
-    const isEdge = browser === 'chromium' && mode === 'edge';
+  manifest: () => {
     // API base URL from env (supports localhost for dev, api.tex2doc.cn for prod)
     const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || 'https://api.tex2doc.cn';
     const apiHost = apiBaseUrl.replace(/^https?:\/\//, '').replace(/\/.*$/, '');
@@ -78,13 +59,10 @@ export default defineConfig({
         default_popup: 'popup.html',
         default_title: 'Tex2Doc',
       },
-      permissions: isEdge
-        ? ['storage', 'downloads', 'contextMenus', 'notifications', 'sidePanel', 'alarms']
-        : ['storage', 'downloads', 'contextMenus', 'notifications', 'alarms'],
+      permissions: ['storage', 'downloads', 'contextMenus', 'notifications', 'alarms'],
       content_security_policy: {
         extension_pages: "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; object-src 'self'",
       },
-      ...(isEdge ? { side_panel: { default_path: 'sidepanel.html' } } : {}),
       host_permissions: [`https://${apiHost}/*`, `http://${apiHost}/*`],
       optional_host_permissions: [
         'https://www.overleaf.com/*',
@@ -95,13 +73,4 @@ export default defineConfig({
     };
   },
 
-  hooks: {
-    'build:manifest': (_wxt, manifest) => {
-      // 强制清理 Chrome 不支持的字段，确保无任何 blob: CSP 值
-      delete manifest.side_panel;
-      if (manifest.permissions) {
-        manifest.permissions = manifest.permissions.filter((p) => p !== 'sidePanel');
-      }
-    },
-  },
 });

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../commercial_api.dart';
 import '../../../ui/app_components.dart';
-import '../../../ui/app_i18n.dart';
 import '../../../ui/app_tokens.dart';
 import 'automation_request_detail.dart';
 import 'automation_status.dart';
@@ -49,12 +48,11 @@ class AutomationRequestList extends StatelessWidget {
         // List
         Expanded(
           child: requests.isEmpty
-              ? const EmptyState(
-                  label: 'No requests',
-                )
+              ? const EmptyState(label: 'No requests')
               : ListView.separated(
                   itemCount: requests.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+                  separatorBuilder: (_, _) =>
+                      const SizedBox(height: AppSpacing.sm),
                   itemBuilder: (context, index) {
                     final request = requests[index];
                     return _RequestCard(
@@ -80,7 +78,7 @@ class AutomationRequestList extends StatelessWidget {
         SizedBox(
           width: 160,
           child: DropdownButtonFormField<String>(
-            value: statusFilter,
+            initialValue: statusFilter,
             decoration: const InputDecoration(
               labelText: 'Status',
               isDense: true,
@@ -92,13 +90,22 @@ class AutomationRequestList extends StatelessWidget {
             items: const [
               DropdownMenuItem(value: 'all', child: Text('All')),
               DropdownMenuItem(value: 'triaged', child: Text('Triaged')),
-              DropdownMenuItem(value: 'needs_approval', child: Text('Needs Approval')),
+              DropdownMenuItem(
+                value: 'needs_approval',
+                child: Text('Needs Approval'),
+              ),
               DropdownMenuItem(value: 'queued_for_dev', child: Text('Queued')),
               DropdownMenuItem(value: 'claimed', child: Text('Claimed')),
               DropdownMenuItem(value: 'coding', child: Text('Coding')),
-              DropdownMenuItem(value: 'local_failed', child: Text('Local Failed')),
+              DropdownMenuItem(
+                value: 'local_failed',
+                child: Text('Local Failed'),
+              ),
               DropdownMenuItem(value: 'ci_failed', child: Text('CI Failed')),
-              DropdownMenuItem(value: 'production_deployed', child: Text('Deployed')),
+              DropdownMenuItem(
+                value: 'production_deployed',
+                child: Text('Deployed'),
+              ),
               DropdownMenuItem(value: 'rejected', child: Text('Rejected')),
             ],
             onChanged: (v) => onStatusFilterChanged(v ?? 'all'),
@@ -109,7 +116,7 @@ class AutomationRequestList extends StatelessWidget {
         SizedBox(
           width: 140,
           child: DropdownButtonFormField<String>(
-            value: riskFilter,
+            initialValue: riskFilter,
             decoration: const InputDecoration(
               labelText: 'Risk',
               isDense: true,
@@ -133,7 +140,7 @@ class AutomationRequestList extends StatelessWidget {
         SizedBox(
           width: 160,
           child: DropdownButtonFormField<String>(
-            value: sourceFilter,
+            initialValue: sourceFilter,
             decoration: const InputDecoration(
               labelText: 'Source',
               isDense: true,
@@ -227,7 +234,11 @@ class _RequestCard extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(statusInfo.icon, size: 14, color: statusInfo.color),
+                        Icon(
+                          statusInfo.icon,
+                          size: 14,
+                          color: statusInfo.color,
+                        ),
                         const SizedBox(width: 4),
                         Text(
                           request.statusLabel,
@@ -384,7 +395,10 @@ class _RiskBadge extends StatelessWidget {
     };
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.xs, vertical: 2),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.xs,
+        vertical: 2,
+      ),
       decoration: BoxDecoration(
         color: color.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(AppRadius.sm),

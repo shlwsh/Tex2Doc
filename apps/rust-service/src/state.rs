@@ -19,6 +19,83 @@ use crate::worker_service::WorkerCommand;
 
 pub const PREVIEW_CLOUD_CONVERSION_LIMIT: u64 = 100;
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignupBonusConfig {
+    pub enabled: bool,
+    pub default_quantity: u64,
+    pub validity_days: u64,
+    pub package_name: String,
+}
+
+impl Default for SignupBonusConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_quantity: 30,
+            validity_days: 90,
+            package_name: "新用户免费体验包".to_string(),
+        }
+    }
+}
+
+impl SignupBonusConfig {
+    pub fn from_env() -> Self {
+        let defaults = Self::default();
+        Self {
+            enabled: parse_bool_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_ENABLED").ok(),
+                defaults.enabled,
+            ),
+            default_quantity: parse_positive_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_QUANTITY").ok(),
+                defaults.default_quantity,
+            ),
+            validity_days: parse_positive_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_VALIDITY_DAYS").ok(),
+                defaults.validity_days,
+            ),
+            package_name: std::env::var("TEX2DOC_SIGNUP_BONUS_PACKAGE_NAME")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(defaults.package_name),
+        }
+    }
+}
+
+fn parse_bool_env(value: Option<String>, fallback: bool) -> bool {
+    value
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(fallback)
+}
+
+fn parse_positive_env(value: Option<String>, fallback: u64) -> u64 {
+    value
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
+}
+
+#[cfg(test)]
+mod signup_bonus_config_tests {
+    use super::{parse_bool_env, parse_positive_env, SignupBonusConfig};
+
+    #[test]
+    fn signup_bonus_defaults_are_commercial_defaults() {
+        let config = SignupBonusConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.default_quantity, 30);
+        assert_eq!(config.validity_days, 90);
+    }
+
+    #[test]
+    fn invalid_values_fall_back_and_valid_values_are_kept() {
+        assert!(parse_bool_env(Some("invalid".into()), true));
+        assert!(!parse_bool_env(Some("false".into()), true));
+        assert_eq!(parse_positive_env(Some("0".into()), 30), 30);
+        assert_eq!(parse_positive_env(Some("45".into()), 30), 45);
+    }
+}
+
 #[derive(Clone)]
 pub struct ServerState {
     db: DbStore,
@@ -245,6 +322,8 @@ pub struct EntitlementRecord {
     pub count_balance: u64,
     pub valid_until: Option<String>,
     pub source_order_id: Option<String>,
+    pub signup_bonus_balance: u64,
+    pub signup_bonus_valid_until: Option<String>,
     pub updated_at: String,
 }
 
@@ -295,7 +374,18 @@ impl ServerState {
         display_name: Option<&str>,
         password: &str,
     ) -> Result<AppUser, sqlx::Error> {
-        self.db.register_user(email, display_name, password).await
+        self.db
+            .register_user(
+                email,
+                display_name,
+                password,
+                &SignupBonusConfig::from_env(),
+            )
+            .await
+    }
+
+    pub fn signup_bonus_config(&self) -> SignupBonusConfig {
+        SignupBonusConfig::from_env()
     }
 
     pub async fn login_user(
@@ -361,6 +451,7 @@ impl ServerState {
         Some(upload)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_job(
         &self,
         user_id: String,
@@ -607,6 +698,7 @@ impl ServerState {
         self.db.list_release_audit().await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_redeem_batch(
         &self,
         package_id: &str,
@@ -742,7 +834,13 @@ impl ServerState {
         }
     }
 
-    pub async fn complete_job(&self, job_id: &str, docx: Vec<u8>, report: ConversionReportRecord, trace_id: Option<String>) {
+    pub async fn complete_job(
+        &self,
+        job_id: &str,
+        docx: Vec<u8>,
+        report: ConversionReportRecord,
+        trace_id: Option<String>,
+    ) {
         let log = FileStorage::build_conversion_log(
             job_id,
             trace_id.as_deref().unwrap_or("N/A"),
@@ -789,12 +887,7 @@ impl ServerState {
         }
     }
 
-    pub async fn fail_job(
-        &self,
-        job_id: &str,
-        error: ConversionErrorCode,
-        message: String,
-    ) {
+    pub async fn fail_job(&self, job_id: &str, error: ConversionErrorCode, message: String) {
         let job = self.db.get_job(job_id).await.ok().flatten();
         let report = ConversionReportRecord {
             job_id: job_id.to_string(),
@@ -813,7 +906,10 @@ impl ServerState {
             dimension_scores: None,
             quality_run_json: None,
         };
-        let trace_id = job.as_ref().and_then(|j| j.trace_id.clone()).unwrap_or_else(|| "N/A".to_string());
+        let trace_id = job
+            .as_ref()
+            .and_then(|j| j.trace_id.clone())
+            .unwrap_or_else(|| "N/A".to_string());
         let log = FileStorage::build_conversion_log(
             job_id,
             &trace_id,
@@ -866,7 +962,8 @@ impl ServerState {
     /// 优先使用带 `ConversionErrorCode` 的 `fail_job` 方法，此方法保留用于向后兼容。
     #[allow(dead_code)]
     pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
-        let err = ConversionErrorCode::from_code(error_code).unwrap_or(ConversionErrorCode::ConvertFailed);
+        let err = ConversionErrorCode::from_code(error_code)
+            .unwrap_or(ConversionErrorCode::ConvertFailed);
         self.fail_job(job_id, err, error).await;
     }
 

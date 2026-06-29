@@ -12,6 +12,7 @@ import type {
   PlanSummary,
   BillingSession,
   RedeemCodeResult,
+  SignupBonusConfig,
 } from '@/shared/types';
 import { RedeemCodeRequest } from '@/shared/types';
 import { ApiError, AuthError, QuotaExceededError } from '@/shared/errors';
@@ -155,7 +156,11 @@ export class ApiClient {
     } catch (error) {
       clearTimeout(timeoutId);
 
-      if (error instanceof AuthError || error instanceof QuotaExceededError || error instanceof ApiError) {
+      if (
+        error instanceof AuthError ||
+        error instanceof QuotaExceededError ||
+        error instanceof ApiError
+      ) {
         throw error;
       }
 
@@ -163,10 +168,7 @@ export class ApiClient {
         throw new ApiError('Request timeout', 'TIMEOUT');
       }
 
-      throw new ApiError(
-        error instanceof Error ? error.message : 'Network error',
-        'NETWORK_ERROR'
-      );
+      throw new ApiError(error instanceof Error ? error.message : 'Network error', 'NETWORK_ERROR');
     }
   }
 
@@ -211,6 +213,10 @@ export class ApiClient {
    */
   async usage(): Promise<UsageSummary> {
     return this.request<UsageSummary>('GET', '/usage', undefined, true);
+  }
+
+  async signupBonusConfig(): Promise<SignupBonusConfig> {
+    return this.request<SignupBonusConfig>('GET', '/config/signup-bonus');
   }
 
   /**

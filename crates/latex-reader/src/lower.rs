@@ -1427,7 +1427,9 @@ fn lower_environment(
             cite_numbers,
             label_map,
         ),
-        "tabular" | "tabular*" | "array" | "longtable" => lower_table(body, span, cite_numbers, label_map),
+        "tabular" | "tabular*" | "array" | "longtable" => {
+            lower_table(body, span, cite_numbers, label_map)
+        }
         "figure" | "figure*" | "table" | "table*" | "algorithm" | "algorithm*" => {
             lower_captioned_env(name, body, span, macros, numbering, cite_numbers, label_map)
         }
