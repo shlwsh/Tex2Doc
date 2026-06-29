@@ -59,7 +59,7 @@
   async function handleButtonClick(): Promise<void> {
     try {
       const projectName = getProjectName();
-      (browser as any).runtime.sendMessage({
+      browser.runtime.sendMessage({
         type: 'CONTENT_SCRIPT_CONVERT',
         context: 'overleaf',
         projectName,

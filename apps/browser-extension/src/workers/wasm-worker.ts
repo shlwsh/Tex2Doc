@@ -38,7 +38,6 @@
 // 由于胶水顶层是 `(function(){...}).call(globalThis)`，副作用是：
 //   - globalThis.__tex2docWbg = { initSync, default: __wbg_init }
 //   - globalThis.__tex2docApi = { convert_zip, convert_zip_to_docx, version, ... }
-// @ts-ignore - generated glue intentionally has no declaration file
 import './wasm-glue/doc_engine.js';
 
 export interface WasmConvertOptions {

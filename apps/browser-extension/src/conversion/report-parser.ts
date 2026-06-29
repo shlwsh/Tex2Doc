@@ -4,7 +4,7 @@
  * Parses and displays conversion quality reports
  */
 
-import type { ConversionReport, QualityGate } from '@/shared/types';
+import type { ConversionReport } from '@/shared/types';
 
 export interface ParsedReport {
   summary: ReportSummary;

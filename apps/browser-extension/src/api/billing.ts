@@ -5,7 +5,7 @@
  */
 
 import { ApiClient } from './api-client';
-import type { PlanSummary, BillingSession } from '@/shared/types';
+import type { PlanSummary } from '@/shared/types';
 import { openUrl } from '@/browser/compat';
 
 export interface CheckoutOptions {

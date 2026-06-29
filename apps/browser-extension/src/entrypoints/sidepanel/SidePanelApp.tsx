@@ -5,7 +5,7 @@
  * (Jobs / Billing / Feedback / Account). All copy goes through useI18n().
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Button from '@/ui/components/Button';
 import Badge from '@/ui/components/Badge';
 import Card from '@/ui/components/Card';
@@ -63,17 +63,7 @@ export default function SidePanelApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [isExportingDiagnostics, setIsExportingDiagnostics] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    setIsLoading(true);
-    await Promise.all([loadSession(), loadJobs(), loadPlans(), loadSignupBonus()]);
-    setIsLoading(false);
-  };
-
-  const loadSession = async () => {
+  const loadSession = useCallback(async () => {
     try {
       const result = await sendToBackground<{
         signedIn: boolean;
@@ -88,27 +78,27 @@ export default function SidePanelApp() {
     } catch (error) {
       console.error('Failed to load session:', error);
     }
-  };
+  }, []);
 
-  const loadJobs = async () => {
+  const loadJobs = useCallback(async () => {
     try {
       const jobList = await sendToBackground<JobRecord[]>({ type: MESSAGE_TYPES.FETCH_JOBS });
       setJobs(jobList);
     } catch (error) {
       console.error('Failed to load jobs:', error);
     }
-  };
+  }, []);
 
-  const loadPlans = async () => {
+  const loadPlans = useCallback(async () => {
     try {
       const planList = await sendToBackground<PlanSummary[]>({ type: MESSAGE_TYPES.FETCH_PLANS });
       setPlans(planList);
     } catch (error) {
       console.error('Failed to load plans:', error);
     }
-  };
+  }, []);
 
-  const loadSignupBonus = async () => {
+  const loadSignupBonus = useCallback(async () => {
     try {
       setSignupBonus(
         await sendToBackground<SignupBonusConfig>({ type: MESSAGE_TYPES.FETCH_SIGNUP_BONUS_CONFIG })
@@ -116,9 +106,19 @@ export default function SidePanelApp() {
     } catch {
       setSignupBonus(null);
     }
-  };
+  }, []);
 
-  const loadFeedback = async () => {
+  const loadData = useCallback(async () => {
+    setIsLoading(true);
+    await Promise.all([loadSession(), loadJobs(), loadPlans(), loadSignupBonus()]);
+    setIsLoading(false);
+  }, [loadJobs, loadPlans, loadSession, loadSignupBonus]);
+
+  useEffect(() => {
+    loadData();
+  }, [loadData]);
+
+  const loadFeedback = useCallback(async () => {
     if (!session) return;
     try {
       const threads = await sendToBackground<FeedbackThread[]>({
@@ -128,13 +128,13 @@ export default function SidePanelApp() {
     } catch (error) {
       console.error('Failed to load feedback:', error);
     }
-  };
+  }, [session]);
 
   useEffect(() => {
     if (activeTab === 'feedback' && session) {
-      loadFeedback();
+      void loadFeedback();
     }
-  }, [activeTab, session]);
+  }, [activeTab, session, loadFeedback]);
 
   const handleLogout = async () => {
     await sendToBackground({ type: MESSAGE_TYPES.LOGOUT });

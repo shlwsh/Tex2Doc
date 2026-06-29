@@ -2,6 +2,7 @@
  * ThemeProvider - React Context for theme management
  */
 
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { getSettings, saveSettings } from '@/state/settings-store';
 

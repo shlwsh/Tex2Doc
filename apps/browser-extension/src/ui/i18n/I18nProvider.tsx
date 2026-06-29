@@ -2,8 +2,9 @@
  * I18nProvider - React Context for internationalization
  */
 
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { translations, Locale, t as translate } from './index';
+import { Locale, t as translate } from './index';
 import { getSettings, saveSettings } from '@/state/settings-store';
 
 export interface I18nContextValue {
@@ -41,7 +42,7 @@ export const I18nProvider: React.FC<I18nProviderProps> = ({
       }
     };
     loadLocale();
-  }, [defaultLocale]);
+  }, [defaultLocale, locale]);
 
   const setLocale = useCallback(async (newLocale: Locale) => {
     setLocaleState(newLocale);

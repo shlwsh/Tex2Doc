@@ -42,7 +42,9 @@ export async function saveSettings(settings: Partial<ExtensionSettings>): Promis
 export async function resetSettings(): Promise<void> {
   try {
     if (supportsSyncStorage()) await browser.storage.sync.remove(SETTINGS_KEY);
-  } catch {}
+  } catch {
+    // Fall back to local storage cleanup below.
+  }
   await browser.storage.local.remove(SETTINGS_KEY);
 }
 

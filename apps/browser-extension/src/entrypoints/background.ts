@@ -14,8 +14,6 @@ import { ApiClient } from '@/api/api-client';
 import { login as apiLogin, register as apiRegister, refreshSession } from '@/api/auth';
 import { getUsage } from '@/api/usage';
 import { createAndPollConversion, pollCloudConversion } from '@/api/conversions';
-import { redeemCode } from '@/api/feedback';
-import { startCheckout, openBillingPortal } from '@/api/billing';
 import { getSession, saveSession, clearSession, getAccessToken } from '@/state/session-store';
 import { getSettings, getApiBaseUrl } from '@/state/settings-store';
 import {
@@ -33,7 +31,7 @@ import { convertLocal } from '@/conversion/local-wasm';
 import { CONTEXT_MENU_IDS, MESSAGE_TYPES } from '@/shared/constants';
 import type { JobRecord, ConversionJob } from '@/shared/types';
 import { AuthError, ApiError } from '@/shared/errors';
-import { buildDiagnostics, exportDiagnosticsBlob } from '@/diagnostics/bundle';
+import { buildDiagnostics } from '@/diagnostics/bundle';
 import { exportFunnelJson, track } from '@/analytics/funnel';
 import { defineBackground } from 'wxt/utils/define-background';
 

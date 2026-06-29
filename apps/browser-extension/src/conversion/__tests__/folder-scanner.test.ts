@@ -1,16 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { shouldExclude, MAX_DEPTH, MAX_FILE_COUNT, MAX_TOTAL_SIZE } from '@/conversion/folder-types';
-
-// ── Helper ────────────────────────────────────────────────────────────────────
-function makeFile(name: string, size = 100): File {
-  return new File(['x'.repeat(size)], name, { type: 'text/plain' });
-}
-
-function makeFileList(files: File[]): FileList {
-  const dt = new DataTransfer();
-  for (const f of files) dt.items.add(f);
-  return dt.files;
-}
+import { describe, it, expect } from 'vitest';
+import { shouldExclude } from '@/conversion/folder-types';
 
 // ── shouldExclude unit tests ─────────────────────────────────────────────────
 describe('folder-types', () => {

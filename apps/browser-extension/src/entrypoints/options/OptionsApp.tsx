@@ -46,7 +46,7 @@ export default function OptionsApp() {
     try {
       const s = await getSettings();
       setSettings(s);
-    } catch (err) {
+    } catch {
       setError('Failed to load settings');
     }
   };
@@ -57,7 +57,7 @@ export default function OptionsApp() {
       await saveSettings(settings);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (err) {
+    } catch {
       setError('Failed to save settings');
     }
   };
@@ -78,7 +78,7 @@ export default function OptionsApp() {
       await saveSettings(defaults);
       setSettings(defaults);
       setSaved(true);
-    } catch (err) {
+    } catch {
       setError('Failed to reset settings');
     }
   };

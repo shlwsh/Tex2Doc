@@ -41,6 +41,74 @@ function Resolve-Executable([string]$Name) {
     return $command.Source
 }
 
+function Get-OptionalExecutable([string]$Name) {
+    $command = Get-Command $Name -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if (-not $command) { return $null }
+    return $command.Source
+}
+
+function Invoke-WslCommand([string]$Command) {
+    $wslExe = Get-OptionalExecutable "wsl.exe"
+    if (-not $wslExe) { return $false }
+    & $wslExe sh -lc $Command | Out-Null
+    return $LASTEXITCODE -eq 0
+}
+
+function Test-PostgresUrl([string]$Url) {
+    $psqlExe = Get-OptionalExecutable "psql.exe"
+    if (-not $psqlExe) {
+        return $null
+    }
+
+    & $psqlExe $Url -Atc "select 1" *> $null
+    return $LASTEXITCODE -eq 0
+}
+
+function Wait-Database([string]$Url, [int]$Attempts = 30) {
+    $canUsePsql = $null -ne (Get-OptionalExecutable "psql.exe")
+    if (-not $canUsePsql) {
+        Write-WarnMsg "psql.exe was not found; skipping DATABASE_URL preflight."
+        return
+    }
+
+    for ($attempt = 1; $attempt -le $Attempts; $attempt++) {
+        if (Test-PostgresUrl $Url) {
+            Write-Ok "database reachable"
+            return
+        }
+        Start-Sleep -Milliseconds 700
+    }
+
+    throw "Database is not reachable via DATABASE_URL. Start PostgreSQL in WSL or pass -DatabaseUrl explicitly. Tried: $Url"
+}
+
+function Resolve-DatabaseUrl([string]$CandidateUrl) {
+    if (-not [string]::IsNullOrWhiteSpace($CandidateUrl)) {
+        return $CandidateUrl
+    }
+
+    $wslExe = Get-OptionalExecutable "wsl.exe"
+    if ($wslExe) {
+        Write-Info "Checking WSL PostgreSQL for docdb..."
+        $ready = Invoke-WslCommand "pg_isready -h 127.0.0.1 -p 5432 -d docdb >/dev/null 2>&1"
+        if (-not $ready) {
+            Write-WarnMsg "WSL PostgreSQL is not ready; trying to start postgresql service."
+            Invoke-WslCommand "sudo -n service postgresql start >/dev/null 2>&1 || service postgresql start >/dev/null 2>&1" | Out-Null
+        }
+
+        $wslIps = @(& $wslExe sh -lc "hostname -I" 2>$null)
+        foreach ($ip in ($wslIps -join " ").Split(" ", [System.StringSplitOptions]::RemoveEmptyEntries)) {
+            $wslUrl = "postgres://postgres:postgres@${ip}:5432/docdb"
+            if (Test-PostgresUrl $wslUrl) {
+                Write-Ok "using WSL PostgreSQL at ${ip}:5432"
+                return $wslUrl
+            }
+        }
+    }
+
+    return "postgres://postgres:postgres@127.0.0.1:5432/docdb"
+}
+
 function Get-ListenerProcessIds([int]$Port) {
     try {
         return @(Get-NetTCPConnection -LocalAddress $ServerHost -LocalPort $Port -State Listen -ErrorAction Stop |
@@ -82,6 +150,7 @@ if (-not (Test-Path -LiteralPath $ExtensionRoot -PathType Container)) {
 
 $cargoExe = Resolve-Executable "cargo.exe"
 $npmExe = Resolve-Executable "npm.cmd"
+$ResolvedDatabaseUrl = Resolve-DatabaseUrl $DatabaseUrl
 New-Item -ItemType Directory -Path $LogRoot -Force | Out-Null
 
 $buildScript = if ($Browser -eq "edge") { "build:edge" } else { "build:$Browser" }
@@ -122,7 +191,8 @@ try {
         $oldDatabaseUrl = $env:DATABASE_URL
         try {
             $env:DOC_SERVER_ADDR = "${ServerHost}:${ServerPort}"
-            if (-not [string]::IsNullOrWhiteSpace($DatabaseUrl)) { $env:DATABASE_URL = $DatabaseUrl }
+            $env:DATABASE_URL = $ResolvedDatabaseUrl
+            Wait-Database $ResolvedDatabaseUrl
             Write-Info "Starting doc-server on ${ServerHost}:${ServerPort}..."
             $serverProcess = Start-Process -FilePath $cargoExe `
                 -ArgumentList @("run", "-p", "doc-server") `

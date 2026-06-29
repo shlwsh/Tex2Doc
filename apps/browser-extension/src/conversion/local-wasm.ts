@@ -12,7 +12,6 @@ import {
   isWithinSizeLimit,
   getFileSizeLimit,
   getFileSizeLimitDisplay,
-  type WasmConvertResult,
 } from '@/workers/wasm-worker';
 import { downloadBytes } from '@/browser/downloads';
 import { saveJob, updateJobStatus } from '@/state/job-store';

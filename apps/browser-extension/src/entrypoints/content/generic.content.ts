@@ -6,8 +6,6 @@
  */
 
 (() => {
-  const SCRIPT_ID = 'tex2doc-generic';
-
   // Check if we should run
   function shouldRun(): boolean {
     // Don't run on file:// URLs
@@ -17,12 +15,6 @@
     if (window.location.hostname === '') return false;
 
     return true;
-  }
-
-  // Create context menu item via selection
-  function createSelectionContext(): void {
-    // Listen for text selection
-    document.addEventListener('mouseup', handleTextSelection);
   }
 
   // Handle text selection
@@ -44,7 +36,7 @@
   function init(): void {
     if (!shouldRun()) return;
 
-    // Add any generic functionality here
+    document.addEventListener('mouseup', handleTextSelection);
     console.log('[Tex2Doc] Generic content script initialized on:', window.location.hostname);
   }
 

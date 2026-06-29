@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { buildZipFromFolder } from '@/conversion/folder-packager';
 import type { FolderEntry } from '@/conversion/folder-types';
 

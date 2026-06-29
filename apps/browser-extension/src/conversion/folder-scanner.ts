@@ -6,7 +6,7 @@
  * and delegates main-tex detection to the existing local-wasm logic.
  */
 
-import { shouldExclude, MAX_DEPTH, MAX_FILE_COUNT, MAX_TOTAL_SIZE } from './folder-types';
+import { shouldExclude, MAX_FILE_COUNT, MAX_TOTAL_SIZE } from './folder-types';
 import type { FolderEntry, ScanResult } from './folder-types';
 import { detectMainTex } from './local-wasm';
 import type { TexFileInfo } from './local-wasm';

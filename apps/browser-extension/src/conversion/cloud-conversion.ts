@@ -79,7 +79,7 @@ export async function convertCloud(
     );
 
     // Update job with cloud job ID
-    const localJob = await saveJob({
+    await saveJob({
       ...job,
       job_id: cloudJob.job_id,
       status: 'completed',

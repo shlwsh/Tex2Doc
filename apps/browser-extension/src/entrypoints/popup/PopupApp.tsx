@@ -2,7 +2,7 @@
  * Main Popup Application - Commercial UI refactor
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import Button from '../../ui/components/Button';
 import Input from '../../ui/components/Input';
 import Badge from '../../ui/components/Badge';
@@ -35,6 +35,8 @@ import {
 type ConversionMode = 'local' | 'cloud';
 type ConversionStage = 'idle' | 'uploading' | 'creating' | 'polling' | 'completed' | 'failed';
 type AuthTab = 'signIn' | 'register' | 'redeem';
+
+const REGISTER_MESSAGE_TIMEOUT_MS = 45000;
 
 function sizeBucket(bytes: number): 'lt_1mb' | '1_to_5mb' | '5_to_10mb' | 'gt_10mb' {
   const mb = bytes / (1024 * 1024);
@@ -125,26 +127,7 @@ export default function PopupApp() {
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [signupBonus, setSignupBonus] = useState<SignupBonusConfig | null>(null);
 
-  useEffect(() => {
-    loadSession();
-    loadJobs();
-    loadSignupBonus();
-    // P1-2: anonymous funnel event when popup opens.
-    track('popup_open', { stage: 'popup' });
-    const listener = (msg: { type?: string; [key: string]: unknown }) => {
-      if (msg?.type === 'JOB_UPDATED' && msg.jobId === currentJobId) {
-        applyJobUpdate(msg as JobUpdatePayload & { type: string });
-      }
-    };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (browser.runtime.onMessage as any).addListener(listener);
-    return () => {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (browser.runtime.onMessage as any).removeListener(listener);
-    };
-  }, [currentJobId]);
-
-  const applyJobUpdate = (msg: JobUpdatePayload & { type: string }) => {
+  const applyJobUpdate = useCallback((msg: JobUpdatePayload & { type: string }) => {
     const stage = (msg.stage as ConversionStage) || 'polling';
     const progress = typeof msg.progress === 'number' ? msg.progress : 0;
     let messageKey = 'converting';
@@ -162,7 +145,7 @@ export default function PopupApp() {
     if (stage === 'completed') {
       loadJobs();
     }
-  };
+  }, [t]);
 
   const loadSession = async () => {
     try {
@@ -199,6 +182,27 @@ export default function PopupApp() {
     }
   };
 
+  useEffect(() => {
+    loadSession();
+    loadJobs();
+    loadSignupBonus();
+    // P1-2: anonymous funnel event when popup opens.
+    track('popup_open', { stage: 'popup' });
+    const listener = (msg: unknown) => {
+      if (typeof msg !== 'object' || msg === null) {
+        return;
+      }
+      const payload = msg as { type?: string; [key: string]: unknown };
+      if (payload.type === 'JOB_UPDATED' && payload.jobId === currentJobId) {
+        applyJobUpdate(payload as JobUpdatePayload & { type: string });
+      }
+    };
+    browser.runtime.onMessage.addListener(listener);
+    return () => {
+      browser.runtime.onMessage.removeListener(listener);
+    };
+  }, [currentJobId, applyJobUpdate]);
+
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsLoggingIn(true);
@@ -230,12 +234,15 @@ export default function PopupApp() {
     setIsLoggingIn(true);
     setLoginError('');
     try {
-      const result = await sendToBackground<{ success: boolean; error?: string }>({
-        type: MESSAGE_TYPES.REGISTER,
-        email: loginEmail,
-        password: loginPassword,
-        displayName: displayName.trim() || undefined,
-      });
+      const result = await sendToBackground<{ success: boolean; error?: string }>(
+        {
+          type: MESSAGE_TYPES.REGISTER,
+          email: loginEmail,
+          password: loginPassword,
+          displayName: displayName.trim() || undefined,
+        },
+        { timeout: REGISTER_MESSAGE_TIMEOUT_MS }
+      );
       if (!result.success) throw new Error(result.error || t('errors.authError'));
       setLoginEmail('');
       setLoginPassword('');

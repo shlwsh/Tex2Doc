@@ -4,13 +4,14 @@
  * Handles login, registration, session management, and token refresh
  */
 
-import { ApiClient, createAnonymousClient, LoginRequest, RegisterRequest } from './api-client';
-import type { AuthResponse, UserProfile, UsageSummary, Session } from '@/shared/types';
+import { ApiClient, createAnonymousClient } from './api-client';
+import type { UserProfile, UsageSummary, Session } from '@/shared/types';
 import { AuthError } from '@/shared/errors';
 import { getStorageItem, setStorageItem, removeStorageItem } from '@/browser/storage';
 import { STORAGE_KEYS } from '@/shared/constants';
 
 const SESSION_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
+const POST_AUTH_USAGE_TIMEOUT_MS = 5000;
 
 export interface StoredSession {
   refresh_token: string;
@@ -43,7 +44,11 @@ export async function login(
     // Get usage after login
     let usage: UsageSummary | null = null;
     try {
-      const authClient = new ApiClient({ baseUrl, apiKey: auth.access_token });
+      const authClient = new ApiClient({
+        baseUrl,
+        apiKey: auth.access_token,
+        timeout: POST_AUTH_USAGE_TIMEOUT_MS,
+      });
       usage = await authClient.usage();
     } catch {
       // Ignore usage fetch errors
@@ -92,7 +97,11 @@ export async function register(
     // Get usage after registration
     let usage: UsageSummary | null = null;
     try {
-      const authClient = new ApiClient({ baseUrl, apiKey: auth.access_token });
+      const authClient = new ApiClient({
+        baseUrl,
+        apiKey: auth.access_token,
+        timeout: POST_AUTH_USAGE_TIMEOUT_MS,
+      });
       usage = await authClient.usage();
     } catch {
       // Ignore usage fetch errors
@@ -185,7 +194,6 @@ export async function getSession(baseUrl: string): Promise<Session | null> {
     return await refreshSession(baseUrl);
   } catch {
     // Return stored session without refresh
-    const client = new ApiClient({ baseUrl, apiKey: '' });
     return {
       access_token: '',
       refresh_token: stored.refresh_token,
@@ -199,7 +207,7 @@ export async function getSession(baseUrl: string): Promise<Session | null> {
 /**
  * Logout and clear session
  */
-export async function logout(baseUrl: string): Promise<void> {
+export async function logout(_baseUrl: string): Promise<void> {
   await removeStorageItem(STORAGE_KEYS.SESSION);
 }
 

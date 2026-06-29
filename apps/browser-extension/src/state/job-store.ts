@@ -259,7 +259,7 @@ export async function getEvents(
 ): Promise<unknown[]> {
   const db = await getDB();
   const events = await db.getAll(STORES.EVENTS);
-  let filtered = type ? events.filter((e) => e.type === type) : events;
+  const filtered = type ? events.filter((e) => e.type === type) : events;
   filtered.sort((a, b) => b.timestamp - a.timestamp);
   return filtered.slice(0, limit);
 }

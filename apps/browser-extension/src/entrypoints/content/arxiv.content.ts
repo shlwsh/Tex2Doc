@@ -67,7 +67,7 @@
       const btn = document.querySelector(`#${BUTTON_ID} button`) as HTMLButtonElement;
       if (btn) { btn.disabled = true; btn.textContent = 'Preparing...'; }
 
-      (browser as any).runtime.sendMessage({
+      browser.runtime.sendMessage({
         type: 'CONTENT_SCRIPT_CONVERT',
         context: 'arxiv',
         paperId,
