@@ -29,6 +29,7 @@ use crate::limits::{
     MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_ZIP_BYTES,
 };
+use crate::logging::{file_hash, redact_json};
 use crate::state::{
     ConversionJobRecord, ConversionStatus, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
     RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
@@ -449,16 +450,47 @@ async fn auth_register(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let email = require_non_empty(payload.email, "email")?;
     let password = require_non_empty(payload.password, "password")?;
+
+    // 记录注册尝试（不记录密码）
+    tracing::info!(
+        target: "api",
+        event = "auth.register.start",
+        email_hash = %crate::state::hash_text(&email),
+        display_name = ?payload.display_name,
+        "user registration attempt"
+    );
+
     let user = state
         .register_user(&email, payload.display_name.as_deref(), &password)
         .await
         .map_err(|error| {
             if is_unique_violation(&error) {
+                tracing::warn!(
+                    target: "security",
+                    event = "auth.register.duplicate",
+                    email_hash = %crate::state::hash_text(&email),
+                    "duplicate registration attempt"
+                );
                 ApiError::Conflict(format!("user already exists: {email}"))
             } else {
+                tracing::error!(
+                    target: "security",
+                    event = "auth.register.error",
+                    error = %error,
+                    "registration failed"
+                );
                 db_error(error)
             }
         })?;
+
+    tracing::info!(
+        target: "api",
+        event = "auth.register.success",
+        user_id = %user.id,
+        email_hash = %crate::state::hash_text(&email),
+        "user registered successfully"
+    );
+
     issue_auth_response(&state, &user).await
 }
 
@@ -468,11 +500,45 @@ async fn auth_login(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let email = require_non_empty(payload.email, "email")?;
     let password = require_non_empty(payload.password, "password")?;
+
+    // 记录登录尝试（不记录密码）
+    tracing::info!(
+        target: "api",
+        event = "auth.login.start",
+        email_hash = %crate::state::hash_text(&email),
+        "login attempt"
+    );
+
     let user = state
         .login_user(&email, &password)
         .await
-        .map_err(db_error)?
-        .ok_or_else(|| ApiError::Unauthorized("invalid email or password".to_string()))?;
+        .map_err(|error| {
+            tracing::error!(
+                target: "security",
+                event = "auth.login.error",
+                error = %error,
+                "login error"
+            );
+            db_error(error)
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: "security",
+                event = "auth.login.failed",
+                email_hash = %crate::state::hash_text(&email),
+                "invalid credentials"
+            );
+            ApiError::Unauthorized("invalid email or password".to_string())
+        })?;
+
+    tracing::info!(
+        target: "api",
+        event = "auth.login.success",
+        user_id = %user.id,
+        email_hash = %crate::state::hash_text(&email),
+        "user logged in successfully"
+    );
+
     issue_auth_response(&state, &user).await
 }
 
@@ -1213,9 +1279,21 @@ async fn upload_project(
     }
     validate_project_zip(&file_part)?;
     let record = state
-        .store_upload(&session.id, "project.zip".to_string(), file_part)
+        .store_upload(&session.id, "project.zip".to_string(), file_part.clone())
         .await
         .map_err(ApiError::Io)?;
+
+    // 记录上传存储
+    tracing::info!(
+        target: "api",
+        event = "upload.store",
+        user_id = %session.id,
+        upload_id = %record.upload_id,
+        bytes = %file_part.len(),
+        sha256 = %file_hash(&file_part),
+        "upload stored"
+    );
+
     Ok(Json(json!({
         "upload_id": record.upload_id,
         "status": "stored",
@@ -1303,6 +1381,21 @@ async fn create_conversion(
         .enqueue_job(job.job_id.clone())
         .await
         .map_err(ApiError::Io)?;
+
+    // 记录转换任务创建
+    tracing::info!(
+        target: "api",
+        event = "conversion.create",
+        user_id = %session.id,
+        upload_id = %job.upload_id,
+        job_id = %job.job_id,
+        main_tex = %job.main_tex,
+        profile = %job.profile,
+        quality = %job.quality,
+        engine = %job.engine,
+        "conversion job created"
+    );
+
     Ok(Json(job_json(&job)))
 }
 

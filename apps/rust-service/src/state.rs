@@ -123,6 +123,8 @@ pub struct ConversionJobRecord {
     pub profile_version: Option<String>,
     /// Last error code (for retry tracking)
     pub last_error_code: Option<String>,
+    /// Trace ID for log correlation
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -369,6 +371,9 @@ impl ServerState {
         engine: String,
         idempotency_key: Option<String>,
     ) -> Result<ConversionJobRecord, String> {
+        // 从 logging 模块获取当前 trace_id
+        let trace_id = crate::logging::get_trace_id();
+
         let mut job = self
             .db
             .create_job(
@@ -379,9 +384,11 @@ impl ServerState {
                 quality,
                 engine,
                 idempotency_key,
+                trace_id.clone(),
             )
             .await
             .map_err(|e| e.to_string())?;
+        job.trace_id = trace_id;
         if let Some(upload) = self.get_upload(&upload_id).await {
             let source_key = self.file_storage.file_key(&job.job_id, "source.zip");
             self.file_storage
@@ -735,9 +742,10 @@ impl ServerState {
         }
     }
 
-    pub async fn complete_job(&self, job_id: &str, docx: Vec<u8>, report: ConversionReportRecord) {
+    pub async fn complete_job(&self, job_id: &str, docx: Vec<u8>, report: ConversionReportRecord, trace_id: Option<String>) {
         let log = FileStorage::build_conversion_log(
             job_id,
+            trace_id.as_deref().unwrap_or("N/A"),
             &report.job_id,
             "",
             &report.main_tex,
@@ -805,8 +813,10 @@ impl ServerState {
             dimension_scores: None,
             quality_run_json: None,
         };
+        let trace_id = job.as_ref().and_then(|j| j.trace_id.clone()).unwrap_or_else(|| "N/A".to_string());
         let log = FileStorage::build_conversion_log(
             job_id,
+            &trace_id,
             job.as_ref().map(|j| j.user_id.as_str()).unwrap_or_default(),
             job.as_ref()
                 .map(|j| j.upload_id.as_str())

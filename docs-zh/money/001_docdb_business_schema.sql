@@ -350,7 +350,8 @@ ALTER TABLE conversion_jobs
     ADD COLUMN IF NOT EXISTS engine_version TEXT DEFAULT '1.0.0',
     ADD COLUMN IF NOT EXISTS profile_version TEXT,
     ADD COLUMN IF NOT EXISTS last_error_code TEXT,
-    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS trace_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_conversion_jobs_user_created
     ON conversion_jobs(user_id, created_at DESC);

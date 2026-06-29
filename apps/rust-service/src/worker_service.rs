@@ -125,17 +125,42 @@ async fn worker_loop(state: ServerState, mut rx: mpsc::Receiver<WorkerCommand>) 
 }
 
 async fn process_job(state: ServerState, job_id: String) {
-    tracing::info!(job_id = %job_id, "processing job started");
+    // 获取 job 信息和 trace_id
+    let job = state.get_job(&job_id).await;
+    let trace_id = job
+        .as_ref()
+        .and_then(|j| j.trace_id.clone())
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+
+    let upload_id = job.as_ref().map(|j| j.upload_id.clone()).unwrap_or_else(|| "unknown".to_string());
+    let user_id = job.as_ref().map(|j| j.user_id.clone()).unwrap_or_else(|| "unknown".to_string());
+    let engine = job.as_ref().map(|j| j.engine.clone()).unwrap_or_else(|| "unknown".to_string());
+    let profile = job.as_ref().map(|j| j.profile.clone()).unwrap_or_else(|| "unknown".to_string());
+    let quality = job.as_ref().map(|j| j.quality.clone()).unwrap_or_else(|| "unknown".to_string());
+
+    tracing::info!(
+        target: "conversion",
+        event = "conversion.job.start",
+        trace_id = %trace_id,
+        job_id = %job_id,
+        upload_id = %upload_id,
+        user_id = %user_id,
+        engine = %engine,
+        profile = %profile,
+        quality = %quality,
+        "conversion job processing started"
+    );
 
     state
         .update_status(&job_id, ConversionStatus::Normalizing)
         .await;
 
-    let Some(job) = state.get_job(&job_id).await else {
-        tracing::warn!("job not found");
+    let Some(job) = job else {
+        tracing::warn!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, error_code = "job_not_found", "job not found");
         return;
     };
     let Some(upload) = state.get_upload(&job.upload_id).await else {
+        tracing::warn!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, upload_id = %job.upload_id, error_code = "upload_not_found", "upload not found");
         state
             .fail_job(
                 &job_id,
@@ -147,16 +172,16 @@ async fn process_job(state: ServerState, job_id: String) {
     };
 
     // Validate ZIP file for security threats
-    tracing::info!("validating upload ZIP");
+    tracing::info!(target: "conversion", event = "conversion.zip.validate", trace_id = %trace_id, job_id = %job_id, bytes = %upload.bytes.len(), "validating upload ZIP");
     if let Err(err) = validate_zip(&upload.bytes) {
-        tracing::warn!(error = %err, "ZIP validation failed");
+        tracing::warn!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, error_code = "invalid_zip", error = %err, "ZIP validation failed");
         state
             .fail_job(&job_id, ConversionErrorCode::UploadInvalidZip, err)
             .await;
         return;
     }
 
-    tracing::info!(profile = %job.profile, quality = %job.quality, engine = %job.engine, "starting conversion");
+    tracing::info!(target: "conversion", event = "conversion.execute.start", trace_id = %trace_id, job_id = %job_id, profile = %job.profile, quality = %job.quality, engine = %job.engine, "starting conversion");
     let input = ConversionJobInput {
         zip_bytes: upload.bytes.clone(),
         main_tex: job.main_tex.clone(),
@@ -164,17 +189,27 @@ async fn process_job(state: ServerState, job_id: String) {
         quality: job.quality.clone(),
         engine: job.engine.clone(),
     };
-    let result = tokio::task::spawn_blocking(move || execute_conversion(input)).await;
+
+    // 保存当前 span 用于 spawn_blocking
+    let span = tracing::Span::current();
+    let result = tokio::task::spawn_blocking(move || {
+        span.in_scope(|| execute_conversion(input))
+    }).await;
 
     let output = match result {
-        Ok(Ok(result)) => result,
+        Ok(Ok(result)) => {
+            tracing::info!(target: "conversion", event = "conversion.execute.end", trace_id = %trace_id, job_id = %job_id, executor = %result.executor, backend = %result.backend, quality_score = %result.quality_score, "conversion completed");
+            result
+        }
         Ok(Err(err)) => {
+            tracing::error!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, error_code = "conversion_failed", error = %err, "conversion execution failed");
             state
                 .fail_job(&job_id, ConversionErrorCode::ConvertFailed, err)
                 .await;
             return;
         }
         Err(err) => {
+            tracing::error!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, error_code = "worker_join_error", error = %err, "worker join error");
             state
                 .fail_job(
                     &job_id,
@@ -194,6 +229,7 @@ async fn process_job(state: ServerState, job_id: String) {
         .await;
 
     if output.docx.len() < 4 || &output.docx[..4] != b"PK\x03\x04" {
+        tracing::error!(target: "conversion", event = "conversion.job.fail", trace_id = %trace_id, job_id = %job_id, error_code = "invalid_docx", "generated docx does not have valid ZIP header");
         state
             .fail_job(
                 &job_id,
@@ -229,7 +265,8 @@ async fn process_job(state: ServerState, job_id: String) {
         quality_run_json: output.quality_run_json,
     };
 
-    state.complete_job(&job_id, output.docx, report).await;
+    tracing::info!(target: "conversion", event = "conversion.job.complete", trace_id = %trace_id, job_id = %job_id, docx_bytes = %output.docx.len(), quality_score = %output.quality_score, "conversion job completed");
+    state.complete_job(&job_id, output.docx, report, Some(trace_id)).await;
 }
 
 #[derive(Debug)]

@@ -25,6 +25,7 @@ use crate::state::{
     RedeemCodeRecord, RedeemCodeResult, RedeemFailure, RedeemPackage, UploadRecord,
     PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
+use crate::logging::db_operation;
 
 const BUSINESS_SCHEMA: &str = include_str!("../../../docs-zh/money/001_docdb_business_schema.sql");
 const REDEEM_STOCK_SCHEMA: &str =
@@ -422,17 +423,19 @@ impl DbStore {
         quality: String,
         engine: String,
         idempotency_key: Option<String>,
+        trace_id: Option<String>,
     ) -> Result<ConversionJobRecord, sqlx::Error> {
-        let row = sqlx::query(
+        let start = std::time::Instant::now();
+        let result = sqlx::query(
             r#"
-            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status, idempotency_key, attempt_count, engine_version)
-            VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, 1, '1.0.0')
+            INSERT INTO conversion_jobs (user_id, upload_id, main_tex, profile, quality, engine, status, idempotency_key, attempt_count, engine_version, trace_id)
+            VALUES ($1, $2, $3, $4, $5, $6, 'queued', $7, 1, '1.0.0', $8)
             RETURNING id::text, user_id::text, upload_id::text, main_tex, profile, quality, engine, status,
                       result_docx_key, result_report_key, report_json, source_zip_key, result_log_key, storage_path,
                       zip_bytes, docx_bytes, log_bytes, error_code, error_message,
                       EXTRACT(EPOCH FROM created_at)::bigint AS created_at_secs,
                       EXTRACT(EPOCH FROM updated_at)::bigint AS updated_at_secs,
-                      idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code
+                      idempotency_key, attempt_count, worker_id, engine_version, profile_version, last_error_code, trace_id
             "#,
         )
         .bind(parse_uuid(&user_id)?)
@@ -442,9 +445,33 @@ impl DbStore {
         .bind(&quality)
         .bind(&engine)
         .bind(&idempotency_key)
+        .bind(&trace_id)
         .fetch_one(&self.pool)
-        .await?;
-        Ok(job_from_row(&row, None, None))
+        .await;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        // fetch_one with RETURNING always returns 1 row for INSERT
+        let rows_affected: i64 = match &result {
+            Ok(_) => 1,
+            Err(_) => 0,
+        };
+
+        db_operation(
+            "INSERT",
+            "conversion_jobs",
+            duration_ms,
+            rows_affected,
+            Some(&serde_json::json!({
+                "user_id": hash_text(&user_id),
+                "upload_id": hash_text(&upload_id),
+                "trace_id": trace_id
+            })),
+        );
+
+        match result {
+            Ok(row) => Ok(job_from_row(&row, None, None)),
+            Err(e) => Err(e),
+        }
     }
 
     pub async fn update_job_source_storage(
@@ -526,7 +553,8 @@ impl DbStore {
         log_bytes: u64,
         report: &ConversionReportRecord,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        let start = std::time::Instant::now();
+        let result = sqlx::query(
             r#"
             UPDATE conversion_jobs
             SET status = 'completed',
@@ -543,13 +571,33 @@ impl DbStore {
             "#,
         )
         .bind(parse_uuid(job_id)?)
-        .bind(docx_key)
+        .bind(&docx_key)
         .bind(serde_json::to_value(report).unwrap_or_else(|_| Value::Object(Default::default())))
-        .bind(log_key)
+        .bind(&log_key)
         .bind(docx_bytes as i64)
         .bind(log_bytes as i64)
         .execute(&self.pool)
-        .await?;
+        .await;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let rows_affected = match &result {
+            Ok(r) => r.rows_affected(),
+            Err(_) => 0,
+        };
+
+        db_operation(
+            "UPDATE",
+            "conversion_jobs.complete",
+            duration_ms,
+            rows_affected as i64,
+            Some(&serde_json::json!({
+                "job_id": hash_text(job_id),
+                "docx_bytes": docx_bytes,
+                "log_bytes": log_bytes,
+            })),
+        );
+
+        result?;
         Ok(())
     }
 
@@ -562,7 +610,8 @@ impl DbStore {
         log_bytes: u64,
         report: &ConversionReportRecord,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        let start = std::time::Instant::now();
+        let result = sqlx::query(
             r#"
             UPDATE conversion_jobs
             SET status = 'failed',
@@ -579,11 +628,31 @@ impl DbStore {
         .bind(parse_uuid(job_id)?)
         .bind(error_code)
         .bind(error)
-        .bind(log_key)
+        .bind(&log_key)
         .bind(log_bytes as i64)
         .bind(serde_json::to_value(report).unwrap_or_else(|_| Value::Object(Default::default())))
         .execute(&self.pool)
-        .await?;
+        .await;
+
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let rows_affected = match &result {
+            Ok(r) => r.rows_affected(),
+            Err(_) => 0,
+        };
+
+        db_operation(
+            "UPDATE",
+            "conversion_jobs.fail",
+            duration_ms,
+            rows_affected as i64,
+            Some(&serde_json::json!({
+                "job_id": hash_text(job_id),
+                "error_code": error_code,
+                "log_bytes": log_bytes,
+            })),
+        );
+
+        result?;
         Ok(())
     }
 
@@ -2730,6 +2799,7 @@ fn job_from_row(
         engine_version: row.get::<String, _>("engine_version"),
         profile_version: row.get("profile_version"),
         last_error_code: row.get("last_error_code"),
+        trace_id: row.get("trace_id"),
     }
 }
 

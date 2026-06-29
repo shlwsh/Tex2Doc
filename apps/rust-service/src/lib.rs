@@ -8,6 +8,7 @@ pub mod automation_service;
 pub mod feedback_service;
 pub mod file_storage;
 pub mod limits;
+pub mod logging;
 pub mod routes;
 pub mod state;
 pub mod worker_service;
