@@ -1,4 +1,8 @@
 # Semantic TeX Engine 商业化差距评估与实施方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **方案版本**：20260621-180617  
 **基准文档**：`docs-zh/semantic-tex-engine-progress-report-20260621-180000.md`  

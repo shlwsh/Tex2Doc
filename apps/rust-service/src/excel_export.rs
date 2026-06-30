@@ -59,7 +59,7 @@ pub fn build_admin_feedback_export(threads: &[FeedbackThreadSummary]) -> Vec<u8>
     build_feedback_export_xlsx(threads, false)
 }
 
-fn write_xml_part<W: Write + std::io::Seek, S: AsRef<str>>(
+pub fn write_xml_part<W: Write + std::io::Seek, S: AsRef<str>>(
     zip: &mut zip::ZipWriter<W>,
     opts: zip::write::SimpleFileOptions,
     name: &str,

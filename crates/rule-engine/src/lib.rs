@@ -22,6 +22,7 @@
 
 mod audit;
 mod builtin_rules;
+mod capability;
 mod registry;
 mod rule_engine;
 mod rule_output;
@@ -32,6 +33,10 @@ mod ai_inference;
 
 pub use audit::{AuditCache, AuditRecord, DecisionSource};
 pub use builtin_rules::{builtin_rules, journal_rules};
+pub use capability::{
+    builtin_capability_matrix, CapabilityCoverageReport, CapabilityMatrix, ImpactLevel,
+    ImpactLevelCounts, MacroCapability, SupportLevel, SupportLevelCounts,
+};
 pub use registry::{MacroRule, RuleRegistry};
 pub use rule_engine::RuleEngine;
 pub use rule_engine::RuleEngineConfig;

@@ -1,4 +1,8 @@
 # 第八章 · PDF 流水线（V2 实施状态）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章记录 V1 → V2 的演进路线与当前实现。V1（[../01-overview/01-features.md](../01-overview/01-features.md) §1.5）只生成 docx；
 > V2 已在 Rust workspace 中新增 **docx→PDF 同步生成** 与 **TeX oracle 质量对比** 两条新路径，

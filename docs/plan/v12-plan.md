@@ -30,6 +30,10 @@ isProject: false
 ---
 
 # Doc-engine v12 实施计划
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 ## 总目标
 

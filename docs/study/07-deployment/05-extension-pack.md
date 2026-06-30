@@ -1,4 +1,8 @@
 # Chrome 扩展打包
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 `extension/` 目录的打包与发布流程：开发模式加载、CRX 自托管、Chrome Web Store 上架。
 

@@ -6,16 +6,95 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use sqlx::PgPool;
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use crate::db_store::{AppUser, BillingPlanRecord, DbStore, ManualOrderRecord};
+use crate::error_code::ConversionErrorCode;
 use crate::excel_export;
 use crate::feedback_service::FeedbackStore;
 use crate::file_storage::FileStorage;
 use crate::worker_service::WorkerCommand;
 
 pub const PREVIEW_CLOUD_CONVERSION_LIMIT: u64 = 100;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SignupBonusConfig {
+    pub enabled: bool,
+    pub default_quantity: u64,
+    pub validity_days: u64,
+    pub package_name: String,
+}
+
+impl Default for SignupBonusConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            default_quantity: 30,
+            validity_days: 90,
+            package_name: "新用户免费体验包".to_string(),
+        }
+    }
+}
+
+impl SignupBonusConfig {
+    pub fn from_env() -> Self {
+        let defaults = Self::default();
+        Self {
+            enabled: parse_bool_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_ENABLED").ok(),
+                defaults.enabled,
+            ),
+            default_quantity: parse_positive_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_QUANTITY").ok(),
+                defaults.default_quantity,
+            ),
+            validity_days: parse_positive_env(
+                std::env::var("TEX2DOC_SIGNUP_BONUS_VALIDITY_DAYS").ok(),
+                defaults.validity_days,
+            ),
+            package_name: std::env::var("TEX2DOC_SIGNUP_BONUS_PACKAGE_NAME")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or(defaults.package_name),
+        }
+    }
+}
+
+fn parse_bool_env(value: Option<String>, fallback: bool) -> bool {
+    value
+        .and_then(|value| value.parse::<bool>().ok())
+        .unwrap_or(fallback)
+}
+
+fn parse_positive_env(value: Option<String>, fallback: u64) -> u64 {
+    value
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(fallback)
+}
+
+#[cfg(test)]
+mod signup_bonus_config_tests {
+    use super::{parse_bool_env, parse_positive_env, SignupBonusConfig};
+
+    #[test]
+    fn signup_bonus_defaults_are_commercial_defaults() {
+        let config = SignupBonusConfig::default();
+        assert!(config.enabled);
+        assert_eq!(config.default_quantity, 30);
+        assert_eq!(config.validity_days, 90);
+    }
+
+    #[test]
+    fn invalid_values_fall_back_and_valid_values_are_kept() {
+        assert!(parse_bool_env(Some("invalid".into()), true));
+        assert!(!parse_bool_env(Some("false".into()), true));
+        assert_eq!(parse_positive_env(Some("0".into()), 30), 30);
+        assert_eq!(parse_positive_env(Some("45".into()), 30), 45);
+    }
+}
 
 #[derive(Clone)]
 pub struct ServerState {
@@ -109,6 +188,20 @@ pub struct ConversionJobRecord {
     pub zip_bytes: Option<u64>,
     pub docx_bytes: Option<u64>,
     pub log_bytes: Option<u64>,
+    /// Idempotency key for deduplication
+    pub idempotency_key: Option<String>,
+    /// Number of retry attempts
+    pub attempt_count: u8,
+    /// Worker ID that processed this job
+    pub worker_id: Option<String>,
+    /// Engine version used
+    pub engine_version: String,
+    /// Profile version used
+    pub profile_version: Option<String>,
+    /// Last error code (for retry tracking)
+    pub last_error_code: Option<String>,
+    /// Trace ID for log correlation
+    pub trace_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -152,6 +245,12 @@ pub struct RedeemCodeBatchRecord {
     pub created_by: String,
     pub created_at: String,
     pub codes: Vec<String>,
+    /// When `true`, an anonymous caller (no bearer token) can redeem a code
+    /// from this batch and have an account provisioned automatically. The
+    /// account email is derived from `sha256(code)[..16]@tex2doc.local`.
+    /// Default: `false` (requires existing session, like classic codes).
+    #[serde(default)]
+    pub auto_provision: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -170,9 +269,14 @@ pub struct RedeemCodeRecord {
     pub plaintext_code: String,
     pub key_version: String,
     pub status: String,
+    pub stock_status: String,
+    pub stocked_by: Option<String>,
+    pub stocked_at: Option<String>,
     pub redeemed_by: Option<String>,
     pub redeemed_recharge_id: Option<String>,
     pub redeemed_at: Option<String>,
+    pub restocked_by: Option<String>,
+    pub restocked_at: Option<String>,
     pub expires_at: Option<String>,
     pub created_at: String,
 }
@@ -189,6 +293,18 @@ pub struct RedeemCodeResult {
     pub count_balance: u64,
     pub date_valid_until: Option<String>,
     pub redeemed_at: String,
+    /// Auto-provisioned account fields. Present only when the redeem batch
+    /// has `auto_provision = true` and the caller did NOT supply an Authorization
+    /// bearer token (anonymous redemption path).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user: Option<AppUser>,
+    /// `true` when the anonymous redeem just created a new account; `false`
+    /// when it returned an existing one (same email derived from code hash).
+    pub is_new_account: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,6 +322,8 @@ pub struct EntitlementRecord {
     pub count_balance: u64,
     pub valid_until: Option<String>,
     pub source_order_id: Option<String>,
+    pub signup_bonus_balance: u64,
+    pub signup_bonus_valid_until: Option<String>,
     pub updated_at: String,
 }
 
@@ -224,6 +342,12 @@ pub struct ConversionReportRecord {
     pub warnings: Vec<String>,
     pub error_code: Option<String>,
     pub message: String,
+    /// 六维评分（对应技术方案第 1.2 节）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dimension_scores: Option<serde_json::Value>,
+    /// 完整 QualityRun JSON（对应技术方案第 8 节报告结构）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub quality_run_json: Option<String>,
 }
 
 impl ServerState {
@@ -240,13 +364,28 @@ impl ServerState {
         })
     }
 
+    pub fn pool(&self) -> &PgPool {
+        &self.db.pool
+    }
+
     pub async fn register_user(
         &self,
         email: &str,
         display_name: Option<&str>,
         password: &str,
     ) -> Result<AppUser, sqlx::Error> {
-        self.db.register_user(email, display_name, password).await
+        self.db
+            .register_user(
+                email,
+                display_name,
+                password,
+                &SignupBonusConfig::from_env(),
+            )
+            .await
+    }
+
+    pub fn signup_bonus_config(&self) -> SignupBonusConfig {
+        SignupBonusConfig::from_env()
     }
 
     pub async fn login_user(
@@ -312,6 +451,7 @@ impl ServerState {
         Some(upload)
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_job(
         &self,
         user_id: String,
@@ -320,7 +460,11 @@ impl ServerState {
         profile: String,
         quality: String,
         engine: String,
+        idempotency_key: Option<String>,
     ) -> Result<ConversionJobRecord, String> {
+        // 从 logging 模块获取当前 trace_id
+        let trace_id = crate::logging::get_trace_id();
+
         let mut job = self
             .db
             .create_job(
@@ -330,9 +474,12 @@ impl ServerState {
                 profile,
                 quality,
                 engine,
+                idempotency_key,
+                trace_id.clone(),
             )
             .await
             .map_err(|e| e.to_string())?;
+        job.trace_id = trace_id;
         if let Some(upload) = self.get_upload(&upload_id).await {
             let source_key = self.file_storage.file_key(&job.job_id, "source.zip");
             self.file_storage
@@ -362,6 +509,15 @@ impl ServerState {
 
     pub async fn claim_next_job(&self, worker_id: &str) -> Result<Option<String>, sqlx::Error> {
         self.db.claim_next_job(worker_id).await
+    }
+
+    /// Find a job by idempotency key.
+    pub async fn find_job_by_idempotency_key(&self, key: &str) -> Option<ConversionJobRecord> {
+        self.db
+            .find_job_by_idempotency_key(key)
+            .await
+            .ok()
+            .flatten()
     }
 
     pub async fn recover_stale_jobs(&self) -> Result<u64, sqlx::Error> {
@@ -400,6 +556,10 @@ impl ServerState {
 
     pub async fn reserve_cloud_conversion(&self, user_id: &str, job_id: &str) -> Result<u64, u64> {
         self.db.reserve_cloud_conversion(user_id, job_id).await
+    }
+
+    pub async fn consume_local_conversion(&self, user_id: &str) -> Result<u64, u64> {
+        self.db.consume_local_conversion(user_id).await
     }
 
     pub async fn create_recharge(
@@ -538,6 +698,7 @@ impl ServerState {
         self.db.list_release_audit().await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_redeem_batch(
         &self,
         package_id: &str,
@@ -546,6 +707,7 @@ impl ServerState {
         note: Option<String>,
         expires_at: Option<String>,
         created_by: String,
+        auto_provision: bool,
     ) -> Result<RedeemCodeBatchRecord, RedeemFailure> {
         self.db
             .create_redeem_batch(
@@ -555,6 +717,7 @@ impl ServerState {
                 note,
                 expires_at,
                 created_by,
+                auto_provision,
             )
             .await
     }
@@ -594,11 +757,71 @@ impl ServerState {
         self.db.redeem_code(user_id, input_code).await
     }
 
+    /// Anonymous redeem: provisions (or reuses) an account whose email is
+    /// derived from the code, and returns that account's tokens alongside the
+    /// recharge record. The DB layer enforces the `auto_provision = true` flag
+    /// on the redeem-code batch and the `UNIQUE` constraint on the derived
+    /// email guarantees idempotency.
+    pub async fn redeem_code_anonymous(
+        &self,
+        input_code: String,
+    ) -> Result<RedeemCodeResult, RedeemFailure> {
+        self.db.redeem_code_anonymous(input_code).await
+    }
+
     pub async fn list_redeem_records(&self, user_id: &str) -> Vec<RedeemCodeRecord> {
         self.db
             .list_redeem_records(user_id)
             .await
             .unwrap_or_default()
+    }
+
+    /// Admin: list redeem codes with optional filters.
+    pub async fn admin_list_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+        limit: Option<u32>,
+        offset: Option<u32>,
+    ) -> Vec<RedeemCodeRecord> {
+        self.db
+            .admin_list_redeem_codes(stock_status, batch_id, package_id, search, limit, offset)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// Admin: count redeem codes matched by filters (for pagination).
+    pub async fn admin_count_redeem_codes(
+        &self,
+        stock_status: Option<&str>,
+        batch_id: Option<&str>,
+        package_id: Option<&str>,
+        search: Option<&str>,
+    ) -> u64 {
+        self.db
+            .admin_count_redeem_codes(stock_status, batch_id, package_id, search)
+            .await
+            .unwrap_or_default()
+    }
+
+    /// Admin: bulk mark given codes as "stocked" (上货).
+    pub async fn admin_stock_redeem_codes(
+        &self,
+        admin_id: &str,
+        code_ids: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        self.db.admin_stock_redeem_codes(admin_id, code_ids).await
+    }
+
+    /// Admin: reset codes back to "new" (恢复/重置). 文本导入时使用。
+    pub async fn admin_restock_redeem_codes(
+        &self,
+        admin_id: &str,
+        codes: &[String],
+    ) -> Result<u64, RedeemFailure> {
+        self.db.admin_restock_redeem_codes(admin_id, codes).await
     }
 
     pub async fn list_recharges(&self, user_id: &str) -> Vec<RechargeRecord> {
@@ -611,9 +834,16 @@ impl ServerState {
         }
     }
 
-    pub async fn complete_job(&self, job_id: &str, docx: Vec<u8>, report: ConversionReportRecord) {
+    pub async fn complete_job(
+        &self,
+        job_id: &str,
+        docx: Vec<u8>,
+        report: ConversionReportRecord,
+        trace_id: Option<String>,
+    ) {
         let log = FileStorage::build_conversion_log(
             job_id,
+            trace_id.as_deref().unwrap_or("N/A"),
             &report.job_id,
             "",
             &report.main_tex,
@@ -657,7 +887,7 @@ impl ServerState {
         }
     }
 
-    pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
+    pub async fn fail_job(&self, job_id: &str, error: ConversionErrorCode, message: String) {
         let job = self.db.get_job(job_id).await.ok().flatten();
         let report = ConversionReportRecord {
             job_id: job_id.to_string(),
@@ -671,11 +901,18 @@ impl ServerState {
             compatibility_score: None,
             docx_bytes: 0,
             warnings: Vec::new(),
-            error_code: Some(error_code.to_string()),
-            message: error.clone(),
+            error_code: Some(error.as_code().to_string()),
+            message: message.clone(),
+            dimension_scores: None,
+            quality_run_json: None,
         };
+        let trace_id = job
+            .as_ref()
+            .and_then(|j| j.trace_id.clone())
+            .unwrap_or_else(|| "N/A".to_string());
         let log = FileStorage::build_conversion_log(
             job_id,
+            &trace_id,
             job.as_ref().map(|j| j.user_id.as_str()).unwrap_or_default(),
             job.as_ref()
                 .map(|j| j.upload_id.as_str())
@@ -686,7 +923,7 @@ impl ServerState {
             &report.executor,
             "failed",
             None,
-            Some(&error),
+            Some(&format!("[{}] {}", error.as_code(), message)),
         );
         let log_key = self.file_storage.file_key(job_id, "conversion.log");
         if let Err(write_error) = self
@@ -699,8 +936,8 @@ impl ServerState {
             .db
             .fail_job(
                 job_id,
-                error_code,
-                &error,
+                error.as_code(),
+                &format!("[{}] {}", error.as_code(), message),
                 log_key,
                 log.len() as u64,
                 &report,
@@ -709,13 +946,25 @@ impl ServerState {
         {
             tracing::error!("failed to mark conversion job failed: {db_error}");
         }
-        if let Err(refund_error) = self
-            .db
-            .refund_cloud_conversion_for_job(job_id, error_code)
-            .await
-        {
-            tracing::error!("failed to refund conversion quota: {refund_error}");
+        if error.should_refund() {
+            if let Err(refund_error) = self
+                .db
+                .refund_cloud_conversion_for_job(job_id, error.as_code())
+                .await
+            {
+                tracing::error!("failed to refund conversion quota: {refund_error}");
+            }
         }
+    }
+
+    /// 使用错误码和可选自定义消息失败 job。
+    ///
+    /// 优先使用带 `ConversionErrorCode` 的 `fail_job` 方法，此方法保留用于向后兼容。
+    #[allow(dead_code)]
+    pub async fn fail_job_with_code(&self, job_id: &str, error_code: &str, error: String) {
+        let err = ConversionErrorCode::from_code(error_code)
+            .unwrap_or(ConversionErrorCode::ConvertFailed);
+        self.fail_job(job_id, err, error).await;
     }
 
     pub fn load_storage_key(&self, key: &str) -> Option<Vec<u8>> {
@@ -767,6 +1016,18 @@ pub fn random_bytes(len: usize) -> Vec<u8> {
     let mut bytes = vec![0_u8; len];
     rand::rngs::OsRng.fill_bytes(&mut bytes);
     bytes
+}
+
+/// Random ASCII alphanumeric string suitable for placeholder credentials.
+/// Used by the anonymous redeem flow to provision a password the user will
+/// never see (login is via redeem-code only).
+pub fn random_string(len: usize) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let bytes = random_bytes(len);
+    bytes
+        .iter()
+        .map(|b| ALPHABET[(*b as usize) % ALPHABET.len()] as char)
+        .collect()
 }
 
 pub fn generate_redeem_code(batch_prefix: &str) -> String {
@@ -901,7 +1162,7 @@ fn hex_lower(bytes: &[u8]) -> String {
     out
 }
 
-fn now_secs() -> u64 {
+pub fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs())

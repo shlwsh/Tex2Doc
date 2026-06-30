@@ -1,0 +1,185 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage[noend]{algpseudocode}
+\usepackage{listings}
+\usepackage{minted}
+\usepackage{xcolor}
+\usepackage{booktabs}
+\usepackage{hyperref}
+\usepackage{url}
+
+% ---- listings configuration ----
+\lstset{
+  language=Python,
+  frame=tb,
+  numbers=left,
+  numberstyle=\tiny\color{gray},
+  backgroundcolor=\color{white},
+  keywordstyle=\color{blue},
+  stringstyle=\color{orange},
+  commentstyle=\color{green},
+  breaklines=true
+}
+
+% ---- minted style ----
+\usemintedstyle{monokai}
+
+\graphicspath{{./figures/}}
+
+\title{Code Optimization Algorithms: A Comparative Study}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We present a comparative study of optimization algorithms for code generation
+and compilation. Our analysis covers gradient-based and gradient-free methods,
+evaluating their effectiveness on various computational benchmarks.
+\end{abstract}
+
+\section{Introduction}
+
+Algorithm efficiency is crucial in computational applications. This paper
+compares state-of-the-art optimization algorithms for code generation tasks.
+
+\section{Union-Find Algorithm}
+
+The Union-Find data structure is fundamental in graph algorithms.
+
+% ---- Algorithm environment ----
+\begin{algorithm}[p]
+  \caption{Union-Find with Path Compression}
+  \begin{algorithmic}[1]
+    \Function{MakeSet}{$x$}
+      \State $\text{parent}[x] \gets x$
+      \State $\text{rank}[x] \gets 0$
+    \EndFunction
+    \Statex
+    \Function{Find}{$x$}
+      \If{$\text{parent}[x] \neq x$}
+        \State $\text{parent}[x] \gets \Call{Find}{\text{parent}[x]}$
+      \EndIf
+      \State \Return $\text{parent}[x]$
+    \EndFunction
+    \Statex
+    \Function{Union}{$x, y$}
+      \State $p \gets \Call{Find}{x}$
+      \State $q \gets \Call{Find}{y}$
+      \If{$p = q$}
+        \State \Return
+      \EndIf
+      \If{$\text{rank}[p] < \text{rank}[q]$}
+        \State $\text{parent}[p] \gets q$
+      \ElsIf{$\text{rank}[p] > \text{rank}[q]$}
+        \State $\text{parent}[q] \gets p$
+      \Else
+        \State $\text{parent}[q] \gets p$
+        \State $\text{rank}[p] \gets \text{rank}[p] + 1$
+      \EndIf
+    \EndFunction
+  \end{algorithmic}
+\end{algorithm}
+
+\section{Python Implementation}
+
+The following Python code implements k-means clustering:
+
+% ---- Python code block ----
+\begin{lstlisting}[language=Python, caption={K-means clustering implementation}]
+import numpy as np
+
+def kmeans(X: np.ndarray, k: int, max_iter: int = 100) -> tuple:
+    """
+    K-means clustering algorithm.
+    
+    Args:
+        X: Input data points
+        k: Number of clusters
+        max_iter: Maximum iterations
+    
+    Returns:
+        Tuple of (centroids, labels)
+    """
+    centroids = X[:k]          # init: first k points
+    labels = np.zeros(len(X), dtype=int)
+
+    for _ in range(max_iter):
+        # E-step: assign points to nearest centroid
+        distances = np.linalg.norm(X[:, None] - centroids, axis=2)
+        labels = np.argmin(distances, axis=1)
+
+        # M-step: update centroids
+        new_centroids = np.array([
+            X[labels == i].mean(axis=0) if np.any(labels == i) else c
+            for i, c in enumerate(centroids)
+        ])
+
+        if np.allclose(centroids, new_centroids):
+            break
+        centroids = new_centroids
+
+    return centroids, labels
+\end{lstlisting}
+
+\section{Rust Implementation}
+
+For performance-critical applications, we provide a Rust implementation:
+
+% ---- Rust code block (minted) ----
+\begin{minted}[caption={Graph adjacency list with Dijkstra}, frame=lines]{rust}
+use std::collections::BinaryHeap;
+use std::cmp::Reverse;
+
+fn dijkstra(graph: &[Vec<(usize, i32)>], start: usize) -> Vec<i32> {
+    let n = graph.len();
+    let mut dist = vec![i32::MAX; n];
+    dist[start] = 0;
+    let mut pq = BinaryHeap::new();
+    pq.push((Reverse(0), start));
+
+    while let Some((Reverse(d), u)) = pq.pop() {
+        if d > dist[u] { continue; }
+        for &(v, w) in &graph[u] {
+            if dist[u] + w < dist[v] {
+                dist[v] = dist[u] + w;
+                pq.push((Reverse(dist[v]), v));
+            }
+        }
+    }
+    dist
+}
+\end{minted}
+
+\section{Performance Comparison}
+
+\begin{table}[ht]
+\centering
+\caption{Execution time comparison (ms)}
+\label{tab:perf}
+\begin{tabular}{lccc}
+  \toprule
+  Algorithm & Python & Rust & Speedup \\
+  \midrule
+  K-means & 234.5 & 12.3 & 19.1x \\
+  Dijkstra & 89.2 & 4.7 & 19.0x \\
+  Sorting & 45.3 & 2.1 & 21.6x \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{Conclusion}
+
+Our comparative analysis reveals significant performance differences between
+interpreted and compiled implementations.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

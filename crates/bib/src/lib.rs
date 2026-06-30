@@ -44,6 +44,14 @@ fn from_raw(r: &BibRawEntry) -> Option<BibEntry> {
         title,
         year,
         venue,
+        doi: get_field(r, "doi"),
+        url: get_field(r, "url"),
+        pages: get_field(r, "pages"),
+        volume: get_field(r, "volume"),
+        number: get_field(r, "number"),
+        publisher: get_field(r, "publisher"),
+        entry_type: Some(r.entry_type.clone()),
+        raw_fields: std::collections::HashMap::new(),
     })
 }
 

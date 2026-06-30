@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-25-report-thesis",
+  "corpus_name": "Long Report / Thesis",
+  "corpus_name_zh": "长报告/论文",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 15,
+  "packages": ["tocbibind", "minitoc", "fancyhdr", "hyperref"],
+  "focus_areas": ["multi_file_document", "toc_management", "header_footer"],
+  "hard_elements": ["\\include", "minitoc", "fancyhdr", "appendix"],
+  "thresholds": {
+    "parse_score_min": 85,
+    "semantic_score_min": 80,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 85,
+    "citation_resolved_rate_min": 85
+  },
+  "expected_warnings": ["minitoc may not translate to DOCX TOC styles"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 10 }
+}

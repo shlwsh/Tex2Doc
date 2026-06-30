@@ -1,4 +1,8 @@
 # Tex2Doc 商业化 UI/UX 设计系统与前端重构方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 日期：2026-06-23  
 范围：Flutter 客户端、Slint 桌面端、项目 UI 设计技能

@@ -1,4 +1,8 @@
 # Semantic TeX Engine 进展报告与开发任务清单
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 快照日期：2026-06-20
 >

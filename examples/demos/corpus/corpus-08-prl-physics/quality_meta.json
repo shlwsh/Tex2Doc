@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-08-prl-physics",
+  "corpus_name": "APS PRL - revtex4-2",
+  "corpus_name_zh": "APS PRL 物理期刊",
+  "tier": "golden",
+  "profile": "aps-prl",
+  "source": "synthetic",
+  "page_count_approx": 6,
+  "packages": ["revtex4-2", "amsmath", "physics", "siunitx", "mhchem", "hyperref"],
+  "focus_areas": ["equation_array", "bmatrix", "physics_notation", "siunitx_units"],
+  "hard_elements": ["gather", "multline", "bmatrix", "physics macros", "\\siunitx"],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 95
+  },
+  "expected_warnings": ["physics: \\qty and similar macros may need expansion"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 10 }
+}

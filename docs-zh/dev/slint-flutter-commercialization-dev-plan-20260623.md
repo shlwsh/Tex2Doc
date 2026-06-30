@@ -1,4 +1,8 @@
 # Tex2Doc Slint 与 Flutter 商业化开发目标及技术方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-23  
 **输出目录**：`docs-zh/dev`  

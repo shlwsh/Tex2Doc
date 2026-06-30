@@ -1,0 +1,122 @@
+\documentclass[rjthesis}
+\geometry{paperwidth=18.40cm,paperheight=26.00cm,
+  left=1.45cm,right=1.45cm,top=1.00cm,bottom=2.20cm}
+\usepackage{graphicx}
+\graphicspath{{./figures/}}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\newtheorem{definition}{定义}
+\newtheorem{property}{性质}
+\usepackage{booktabs}
+\usepackage[super,square,sort&compress]{natbib}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=blue,citecolor=blue}
+\usepackage[ruled,vlined,linesnumbered]{algorithm2e}
+\usepackage{url}
+
+% ---- Metadata ----
+\rjtitle{基于深度学习的文档智能转换方法研究}
+\rjauthor{张三, 李四}
+\rjinfor{（某某大学计算机科学与技术系，某某 123456）\\
+通讯作者: 张三, E-mail: zhangsan@example.edu.cn}
+
+\begin{document}
+\rjmakenobibintoc
+\rjmaketitle
+
+% ---- Bilingual Abstract ----
+\begin{rjabstract}
+\AbstractContentZh
+本文提出一种基于深度学习的文档智能转换方法。该方法采用双向对齐机制，
+在 LaTeX 到 DOCX 转换过程中保持版面语义完整性。实验表明，本文方法在多个
+评估指标上优于现有方法。
+\end{rjabstract}
+\rjkeywords{文档转换; 深度学习; 格式分析; 双向对齐}
+\AbstractENContent
+{This paper proposes a deep learning based method for intelligent document
+conversion. We introduce a bidirectional alignment mechanism to preserve
+layout semantics during LaTeX-to-DOCX transformation. Experiments on benchmark
+datasets demonstrate superior performance compared to existing methods.}
+\rjkeywordsEn{Document Conversion; Deep Learning; Format Analysis; Bidirectional Alignment}
+
+\section{引言}
+\label{sec:intro}
+
+文档格式转换是学术出版和协作工作中的常见需求。LaTeX 作为科技文档排版的标准工具，
+广泛应用于数学、计算机科学等领域的论文撰写。然而，Microsoft Word 的普及使得
+LaTeX 到 DOCX 的格式转换成为必要~\cite{zhang2020deep}。
+
+\section{方法}
+\label{sec:method}
+
+\subsection{问题定义}
+\label{ssec:problem}
+
+\begin{definition}
+\label{def:alignment}
+双向对齐（Bidirectional Alignment）指在 LaTeX$\to$DOCX 转换过程中，
+源端与目标端语义块之间的双向映射关系，满足对称性：
+$\mathcal{A} = \mathcal{A}^{-1}$。
+\end{definition}
+
+\subsection{网络结构}
+\label{ssec:network}
+
+本文方法采用编码器-解码器架构~\cite{vaswani2017attention}，
+如图~\ref{fig:system} 所示。
+
+% ---- Bilingual Figure Caption ----
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=.7\textwidth]{fig-system-overview.pdf}
+  \bicaption{系统总体架构}{System Overall Architecture}
+  \label{fig:system}
+\end{figure}
+
+% ---- Bilingual Table Caption ----
+\begin{table}[ht]
+\centering
+\bicaption{数据集统计}{Dataset Statistics}
+\label{tab:stats}
+\begin{tabular}{lccc}
+  \toprule
+  数据集 & 训练集 & 验证集 & 测试集 \\
+  \midrule
+  JOS-1000 & 800 & 100 & 100 \\
+  IEEE-500  & 400 & 50  & 50  \\
+  ACM-300   & 240 & 30  & 30  \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{实验}
+\label{sec:exp}
+
+我们在三个基准数据集上进行了实验~\cite{wang2021table}，
+结果如表~\ref{tab:stats} 所示。
+
+\section{结论}
+\label{sec:concl}
+
+本文提出了一种基于深度学习的文档智能转换方法~\cite{li2019layout}，
+实验结果表明该方法有效。
+
+\bibliographystyle{unsrt}
+\bibliography{refs}
+
+\noindent{\hei 附中文参考文献:}
+\begin{thebibliography}{99}
+\addtolength{\itemsep}{-0.6ex}
+\item 张伟, 李明. 基于深度学习的文档格式转换方法[J]. 软件学报, 2020, 31(5): 1234-1245.
+\item 王强, 陈华. 表格结构识别研究综述[J]. 计算机学报, 2021, 44(3): 567-578.
+\item 李娜, 赵刚. 版面分析在文档理解中的应用[J]. 中文信息学报, 2019, 33(8): 1-10.
+\end{thebibliography}
+
+% ---- Author Biography ----
+\noindent{\textbf{作者简介:}
+\begin{description}[font=\normalfont,labelwidth=2em,leftmargin=2.5em]
+\item[{[张三]}] 博士，CCF 专业会员，主要研究方向为文档智能处理与机器学习。
+\item[{[李四]}] 硕士，主要研究方向为自然语言处理。
+\end{description}}
+
+\end{document}

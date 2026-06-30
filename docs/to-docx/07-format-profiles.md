@@ -1,4 +1,8 @@
 # 07 · 《软件学报》2025 格式定义（jos_2025）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本章是 Rust 重构时**直接抄录**样式数值的单一来源。所有样式 ID、字体、字号、缩进、行距均来自 `docs/format/jos_2025_docx_format_definitions.json`，与 `build_jos_docx.py` 中的 `style()` 调用**逐字段对应**。
 >

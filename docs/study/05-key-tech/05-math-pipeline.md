@@ -1,4 +1,8 @@
 # 关键技术 5：LaTeX 公式 → OMML 数学管道
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节深入解析 `doc-mathml` crate。解决的核心问题：把 LaTeX 数学源码嵌入到 docx，**保持 Word 可编辑**（而非退化为图片）。
 

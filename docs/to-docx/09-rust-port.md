@@ -1,4 +1,8 @@
 # 09 · Rust 重构指南
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > **目标读者**：要把 `scripts/build_docx.sh` 流水线用 Rust 重写的工程师。
 > 本章提供 crate 选型、模块切分、数据结构、关键算法伪代码、与 Python 实现的对应表。读完本章你应能在 ~1500–2000 行 Rust 中复刻等价的 build+verify 工具。

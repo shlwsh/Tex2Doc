@@ -10,19 +10,30 @@
  */
 
 import { chromium } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
-import { resolve, dirname, extname } from 'node:path';
+import { access, readFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, '..');
-const extPath = resolve(repoRoot, 'extension');
+const extPath = resolve(repoRoot, process.env.EXTENSION_PATH || 'extension');
+
+async function fileExists(path) {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 async function main() {
   let exitCode = 0;
   let browser = null;
 
   console.log('[e2e-extension] starting');
+  console.log(`[e2e-extension] extension path: ${extPath}`);
 
   try {
     // ---- 1. 静态验证 ----
@@ -55,30 +66,43 @@ async function main() {
     }
 
     // background.js 语法（用 Node eval 跑）
-    const bgJs = await readFile(resolve(extPath, 'background.js'), 'utf8');
-    try {
-      // eslint-disable-next-line no-new-func
-      new Function(bgJs);
-      console.log('[e2e-extension] background.js: valid JS syntax');
-    } catch (e) {
-      console.error(`[e2e-extension] FAIL: background.js syntax error: ${e.message}`);
+    const backgroundScript = manifest.background?.service_worker || 'background.js';
+    const backgroundPath = resolve(extPath, backgroundScript);
+    const bgCheck = spawnSync(process.execPath, ['--check', backgroundPath], {
+      encoding: 'utf8',
+    });
+    if (bgCheck.status === 0) {
+      console.log(`[e2e-extension] ${backgroundScript}: valid JS syntax`);
+    } else {
+      const message = (bgCheck.stderr || bgCheck.stdout || '').trim();
+      console.error(`[e2e-extension] FAIL: ${backgroundScript} syntax error: ${message}`);
       exitCode = 1;
     }
 
-    // popup.js 语法
-    const popupJs = await readFile(resolve(extPath, 'popup/popup.js'), 'utf8');
-    try {
-      // eslint-disable-next-line no-new-func
-      new Function(popupJs);
-      console.log('[e2e-extension] popup.js: valid JS syntax');
-    } catch (e) {
-      console.error(`[e2e-extension] FAIL: popup.js syntax error: ${e.message}`);
-      exitCode = 1;
+    // popup.js 语法（旧版静态扩展有 popup/popup.js；WXT 构建产物走 chunk）
+    const legacyPopupJs = resolve(extPath, 'popup/popup.js');
+    if (await fileExists(legacyPopupJs)) {
+      const popupJs = await readFile(legacyPopupJs, 'utf8');
+      try {
+        // eslint-disable-next-line no-new-func
+        new Function(popupJs);
+        console.log('[e2e-extension] popup.js: valid JS syntax');
+      } catch (e) {
+        console.error(`[e2e-extension] FAIL: popup.js syntax error: ${e.message}`);
+        exitCode = 1;
+      }
+    } else {
+      console.log('[e2e-extension] popup.js: skipped (bundled WXT popup)');
     }
 
     // popup.html 存在
-    const popupHtml = await readFile(resolve(extPath, 'popup/popup.html'), 'utf8');
-    if (popupHtml.includes('id="status-bar"') && popupHtml.includes('id="convert-btn"')) {
+    const popupPath = resolve(extPath, manifest.action.default_popup);
+    const popupHtml = await readFile(popupPath, 'utf8');
+    if (
+      popupHtml.includes('id="status-bar"') && popupHtml.includes('id="convert-btn"') ||
+      (popupHtml.includes('id="root"') || popupHtml.includes('id="app"')) &&
+        popupHtml.includes('type="module"')
+    ) {
       console.log('[e2e-extension] popup.html: structure OK');
     } else {
       console.error('[e2e-extension] FAIL: popup.html missing key elements');
@@ -86,8 +110,11 @@ async function main() {
     }
 
     // WASM 文件存在
-    const wasmJs = await readFile(resolve(extPath, 'popup/wasm/doc_engine.js'), 'utf8');
-    const wasmBin = await readFile(resolve(extPath, 'popup/wasm/doc_engine_bg.wasm'));
+    const wasmDir = await fileExists(resolve(extPath, 'wasm/doc_engine_bg.wasm'))
+      ? resolve(extPath, 'wasm')
+      : resolve(extPath, 'popup/wasm');
+    await readFile(resolve(wasmDir, 'doc_engine.js'), 'utf8');
+    const wasmBin = await readFile(resolve(wasmDir, 'doc_engine_bg.wasm'));
     if (wasmBin.length > 100_000) {
       console.log(`[e2e-extension] WASM bundle: ${(wasmBin.length / 1024).toFixed(0)} KB`);
     } else {
@@ -123,10 +150,12 @@ async function main() {
     const popupPage = await context.newPage();
 
     // 用 file:// 协议加载 popup（验证纯 DOM，不含 WASM）
-    const popupFileUrl = resolve(extPath, 'popup/popup.html').replace(/\\/g, '/');
+    const popupFileUrl = popupPath.replace(/\\/g, '/');
     await popupPage.goto(`file:///${popupFileUrl}`, { waitUntil: 'domcontentloaded', timeout: 10_000 });
 
     const checks = await popupPage.evaluate(() => ({
+      root: !!document.getElementById('root'),
+      app: !!document.getElementById('app'),
       header: !!document.querySelector('header h1'),
       versionBadge: !!document.getElementById('version-badge'),
       statusBar: !!document.getElementById('status-bar'),
@@ -144,11 +173,16 @@ async function main() {
       resultHidden: document.getElementById('result-section')?.classList.contains('hidden'),
     }));
 
-    const missing = Object.entries(checks)
-      .filter(([, v]) => typeof v === 'boolean' && !v)
-      .map(([k]) => k);
+    const legacyDomOk = checks.header && checks.versionBadge && checks.statusBar &&
+      checks.statusText && checks.zipInput && checks.pickLabel && checks.mainTexInput &&
+      checks.convertBtn && checks.resultSection && checks.errorSection && checks.downloadBtn &&
+      checks.errorHidden && checks.resultHidden;
+    const wxtDomOk = checks.root || checks.app;
 
-    if (missing.length > 0) {
+    if (!legacyDomOk && !wxtDomOk) {
+      const missing = Object.entries(checks)
+        .filter(([, v]) => typeof v === 'boolean' && !v)
+        .map(([k]) => k);
       console.error(`[e2e-extension] FAIL: missing DOM: ${missing.join(', ')}`);
       exitCode = 1;
     } else {

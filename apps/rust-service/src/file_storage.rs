@@ -84,6 +84,7 @@ impl FileStorage {
     #[allow(clippy::too_many_arguments)]
     pub fn build_conversion_log(
         job_id: &str,
+        trace_id: &str,
         user_id: &str,
         upload_id: &str,
         main_tex: &str,
@@ -100,6 +101,7 @@ impl FileStorage {
 
         let mut log = format!(
             "=== Conversion Job {job_id} ===\n\
+             TraceID:   {trace_id}\n\
              Started:   {timestamp}\n\
              Date:      {date_part}\n\
              User:      {user_id}\n\
@@ -192,6 +194,7 @@ mod tests {
     fn test_build_conversion_log() {
         let log = FileStorage::build_conversion_log(
             "conv_001",
+            "trace-123-456",
             "user_abc",
             "upload_001",
             "main.tex",
@@ -203,6 +206,7 @@ mod tests {
             None,
         );
         assert!(log.contains("conv_001"));
+        assert!(log.contains("trace-123-456"));
         assert!(log.contains("Completed"));
     }
 }

@@ -18,6 +18,7 @@ path = "src/main.rs"
 [dependencies]
 doc-core = { path = "../../crates/core" }
 doc-compiler-engine = { path = "../../crates/compiler-engine" }
+doc-quality = { path = "../../crates/quality" }
 
 axum         = { version = "0.7", features = ["multipart", "macros"] }
 tower        = "0.5"
@@ -31,7 +32,8 @@ serde        = { workspace = true }
 serde_json   = { workspace = true }
 thiserror    = { workspace = true }
 tracing      = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json", "time"] }
+tracing-appender = "0.2"
 mime         = "0.3"
 async-trait  = "0.1"
 zip          = { workspace = true }

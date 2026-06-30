@@ -1,0 +1,285 @@
+name: Browser Extension CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+    paths:
+      - 'apps/browser-extension/**'
+      - 'crates/wasm/**'
+      - '.github/workflows/browser-extension.yml'
+  pull_request:
+    paths:
+      - 'apps/browser-extension/**'
+      - 'crates/wasm/**'
+      - '.github/workflows/browser-extension.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ============================================
+  # Build Jobs (parallel for each browser)
+  # ============================================
+  build:
+    name: Build (${{ matrix.browser }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - browser: chrome
+            artifact_name: chrome
+          - browser: firefox
+            artifact_name: firefox
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            apps/browser-extension/package-lock.json
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Get Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/wasm
+
+      - name: Build WASM
+        run: npm run build:wasm:extension
+
+      - name: Install dependencies
+        working-directory: apps/browser-extension
+        run: npm install
+
+      - name: Build extension (${{ matrix.browser }})
+        working-directory: apps/browser-extension
+        run: npm run build:${{ matrix.browser }}
+
+      - name: Create zip artifact
+        working-directory: apps/browser-extension
+        run: npm run zip:${{ matrix.browser }}
+
+      - name: Stage zip artifact
+        run: |
+          mkdir -p apps/browser-extension/artifacts
+          cp apps/browser-extension/.output/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip apps/browser-extension/artifacts/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}-extension
+          path: apps/browser-extension/artifacts/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip
+          if-no-files-found: error
+          retention-days: 7
+
+  # ============================================
+  # Type Check
+  # ============================================
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/browser-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/browser-extension
+        run: npm install
+
+      - name: Type check
+        working-directory: apps/browser-extension
+        run: npm run typecheck
+
+  # ============================================
+  # Lint
+  # ============================================
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/browser-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/browser-extension
+        run: npm install
+
+      - name: Lint
+        working-directory: apps/browser-extension
+        run: npm run lint
+
+  # ============================================
+  # Unit Tests
+  # ============================================
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/browser-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/browser-extension
+        run: npm install
+
+      - name: Run tests
+        working-directory: apps/browser-extension
+        run: npm run test
+
+  # ============================================
+  # E2E Tests (Chrome)
+  # ============================================
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: |
+            package-lock.json
+            apps/browser-extension/package-lock.json
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Install Playwright browsers
+        run: npx playwright install chromium
+
+      - name: Download extension artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: chrome-extension
+          path: apps/browser-extension/artifacts
+
+      - name: Unpack extension artifact
+        run: |
+          mkdir -p apps/browser-extension/.output/e2e-chrome
+          unzip -q apps/browser-extension/artifacts/tex2doc-browser-extension-*-chrome.zip -d apps/browser-extension/.output/e2e-chrome
+
+      - name: Run E2E tests
+        env:
+          EXTENSION_PATH: apps/browser-extension/.output/e2e-chrome
+        run: npm run e2e:extension
+
+  # ============================================
+  # WASM Size Check
+  # ============================================
+  wasm-size:
+    name: WASM Size Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: |
+          curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
+
+      - name: Get Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: crates/wasm
+
+      - name: Build WASM (release)
+        run: npm run build:wasm:extension
+
+      - name: Check WASM size
+        run: |
+          WASM_SIZE=$(wc -c < apps/browser-extension/public/wasm/doc_engine_bg.wasm)
+          MAX_SIZE=$((10 * 1024 * 1024))  # 10MB
+          echo "WASM size: $((WASM_SIZE / 1024)) KB"
+          if [ $WASM_SIZE -gt $MAX_SIZE ]; then
+            echo "ERROR: WASM size exceeds 10MB limit"
+            exit 1
+          fi
+          echo "WASM size check passed"
+
+  # ============================================
+  # Manifest Validation
+  # ============================================
+  manifest-check:
+    name: Manifest Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: apps/browser-extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/browser-extension
+        run: npm install
+
+      - name: Build extension
+        working-directory: apps/browser-extension
+        run: npm run build:chrome
+
+      - name: Validate manifest
+        run: |
+          echo "Checking manifest permissions..."
+          cat apps/browser-extension/.output/chrome-mv3/manifest.json | jq -r '.permissions[]' > /tmp/permissions.txt
+          cat /tmp/permissions.txt
+          echo "Checking host permissions..."
+          cat apps/browser-extension/.output/chrome-mv3/manifest.json | jq -r '.host_permissions[]' > /tmp/host_permissions.txt
+          cat /tmp/host_permissions.txt
+          echo "Manifest validation complete"

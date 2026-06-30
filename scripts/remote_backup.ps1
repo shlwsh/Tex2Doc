@@ -10,6 +10,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
+. "$PSScriptRoot\common.ps1"
+
 if ($Retain -lt 1) {
     throw "Retain must be at least 1."
 }
@@ -82,14 +84,14 @@ if [ -z "${DATABASE_URL:-}" ]; then
 fi
 
 DB_NAME="$(psql "$DATABASE_URL" -Atc "select current_database();" 2>/dev/null || true)"
-SERVER_VERSION="$(psql "$DATABASE_URL" -Atc "show server_version;" | tr -d '\r')"
+SERVER_VERSION_NUM="$(psql "$DATABASE_URL" -Atc "show server_version_num;" | tr -d '\r')"
 
 pg_dump "$DATABASE_URL" --format=custom --blobs --verbose --file "$OUT_FILE"
 chmod 600 "$OUT_FILE"
 
 BYTES="$(stat -c '%s' "$OUT_FILE")"
 printf 'database=%s\n' "${DB_NAME:-docdb}"
-printf 'server_version=%s\n' "$SERVER_VERSION"
+printf 'server_version_num=%s\n' "$SERVER_VERSION_NUM"
 printf 'remote_file=%s\n' "$OUT_FILE"
 printf 'bytes=%s\n' "$BYTES"
 '@
@@ -127,8 +129,9 @@ $remoteOutput | ForEach-Object {
     }
 }
 
-$serverVersion = if ($metadata.ContainsKey("server_version")) { $metadata["server_version"] } else { "unknown" }
-$versionDirName = ($serverVersion -replace "[^A-Za-z0-9._-]", "_")
+$serverVersionNum = if ($metadata.ContainsKey("server_version_num")) { $metadata["server_version_num"] } else { throw "remote backup did not return server_version_num" }
+$pgVersion = ConvertTo-PgVersionLabel $serverVersionNum
+$versionDirName = $pgVersion.Label
 $localDir = Join-Path $OutputRoot $versionDirName
 New-Item -ItemType Directory -Force -Path $localDir | Out-Null
 

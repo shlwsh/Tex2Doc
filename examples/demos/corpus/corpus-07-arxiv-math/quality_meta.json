@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-07-arxiv-math",
+  "corpus_name": "ArXiv Math - amsart",
+  "corpus_name_zh": "ArXiv 数学论文",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 12,
+  "packages": ["amsart", "amsthm", "amsmath", "amssymb", "hyperref"],
+  "focus_areas": ["theorem_environment", "proof_environment", "math_operator"],
+  "hard_elements": ["10+ theorem types", "DeclareMathOperator", "proof endings"],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 95,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["theorem: numbered environment may need style mapping"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 8 }
+}

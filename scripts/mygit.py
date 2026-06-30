@@ -713,7 +713,14 @@ def build_push_command(
 
 
 def run_git(args: list[str], env: dict | None = None, check: bool = True) -> subprocess.CompletedProcess:
-    result = subprocess.run(["git", *args], capture_output=True, text=True, env=env)
+    result = subprocess.run(
+        ["git", *args],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env=env,
+    )
     if check and result.returncode != 0:
         stderr = result.stderr.strip() or result.stdout.strip()
         raise RuntimeError(stderr or f"git {' '.join(args)} failed")
@@ -806,7 +813,12 @@ def push_to_remote(proxy_url: str | None, github_token: str | None) -> None:
         print(f"🔐 尝试: {label}")
         try:
             result = subprocess.run(
-                push_cmd, env=push_env, text=True, capture_output=True
+                push_cmd,
+                env=push_env,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
             )
         except OSError as exc:
             last_error = str(exc)

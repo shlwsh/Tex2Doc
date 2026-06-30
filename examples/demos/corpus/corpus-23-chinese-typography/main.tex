@@ -1,0 +1,64 @@
+\documentclass{ctexart}
+\usepackage{xeCJK}
+\usepackage{xpinyin}
+\usepackage{amsmath,amssymb,graphicx,booktabs,hyperref}
+\usepackage{url}
+
+\title{中文排版边界测试}
+
+\author{测试作者}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+这是 Corpus \#23 中文排版边界测试的完整内容。
+焦点：xeCJK、拼音、繁体字、生僻字。
+\end{abstrct}
+
+\section{引言}
+
+本文测试中文排版的各种边界情况。
+
+\subsection{简体中文内容}
+
+简体中文内容包含常用汉字和标点符号。标点挤压测试：这是中文引号测试"双引号"，'单引号'。
+
+\subsection{繁体字内容}
+
+繁體字測試：這是繁體中文的內容，包含常用繁體字形。
+
+\subsection{生僻字测试}
+
+生僻字：靐（三个雷）、龘（三条龙）、齉（鼻子不通）、䶮（龙的一种）等 Unicode 生僻汉字。
+
+\section{数学公式中的中文}
+
+数学公式 $E = mc^2$ 与中文混合排版：这是中文标点与数学公式 $a^2 + b^2 = c^2$ 的混合测试。
+
+\section{表格中的中文}
+
+\begin{table}[ht]
+\centering
+\caption{中文表格示例}
+\label{tab:chinese}
+\begin{tabular}{lcc}
+  \toprule
+  序号 & 姓名 & 备注 \\
+  \midrule
+  1 & 张三 & 高级工程师 \\
+  2 & 李四 & 产品经理 \\
+  3 & 王五 & 技术总监 \\
+  \bottomrule
+\end{tabular}
+\end{table}
+
+\section{结论}
+
+中文排版测试完成。
+
+\bibliographystyle{gbt7714-numerical}
+\bibliography{refs}
+
+\end{document}

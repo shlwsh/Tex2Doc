@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-09-math-edgecases",
+  "corpus_name": "Math Equation Edge Cases",
+  "corpus_name_zh": "数学公式边界场景",
+  "tier": "golden",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["amsmath", "tikz-cd", "booktabs", "hyperref"],
+  "focus_areas": ["commutative_diagram", "cases_environment", "large_matrix", "split_equation"],
+  "hard_elements": ["tikz-cd", "10x10 matrix", "numcases", "split multi-line"],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 85,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["tikz-cd: complex diagrams may render as image", "Large matrix: OMML conversion may truncate"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 5 }
+}

@@ -1,0 +1,61 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,enumitem,hyperref}
+\usepackage{url}
+
+\title{List Nesting Stress Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests deep list nesting with enumitem customization.
+Focus: 6-level nested lists, enumitem.
+\end{abstrct}
+
+\section{Nested Lists}
+
+\subsection{6-level nesting}
+
+\begin{enumerate}
+  \item Level 1
+        \begin{enumerate}
+          \item Level 2
+                \begin{enumerate}
+                  \item Level 3
+                        \begin{enumerate}
+                          \item Level 4
+                                \begin{enumerate}
+                                  \item Level 5
+                                        \begin{enumerate}
+                                          \item Level 6 - deepest level
+                                                  \begin{itemize}
+                                            \item Item within deep enumeration
+                                          \end{itemize}
+                                        \end{enumerate}
+                                \end{enumerate}
+                        \end{enumerate}
+                \end{enumerate}
+        \end{enumerate}
+\end{enumerate}
+
+\section{Description lists}
+
+\begin{description}
+  \item[First] First item with description
+  \item[Second] Second item
+        \begin{description}
+          \item[Nested] A nested description
+        \end{description}
+  \item[Third] Third item
+\end{description}
+
+\section{Conclusion}
+
+Deep nesting tests complete.
+
+\end{document}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tex2Doc Extension E2E Testing"
+  short_description: "Chrome 插件与主流程端到端测试流程"
+  default_prompt: "Use $tex2doc-extension-e2e-testing to validate Tex2Doc Chrome extension registration, login, local conversion, and cloud conversion."

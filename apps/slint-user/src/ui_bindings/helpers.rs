@@ -1,7 +1,6 @@
 use crate::app_state::AppState;
 use crate::cloud_account::{self, CloudAccountSession};
 use crate::ui::{JobRow, MainWindow};
-use slint::SharedString;
 use std::path::PathBuf;
 
 pub(crate) fn apply_account_session(
@@ -65,6 +64,11 @@ pub(crate) fn job_history_for_ui(app_state: &AppState) -> Vec<JobRow> {
             opened_at: job.created_at.into(),
             error: job.error.unwrap_or_default().into(),
             html_report: job.report_path.unwrap_or_default().into(),
+            // Quality fields - defaults for local jobs
+            quality_score: 0,
+            quality_status: "unchecked".into(),
+            blocking_issues_count: 0,
+            warnings_count: 0,
         })
         .collect()
 }
@@ -130,6 +134,22 @@ pub(crate) fn persist_settings(
     }
 }
 
+pub(crate) fn persist_redeem_code(code: &str, api_base_url: &str, login_email: &str) {
+    let mut settings = crate::settings::Settings::load();
+    if !code.trim().is_empty() {
+        settings.last_redeem_code = Some(code.to_string());
+    }
+    if !api_base_url.trim().is_empty() {
+        settings.api_base_url = api_base_url.to_string();
+    }
+    if !login_email.trim().is_empty() {
+        settings.last_login_email = Some(login_email.to_string());
+    }
+    if let Err(error) = settings.save() {
+        log::warn!("Failed to persist redeem code: {}", error);
+    }
+}
+
 pub(crate) fn persist_release_channel(channel: &str) {
     let channel = channel.trim();
     if channel.is_empty() {
@@ -149,26 +169,6 @@ pub(crate) fn path_for_dialog(value: &str) -> Option<PathBuf> {
     } else {
         Some(PathBuf::from(trimmed))
     }
-}
-
-pub(crate) fn default_output_for_project(project_path: &str) -> String {
-    let path = std::path::Path::new(project_path);
-    let project_dir = if path.extension().and_then(|ext| ext.to_str()) == Some("zip") {
-        path.parent().unwrap_or_else(|| std::path::Path::new("."))
-    } else {
-        path
-    };
-    let stem = path
-        .file_stem()
-        .and_then(|name| name.to_str())
-        .filter(|name| !name.is_empty())
-        .unwrap_or("tex2doc-output");
-    project_dir
-        .join("output")
-        .join("to-docx")
-        .join(format!("{stem}.docx"))
-        .display()
-        .to_string()
 }
 
 pub(crate) fn report_path_for_output(output_path: &str) -> Option<PathBuf> {
@@ -258,10 +258,4 @@ pub(crate) fn open_external_url(url: &str) -> std::io::Result<()> {
     };
 
     command.spawn().map(|_| ())
-}
-
-pub(crate) fn confidence_text(confidence: Option<f32>) -> SharedString {
-    confidence
-        .map(|value| format!("{:.0}%", value * 100.0).into())
-        .unwrap_or_else(|| "--".into())
 }

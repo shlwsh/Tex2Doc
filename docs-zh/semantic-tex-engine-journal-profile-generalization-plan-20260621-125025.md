@@ -1,4 +1,8 @@
 # Semantic TeX Engine 期刊 Profile 泛化能力改进方案
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **方案版本**：20260621-125025  
 **适用范围**：新语义引擎路径，不影响原有 Rust 版本 doc 转换引擎  

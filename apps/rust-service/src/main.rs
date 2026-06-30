@@ -11,15 +11,16 @@ use std::net::SocketAddr;
 
 use axum::Router;
 use tower_http::limit::RequestBodyLimitLayer;
-use tower_http::trace::TraceLayer;
-use tracing_subscriber::EnvFilter;
 
+mod automation_service;
 mod db_store;
 mod error;
+mod error_code;
 mod excel_export;
 mod feedback_service;
 mod file_storage;
 mod limits;
+mod logging;
 mod routes;
 mod state;
 mod worker_service;
@@ -28,13 +29,12 @@ use limits::MAX_BODY;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
-        .init();
+    // 初始化日志系统
+    logging::init();
 
     let app: Router = routes::router()
         .await?
-        .layer(TraceLayer::new_for_http())
+        .layer(logging::TraceIdLayer::new())
         .layer(RequestBodyLimitLayer::new(MAX_BODY));
 
     let addr: SocketAddr = std::env::var("DOC_SERVER_ADDR")

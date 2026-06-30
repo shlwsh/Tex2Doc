@@ -1,5 +1,8 @@
 # GitHub 自动部署 Flutter Web 与 Rust 服务端实施方案
 
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
 ## 目标
 
 将 Tex2Doc 的生产部署收敛为一条 GitHub Actions 自动流水线：
@@ -84,7 +87,12 @@ macOS intel / macOS arm 打包暂时从必过发布要求中移除，避免 GitH
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y nginx postgresql-client tar unzip ca-certificates
+sudo apt-get install -y nginx postgresql-client tar unzip ca-certificates \
+  texlive-xetex texlive-luatex texlive-latex-recommended texlive-latex-extra \
+  texlive-lang-chinese texlive-bibtex-extra latexmk fontconfig fonts-noto-cjk fonts-noto-cjk-extra
+
+# 刷新字体缓存
+sudo fc-cache -fv
 ```
 
 如服务器本机也运行 PostgreSQL：
@@ -108,6 +116,7 @@ sudo chown -R ubuntu:ubuntu /opt/tex2doc
 DOC_SERVER_ADDR=127.0.0.1:2624
 DATABASE_URL=postgres://postgres:REPLACE_ME@127.0.0.1:5432/docdb
 RUST_LOG=info
+TEX2DOC_STATIC_DIR=/opt/tex2doc/current/static
 TEX2DOC_BOOTSTRAP_ADMIN_EMAIL=admin@example.com
 TEX2DOC_BOOTSTRAP_ADMIN_PASSWORD=REPLACE_ME
 ```

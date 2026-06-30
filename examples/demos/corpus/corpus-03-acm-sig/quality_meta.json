@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-03-acm-sig",
+  "corpus_name": "ACM SIG Conference (acmart)",
+  "corpus_name_zh": "ACM SIG 会议论文",
+  "tier": "golden",
+  "profile": "acm-sig",
+  "source": "synthetic",
+  "page_count_approx": 8,
+  "packages": ["acmart", "amsmath", "booktabs", "hyperref"],
+  "focus_areas": ["ccs_taxonomy", "doi_citation", "acmart_metadata"],
+  "hard_elements": ["CCS concepts", "\\affiliation", "DOI reference"],
+  "thresholds": {
+    "parse_score_min": 95,
+    "semantic_score_min": 90,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 90,
+    "citation_resolved_rate_min": 95
+  },
+  "expected_warnings": ["acmart: CCS taxonomy may need manual mapping"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 10 }
+}

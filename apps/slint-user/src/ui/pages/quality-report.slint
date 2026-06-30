@@ -1,0 +1,484 @@
+// ============================================================
+// QualityReportPage.slint - 质量报告详情页
+// ============================================================
+
+import { Button, VerticalBox, HorizontalBox, GroupBox, ListView, ScrollView } from "std-widgets.slint";
+import { QualityReportSummary, SemanticLossInfo, QualityDimensions } from "../types.slint";
+
+export component QualityReportPage inherits Rectangle {
+    in-out property <string> job-id: "";
+    in-out property <QualityReportSummary> report;
+    in-out property <string> active-tab: "summary";
+    in-out property <bool> is-loading: false;
+    in-out property <string> error-message: "";
+
+    in property <color> surface-color: #FFFFFF;
+    in property <color> surface-alt-color: #F1F5F9;
+    in property <color> border-color: #D7DEE8;
+    in property <color> text-primary: #172033;
+    in property <color> text-secondary: #42526B;
+    in property <color> text-muted: #6B778C;
+    in property <color> accent: #2563EB;
+    in property <color> success: #0F8A5F;
+    in property <color> warning: #B7791F;
+    in property <color> danger: #C2413A;
+
+    in property <string> t-back: "Back";
+    in property <string> t-summary: "Summary";
+    in property <string> t-semantic-loss: "Semantic Loss";
+    in property <string> t-structure: "Structure";
+    in property <string> t-visual: "Visual";
+    in property <string> t-raw-data: "Raw Data";
+    in property <string> t-download-report: "Download Report";
+    in property <string> t-download-docx: "Download DOCX";
+    in property <string> t-submit-feedback: "Submit Feedback";
+
+    callback go-back();
+    callback download-report(string);
+    callback download-docx(string);
+    callback submit-feedback(string);
+
+    background: #f6f8fb;
+
+    VerticalBox {
+        padding: 20px;
+        spacing: 16px;
+
+        // Header with back button
+        HorizontalBox {
+            spacing: 12px;
+            alignment: center;
+
+            Button {
+                text: "< " + root.t-back;
+                clicked => { root.go-back(); }
+            }
+
+            Text {
+                text: "Quality Report: " + root.job-id;
+                font-size: 20px;
+                font-weight: 700;
+                color: text-primary;
+                horizontal-stretch: 1;
+            }
+        }
+
+        // Tab navigation
+        Rectangle {
+            height: 44px;
+            border-radius: 8px;
+            background: surface-color;
+            border-color: border-color;
+            border-width: 1px;
+
+            HorizontalBox {
+                padding: 4px;
+                spacing: 4px;
+
+                for tab[idx] in [
+                    root.t-summary,
+                    root.t-semantic-loss,
+                    root.t-structure,
+                    root.t-visual,
+                    root.t-raw-data
+                ]: Rectangle {
+                    width: 100px;
+                    height: 36px;
+                    border-radius: 6px;
+                    background: root.active-tab == tab ? accent : #00000000;
+
+                    TouchArea { clicked => { root.active-tab = tab; } }
+
+                    Text {
+                        text: tab;
+                        font-size: 12px;
+                        font-weight: root.active-tab == tab ? 700 : 500;
+                        color: root.active-tab == tab ? #ffffff : text-secondary;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        // Tab content area
+        Rectangle {
+            vertical-stretch: 1;
+            border-radius: 8px;
+            background: surface-color;
+            border-color: border-color;
+            border-width: 1px;
+
+            VerticalBox {
+                padding: 16px;
+                spacing: 16px;
+
+                // Summary Tab
+                if root.active-tab == root.t-summary: VerticalBox {
+                    spacing: 12px;
+
+                    // Overall quality score
+                    Rectangle {
+                        height: 120px;
+                        border-radius: 12px;
+                        background: root.report.quality-score >= 75 ? #ECFDF5 : (root.report.quality-score >= 60 ? #FFFBEB : #FEF2F2);
+
+                        HorizontalBox {
+                            padding: 20px;
+                            spacing: 24px;
+
+                            VerticalBox {
+                                spacing: 4px;
+                                Text { text: root.report.quality-score; font-size: 56px; font-weight: 900; color: root.report.quality-score >= 90 ? success : (root.report.quality-score >= 75 ? accent : (root.report.quality-score >= 60 ? warning : danger)); }
+                                Text { text: "/ 100"; font-size: 18px; color: text-muted; }
+                            }
+
+                            VerticalBox {
+                                spacing: 8px;
+                                VerticalBox {
+                                    spacing: 2px;
+                                    Text { text: "Quality Grade"; font-size: 12px; color: text-muted; }
+                                    Text { text: root.report.quality-score >= 90 ? "Excellent" : (root.report.quality-score >= 75 ? "Good" : (root.report.quality-score >= 60 ? "Fair" : "Poor")); font-size: 20px; font-weight: 700; color: root.report.quality-score >= 90 ? success : (root.report.quality-score >= 75 ? accent : (root.report.quality-score >= 60 ? warning : danger)); }
+                                }
+                                VerticalBox {
+                                    spacing: 2px;
+                                    Text { text: "Profile"; font-size: 12px; color: text-muted; }
+                                    Text { text: root.report.profile; font-size: 14px; font-weight: 600; color: text-primary; }
+                                }
+                                VerticalBox {
+                                    spacing: 2px;
+                                    Text { text: "Engine Version"; font-size: 12px; color: text-muted; }
+                                    Text { text: root.report.engine-version; font-size: 14px; font-weight: 600; color: text-primary; }
+                                }
+                            }
+                        }
+                    }
+
+                    // Six dimension scores grid
+                    Text { text: "Six-Dimension Scores"; font-size: 16px; font-weight: 700; color: text-primary; }
+
+                    GridLayout {
+                        spacing: 8px;
+                        rows: 2;
+                        columns: 3;
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "Parse Integrity"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.parse; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.parse >= 90 ? success : (root.report.dimension-scores.parse >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.parse >= 90 ? "Complete" : (root.report.dimension-scores.parse >= 75 ? "Minor Issues" : "Issues"); font-size: 10px; color: text-muted; }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "Semantic Fidelity"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.semantic; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.semantic >= 90 ? success : (root.report.dimension-scores.semantic >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.semantic >= 90 ? "Fully Fidelity" : (root.report.dimension-scores.semantic >= 75 ? "Partial" : "Degraded"); font-size: 10px; color: text-muted; }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "DOCX Structure"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.docx; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.docx >= 90 ? success : (root.report.dimension-scores.docx >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.docx >= 90 ? "Compliant" : "Has Issues"; font-size: 10px; color: text-muted; }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "Visual Layout"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.visual; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.visual >= 90 ? success : (root.report.dimension-scores.visual >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.visual >= 90 ? "Consistent" : "Some Diff"; font-size: 10px; color: text-muted; }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "Editability"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.editable; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.editable >= 90 ? success : (root.report.dimension-scores.editable >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.editable >= 90 ? "Ready" : "Limited"; font-size: 10px; color: text-muted; }
+                        }
+
+                        Rectangle {
+                            border-radius: 8px;
+                            background: surface-alt-color;
+                            padding: 12px;
+                            Text { text: "Performance"; font-size: 11px; color: text-muted; }
+                            Text { text: "" + root.report.dimension-scores.performance; font-size: 28px; font-weight: 700; color: root.report.dimension-scores.performance >= 90 ? success : (root.report.dimension-scores.performance >= 75 ? accent : warning); }
+                            Text { text: root.report.dimension-scores.performance >= 90 ? "Stable" : "Slow"; font-size: 10px; color: text-muted; }
+                        }
+                    }
+
+                    // Word compatibility
+                    Rectangle {
+                        border-radius: 8px;
+                        background: root.report.word-compatibility.status == "passed" ? #ECFDF5 : (root.report.word-compatibility.status == "warnings" ? #FFFBEB : #FEF2F2);
+                        padding: 12px;
+
+                        VerticalBox {
+                            spacing: 8px;
+                            Text { text: "Word Compatibility"; font-size: 14px; font-weight: 700; color: text-primary; }
+                            Text { text: root.report.word-compatibility.status == "passed" ? "Passed" : (root.report.word-compatibility.status == "warnings" ? "Warnings" : "Failed/Unchecked"); font-size: 12px; font-weight: 600; color: root.report.word-compatibility.status == "passed" ? success : (root.report.word-compatibility.status == "warnings" ? warning : danger); }
+                            Text { text: "Check Method: " + root.report.word-compatibility.check-method; font-size: 11px; color: text-muted; }
+                        }
+                    }
+                }
+
+                // Semantic Loss Tab
+                if root.active-tab == root.t-semantic-loss: VerticalBox {
+                    spacing: 12px;
+
+                    // Blocking Issues
+                    if root.report.blocking-issues.length > 0: VerticalBox {
+                        spacing: 8px;
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: 6px;
+                            background: #FEF2F2;
+                            padding: 6px;
+
+                            Text {
+                                text: "Blocking Issues (" + root.report.blocking-issues.length + ")";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: danger;
+                            }
+                        }
+
+                        for item in root.report.blocking-issues: Rectangle {
+                            border-radius: 6px;
+                            border-color: danger + #40;
+                            border-width: 1px;
+                            background: #ffffff;
+                            padding: 10px;
+
+                            VerticalBox {
+                                spacing: 6px;
+                                HorizontalBox {
+                                    spacing: 8px;
+                                    Text { text: "[" + item.loss-type + "]"; font-size: 12px; font-weight: 700; color: danger; }
+                                    Text { text: item.description; font-size: 12px; color: text-primary; horizontal-stretch: 1; }
+                                }
+                                Text { text: "Location: " + item.location; font-size: 10px; color: text-muted; }
+                                if item.suggestion != "": Text { text: "Suggestion: " + item.suggestion; font-size: 10px; color: accent; }
+                            }
+                        }
+                    }
+
+                    // Warnings
+                    if root.report.warnings.length > 0: VerticalBox {
+                        spacing: 8px;
+
+                        Rectangle {
+                            height: 32px;
+                            border-radius: 6px;
+                            background: #FFFBEB;
+                            padding: 6px;
+
+                            Text {
+                                text: "Warnings (" + root.report.warnings.length + ")";
+                                font-size: 13px;
+                                font-weight: 700;
+                                color: warning;
+                            }
+                        }
+
+                        for item in root.report.warnings: Rectangle {
+                            border-radius: 6px;
+                            border-color: warning + #40;
+                            border-width: 1px;
+                            background: #ffffff;
+                            padding: 10px;
+
+                            VerticalBox {
+                                spacing: 6px;
+                                HorizontalBox {
+                                    spacing: 8px;
+                                    Text { text: "[" + item.loss-type + "]"; font-size: 12px; font-weight: 700; color: warning; }
+                                    Text { text: item.description; font-size: 12px; color: text-primary; horizontal-stretch: 1; }
+                                }
+                                Text { text: "Location: " + item.location; font-size: 10px; color: text-muted; }
+                                if item.suggestion != "": Text { text: "Suggestion: " + item.suggestion; font-size: 10px; color: accent; }
+                            }
+                        }
+                    }
+
+                    if root.report.blocking-issues.length == 0 && root.report.warnings.length == 0: VerticalBox {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text { text: "No semantic loss events"; font-size: 16px; color: text-muted; horizontal-alignment: center; }
+                        Text { text: "All content was converted successfully."; font-size: 13px; color: text-muted; horizontal-alignment: center; }
+                    }
+                }
+
+                // Structure Tab
+                if root.active-tab == root.t-structure: VerticalBox {
+                    spacing: 12px;
+
+                    Text { text: "DOCX Structure Validation"; font-size: 16px; font-weight: 700; color: text-primary; }
+
+                    VerticalBox {
+                        spacing: 8px;
+
+                        for check in [
+                            "relationships.xml complete",
+                            "Media file references valid",
+                            "Styles references valid",
+                            "Numbering format correct",
+                            "Document.xml well-formed"
+                        ]: HorizontalBox {
+                            spacing: 8px;
+                            Text { text: "✓"; font-size: 14px; color: success; }
+                            Text { text: check; font-size: 13px; color: text-primary; }
+                        }
+                    }
+
+                    Rectangle {
+                        border-radius: 8px;
+                        background: surface-alt-color;
+                        padding: 12px;
+
+                        VerticalBox {
+                            spacing: 8px;
+                            Text { text: "Style Coverage"; font-size: 14px; font-weight: 700; color: text-primary; }
+                            Text { text: Math.round(root.report.style-coverage-rate) + "% (" + root.report.style-coverage-rate + " styles mapped)"; font-size: 13px; color: text-secondary; }
+                            Rectangle {
+                                height: 8px;
+                                border-radius: 4px;
+                                background: border-color;
+                                Rectangle {
+                                    height: parent.height;
+                                    width: parent.width * (root.report.style-coverage-rate / 100);
+                                    border-radius: parent.border-radius;
+                                    background: root.report.style-coverage-rate >= 95 ? success : (root.report.style-coverage-rate >= 80 ? accent : warning);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Visual Tab
+                if root.active-tab == root.t-visual: VerticalBox {
+                    spacing: 12px;
+
+                    Text { text: "Visual Comparison"; font-size: 16px; font-weight: 700; color: text-primary; }
+
+                    if root.report.visual-diff-percentage > 0: VerticalBox {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text { text: "Reference PDF"; font-size: 12px; color: text-muted; }
+                        Rectangle {
+                            width: 300px;
+                            height: 200px;
+                            border-radius: 8px;
+                            border-color: border-color;
+                            border-width: 1px;
+                            background: surface-alt-color;
+                            Text { text: "[Reference Image]"; font-size: 14px; color: text-muted; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+
+                        Text { text: "Converted DOCX"; font-size: 12px; color: text-muted; }
+                        Rectangle {
+                            width: 300px;
+                            height: 200px;
+                            border-radius: 8px;
+                            border-color: border-color;
+                            border-width: 1px;
+                            background: surface-alt-color;
+                            Text { text: "[Converted Image]"; font-size: 14px; color: text-muted; horizontal-alignment: center; vertical-alignment: center; }
+                        }
+
+                        HorizontalBox {
+                            spacing: 16px;
+                            alignment: center;
+
+                            VerticalBox {
+                                spacing: 2px;
+                                Text { text: "Diff Percentage"; font-size: 11px; color: text-muted; horizontal-alignment: center; }
+                                Text { text: root.report.visual-diff-percentage + "%"; font-size: 24px; font-weight: 700; color: root.report.visual-diff-percentage < 5 ? success : (root.report.visual-diff-percentage < 10 ? warning : danger); horizontal-alignment: center; }
+                            }
+
+                            VerticalBox {
+                                spacing: 2px;
+                                Text { text: "SSIM Score"; font-size: 11px; color: text-muted; horizontal-alignment: center; }
+                                Text { text: "--"; font-size: 24px; font-weight: 700; color: text-secondary; horizontal-alignment: center; }
+                            }
+                        }
+                    } else : VerticalBox {
+                        spacing: 8px;
+                        alignment: center;
+
+                        Text { text: "No visual comparison available"; font-size: 16px; color: text-muted; horizontal-alignment: center; }
+                        Text { text: "Visual diff requires reference PDF input."; font-size: 13px; color: text-muted; horizontal-alignment: center; }
+                    }
+                }
+
+                // Raw Data Tab
+                if root.active-tab == root.t-raw-data: VerticalBox {
+                    spacing: 12px;
+
+                    Text { text: "Raw Quality Report JSON"; font-size: 16px; font-weight: 700; color: text-primary; }
+
+                    ScrollView {
+                        Rectangle {
+                            border-radius: 8px;
+                            border-color: border-color;
+                            border-width: 1px;
+                            background: #1e293b;
+                            padding: 12px;
+
+                            Text {
+                                text: "{ \"job_id\": \"" + root.report.job-id + "\", \"quality_score\": " + root.report.quality-score + ", \"profile\": \"" + root.report.profile + "\", \"engine_version\": \"" + root.report.engine-version + "\" }";
+                                font-size: 11px;
+                                color: #e2e8f0;
+                                font-family: "monospace";
+                                wrap: word-wrap;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Action buttons
+        HorizontalBox {
+            spacing: 12px;
+
+            Button {
+                text: root.t-download-report;
+                primary: true;
+                clicked => { root.download-report(root.job-id); }
+            }
+
+            Button {
+                text: root.t-download-docx;
+                clicked => { root.download-docx(root.job-id); }
+            }
+
+            Button {
+                text: root.t-submit-feedback;
+                clicked => { root.submit-feedback(root.job-id); }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Text {
+                text: "Created: " + root.report.created-at;
+                font-size: 11px;
+                color: text-muted;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

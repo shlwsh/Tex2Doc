@@ -1,7 +1,10 @@
 //! Cloud conversion API methods.
 
 use crate::client::ApiClient;
-use crate::models::{ConversionJob, ConversionReport, CreateConversionRequest};
+use crate::models::{
+    ConversionJob, ConversionReport, CreateConversionRequest, LocalQuotaCheckResponse,
+    LocalQuotaConsumeResponse,
+};
 use crate::ApiError;
 
 impl ApiClient {
@@ -39,5 +42,13 @@ impl ApiClient {
     pub async fn download_conversion_log(&self, job_id: &str) -> Result<Vec<u8>, ApiError> {
         self.get_bytes(&format!("conversions/{job_id}/download/log"))
             .await
+    }
+
+    pub async fn check_local_conversion(&self) -> Result<LocalQuotaCheckResponse, ApiError> {
+        self.post("local-conversions/check", &()).await
+    }
+
+    pub async fn consume_local_conversion(&self) -> Result<LocalQuotaConsumeResponse, ApiError> {
+        self.post("local-conversions/consume", &()).await
     }
 }

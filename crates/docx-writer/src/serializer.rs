@@ -2409,6 +2409,17 @@ fn write_table(
                 shd.push_attribute(("w:fill", fill.as_str()));
                 w.write_event(Event::Empty(shd)).unwrap();
             }
+            // Vertical alignment (top / center / bottom)
+            if let Some(va) = cell.vertical_align {
+                let val = match va {
+                    doc_semantic_ast::VerticalAlign::Top => "top",
+                    doc_semantic_ast::VerticalAlign::Center => "center",
+                    doc_semantic_ast::VerticalAlign::Bottom => "bottom",
+                };
+                let mut v_align = BytesStart::new("w:vAlign");
+                v_align.push_attribute(("w:val", val));
+                w.write_event(Event::Empty(v_align)).unwrap();
+            }
             w.write_event(Event::End(BytesEnd::new("w:tcPr"))).unwrap();
 
             let p = Paragraph {
@@ -3662,6 +3673,8 @@ mod tests {
                             colspan: 1,
                             rowspan: 1,
                             bg_color: None,
+                            vertical_align: None,
+                            text_direction: None,
                         },
                         TableCell {
                             runs: vec![TextRun {
@@ -3672,6 +3685,8 @@ mod tests {
                             colspan: 1,
                             rowspan: 1,
                             bg_color: None,
+                            vertical_align: None,
+                            text_direction: None,
                         },
                     ],
                 }],
@@ -3707,6 +3722,8 @@ mod tests {
                             colspan: 1,
                             rowspan: 1,
                             bg_color: None,
+                            vertical_align: None,
+                            text_direction: None,
                         })
                         .collect(),
                 }],
@@ -3769,6 +3786,8 @@ mod tests {
             colspan,
             rowspan,
             bg_color: None,
+            vertical_align: None,
+            text_direction: None,
         };
         let doc = Document {
             metadata: Default::default(),
@@ -3843,6 +3862,8 @@ mod tests {
             colspan: 1,
             rowspan: 1,
             bg_color: None,
+            vertical_align: None,
+            text_direction: None,
         };
         let row = doc_semantic_ast::TableRow {
             cells: vec![cell.clone(), cell],
@@ -3900,6 +3921,8 @@ mod tests {
             colspan: 1,
             rowspan: 1,
             bg_color: None,
+            vertical_align: None,
+            text_direction: None,
         };
         let row = doc_semantic_ast::TableRow {
             cells: vec![cell.clone(), cell],
@@ -3951,6 +3974,8 @@ mod tests {
                 scale: 1.0,
                 sizing: None,
                 number: Some("图 1".to_string()),
+                label: None,
+                text_direction: None,
                 span: Span::default(),
             }],
         };
@@ -3994,6 +4019,8 @@ mod tests {
                 scale: 0.5,
                 sizing: FigureSizing::from_options(Some("width=.5\\textwidth".to_string())),
                 number: None,
+                label: None,
+                text_direction: None,
                 span: Span::default(),
             }],
         };
@@ -4029,6 +4056,8 @@ mod tests {
                 scale: 1.0,
                 sizing: None,
                 number: Some("图 1".to_string()),
+                label: None,
+                text_direction: None,
                 span: Span::default(),
             }],
         };

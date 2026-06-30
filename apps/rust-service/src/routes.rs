@@ -14,8 +14,11 @@ use tower_http::services::{ServeDir, ServeFile};
 
 use doc_core::{convert_zip, ConvertOptions};
 
+use crate::automation_service::{AutomationService, RequestFilters};
 use crate::db_store::{AppUser, ManualOrderRecord};
 use crate::error::ApiError;
+use crate::error_code::ConversionErrorCode;
+use crate::excel_export::write_xml_part;
 use crate::feedback_service::{
     AddMessageRequest, AdminReplyRequest, AdminUpdateThreadRequest, CreateThreadRequest,
     FeedbackError, ThreadFilters,
@@ -24,9 +27,10 @@ use crate::limits::{
     MAX_BODY, MAX_UPLOAD_FILE_BYTES, MAX_UPLOAD_FILE_COUNT, MAX_UPLOAD_UNCOMPRESSED_BYTES,
     MAX_UPLOAD_ZIP_BYTES,
 };
+use crate::logging::file_hash;
 use crate::state::{
-    ConversionJobRecord, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord, RedeemCodeResult,
-    RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
+    ConversionJobRecord, ConversionStatus, RechargeRecord, RedeemCodeBatchRecord, RedeemCodeRecord,
+    RedeemCodeResult, RedeemFailure, ServerState, PREVIEW_CLOUD_CONVERSION_LIMIT,
 };
 use crate::worker_service;
 
@@ -45,6 +49,8 @@ pub fn router_with_state(state: ServerState) -> Router {
     Router::new()
         .route("/api/v1/health", get(health))
         .route("/api/v1/version", get(version))
+        .route("/v1/config/signup-bonus", get(signup_bonus_config))
+        .route("/api/v1/config/signup-bonus", get(signup_bonus_config))
         .route("/v1/downloads", get(downloads))
         .route("/api/v1/downloads", get(downloads))
         .route("/v1/waitlist", post(create_waitlist_lead))
@@ -89,12 +95,25 @@ pub fn router_with_state(state: ServerState) -> Router {
             get(admin_list_redeem_batches).post(admin_create_redeem_batch),
         )
         .route(
-            "/admin/v1/redeem-code-batches/:id",
-            get(admin_get_redeem_batch),
-        )
-        .route(
             "/admin/v1/redeem-code-batches/:id/export.xlsx",
             get(admin_export_redeem_batch),
+        )
+        // Admin: redeem codes list (上货管理)
+        .route(
+            "/admin/v1/redeem-codes",
+            get(admin_list_redeem_codes).post(admin_bulk_stock_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-codes/export.xlsx",
+            get(admin_export_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-codes/restock",
+            post(admin_restock_redeem_codes),
+        )
+        .route(
+            "/admin/v1/redeem-code-batches/:id",
+            get(admin_get_redeem_batch),
         )
         .route("/v1/billing/checkout", post(billing_checkout))
         .route("/api/v1/billing/checkout", post(billing_checkout))
@@ -105,6 +124,19 @@ pub fn router_with_state(state: ServerState) -> Router {
         .route(
             "/v1/conversions",
             get(list_conversions).post(create_conversion),
+        )
+        .route("/v1/local-conversions/check", post(check_local_conversion))
+        .route(
+            "/api/v1/local-conversions/check",
+            post(check_local_conversion),
+        )
+        .route(
+            "/v1/local-conversions/consume",
+            post(consume_local_conversion),
+        )
+        .route(
+            "/api/v1/local-conversions/consume",
+            post(consume_local_conversion),
         )
         .route(
             "/api/v1/conversions",
@@ -122,6 +154,15 @@ pub fn router_with_state(state: ServerState) -> Router {
         )
         .route("/v1/conversions/:id/report", get(get_conversion_report))
         .route("/api/v1/conversions/:id/report", get(get_conversion_report))
+        // QualityRun 多维质量报告（对应技术方案第 1.5 节）
+        .route(
+            "/v1/conversions/:id/quality-report",
+            get(get_quality_report_json),
+        )
+        .route(
+            "/api/v1/conversions/:id/quality-report",
+            get(get_quality_report_json),
+        )
         // Conversion file download (enhanced)
         .route(
             "/v1/conversions/:id/download/zip",
@@ -169,6 +210,45 @@ pub fn router_with_state(state: ServerState) -> Router {
             post(admin_rollback_release),
         )
         .route("/admin/v1/release-audit", get(admin_release_audit))
+        // Automation R&D routes
+        .route("/admin/v1/automation/summary", get(automation_summary))
+        .route(
+            "/admin/v1/automation/requests",
+            get(automation_list_requests),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id",
+            get(automation_get_request),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/events",
+            get(automation_get_events),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/approve",
+            post(automation_approve),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/reject",
+            post(automation_reject),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/retry",
+            post(automation_retry),
+        )
+        .route(
+            "/admin/v1/automation/requests/:id/escalate",
+            post(automation_escalate),
+        )
+        .route("/admin/v1/automation/agents", get(automation_list_agents))
+        .route(
+            "/admin/v1/automation/agents/:id/pause",
+            post(automation_pause_agent),
+        )
+        .route(
+            "/admin/v1/automation/agents/:id/resume",
+            post(automation_resume_agent),
+        )
         .merge(static_router())
         .with_state(state)
         .layer(
@@ -296,6 +376,8 @@ struct ConversionBody {
     quality: Option<String>,
     engine: Option<String>,
     backend: Option<String>,
+    /// Idempotency key for request deduplication
+    idempotency_key: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -347,6 +429,34 @@ struct AdminRedeemBatchBody {
     channel: Option<String>,
     note: Option<String>,
     expires_at: Option<String>,
+    /// When true, anonymous callers (no Authorization header) can redeem a
+    /// code from this batch and have an account provisioned automatically.
+    /// Defaults to false to preserve existing behavior.
+    auto_provision: Option<bool>,
+}
+
+/// Request body for the admin redeem-code list endpoint.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeListQuery {
+    stock_status: Option<String>,
+    batch_id: Option<String>,
+    package_id: Option<String>,
+    search: Option<String>,
+    page: Option<u32>,
+    page_size: Option<u32>,
+}
+
+/// Request body for bulk stocking redeem codes.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeStockBody {
+    code_ids: Vec<String>,
+}
+
+/// Request body for restocking (resetting) redeem codes by plaintext codes.
+#[derive(Debug, Deserialize)]
+struct AdminRedeemCodeRestockBody {
+    /// Plain-text redeem codes, one per line (may include dashes / whitespace).
+    codes: String,
 }
 
 async fn auth_register(
@@ -355,16 +465,47 @@ async fn auth_register(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let email = require_non_empty(payload.email, "email")?;
     let password = require_non_empty(payload.password, "password")?;
+
+    // 记录注册尝试（不记录密码）
+    tracing::info!(
+        target: "api",
+        event = "auth.register.start",
+        email_hash = %crate::state::hash_text(&email),
+        display_name = ?payload.display_name,
+        "user registration attempt"
+    );
+
     let user = state
         .register_user(&email, payload.display_name.as_deref(), &password)
         .await
         .map_err(|error| {
             if is_unique_violation(&error) {
+                tracing::warn!(
+                    target: "security",
+                    event = "auth.register.duplicate",
+                    email_hash = %crate::state::hash_text(&email),
+                    "duplicate registration attempt"
+                );
                 ApiError::Conflict(format!("user already exists: {email}"))
             } else {
+                tracing::error!(
+                    target: "security",
+                    event = "auth.register.error",
+                    error = %error,
+                    "registration failed"
+                );
                 db_error(error)
             }
         })?;
+
+    tracing::info!(
+        target: "api",
+        event = "auth.register.success",
+        user_id = %user.id,
+        email_hash = %crate::state::hash_text(&email),
+        "user registered successfully"
+    );
+
     issue_auth_response(&state, &user).await
 }
 
@@ -374,11 +515,45 @@ async fn auth_login(
 ) -> Result<Json<serde_json::Value>, ApiError> {
     let email = require_non_empty(payload.email, "email")?;
     let password = require_non_empty(payload.password, "password")?;
+
+    // 记录登录尝试（不记录密码）
+    tracing::info!(
+        target: "api",
+        event = "auth.login.start",
+        email_hash = %crate::state::hash_text(&email),
+        "login attempt"
+    );
+
     let user = state
         .login_user(&email, &password)
         .await
-        .map_err(db_error)?
-        .ok_or_else(|| ApiError::Unauthorized("invalid email or password".to_string()))?;
+        .map_err(|error| {
+            tracing::error!(
+                target: "security",
+                event = "auth.login.error",
+                error = %error,
+                "login error"
+            );
+            db_error(error)
+        })?
+        .ok_or_else(|| {
+            tracing::warn!(
+                target: "security",
+                event = "auth.login.failed",
+                email_hash = %crate::state::hash_text(&email),
+                "invalid credentials"
+            );
+            ApiError::Unauthorized("invalid email or password".to_string())
+        })?;
+
+    tracing::info!(
+        target: "api",
+        event = "auth.login.success",
+        user_id = %user.id,
+        email_hash = %crate::state::hash_text(&email),
+        "user logged in successfully"
+    );
+
     issue_auth_response(&state, &user).await
 }
 
@@ -534,6 +709,7 @@ async fn usage(
     let session = require_session(&state, &headers).await?;
     let used = state.cloud_conversions_used(&session.id).await;
     let entitlement = state.entitlement(&session.id).await;
+    let had_signup_bonus = entitlement.signup_bonus_valid_until.is_some();
     let date_valid = entitlement
         .valid_until
         .as_deref()
@@ -542,7 +718,9 @@ async fn usage(
             valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
         });
     Ok(Json(json!({
-        "plan_id": if date_valid {
+        "plan_id": if had_signup_bonus {
+            "free_trial"
+        } else if date_valid {
             "date"
         } else if entitlement.count_balance > 0 {
             "count"
@@ -550,15 +728,28 @@ async fn usage(
             "preview"
         },
         "cloud_conversions_used": used,
-        "cloud_conversions_limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
+        "cloud_conversions_limit": if had_signup_bonus { 0 } else { PREVIEW_CLOUD_CONVERSION_LIMIT },
         "count_balance": entitlement.count_balance,
-        "date_valid_until": entitlement.valid_until,
+        "date_valid_until": entitlement.valid_until.clone().or_else(|| entitlement.signup_bonus_valid_until.clone()),
+        "signup_bonus_balance": entitlement.signup_bonus_balance,
+        "signup_bonus_valid_until": entitlement.signup_bonus_valid_until,
+        "entitlement_source": if had_signup_bonus { "system_signup" } else { "standard" },
         "entitlement_source_order_id": entitlement.source_order_id,
         "storage_bytes_used": 0,
         "storage_bytes_limit": 1_073_741_824_u64,
         "period_start": "2026-06-01T00:00:00Z",
         "period_end": "2026-07-01T00:00:00Z",
     })))
+}
+
+async fn signup_bonus_config(State(state): State<ServerState>) -> Json<serde_json::Value> {
+    let config = state.signup_bonus_config();
+    Json(json!({
+        "enabled": config.enabled,
+        "default_quantity": config.default_quantity,
+        "validity_days": config.validity_days,
+        "package_name": config.package_name,
+    }))
 }
 
 async fn plans(State(state): State<ServerState>) -> Result<Json<serde_json::Value>, ApiError> {
@@ -646,13 +837,51 @@ async fn redeem_code(
     headers: HeaderMap,
     Json(payload): Json<RedeemCodeBody>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let session = require_session(&state, &headers).await?;
     let code = payload.code.unwrap_or_default();
+
+    // Try the existing-session path first if a bearer token is supplied.
+    // This keeps already-signed-in users on their existing account, with no
+    // chance of accidentally provisioning a new one.
+    if let Some(token) = bearer_token_from_headers(&headers) {
+        if let Ok(Some(user)) = state.user_for_token(&token).await {
+            let result = state
+                .redeem_code(user.id.clone(), code.clone())
+                .await
+                .map_err(redeem_failure_to_error)?;
+            return Ok(Json(redeem_result_json(&result)));
+        }
+        // Invalid/expired token: fall through to anonymous path so callers
+        // aren't penalized for a stale credential. The anonymous path will
+        // refuse with REDEEM_REQUIRES_LOGIN if the batch disallows it.
+    }
+
+    // Anonymous path — auto-provisions an account when the batch allows it.
     let result = state
-        .redeem_code(session.id, code)
+        .redeem_code_anonymous(code)
         .await
-        .map_err(redeem_failure_to_error)?;
+        .map_err(|failure| match failure {
+            // Map auto_provision=false onto a stable client-friendly code so
+            // older clients can prompt the user to sign in first.
+            RedeemFailure::InvalidCode => ApiError::Coded {
+                status: StatusCode::UNAUTHORIZED,
+                code: "redeem_requires_login",
+                message: "this redeem code requires sign-in; please log in and try again"
+                    .to_string(),
+            },
+            other => redeem_failure_to_error(other),
+        })?;
     Ok(Json(redeem_result_json(&result)))
+}
+
+/// Extract the bearer token from the `Authorization` header, if present.
+fn bearer_token_from_headers(headers: &HeaderMap) -> Option<String> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
+    let token = value.strip_prefix("Bearer ")?.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some(token.to_string())
+    }
 }
 
 async fn list_redeem_records(
@@ -683,6 +912,7 @@ async fn admin_create_redeem_batch(
             payload.note,
             payload.expires_at,
             admin.id,
+            payload.auto_provision.unwrap_or(false),
         )
         .await
         .map_err(redeem_failure_to_error)?;
@@ -745,6 +975,246 @@ async fn admin_export_redeem_batch(
         .header(header::CONTENT_LENGTH, body.len())
         .body(axum::body::Body::from(body))
         .map_err(|e| ApiError::Io(e.to_string()))
+}
+
+// ─── Admin: redeem-codes (上货列表) ─────────────────────────────────────────
+
+fn redeem_code_record_json(record: &RedeemCodeRecord) -> serde_json::Value {
+    json!({
+        "code_id": record.code_id,
+        "batch_id": record.batch_id,
+        "batch_no": record.batch_no,
+        "code_preview": record.code_preview,
+        "package_id": record.package_id,
+        "package_name": record.package_name,
+        "recharge_type": record.recharge_type,
+        "quantity": record.quantity,
+        "status": record.status,
+        "stock_status": record.stock_status,
+        "stocked_by": record.stocked_by,
+        "stocked_at": record.stocked_at,
+        "redeemed_by": record.redeemed_by,
+        "redeemed_recharge_id": record.redeemed_recharge_id,
+        "redeemed_at": record.redeemed_at,
+        "restocked_by": record.restocked_by,
+        "restocked_at": record.restocked_at,
+        "expires_at": record.expires_at,
+        "created_at": record.created_at,
+    })
+}
+
+async fn admin_list_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<AdminRedeemCodeListQuery>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let page = params.page.unwrap_or(1).max(1);
+    let page_size = params.page_size.unwrap_or(50).clamp(1, 200);
+    let offset = (page - 1) * page_size;
+
+    let records = state
+        .admin_list_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+            Some(page_size),
+            Some(offset),
+        )
+        .await;
+
+    let total = state
+        .admin_count_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+        )
+        .await;
+
+    Ok(Json(json!({
+        "records": records.iter().map(redeem_code_record_json).collect::<Vec<_>>(),
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    })))
+}
+
+async fn admin_bulk_stock_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminRedeemCodeStockBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let affected = state
+        .admin_stock_redeem_codes(&admin.id, &payload.code_ids)
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(json!({ "affected": affected })))
+}
+
+async fn admin_restock_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Json(payload): Json<AdminRedeemCodeRestockBody>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let admin = require_admin_session(&state, &headers).await?;
+    let codes: Vec<String> = payload
+        .codes
+        .lines()
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    let affected = state
+        .admin_restock_redeem_codes(&admin.id, &codes)
+        .await
+        .map_err(redeem_failure_to_error)?;
+    Ok(Json(json!({ "affected": affected })))
+}
+
+async fn admin_export_redeem_codes(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<AdminRedeemCodeListQuery>,
+) -> Result<Response, ApiError> {
+    let _admin = require_admin_session(&state, &headers).await?;
+    let records = state
+        .admin_list_redeem_codes(
+            params.stock_status.as_deref(),
+            params.batch_id.as_deref(),
+            params.package_id.as_deref(),
+            params.search.as_deref(),
+            Some(10000),
+            Some(0),
+        )
+        .await;
+    let body = build_redeem_codes_list_xlsx(&records);
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        .header(
+            header::CONTENT_DISPOSITION,
+            "attachment; filename=\"redeem-codes-list.xlsx\"",
+        )
+        .header(header::CONTENT_LENGTH, body.len())
+        .body(axum::body::Body::from(body))
+        .map_err(|e| ApiError::Io(e.to_string()))
+}
+
+fn build_redeem_codes_list_xlsx(records: &[RedeemCodeRecord]) -> Vec<u8> {
+    let mut cursor = std::io::Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut cursor);
+        let opts = zip::write::SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Deflated);
+        write_xml_part(&mut zip, opts, "[Content_Types].xml", content_types_xml());
+        write_xml_part(&mut zip, opts, "_rels/.rels", rels_xml());
+        write_xml_part(&mut zip, opts, "xl/workbook.xml", workbook_xml_codes_list());
+        write_xml_part(
+            &mut zip,
+            opts,
+            "xl/_rels/workbook.xml.rels",
+            workbook_rels_xml_codes_list(),
+        );
+        write_xml_part(
+            &mut zip,
+            opts,
+            "xl/worksheets/sheet1.xml",
+            redeem_codes_list_sheet_xml(records),
+        );
+        zip.finish().expect("zip finish should not fail");
+    }
+    cursor.into_inner()
+}
+
+fn workbook_xml_codes_list() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+<sheets><sheet name="兑换码列表" sheetId="1" r:id="rId1"/></sheets>
+</workbook>"#
+}
+
+fn workbook_rels_xml_codes_list() -> &'static str {
+    r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+</Relationships>"#
+}
+
+fn redeem_codes_list_sheet_xml(records: &[RedeemCodeRecord]) -> String {
+    let headers = [
+        "批次号",
+        "兑换码预览",
+        "套餐 ID",
+        "套餐名称",
+        "转换次数",
+        "上货状态",
+        "上货时间",
+        "使用时间",
+        "重置时间",
+        "过期时间",
+        "创建时间",
+    ];
+
+    let mut sheet = String::from(r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>"#);
+    sheet.push_str(
+        r#"<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">"#,
+    );
+    sheet.push_str("<sheetData>");
+    let mut header_row = String::from(r#"<row r="1">"#);
+    for (col, h) in headers.iter().enumerate() {
+        let col_letter = (b'A' + col as u8) as char;
+        header_row.push_str(&format!(
+            r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
+            col_letter,
+            1,
+            xml_escape(h)
+        ));
+    }
+    header_row.push_str("</row>");
+    sheet.push_str(&header_row);
+
+    for (idx, r) in records.iter().enumerate() {
+        let row_num = (idx + 2) as u32;
+        let mut row = format!(r#"<row r="{row_num}">"#);
+        let stock_label = match r.stock_status.as_str() {
+            "new" => "new（新建）",
+            "stocked" => "stocked（已上货）",
+            "redeemed" => "redeemed（已使用）",
+            "restocked" => "restocked（已恢复）",
+            _ => r.stock_status.as_str(),
+        };
+        let vals = [
+            r.batch_no.as_str(),
+            r.code_preview.as_str(),
+            r.package_id.as_str(),
+            r.package_name.as_str(),
+            &r.quantity.to_string(),
+            stock_label,
+            r.stocked_at.as_deref().unwrap_or("-"),
+            r.redeemed_at.as_deref().unwrap_or("-"),
+            r.restocked_at.as_deref().unwrap_or("-"),
+            r.expires_at.as_deref().unwrap_or("-"),
+            r.created_at.as_str(),
+        ];
+        for (col, val) in vals.iter().enumerate() {
+            let col_letter = (b'A' + col as u8) as char;
+            row.push_str(&format!(
+                r#"<c r="{}{}" t="inlineStr"><is><t>{}</t></is></c>"#,
+                col_letter,
+                row_num,
+                xml_escape(val)
+            ));
+        }
+        row.push_str("</row>");
+        sheet.push_str(&row);
+    }
+    sheet.push_str("</sheetData></worksheet>");
+    sheet
 }
 
 async fn create_recharge(
@@ -840,9 +1310,21 @@ async fn upload_project(
     }
     validate_project_zip(&file_part)?;
     let record = state
-        .store_upload(&session.id, "project.zip".to_string(), file_part)
+        .store_upload(&session.id, "project.zip".to_string(), file_part.clone())
         .await
         .map_err(ApiError::Io)?;
+
+    // 记录上传存储
+    tracing::info!(
+        target: "api",
+        event = "upload.store",
+        user_id = %session.id,
+        upload_id = %record.upload_id,
+        bytes = %file_part.len(),
+        sha256 = %file_hash(&file_part),
+        "upload stored"
+    );
+
     Ok(Json(json!({
         "upload_id": record.upload_id,
         "status": "stored",
@@ -864,15 +1346,39 @@ async fn create_conversion(
     if state.get_upload(&upload_id).await.is_none() {
         return Err(ApiError::NotFound(format!("upload {upload_id}")));
     }
-    let profile = payload.profile.unwrap_or_else(|| "auto".to_string());
-    let quality = payload.quality.unwrap_or_else(|| "standard".to_string());
+    let profile = payload
+        .profile
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "auto".to_string());
+    let quality = payload
+        .quality
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| "standard".to_string());
     let engine = payload
         .engine
         .or(payload.backend)
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| "semantic-engine".to_string());
     let main_tex = payload
         .main_tex
+        .filter(|s| !s.trim().is_empty())
         .unwrap_or_else(|| DEFAULT_MAIN_TEX.to_string());
+
+    // Check for existing job with same idempotency key (if provided)
+    if let Some(ref key) = payload.idempotency_key {
+        if let Some(existing) = state.find_job_by_idempotency_key(key).await {
+            // Return existing job if it's not failed
+            if existing.status != ConversionStatus::Failed {
+                return Ok(Json(serde_json::json!({
+                    "job_id": existing.job_id,
+                    "status": existing.status,
+                    "idempotent": true,
+                    "message": "Returning existing job with same idempotency key"
+                })));
+            }
+        }
+    }
+
     let job = state
         .create_job(
             session.id.clone(),
@@ -881,6 +1387,7 @@ async fn create_conversion(
             profile,
             quality,
             engine,
+            payload.idempotency_key,
         )
         .await
         .map_err(ApiError::Io)?;
@@ -889,9 +1396,9 @@ async fn create_conversion(
         .await
     {
         state
-            .fail_job_with_code(
+            .fail_job(
                 &job.job_id,
-                "quota_exhausted",
+                ConversionErrorCode::QuotaExhausted,
                 format!(
                     "cloud conversion entitlement exhausted: preview_used={used}, preview_limit={PREVIEW_CLOUD_CONVERSION_LIMIT}"
                 ),
@@ -905,7 +1412,67 @@ async fn create_conversion(
         .enqueue_job(job.job_id.clone())
         .await
         .map_err(ApiError::Io)?;
+
+    // 记录转换任务创建
+    tracing::info!(
+        target: "api",
+        event = "conversion.create",
+        user_id = %session.id,
+        upload_id = %job.upload_id,
+        job_id = %job.job_id,
+        main_tex = %job.main_tex,
+        profile = %job.profile,
+        quality = %job.quality,
+        engine = %job.engine,
+        "conversion job created"
+    );
+
     Ok(Json(job_json(&job)))
+}
+
+async fn check_local_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    let entitlement = state.entitlement(&session.id).await;
+    let valid_until_active = entitlement
+        .valid_until
+        .as_deref()
+        .and_then(|value| value.parse::<u64>().ok())
+        .is_some_and(|valid_until| {
+            valid_until >= crate::state::now_timestamp().parse().unwrap_or_default()
+        });
+    let used = state.cloud_conversions_used(&session.id).await;
+    let allowed = valid_until_active
+        || entitlement.count_balance > 0
+        || used < PREVIEW_CLOUD_CONVERSION_LIMIT;
+    Ok(Json(json!({
+        "allowed": allowed,
+        "valid_until_active": valid_until_active,
+        "count_balance": entitlement.count_balance,
+        "used": used,
+        "limit": PREVIEW_CLOUD_CONVERSION_LIMIT,
+    })))
+}
+
+async fn consume_local_conversion(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    match state.consume_local_conversion(&session.id).await {
+        Ok(_used) => {
+            let entitlement = state.entitlement(&session.id).await;
+            Ok(Json(json!({
+                "consumed": true,
+                "balance": entitlement.count_balance,
+            })))
+        }
+        Err(_used) => Err(ApiError::PaymentRequired(
+            "local conversion entitlement exhausted".to_string(),
+        )),
+    }
 }
 
 async fn list_conversions(
@@ -981,6 +1548,50 @@ async fn get_conversion_report(
     Ok(Json(
         serde_json::to_value(report).map_err(|e| ApiError::Io(e.to_string()))?,
     ))
+}
+
+/// 返回完整的 QualityRun JSON（多维评分报告）。
+///
+/// 对应技术方案第 1.5 节"服务报告 API 增强"：
+/// - GET /api/v1/conversions/:id/quality-report
+async fn get_quality_report_json(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_session(&state, &headers).await?;
+    let job = state
+        .get_job(&id)
+        .await
+        .filter(|job| job.user_id == session.id)
+        .ok_or_else(|| ApiError::NotFound(format!("conversion {id}")))?;
+
+    let report = job
+        .report
+        .as_ref()
+        .ok_or_else(|| ApiError::Conflict(format!("conversion {id} report is not ready")))?;
+
+    // 优先返回完整的 QualityRun JSON
+    if let Some(quality_run_json) = &report.quality_run_json {
+        let parsed: serde_json::Value =
+            serde_json::from_str(quality_run_json).map_err(|e| ApiError::Io(e.to_string()))?;
+        return Ok(Json(parsed));
+    }
+
+    // 降级：返回包含 dimension_scores 的结构化报告
+    let response = serde_json::json!({
+        "job_id": &report.job_id,
+        "status": report.status.as_str(),
+        "quality_score": report.quality_score,
+        "profile": &report.profile,
+        "executor": &report.executor,
+        "backend": &report.backend,
+        "quality_status": &report.quality_status,
+        "dimension_scores": report.dimension_scores,
+        "warnings": &report.warnings,
+        "message": &report.message,
+    });
+    Ok(Json(response))
 }
 
 async fn release_manifest(
@@ -1093,10 +1704,27 @@ async fn issue_auth_response(
         .issue_token(&user.id, "refresh")
         .await
         .map_err(db_error)?;
+    let used = state.cloud_conversions_used(&user.id).await;
+    let entitlement = state.entitlement(&user.id).await;
+    let had_signup_bonus = entitlement.signup_bonus_valid_until.is_some();
     Ok(Json(json!({
         "access_token": access_token,
         "refresh_token": refresh_token,
         "user": app_user_json(user),
+        "usage": {
+            "plan_id": if had_signup_bonus { "free_trial" } else { "preview" },
+            "cloud_conversions_used": used,
+            "cloud_conversions_limit": if had_signup_bonus { 0 } else { PREVIEW_CLOUD_CONVERSION_LIMIT },
+            "count_balance": entitlement.count_balance,
+            "date_valid_until": entitlement.valid_until.clone().or_else(|| entitlement.signup_bonus_valid_until.clone()),
+            "signup_bonus_balance": entitlement.signup_bonus_balance,
+            "signup_bonus_valid_until": entitlement.signup_bonus_valid_until,
+            "entitlement_source": if had_signup_bonus { "system_signup" } else { "standard" },
+            "storage_bytes_used": 0,
+            "storage_bytes_limit": 1_073_741_824_u64,
+            "period_start": "2026-06-01T00:00:00Z",
+            "period_end": "2026-07-01T00:00:00Z"
+        }
     })))
 }
 
@@ -1326,7 +1954,7 @@ fn redeem_batch_json(batch: &RedeemCodeBatchRecord, include_codes: bool) -> serd
 }
 
 fn redeem_result_json(result: &RedeemCodeResult) -> serde_json::Value {
-    json!({
+    let mut value = json!({
         "redeem_id": result.redeem_id,
         "recharge_id": result.recharge_id,
         "package_id": result.package_id,
@@ -1336,7 +1964,18 @@ fn redeem_result_json(result: &RedeemCodeResult) -> serde_json::Value {
         "count_balance": result.count_balance,
         "date_valid_until": result.date_valid_until,
         "redeemed_at": result.redeemed_at,
-    })
+        "is_new_account": result.is_new_account,
+    });
+    if let Some(token) = &result.access_token {
+        value["access_token"] = json!(token);
+    }
+    if let Some(token) = &result.refresh_token {
+        value["refresh_token"] = json!(token);
+    }
+    if let Some(user) = &result.user {
+        value["user"] = app_user_json(user);
+    }
+    value
 }
 
 fn redeem_record_json(record: &RedeemCodeRecord) -> serde_json::Value {
@@ -1545,7 +2184,7 @@ fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
             message: format!("invalid zip entry #{index}: {e}"),
         })?;
         let name = file.name();
-        if name.contains('\\') || file.enclosed_name().is_none() {
+        if !is_safe_zip_entry_name(name) {
             return Err(ApiError::BadRequest {
                 code: "zip_slip",
                 message: format!("unsafe zip entry path: {name}"),
@@ -1572,6 +2211,17 @@ fn validate_project_zip(bytes: &[u8]) -> Result<(), ApiError> {
         }
     }
     Ok(())
+}
+
+fn is_safe_zip_entry_name(name: &str) -> bool {
+    let normalized = name.replace('\\', "/");
+    let trimmed = normalized.trim_end_matches('/');
+    if trimmed.is_empty() || trimmed.starts_with('/') {
+        return false;
+    }
+    trimmed
+        .split('/')
+        .all(|part| !part.is_empty() && part != "." && part != ".." && !part.contains(':'))
 }
 
 /// 在 body 中找第一个 boundary 行。
@@ -1834,11 +2484,43 @@ async fn list_feedback_threads(
     let session = require_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.list_user_threads(&session.id).await;
-    let summaries: Vec<_> = threads
-        .into_iter()
-        .map(|t| thread_summary_from_summary(&t))
-        .collect();
+
+    // Get automation status for each thread (if any)
+    let automation_service = AutomationService::new(state.pool().clone());
+    let mut summaries = Vec::new();
+    for t in threads {
+        let auto_status =
+            get_automation_status_for_feedback(&automation_service, &t.thread_id).await;
+        summaries.push(thread_summary_from_summary(&t, auto_status));
+    }
     Ok(Json(serde_json::json!(summaries)))
+}
+
+async fn get_automation_status_for_feedback(
+    service: &AutomationService,
+    feedback_id: &str,
+) -> Option<(&'static str, &'static str)> {
+    // Query automation_requests table for this feedback thread
+    let pool = &service.pool;
+    let result = sqlx::query_as::<_, (String, String)>(
+        r#"
+        SELECT status, id FROM automation_requests
+        WHERE feedback_thread_id = $1
+        ORDER BY created_at DESC LIMIT 1
+        "#,
+    )
+    .bind(feedback_id)
+    .fetch_optional(pool)
+    .await;
+
+    match result {
+        Ok(Some((status, id))) => {
+            let status_str: &'static str = Box::leak(status.into_boxed_str());
+            let id_str: &'static str = Box::leak(id.into_boxed_str());
+            Some((status_str, id_str))
+        }
+        _ => None,
+    }
 }
 
 async fn get_feedback_thread(
@@ -1904,10 +2586,15 @@ async fn admin_list_feedback_threads(
     let _session = require_admin_session(&state, &headers).await?;
     let store = state.feedback_store();
     let threads = store.admin_list(&params).await;
-    let summaries: Vec<_> = threads
-        .into_iter()
-        .map(|t| thread_summary_from_summary(&t))
-        .collect();
+
+    // Get automation status for each thread
+    let automation_service = AutomationService::new(state.pool().clone());
+    let mut summaries = Vec::new();
+    for t in threads {
+        let auto_status =
+            get_automation_status_for_feedback(&automation_service, &t.thread_id).await;
+        summaries.push(thread_summary_from_summary(&t, auto_status));
+    }
     Ok(Json(serde_json::json!(summaries)))
 }
 
@@ -2009,7 +2696,12 @@ fn thread_json(t: &crate::feedback_service::FeedbackThread) -> serde_json::Value
 
 fn thread_summary_from_summary(
     t: &crate::feedback_service::FeedbackThreadSummary,
+    automation_status: Option<(&str, &str)>,
 ) -> serde_json::Value {
+    let (automation_status_str, automation_request_id) = automation_status
+        .map(|(s, id)| (s.to_string(), Some(id.to_string())))
+        .unwrap_or_else(|| ("none".to_string(), None));
+
     serde_json::json!({
         "thread_id": t.thread_id,
         "conversion_job_id": t.conversion_job_id,
@@ -2021,6 +2713,8 @@ fn thread_summary_from_summary(
         "latest_message_at": t.latest_message_at,
         "created_at": t.created_at,
         "updated_at": t.updated_at,
+        "automation_status": automation_status_str,
+        "automation_request_id": automation_request_id,
     })
 }
 
@@ -2056,4 +2750,142 @@ fn sanitize(name: &str) -> String {
         .unwrap_or(name)
         .trim_end_matches(".tex")
         .replace(['\\', ' '], "_")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Automation R&D handlers (admin-facing)
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn automation_summary(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let summary = store.get_summary().await?;
+    Ok(Json(serde_json::json!(summary)))
+}
+
+async fn automation_list_requests(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    axum::extract::Query(params): axum::extract::Query<RequestFilters>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let requests = store.list_requests(&params).await?;
+    Ok(Json(serde_json::json!(requests)))
+}
+
+async fn automation_get_request(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.get_request(&id).await?;
+    match request {
+        Some(r) => Ok(Json(serde_json::json!(r))),
+        None => Err(ApiError::NotFound("request not found".to_string())),
+    }
+}
+
+async fn automation_get_events(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let events = store.get_events(&id).await?;
+    Ok(Json(serde_json::json!(events)))
+}
+
+#[derive(Debug, Deserialize)]
+struct AutomationActionJson {
+    reason: Option<String>,
+    assignee: Option<String>,
+}
+
+async fn automation_approve(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.approve(&id, &session.id).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_reject(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<AutomationActionJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let reason = payload
+        .reason
+        .unwrap_or_else(|| "No reason provided".to_string());
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.reject(&id, &session.id, &reason).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_retry(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.retry(&id, &session.id).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_escalate(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+    Json(payload): Json<AutomationActionJson>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let session = require_admin_session(&state, &headers).await?;
+    let assignee = payload.assignee.unwrap_or_else(|| "human".to_string());
+    let store = AutomationService::new(state.pool().clone());
+    let request = store.escalate(&id, &session.id, &assignee).await?;
+    Ok(Json(serde_json::json!(request)))
+}
+
+async fn automation_list_agents(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agents = store.list_agents().await?;
+    Ok(Json(serde_json::json!(agents)))
+}
+
+async fn automation_pause_agent(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agent = store.pause_agent(&id).await?;
+    Ok(Json(serde_json::json!(agent)))
+}
+
+async fn automation_resume_agent(
+    State(state): State<ServerState>,
+    headers: HeaderMap,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let _session = require_admin_session(&state, &headers).await?;
+    let store = AutomationService::new(state.pool().clone());
+    let agent = store.resume_agent(&id).await?;
+    Ok(Json(serde_json::json!(agent)))
 }

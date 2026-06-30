@@ -228,7 +228,11 @@ CREATE TABLE IF NOT EXISTS redeem_code_batches (
     expires_at TIMESTAMPTZ,
     created_by UUID REFERENCES app_users(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    -- auto_provision = true → anonymous callers (no Authorization header) can
+    -- redeem codes from this batch and have an account provisioned automatically.
+    -- Existing codes stay auto_provision = false unless explicitly upgraded.
+    auto_provision BOOLEAN NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE IF NOT EXISTS redeem_codes (
@@ -314,6 +318,10 @@ CREATE TABLE IF NOT EXISTS conversion_jobs (
     queued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     started_at TIMESTAMPTZ,
     failed_at TIMESTAMPTZ,
+    idempotency_key TEXT,
+    engine_version TEXT DEFAULT '1.0.0',
+    profile_version TEXT,
+    last_error_code TEXT,
     error_code TEXT,
     error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -337,7 +345,13 @@ ALTER TABLE conversion_jobs
     ADD COLUMN IF NOT EXISTS next_run_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
-    ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ;
+    ADD COLUMN IF NOT EXISTS failed_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS idempotency_key TEXT,
+    ADD COLUMN IF NOT EXISTS engine_version TEXT DEFAULT '1.0.0',
+    ADD COLUMN IF NOT EXISTS profile_version TEXT,
+    ADD COLUMN IF NOT EXISTS last_error_code TEXT,
+    ADD COLUMN IF NOT EXISTS attempt_count INTEGER NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS trace_id TEXT;
 
 CREATE INDEX IF NOT EXISTS idx_conversion_jobs_user_created
     ON conversion_jobs(user_id, created_at DESC);

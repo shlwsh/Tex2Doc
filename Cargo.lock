@@ -1600,6 +1600,7 @@ dependencies = [
  "sha2",
  "slint",
  "slint-build",
+ "tempfile",
  "thiserror 2.0.18",
  "tokio",
  "url",
@@ -1635,6 +1636,7 @@ dependencies = [
  "image",
  "quick-xml 0.36.2",
  "serde",
+ "tempfile",
  "thiserror 1.0.69",
  "zip",
 ]
@@ -1670,7 +1672,6 @@ name = "doc-latex-reader"
 version = "0.1.0"
 dependencies = [
  "doc-semantic-ast",
- "doc-tex-facade",
  "doc-utils",
  "insta",
  "logos",
@@ -1770,6 +1771,7 @@ dependencies = [
  "chrono",
  "doc-compiler-engine",
  "doc-core",
+ "doc-quality",
  "http",
  "memchr",
  "mime",
@@ -1785,6 +1787,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "tracing-appender",
  "tracing-subscriber",
  "uuid",
  "zip",
@@ -2862,8 +2865,6 @@ dependencies = [
 [[package]]
 name = "i-slint-backend-winit"
 version = "1.16.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f4df6ec88d452e3c22e418d20c96bc1ccbc9509e81e6596426d3388bf226a5f9"
 dependencies = [
  "accesskit",
  "accesskit_winit",
@@ -6573,6 +6574,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "symlink"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7973cce6668464ea31f176d85b13c7ab3bba2cb3b77a2ed26abd7801688010a"
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7128,6 +7135,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-appender"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "050686193eb999b4bb3bc2acfa891a13da00f79734704c4b8b4ef1a10b368a3c"
+dependencies = [
+ "crossbeam-channel",
+ "symlink",
+ "thiserror 2.0.18",
+ "time",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "tracing-attributes"
 version = "0.1.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7160,6 +7180,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7169,12 +7199,16 @@ dependencies = [
  "nu-ansi-term",
  "once_cell",
  "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "time",
  "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]

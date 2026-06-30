@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-19-ref-bibtex-complex",
+  "corpus_name": "BibTeX Complex Refs",
+  "corpus_name_zh": "BibTeX 复杂引用",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["hyperref"],
+  "focus_areas": ["bibliography_types", "special_characters", "unicode_names"],
+  "hard_elements": ["6+ reference types", "accented characters", "unicode names"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Special characters may not render correctly"],
+  "expected_fallbacks": ["Some reference types may be simplified"],
+  "references": { "type": "bibtex", "count": 10 }
+}

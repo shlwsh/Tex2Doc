@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-04-jos-chinese",
+  "corpus_name": "软件学报中文期刊",
+  "corpus_name_zh": "软件学报中文期刊",
+  "tier": "golden",
+  "profile": "jos-paper",
+  "source": "synthetic",
+  "page_count_approx": 10,
+  "packages": ["ctexart", "rjthesis", "zhnumber", "booktabs", "algorithm2e", "hyperref"],
+  "focus_areas": ["chinese_typography", "theorem_environment", "bilingual_abstract", "algorithm2e"],
+  "hard_elements": ["xeCJK", "双语摘要", "定理环境", "algorithm2e", "中文参考文献"],
+  "thresholds": {
+    "parse_score_min": 90,
+    "semantic_score_min": 85,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 85,
+    "citation_resolved_rate_min": 90
+  },
+  "expected_warnings": ["Chinese: special font rendering may differ", "algorithm2e: pseudo-code layout may degrade"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 12 }
+}

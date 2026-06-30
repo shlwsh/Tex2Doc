@@ -35,6 +35,8 @@ pub struct Settings {
     pub last_login_email: Option<String>,
     /// Last used project path.
     pub last_project_path: Option<String>,
+    /// Last used redeem code for quick activation.
+    pub last_redeem_code: Option<String>,
 }
 
 impl Default for Settings {
@@ -49,6 +51,7 @@ impl Default for Settings {
             theme: default_theme(),
             last_login_email: None,
             last_project_path: None,
+            last_redeem_code: None,
         }
     }
 }
@@ -89,10 +92,15 @@ impl Settings {
 fn normalize_api_base_url(value: &str) -> String {
     let trimmed = value.trim();
     if trimmed.is_empty() || trimmed == LEGACY_ONLINE_API_BASE_URL {
-        DEFAULT_API_BASE_URL.to_string()
-    } else {
-        trimmed.to_string()
+        return DEFAULT_API_BASE_URL.to_string();
     }
+
+    // Self-healing: if it's completely wrong like a path, reset to default.
+    if !trimmed.starts_with("http://") && !trimmed.starts_with("https://") {
+        return DEFAULT_API_BASE_URL.to_string();
+    }
+
+    trimmed.to_string()
 }
 
 /// Returns the config file path for the desktop app.
@@ -132,7 +140,8 @@ mod tests {
             "quality": "standard",
             "default_profile": "auto",
             "last_login_email": null,
-            "last_project_path": null
+            "last_project_path": null,
+            "last_redeem_code": null
         }"#;
 
         let settings: Settings = serde_json::from_str(json).unwrap();

@@ -1,4 +1,8 @@
 # 03 · 语法归一化（latex_to_text / clean_math）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 目标：把任意 LaTeX 文本段**降级**为**保留富文本语义**的"近 plain"字符串——所有 `\cite`/`\ref` 都已替换为编号，所有 `$..$` 已转为含 Unicode 符号的线性文本，所有上下标已用 `^`/`_` 标记（后续 inline_runs_xml 会再切回 `<w:vertAlign>`）。
 >

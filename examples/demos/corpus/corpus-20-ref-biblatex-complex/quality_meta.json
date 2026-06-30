@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-20-ref-biblatex-complex",
+  "corpus_name": "BibLaTeX Complex Refs",
+  "corpus_name_zh": "BibLaTeX 复杂引用",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["biblatex", "hyperref"],
+  "focus_areas": ["biblatex_citation_styles", "grouped_bibliography", "backref"],
+  "hard_elements": ["printbibliography groups", "3 citation styles", "backref"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["biblatex may require pre-processing"],
+  "expected_fallbacks": ["Citation style differentiation may be lost"],
+  "references": { "type": "biblatex", "count": 10 }
+}

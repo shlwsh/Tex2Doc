@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-24-multicolumn",
+  "corpus_name": "Multicolumn Layout Test",
+  "corpus_name_zh": "多栏排版测试",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["multicol", "hyperref"],
+  "focus_areas": ["column_layout", "float_spanning"],
+  "hard_elements": ["multicol", "table*/figure* spanning", "column switching"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["Column layout may not translate to DOCX"],
+  "expected_fallbacks": ["Spanning floats may become single-column"],
+  "references": { "type": "bibtex", "count": 2 }
+}

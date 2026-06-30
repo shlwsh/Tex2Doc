@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import '../ui/app_i18n.dart';
@@ -7,6 +8,7 @@ import '../ui/app_tokens.dart';
 import '../admin/admin_app.dart';
 import '../shared/workspace_app.dart';
 import '../user/user_app.dart';
+import 'extension_page.dart';
 
 const _appIconAsset = 'assets/app_icon.png';
 
@@ -89,6 +91,8 @@ class ProductHomePage extends StatelessWidget {
                         const SizedBox(height: AppSpacing.md),
                         const _FeatureGrid(),
                         const SizedBox(height: AppSpacing.xxl),
+                        const _ExtensionPromoBand(),
+                        const SizedBox(height: AppSpacing.xxl),
                         const _ReleaseBand(),
                       ],
                     ),
@@ -134,6 +138,11 @@ class _HomeNav extends StatelessWidget {
       spacing: AppSpacing.xs,
       runSpacing: AppSpacing.xs,
       children: [
+        OutlinedButton.icon(
+          onPressed: () => _openExtension(context),
+          icon: const Icon(Icons.extension_outlined, size: 18),
+          label: const Text('浏览器插件'),
+        ),
         TextButton(
           onPressed: () => _openWorkspace(context, DocEngineAppMode.admin),
           child: const Text('管理端'),
@@ -381,4 +390,101 @@ void _openWorkspace(BuildContext context, DocEngineAppMode mode) {
           : const UserApp(isWeb: true),
     ),
   );
+}
+
+void _openExtension(BuildContext context) {
+  if (kIsWeb) {
+    // In a Flutter Web SPA, calling openExternalUrl is not appropriate because
+    // the extension page is served by the same domain. Instead, we simply
+    // push a child route; on reload, /extension is handled by main.dart.
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ExtensionPage()),
+    );
+  } else {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const ExtensionPage()),
+    );
+  }
+}
+
+// ─── Extension promo band (home) ─────────────────────────────────────────────
+
+class _ExtensionPromoBand extends StatelessWidget {
+  const _ExtensionPromoBand();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.lg),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            theme.colorScheme.secondaryContainer,
+            theme.colorScheme.primaryContainer,
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 720;
+          final titleBlock = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    Icons.extension,
+                    size: 32,
+                    color: theme.colorScheme.primary,
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Flexible(
+                    child: Text(
+                      'Tex2Doc 浏览器插件',
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.headlineSmall,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xs),
+              Text(
+                '在 Chrome / Edge / Firefox / Safari 中一键把 LaTeX 转 Word。'
+                '一键转换 Overleaf、arXiv 项目。',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ],
+          );
+          final action = FilledButton.icon(
+            onPressed: () => _openExtension(context),
+            icon: const Icon(Icons.arrow_forward),
+            label: const Text('立即查看'),
+          );
+          if (compact) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                titleBlock,
+                const SizedBox(height: AppSpacing.md),
+                Align(alignment: Alignment.centerLeft, child: action),
+              ],
+            );
+          }
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Expanded(child: titleBlock),
+              const SizedBox(width: AppSpacing.lg),
+              action,
+            ],
+          );
+        },
+      ),
+    );
+  }
 }

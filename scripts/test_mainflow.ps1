@@ -2,6 +2,8 @@ param(
     [string]$PostgresAdminUrl = $(if ($env:TEST_MAINFLOW_POSTGRES_URL) { $env:TEST_MAINFLOW_POSTGRES_URL } else { "postgres://postgres:postgres@127.0.0.1:5432/postgres" }),
     [int]$ServerPort = 0,
     [switch]$SkipSlint,
+    [switch]$SkipChromeExtension,
+    [switch]$SkipExtensionBuild,
     [switch]$KeepDatabase
 )
 
@@ -14,7 +16,9 @@ $RunId = (Get-Date -Format "yyyyMMddHHmmss") + "_" + (Get-Random -Minimum 1000 -
 $DbName = "tex2doc_mainflow_$RunId".ToLowerInvariant()
 $TempRoot = Join-Path ([System.IO.Path]::GetTempPath()) "tex2doc-mainflow-$RunId"
 $TempRustBin = Join-Path $Root "apps\slint-user\src\bin\test_mainflow_slint_tmp.rs"
+$TempChromeScript = Join-Path $Root "target\test_mainflow_chrome_$RunId.mjs"
 $Paper3Zip = Join-Path $Root "examples\paper3\upload.zip"
+$ExtensionZip = Join-Path $Root "target\e2e-paper-tex.zip"
 $Paper3MainTex = "main-jos.tex"
 $ServerProcess = $null
 $CreatedDatabase = $false
@@ -112,7 +116,7 @@ function Invoke-NativeCapture([scriptblock]$Command) {
 
 function Write-CapturedOutput([string]$Source, [string[]]$Lines) {
     foreach ($line in $Lines) {
-        if ($line.StartsWith("WEB_FLOW_JSON:") -or $line.StartsWith("SLINT_FLOW_JSON:") -or $line.StartsWith("REDEEM_CODE:")) {
+        if ($line.StartsWith("WEB_FLOW_JSON:") -or $line.StartsWith("SLINT_FLOW_JSON:") -or $line.StartsWith("CHROME_FLOW_JSON:") -or $line.StartsWith("REDEEM_CODE:")) {
             continue
         }
         if (-not [string]::IsNullOrWhiteSpace($line)) {
@@ -185,14 +189,23 @@ print("REDEEM_CODE:" + codes[0])
 $Cargo = $null
 $Python = $null
 $Psql = $null
+$Node = $null
+$Npm = $null
 
 try {
     New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
     $Cargo = Find-CommandPath "cargo" @("$env:USERPROFILE\.cargo\bin\cargo.exe")
     $Python = Find-CommandPath "python" @("D:\Python\Python311\python.exe")
     $Psql = Find-CommandPath "psql" @("D:\Program Files\PostgreSQL\18\bin\psql.exe", "C:\Program Files\PostgreSQL\18\bin\psql.exe")
+    if (-not $SkipChromeExtension) {
+        $Node = Find-CommandPath "node" @("C:\Program Files\nodejs\node.exe")
+        $Npm = Find-CommandPath "npm" @("C:\Program Files\nodejs\npm.cmd")
+    }
     if (-not (Test-Path $Paper3Zip)) {
         throw "Required test upload file not found: $Paper3Zip"
+    }
+    if (-not $SkipChromeExtension -and -not (Test-Path $ExtensionZip)) {
+        throw "Required Chrome extension test upload file not found: $ExtensionZip"
     }
 
     if ($ServerPort -eq 0) {
@@ -206,6 +219,7 @@ try {
     $AdminPassword = "mainflow-admin-pass-123456"
     $WebEmail = "mainflow-web-$RunId@example.com"
     $SlintEmail = "mainflow-slint-$RunId@example.com"
+    $ChromeEmail = "mainflow-chrome-$RunId@example.com"
     $UserPassword = "123456"
 
     Write-Step "root: $Root"
@@ -297,9 +311,10 @@ admin_login = s.post(f"{base}/auth/login", json={"email": admin_email, "password
 admin_login.raise_for_status()
 admin_token = admin_login.json()["access_token"]
 
-trace("verify initial balance is 0")
+trace("read initial balance")
 usage0 = s.get(f"{base}/usage", headers=auth_headers(token), timeout=30).json()
-require(int(usage0.get("count_balance", 0)) == 0, f"initial count_balance should be 0: {usage0}")
+initial_balance = int(usage0.get("count_balance", 0))
+trace(f"initial count_balance is {initial_balance}")
 
 trace("create count_10 redeem code batch")
 batch = s.post(
@@ -326,9 +341,10 @@ redeem.raise_for_status()
 redeem_json = redeem.json()
 require(int(redeem_json.get("quantity", 0)) == 10, f"redeem quantity should be 10: {redeem_json}")
 
-trace("verify balance after redeem is 10")
+trace("verify balance increased by 10 after redeem")
 usage1 = s.get(f"{base}/usage", headers=auth_headers(token), timeout=30).json()
-require(int(usage1.get("count_balance", 0)) == 10, f"balance after redeem should be 10: {usage1}")
+balance_after_redeem = int(usage1.get("count_balance", 0))
+require(balance_after_redeem == initial_balance + 10, f"balance after redeem should increase by 10: before={initial_balance}, usage={usage1}")
 
 with open(paper3_zip, "rb") as f:
     zip_bytes = f.read()
@@ -390,9 +406,10 @@ redeems = s.get(f"{base}/redeem-codes/records", headers=auth_headers(token), tim
 require(any(item.get("package_id") == "count_10" and int(item.get("quantity", 0)) == 10 for item in recharges), "recharge record missing")
 require(any(item.get("package_id") == "count_10" and item.get("status") == "redeemed" for item in redeems), "redeem record missing")
 
-trace("verify final balance is 9")
+trace("verify final balance decreased by 1")
 usage2 = s.get(f"{base}/usage", headers=auth_headers(token), timeout=30).json()
-require(int(usage2.get("count_balance", -1)) == 9, f"balance after conversion should be 9: {usage2}")
+balance_after_conversion = int(usage2.get("count_balance", -1))
+require(balance_after_conversion == balance_after_redeem - 1, f"balance after conversion should decrease by 1: before={balance_after_redeem}, usage={usage2}")
 trace("Web/API flow checks completed")
 
 result = {
@@ -400,9 +417,9 @@ result = {
     "redeem_code_preview": code[:8] + "...",
     "job_id": job_id,
     "docx_bytes": len(docx_bytes),
-    "balance_before": int(usage0.get("count_balance", 0)),
-    "balance_after_redeem": int(usage1.get("count_balance", 0)),
-    "balance_after_conversion": int(usage2.get("count_balance", 0)),
+    "balance_before": initial_balance,
+    "balance_after_redeem": balance_after_redeem,
+    "balance_after_conversion": balance_after_conversion,
     "cloud_conversions_used": int(usage2.get("cloud_conversions_used", 0)),
     "conversion_records": len(records),
     "recharge_records": len(recharges),
@@ -437,16 +454,18 @@ print("WEB_FLOW_JSON:" + json.dumps(result, ensure_ascii=True, sort_keys=True))
         $binDir = Split-Path -Parent $TempRustBin
         New-Item -ItemType Directory -Force -Path $binDir | Out-Null
         $rustSource = @'
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports, unused_variables)]
 
 #[path = "../cloud_account.rs"]
 mod cloud_account;
 #[path = "../cloud_convert.rs"]
 mod cloud_convert;
+#[path = "../report.rs"]
+mod report;
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn require(condition: bool, message: &str) -> Result<(), Box<dyn std::error::Error>> {
     if condition {
@@ -460,6 +479,63 @@ fn trace(message: impl AsRef<str>) {
     println!("SLINT_FLOW: {}", message.as_ref());
 }
 
+fn run_conversion(
+    base_url: &str,
+    access_token: Option<String>,
+    zip_path: &Path,
+    main_tex: &str,
+    output_docx: &Path,
+    profile: &str,
+    quality: &str,
+) -> Result<cloud_convert::CloudConvertResult, Box<dyn std::error::Error>> {
+    let bytes = fs::read(zip_path)?;
+    let file_name = zip_path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload.zip")
+        .to_string();
+    let output_dir = output_docx
+        .parent()
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    fs::create_dir_all(&output_dir)?;
+    let stem = zip_path
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("upload")
+        .to_string();
+    let final_output = if output_docx.is_dir() {
+        output_docx.join(format!("{stem}.docx"))
+    } else {
+        output_docx.to_path_buf()
+    };
+    if let Some(parent) = final_output.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    let request = cloud_convert::CloudUploadRequest {
+        base_url,
+        access_token,
+        zip_bytes: bytes,
+        file_name: &file_name,
+        main_tex,
+        output_dir: &output_dir,
+        profile,
+        quality,
+    };
+    let result = cloud_convert::convert_upload_blocking(request)?;
+    if result.docx_path != final_output {
+        fs::create_dir_all(final_output.parent().unwrap_or_else(|| Path::new(".")))?;
+        fs::copy(&result.docx_path, &final_output)?;
+    }
+    Ok(cloud_convert::CloudConvertResult {
+        job_id: result.job_id,
+        docx_path: final_output,
+        docx_bytes: result.docx_bytes,
+        report_path: result.report_path,
+        report_text: result.report_text,
+    })
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let base_url = env::var("MAINFLOW_BASE")?;
     let email = env::var("MAINFLOW_SLINT_EMAIL")?;
@@ -468,9 +544,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let paper3_zip = PathBuf::from(env::var("MAINFLOW_PAPER3_ZIP")?);
     let paper3_main_tex = env::var("MAINFLOW_PAPER3_MAIN_TEX")?;
     let temp_root = PathBuf::from(env::var("MAINFLOW_TEMP_ROOT")?).join("slint-project");
-    let output_docx = temp_root.join("output").join("result.docx");
+    let output_docx = temp_root.join("output").join("paper3.docx");
 
     let _ = fs::remove_dir_all(&temp_root);
+    fs::create_dir_all(output_docx.parent().unwrap())?;
     require(paper3_zip.is_file(), "paper3 upload.zip is missing")?;
     let paper3_bytes = fs::metadata(&paper3_zip)?.len();
     trace(format!(
@@ -482,11 +559,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     trace(format!("register user {}", email));
     let registered = cloud_account::register_and_fetch_usage_blocking(&base_url, &email, &password)?;
-    require(registered.usage.count_balance == 0, "initial Slint count_balance should be 0")?;
+    let initial_balance = registered.usage.count_balance;
+    trace(format!("initial Slint count_balance is {}", initial_balance));
 
     trace("login user and verify initial balance");
     let session = cloud_account::login_and_fetch_usage_blocking(&base_url, &email, &password)?;
-    require(session.usage.count_balance == 0, "Slint login usage should start at 0")?;
+    require(
+        session.usage.count_balance == initial_balance,
+        "Slint login usage should match registered initial balance",
+    )?;
 
     trace("redeem count_10 code");
     let (_redeemed, usage_after_redeem) = cloud_account::redeem_code_blocking(
@@ -494,34 +575,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Some(session.access_token.clone()),
         &redeem_code,
     )?;
-    require(usage_after_redeem.count_balance == 10, "Slint balance after redeem should be 10")?;
-    trace("balance after redeem verified: 10");
+    require(
+        usage_after_redeem.count_balance == initial_balance + 10,
+        "Slint balance after redeem should increase by 10",
+    )?;
+    trace(format!(
+        "balance after redeem verified: {}",
+        usage_after_redeem.count_balance
+    ));
 
     trace("start cloud conversion through Slint adapter");
-    let converted = cloud_convert::convert_project_blocking(
+    let converted = run_conversion(
         &base_url,
         Some(session.access_token.clone()),
         &paper3_zip,
-        Some(&paper3_main_tex),
+        &paper3_main_tex,
         &output_docx,
         "auto",
         "standard",
     )?;
     require(converted.docx_bytes > 1000, "Slint DOCX is too small")?;
-    let docx = fs::read(&output_docx)?;
+    let docx = fs::read(&converted.docx_path)?;
     require(docx.starts_with(b"PK"), "Slint DOCX is not a zip/docx file")?;
+    require(docx.len() == converted.docx_bytes, "Slint DOCX bytes mismatch")?;
     trace(format!(
         "conversion completed: job={}, docx_bytes={}",
         converted.job_id, converted.docx_bytes
     ));
 
-    trace("verify final balance is 9");
+    trace("verify final balance decreased by 1");
     let usage_after_conversion =
         cloud_account::fetch_usage_blocking(&base_url, &session.access_token)?;
     require(
-        usage_after_conversion.count_balance == 9,
-        "Slint balance after conversion should be 9",
+        usage_after_conversion.count_balance == usage_after_redeem.count_balance - 1,
+        "Slint balance after conversion should decrease by 1",
     )?;
+    trace(format!(
+        "balance after conversion verified: {} (cloud_conversions_used={})",
+        usage_after_conversion.count_balance, usage_after_conversion.cloud_conversions_used
+    ));
 
     trace("verify recharge/redeem table rows");
     let recharge_rows =
@@ -530,6 +622,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         recharge_rows.iter().any(|row| row.package.contains("count_10") && row.quantity == "10"),
         "Slint recharge/redeem table is missing the count_10 record",
     )?;
+    trace(format!("recharge table rows verified: {} entries", recharge_rows.len()));
 
     trace("verify conversion table storage metadata");
     let conversion_rows =
@@ -540,6 +633,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .any(|row| row.id == converted.job_id && row.has_docx && row.has_zip && row.has_log),
         "Slint conversion table is missing completed storage metadata",
     )?;
+    trace(format!(
+        "conversion table rows verified: {} entries (including {})",
+        conversion_rows.len(),
+        converted.job_id
+    ));
+
+    trace("verify report.json sidecar was generated");
+    require(
+        converted.report_path.is_file(),
+        "Slint report.json was not generated alongside DOCX",
+    )?;
+    let report_bytes = fs::metadata(&converted.report_path)?.len();
+    trace(format!(
+        "report.json verified: {} ({} bytes)",
+        converted.report_path.display(),
+        report_bytes
+    ));
+
     trace("Slint flow checks completed");
 
     println!(
@@ -548,7 +659,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "user": email,
             "job_id": converted.job_id,
             "docx_bytes": converted.docx_bytes,
-            "balance_before": registered.usage.count_balance,
+            "report_bytes": report_bytes,
+            "balance_before": initial_balance,
             "balance_after_redeem": usage_after_redeem.count_balance,
             "balance_after_conversion": usage_after_conversion.count_balance,
             "cloud_conversions_used": usage_after_conversion.cloud_conversions_used,
@@ -585,6 +697,276 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    $ChromeResult = $null
+    if (-not $SkipChromeExtension) {
+        if (-not $SkipExtensionBuild) {
+            Write-Step "building Chrome extension"
+            Push-Location $Root
+            try {
+                Invoke-External "npm build:chrome" {
+                    & $Npm run build:chrome --prefix (Join-Path $Root "apps\browser-extension")
+                }
+            }
+            finally {
+                Pop-Location
+            }
+        }
+
+        $chromeFlow = @'
+import { chromium } from '@playwright/test';
+import { readFile, writeFile, rm } from 'node:fs/promises';
+import path from 'node:path';
+
+const repoRoot = process.env.MAINFLOW_ROOT;
+const tempRoot = process.env.MAINFLOW_TEMP_ROOT;
+const extPath = path.join(repoRoot, 'apps/browser-extension/.output/chrome-mv3');
+const userDataDir = path.join(tempRoot, 'chrome-user-data');
+const zipPath = process.env.MAINFLOW_EXTENSION_ZIP;
+const localDocxPath = path.join(tempRoot, 'chrome-local.docx');
+const cloudDocxPath = path.join(tempRoot, 'chrome-cloud.docx');
+const apiBaseUrl = process.env.MAINFLOW_API_ORIGIN;
+const email = process.env.MAINFLOW_CHROME_EMAIL;
+const password = process.env.MAINFLOW_USER_PASSWORD;
+const mainTex = process.env.MAINFLOW_PAPER3_MAIN_TEX;
+
+function trace(message) {
+  console.log(`CHROME_FLOW: ${message}`);
+}
+
+function requireCondition(condition, message) {
+  if (!condition) throw new Error(message);
+}
+
+async function serviceWorker(context) {
+  if (context.serviceWorkers().length > 0) return context.serviceWorkers()[0];
+  return context.waitForEvent('serviceworker', { timeout: 60000 });
+}
+
+async function send(page, message, allowError = false) {
+  const result = await page.evaluate(async (msg) => {
+    try {
+      const reply = await chrome.runtime.sendMessage(msg);
+      return { ok: true, reply };
+    } catch (error) {
+      return { ok: false, error: error?.message ?? String(error) };
+    }
+  }, message);
+  if (!result.ok) throw new Error(`${message.type} transport failed: ${result.error}`);
+  if (!allowError && result.reply?.error) {
+    throw new Error(`${message.type} replied error: ${result.reply.error}`);
+  }
+  return result.reply;
+}
+
+await rm(userDataDir, { recursive: true, force: true });
+const context = await chromium.launchPersistentContext(userDataDir, {
+  channel: 'chromium',
+  headless: true,
+  args: [
+    `--disable-extensions-except=${extPath}`,
+    `--load-extension=${extPath}`,
+    '--no-sandbox',
+  ],
+  timeout: 120000,
+});
+
+const errors = [];
+context.on('weberror', (event) => errors.push(`weberror: ${event.error().message}`));
+
+try {
+  const starter = await context.newPage();
+  await starter.goto('https://example.com', { waitUntil: 'domcontentloaded', timeout: 30000 });
+  const sw = await serviceWorker(context);
+  sw.on('pageerror', (error) => errors.push(`sw-pageerror: ${error.message}`));
+  sw.on('console', (message) => {
+    const text = message.text();
+    if (message.type() === 'error') errors.push(`sw-console-error: ${text}`);
+    if (message.type() === 'error' || text.includes('Tex2Doc Background')) {
+      console.log(`CHROME_FLOW_SW: [${message.type()}] ${text}`);
+    }
+  });
+  const extensionId = new URL(sw.url()).host;
+  trace(`service worker ready: ${sw.url()}`);
+
+  await sw.evaluate(async (base) => {
+    const settings = {
+      api_base_url: base,
+      default_profile: 'standard',
+      default_quality: 'balanced',
+      default_mode: 'cloud',
+      wasm_file_size_limit: 10 * 1024 * 1024,
+      language: 'en',
+      theme: 'system',
+      polling_interval: 500,
+    };
+    await chrome.storage.sync.set({ tex2doc_settings: settings });
+    await chrome.storage.local.set({ tex2doc_settings: settings });
+    await chrome.storage.local.remove('tex2doc_session');
+  }, apiBaseUrl);
+
+  const extPage = await context.newPage();
+  extPage.on('pageerror', (error) => errors.push(`extension-pageerror: ${error.message}`));
+  await extPage.goto(`chrome-extension://${extensionId}/popup.html`, {
+    waitUntil: 'domcontentloaded',
+    timeout: 30000,
+  });
+  trace('extension popup page opened');
+
+  const preRefresh = await send(extPage, { type: 'REFRESH_SESSION' }, true);
+  requireCondition(
+    preRefresh?.success === false && preRefresh?.signedIn === false,
+    `pre-login refresh should return signed out: ${JSON.stringify(preRefresh)}`
+  );
+  trace('pre-login refresh verified');
+
+  const register = await send(extPage, {
+    type: 'REGISTER',
+    email,
+    password,
+    displayName: 'Chrome Extension Mainflow',
+  });
+  requireCondition(register?.success, `register failed: ${JSON.stringify(register)}`);
+  requireCondition(register.user?.email === email, 'registered email mismatch');
+  trace(`register verified: ${email}`);
+
+  const refresh = await send(extPage, { type: 'REFRESH_SESSION' });
+  requireCondition(refresh?.success, `refresh failed: ${JSON.stringify(refresh)}`);
+  trace('post-register refresh verified');
+
+  const usageAfterRegister = await send(extPage, { type: 'FETCH_USAGE' });
+  requireCondition(
+    Number(usageAfterRegister.count_balance) > 0,
+    `expected signup count_balance > 0: ${JSON.stringify(usageAfterRegister)}`
+  );
+
+  const logout = await send(extPage, { type: 'LOGOUT' });
+  requireCondition(logout?.success, `logout failed: ${JSON.stringify(logout)}`);
+  const login = await send(extPage, { type: 'LOGIN', email, password });
+  requireCondition(login?.success, `login failed: ${JSON.stringify(login)}`);
+  requireCondition(login.user?.email === email, 'logged-in email mismatch');
+  trace('logout/login verified');
+
+  const zipBytes = await readFile(zipPath);
+  const local = await sw.evaluate(async ({ zipArr, mainTex }) => {
+    const fn = globalThis.__tex2docConvertZip;
+    if (typeof fn !== 'function') return { ok: false, error: '__tex2docConvertZip is not a function' };
+    try {
+      const reply = await fn({
+        zipBytes: zipArr,
+        fileName: 'mainflow-extension.zip',
+        mainTex,
+        _e2eReturnBytes: true,
+      });
+      return { ok: true, reply };
+    } catch (error) {
+      return { ok: false, error: error?.message ?? String(error), stack: error?.stack ?? null };
+    }
+  }, { zipArr: Array.from(zipBytes), mainTex });
+  requireCondition(local.ok, `local conversion transport failed: ${local.error}`);
+  requireCondition(local.reply?.success, `local conversion failed: ${JSON.stringify(local.reply)}`);
+  const localDocx = Buffer.from(local.reply.docxBytes);
+  requireCondition(localDocx.length > 1000, `local DOCX too small: ${localDocx.length}`);
+  requireCondition(localDocx[0] === 0x50 && localDocx[1] === 0x4b, 'local DOCX magic bytes mismatch');
+  await writeFile(localDocxPath, localDocx);
+  trace(`local conversion verified: ${localDocx.length} bytes`);
+
+  const start = await send(extPage, {
+    type: 'CLOUD_CONVERT_AND_POLL',
+    zipBytes: Array.from(zipBytes),
+    fileName: 'mainflow-extension.zip',
+    mainTex,
+    profile: 'standard',
+    quality: 'balanced',
+  });
+  requireCondition(start?.success && start.jobId, `cloud start failed: ${JSON.stringify(start)}`);
+  const localJobId = start.jobId;
+  trace(`cloud conversion started: ${localJobId}`);
+
+  const deadline = Date.now() + 180000;
+  let finalJob = null;
+  let lastLine = '';
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 800));
+    const jobs = await send(extPage, { type: 'FETCH_JOBS' });
+    const job = Array.isArray(jobs) ? jobs.find((item) => item.id === localJobId) : null;
+    if (!job) continue;
+    const line = `stage=${job.stage ?? '-'} status=${job.status ?? '-'} progress=${job.progress ?? '-'} cloudJobId=${job.cloudJobId ?? job.job_id ?? '-'}`;
+    if (line !== lastLine) {
+      trace(line);
+      lastLine = line;
+    }
+    if (job.status === 'completed' || job.status === 'failed') {
+      finalJob = job;
+      break;
+    }
+  }
+  requireCondition(finalJob, 'cloud conversion timed out');
+  requireCondition(finalJob.status === 'completed', `cloud conversion failed: ${JSON.stringify(finalJob)}`);
+  const cloudJobId = finalJob.cloudJobId ?? finalJob.job_id;
+  requireCondition(cloudJobId, 'completed cloud job is missing cloudJobId');
+
+  const download = await sw.evaluate(async ({ base, cloudJobId }) => {
+    const stored = await chrome.storage.local.get('tex2doc_session');
+    const token = stored.tex2doc_session?.access_token;
+    if (!token) return { ok: false, error: 'missing access token' };
+    const response = await fetch(`${base}/v1/conversions/${cloudJobId}/download/docx`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!response.ok) {
+      return { ok: false, error: `download HTTP ${response.status}: ${await response.text()}` };
+    }
+    return { ok: true, bytes: Array.from(new Uint8Array(await response.arrayBuffer())) };
+  }, { base: apiBaseUrl, cloudJobId });
+  requireCondition(download.ok, `cloud DOCX download failed: ${download.error}`);
+  const cloudDocx = Buffer.from(download.bytes);
+  requireCondition(cloudDocx.length > 1000, `cloud DOCX too small: ${cloudDocx.length}`);
+  requireCondition(
+    cloudDocx[0] === 0x50 && cloudDocx[1] === 0x4b && cloudDocx[2] === 0x03 && cloudDocx[3] === 0x04,
+    'cloud DOCX magic bytes mismatch'
+  );
+  await writeFile(cloudDocxPath, cloudDocx);
+
+  const usageAfterCloud = await send(extPage, { type: 'FETCH_USAGE' });
+  requireCondition(
+    Number(usageAfterCloud.count_balance) < Number(usageAfterRegister.count_balance),
+    `balance did not decrease: before=${usageAfterRegister.count_balance} after=${usageAfterCloud.count_balance}`
+  );
+  trace(`cloud conversion verified: ${cloudDocx.length} bytes`);
+
+  if (errors.length > 0) throw new Error(errors.join('\n'));
+
+  console.log('CHROME_FLOW_JSON:' + JSON.stringify({
+    user: email,
+    local_docx_bytes: localDocx.length,
+    cloud_docx_bytes: cloudDocx.length,
+    cloud_job_id: cloudJobId,
+    balance_after_register: Number(usageAfterRegister.count_balance),
+    balance_after_cloud: Number(usageAfterCloud.count_balance),
+    cloud_conversions_used: Number(usageAfterCloud.cloud_conversions_used ?? 0),
+  }, null, 0));
+} finally {
+  await context.close();
+}
+'@
+        Set-Content -Path $TempChromeScript -Value $chromeFlow -Encoding UTF8
+
+        Write-Step "running Chrome extension main flow"
+        $env:MAINFLOW_ROOT = $Root
+        $env:MAINFLOW_BASE = $BaseUrl
+        $env:MAINFLOW_API_ORIGIN = "http://127.0.0.1:$ServerPort"
+        $env:MAINFLOW_CHROME_EMAIL = $ChromeEmail
+        $env:MAINFLOW_USER_PASSWORD = $UserPassword
+        $env:MAINFLOW_TEMP_ROOT = $TempRoot
+        $env:MAINFLOW_EXTENSION_ZIP = $ExtensionZip
+        $env:MAINFLOW_PAPER3_MAIN_TEX = "main-jos.tex"
+        $chromeOutput = Invoke-NativeCapture { & $Node $TempChromeScript }
+        if ($LASTEXITCODE -ne 0) {
+            throw "Chrome extension main flow failed:`n$($chromeOutput -join [Environment]::NewLine)"
+        }
+        Write-CapturedOutput "chrome" $chromeOutput
+        $ChromeResult = Get-JsonLine $chromeOutput "CHROME_FLOW_JSON:"
+    }
+
     $FinalStatus = "PASSED"
     Write-Host ""
     Write-Host "MAINFLOW TEST PASSED"
@@ -604,6 +986,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     else {
         Write-Host "Slint: skipped"
+    }
+    if ($ChromeResult) {
+        Write-Host "Chrome extension:"
+        Write-Host "  user: $($ChromeResult.user)"
+        Write-Host "  local_docx_bytes: $($ChromeResult.local_docx_bytes)"
+        Write-Host "  cloud_job: $($ChromeResult.cloud_job_id)"
+        Write-Host "  cloud_docx_bytes: $($ChromeResult.cloud_docx_bytes)"
+        Write-Host "  balance: $($ChromeResult.balance_after_register) -> $($ChromeResult.balance_after_cloud)"
+    }
+    else {
+        Write-Host "Chrome extension: skipped"
     }
 }
 catch {
@@ -630,6 +1023,16 @@ finally {
         }
         catch {
             $CleanupNotes.Add("failed to remove temp Slint bin: $($_.Exception.Message)")
+        }
+    }
+
+    if (Test-Path $TempChromeScript) {
+        try {
+            Remove-Item -LiteralPath $TempChromeScript -Force
+            $CleanupNotes.Add("removed temp Chrome extension script")
+        }
+        catch {
+            $CleanupNotes.Add("failed to remove temp Chrome extension script: $($_.Exception.Message)")
         }
     }
 

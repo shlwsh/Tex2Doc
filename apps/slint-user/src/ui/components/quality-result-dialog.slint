@@ -1,0 +1,300 @@
+// ============================================================
+// QualityResultDialog.slint - 质量结果弹窗组件
+// ============================================================
+
+import { VerticalBox, HorizontalBox, ListView, Button } from "std-widgets.slint";
+import { QualityScoreGauge, DimensionScoreBar, WordCompatibilityCard, StyleCoverageIndicator, SemanticLossCard } from "quality-components.slint";
+import { SemanticLossInfo } from "../types.slint";
+
+export component QualityResultDialog inherits Rectangle {
+    in property <bool> is-open: false;
+    in property <int> quality-score: 0;
+    in property <int> parse-score: 0;
+    in property <int> semantic-score: 0;
+    in property <int> docx-score: 0;
+    in property <int> visual-score: 0;
+    in property <int> editable-score: 0;
+    in property <int> performance-score: 0;
+    in property <string> word-status: "unchecked";
+    in property <[string]> word-errors: [];
+    in property <string> word-method: "none";
+    in property <float> style-coverage: 0.0;
+    in property <int> style-mapped: 0;
+    in property <int> style-total: 0;
+    in property <float> visual-diff: 0.0;
+    in property <string> job-id: "";
+    in property <string> profile: "";
+    in property <string> engine-version: "";
+
+    in property <[SemanticLossInfo]> semantic-loss-list: [];
+
+    callback close();
+    callback open-docx();
+    callback view-full-report();
+    callback export-diagnostics();
+
+    // 对话框背景遮罩
+    if root.is-open: Rectangle {
+        background: #00000066;
+        TouchArea { clicked => { root.close(); } }
+    }
+
+    // 对话框内容
+    if root.is-open: Rectangle {
+        x: (parent.width - 680px) / 2;
+        y: 60px;
+        width: 680px;
+        height: root.semantic-loss-list.length > 0 ? 680px : 560px;
+        border-radius: 16px;
+        background: #ffffff;
+        border-color: #d7dee8;
+        border-width: 1px;
+
+        // 阴影效果
+        drop-shadow-color: #00000029;
+        drop-shadow-blur: 20px;
+        drop-shadow-offset-y: 8px;
+
+        VerticalBox {
+            padding: 20px;
+            spacing: 16px;
+
+            // 标题栏
+            HorizontalBox {
+                spacing: 12px;
+                alignment: center;
+
+                Text {
+                    text: "转换结果";
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: #172033;
+                }
+
+                Rectangle { horizontal-stretch: 1; }
+
+                // Job ID
+                Text {
+                    text: "Job: " + job-id;
+                    font-size: 11px;
+                    color: #6b778c;
+                }
+
+                // 关闭按钮
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    border-radius: 16px;
+                    background: #f1f5f9;
+
+                    TouchArea { clicked => { root.close(); } }
+
+                    Text {
+                        text: "×";
+                        font-size: 20px;
+                        color: #6b778c;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+
+            Rectangle { height: 1px; background: #e5e7eb; }
+
+            // 质量总评分
+            HorizontalBox {
+                spacing: 16px;
+
+                QualityScoreGauge {
+                    score: root.quality-score;
+                    label: "综合质量";
+                }
+
+                VerticalBox {
+                    spacing: 8px;
+
+                    // 状态标签
+                    Rectangle {
+                        height: 28px;
+                        border-radius: 14px;
+                        background: quality-score >= 75 ? #ecfdf5 : (quality-score >= 60 ? #fffbeb : #fef2f2);
+
+                        Text {
+                            text: quality-score >= 90 ? "优秀" : (quality-score >= 75 ? "良好" : (quality-score >= 60 ? "一般" : "较差"));
+                            font-size: 12px;
+                            font-weight: 600;
+                            color: quality-score >= 90 ? #0f8a5f : (quality-score >= 75 ? #2563eb : (quality-score >= 60 ? #b7791f : #c2413a));
+                            horizontal-alignment: center;
+                            vertical-alignment: center;
+                        }
+                    }
+
+                    // 基本信息
+                    HorizontalBox {
+                        spacing: 16px;
+
+                        VerticalBox {
+                            spacing: 2px;
+                            Text { text: "Profile"; font-size: 10px; color: #6b778c; }
+                            Text { text: profile; font-size: 12px; font-weight: 600; color: #172033; }
+                        }
+
+                        VerticalBox {
+                            spacing: 2px;
+                            Text { text: "Engine"; font-size: 10px; color: #6b778c; }
+                            Text { text: engine-version; font-size: 12px; font-weight: 600; color: #172033; }
+                        }
+                    }
+                }
+            }
+
+            // 六维评分
+            Text {
+                text: "六维评分";
+                font-size: 14px;
+                font-weight: 700;
+                color: #172033;
+            }
+
+            GridLayout {
+                spacing: 8px;
+
+                DimensionScoreBar {
+                    dimension-name: "解析完整性";
+                    score: root.parse-score;
+                    description: parse-score >= 90 ? "完整解析" : (parse-score >= 75 ? "少量未知" : "较多未知");
+                    accent: #2563eb;
+                    row: 0;
+                    col: 0;
+                }
+
+                DimensionScoreBar {
+                    dimension-name: "语义保真";
+                    score: root.semantic-score;
+                    description: semantic-score >= 90 ? "完全保真" : (semantic-score >= 75 ? "部分降级" : "较多降级");
+                    accent: #7c3aed;
+                    row: 0;
+                    col: 1;
+                }
+
+                DimensionScoreBar {
+                    dimension-name: "DOCX 结构";
+                    score: root.docx-score;
+                    description: docx-score >= 90 ? "完全合规" : (docx-score >= 75 ? "轻微问题" : "存在问题");
+                    accent: #0891b2;
+                    row: 0;
+                    col: 2;
+                }
+
+                DimensionScoreBar {
+                    dimension-name: "版面一致";
+                    score: root.visual-score;
+                    description: visual-score >= 90 ? "版面一致" : (visual-score >= 75 ? "轻微差异" : "较大差异");
+                    accent: #059669;
+                    row: 1;
+                    col: 0;
+                }
+
+                DimensionScoreBar {
+                    dimension-name: "可编辑性";
+                    score: root.editable-score;
+                    description: editable-score >= 90 ? "可直接编辑" : (editable-score >= 75 ? "部分可编辑" : "受限");
+                    accent: #dc2626;
+                    row: 1;
+                    col: 1;
+                }
+
+                DimensionScoreBar {
+                    dimension-name: "性能稳定";
+                    score: root.performance-score;
+                    description: performance-score >= 90 ? "稳定快速" : (performance-score >= 75 ? "正常" : "较慢");
+                    accent: #ca8a04;
+                    row: 1;
+                    col: 2;
+                }
+            }
+
+            // Word 兼容性
+            WordCompatibilityCard {
+                status: root.word-status;
+                errors: root.word-errors;
+                check-method: root.word-method;
+            }
+
+            // 语义丢失列表
+            if root.semantic-loss-list.length > 0: VerticalBox {
+                spacing: 8px;
+
+                Rectangle {
+                    height: 28px;
+                    border-radius: 6px;
+                    background: root.semantic-loss-list.length > 0 ? #fffbeb : #ecfdf5;
+
+                    Text {
+                        text: "语义丢失 (" + root.semantic-loss-list.length + " 项)";
+                        font-size: 12px;
+                        font-weight: 700;
+                        color: root.semantic-loss-list.length > 0 ? #b7791f : #0f8a5f;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+                }
+
+                ListView {
+                    max-height: 140px;
+
+                    for item in root.semantic-loss-list: SemanticLossCard {
+                        loss-type: item.loss-type;
+                        severity: item.severity;
+                        location: item.location;
+                        description: item.description;
+                        suggestion: item.suggestion;
+                    }
+                }
+            }
+
+            // 样式覆盖率
+            StyleCoverageIndicator {
+                coverage-rate: root.style-coverage;
+                mapped-count: root.style-mapped;
+                total-count: root.style-total;
+            }
+
+            // 视觉差异（如果有）
+            if root.visual-diff > 0.0: Rectangle {
+                border-radius: 6px;
+                background: #f1f5f9;
+
+                Text {
+                    text: "视觉差异: " + visual-diff + "% | SSIM: --";
+                    font-size: 11px;
+                    color: #6b778c;
+                }
+            }
+
+            Rectangle { height: 1px; background: #e5e7eb; }
+
+            // 底部按钮
+            HorizontalBox {
+                spacing: 12px;
+
+                Rectangle { horizontal-stretch: 1; }
+
+                Button {
+                    text: "打开 DOCX";
+                    clicked => { root.open-docx(); }
+                }
+
+                Button {
+                    text: "查看详细报告";
+                    clicked => { root.view-full-report(); }
+                }
+
+                Button {
+                    text: "导出诊断";
+                    clicked => { root.export-diagnostics(); }
+                }
+            }
+        }
+    }
+}

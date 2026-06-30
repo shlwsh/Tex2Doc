@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-23-chinese-typography",
+  "corpus_name": "Chinese Typography Edge",
+  "corpus_name_zh": "中文排版边界测试",
+  "tier": "golden",
+  "profile": "jos-paper",
+  "source": "synthetic",
+  "page_count_approx": 6,
+  "packages": ["xeCJK", "xpinyin", "hyperref"],
+  "focus_areas": ["cjk_rendering", "pinyin_markers", "traditional_characters"],
+  "hard_elements": ["xeCJK", "xpinyin", "traditional characters", "rare characters"],
+  "thresholds": {
+    "parse_score_min": 85,
+    "semantic_score_min": 80,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": false,
+    "formula_omml_rate_min": 85,
+    "citation_resolved_rate_min": 85
+  },
+  "expected_warnings": ["Some CJK characters may require specific fonts"],
+  "expected_fallbacks": [],
+  "references": { "type": "bibtex", "count": 5 }
+}

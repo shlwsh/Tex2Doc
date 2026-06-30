@@ -1,0 +1,54 @@
+{
+  "$schema": "./schema.json",
+  "version": "1.0.0",
+  "description": "Tex2Doc 质量回归样例索引。对应技术方案第 1.4 节 corpus 元数据规范。",
+  "entries": [
+    {
+      "$ref": "./jos-paper-minimal-001/meta.json"
+    },
+    {
+      "$ref": "./jos-paper-realistic-001/meta.json"
+    },
+    {
+      "$ref": "./cvpr-minimal-001/meta.json"
+    },
+    {
+      "$ref": "./tacl-minimal-001/meta.json"
+    },
+    {
+      "$ref": "./nature-minimal-001/meta.json"
+    },
+    {
+      "$ref": "./generic-realistic-001/meta.json"
+    },
+    {
+      "$ref": "./chinese-academic-001/meta.json"
+    },
+    {
+      "$ref": "./springer-minimal-001/meta.json"
+    }
+  ],
+  "stats": {
+    "total": 8,
+    "by_profile": {
+      "jos-paper": 2,
+      "cvpr": 1,
+      "tacl": 1,
+      "nature": 1,
+      "generic-article": 1,
+      "chinese-academic": 1,
+      "springer": 1
+    },
+    "by_document_type": {
+      "journal-article": 6,
+      "conference-paper": 1,
+      "generic": 1
+    }
+  },
+  "target": {
+    "total": 30,
+    "smoke": 10,
+    "golden": 15,
+    "visual": 5
+  }
+}

@@ -1,4 +1,8 @@
 # Semantic TeX Engine 进展报告（20260621-1355）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **基准版本**：`docs-zh/semantic-tex-engine-progress-report-20260621-0900.md`
 **当前版本**：2026-06-21 13:55（子代理任务全部完成 + 编译验证）

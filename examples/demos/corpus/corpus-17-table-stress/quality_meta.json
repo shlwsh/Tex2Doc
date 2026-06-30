@@ -1,0 +1,23 @@
+{
+  "corpus_id": "corpus-17-table-stress",
+  "corpus_name": "Table Stress Test",
+  "corpus_name_zh": "表格压力测试",
+  "tier": "smoke",
+  "profile": "generic-article",
+  "source": "synthetic",
+  "page_count_approx": 4,
+  "packages": ["tabularx", "tabulary", "multirow", "array", "hyperref"],
+  "focus_areas": ["complex_table", "nested_structure", "cell_spanning"],
+  "hard_elements": ["tabularx X column", "tabulary", "multirow", "minipage in cell"],
+  "thresholds": {
+    "parse_score_min": 70,
+    "semantic_score_min": 60,
+    "docx_valid_required": true,
+    "word_open_repair_allowed": true,
+    "formula_omml_rate_min": 70,
+    "citation_resolved_rate_min": 70
+  },
+  "expected_warnings": ["tabularx: X column width calculation may differ", "minipage in cell: complex nesting"],
+  "expected_fallbacks": ["Complex table structures may become simple grid"],
+  "references": { "type": "bibtex", "count": 2 }
+}

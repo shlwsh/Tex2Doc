@@ -1,4 +1,8 @@
 # Semantic TeX Engine 独立 DOCX 转换路径方案（20260620-112803）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 状态：待审核
 >

@@ -1,4 +1,8 @@
 # Semantic TeX Engine OMML 公式接入开发报告（20260620-135937）
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 ## 1. 本次目标
 

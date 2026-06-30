@@ -1,4 +1,8 @@
 # Tex2Doc Desktop UI/UX 新版本总体改进方案 v2
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 **日期**：2026-06-22  
 **基于文档**：`docs-zh/ui/desktop-slint-ui-ux-improvement-report-20260622.md`  

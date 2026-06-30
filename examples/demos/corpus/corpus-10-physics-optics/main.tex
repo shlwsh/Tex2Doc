@@ -1,0 +1,108 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{wrapfig}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{chemfig}
+\usepackage{hyperref}
+\usepackage{url}
+
+\sisetup{
+  detect-all,
+  per-mode=symbol,
+  fraction-function=\tfrac
+}
+
+\graphicspath{{./figures/}}
+
+\title{Physics and Chemistry: A Multidisciplinary Study of Optical Phenomena}
+
+\author{Author Name}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We investigate optical phenomena in chemical systems using advanced spectroscopic
+techniques. Our study reveals new insights into the interaction between light
+and molecular structures.
+\end{abstract}
+
+\section{Optical Absorption}
+
+The Beer-Lambert law describes light absorption:
+
+\begin{wrapfigure}{r}{0.4\textwidth}
+\centering
+\chemfig{C(-[3]H)(-[5]H)=C(-[1]H)(-[7]H)}
+\caption{Benzene ring structure.}
+\label{fig:benzene}
+\end{wrapfigure}
+
+The absorbance $A$ is given by:
+\begin{equation}
+A(\lambda) = \epsilon(\lambda) \cdot c \cdot l \label{eq:beer_lambert}
+\end{equation}
+
+where $\epsilon$ is the molar absorptivity, $c$ is the concentration,
+and $l$ is the path length.
+
+\section{Spectroscopic Measurements}
+
+The measured wavelengths and intensities are summarized in Table~\ref{tab:spectra}.
+
+\begin{wraptable}{l}{0.5\textwidth}
+\centering
+\caption{Spectroscopic data at standard conditions.}
+\label{tab:spectra}
+\begin{tabular}{lS[table-format=3.2]S}
+  \toprule
+  Transition & \lambda (\unit\nm) & Intensity \\
+  \midrule
+  $\pi \to \pi^*$ & 254.0 & 1.25 \\
+  $n \to \pi^*$ & 285.0 & 0.35 \\
+  Charge transfer & 420.0 & 2.10 \\
+  \bottomrule
+\end{tabular}
+\end{wraptable}
+
+\section{Quantum Yields}
+
+The quantum yield $\Phi$ is calculated as:
+\begin{equation}
+\Phi = \frac{\text{photons emitted}}{\text{photons absorbed}}
+     = \frac{k_f}{k_f + k_{nr}} \label{eq:quantum_yield}
+\end{equation}
+
+The rate constants are:
+\begin{align}
+k_f &= A \cdot e^{-E_a/(RT)} \label{eq:k_f} \\
+k_{nr} &= k_0 \cdot e^{-E_{nr}/(RT)} \label{eq:k_nr}
+\end{align}
+
+\section{Chemical Kinetics}
+
+For the reaction \ce{A -> B -> C}, the concentration profiles follow:
+
+\begin{equation}
+\begin{cases}
+[A](t) = [A]_0 e^{-k_1 t} \\
+[B](t) = \dfrac{k_1[A]_0}{k_2 - k_1}\bigl(e^{-k_1 t} - e^{-k_2 t}\bigr) \\
+[C](t) = [A]_0 - [A](t) - [B](t)
+\end{cases} \label{eq:kinetics}
+\end{equation}
+
+\section{Conclusion}
+
+Our findings demonstrate the applicability of spectroscopic techniques
+in studying molecular structure and reaction dynamics.
+
+\bibliographystyle{plain}
+\bibliography{refs}
+
+\end{document}

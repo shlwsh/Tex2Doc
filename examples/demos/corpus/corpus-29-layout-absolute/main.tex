@@ -1,0 +1,56 @@
+\documentclass{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,graphicx,eso-pic,textpos,hyperref}
+\usepackage{url}
+
+\graphicspath{{./figures/}}
+
+\begin{textblock*}{\paperwidth}(0pt,\tpnotevpos)
+\LARGE\color{red!50}\rotatebox{45}{DRAFT DOCUMENT}
+\end{textblock*}
+
+\title{Absolute Positioning Test}
+
+\author{Test Author}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstrct}
+This corpus tests absolute positioning with eso-pic watermarks, textpos,
+and TikZ overlays.
+Focus: eso-pic watermarks, textpos, overlay.
+\end{abstrct}
+
+\section{Content with Watermark}
+
+This document contains a watermark using eso-pic.
+
+\section{Text Block Positioning}
+
+\begin{textblock*}{5cm}(2cm,8cm)
+\textbf{Watermark Text}
+\end{textblock*}
+
+\section{Normal Content}
+
+The main content of the document appears here. This tests how the converter
+handles documents with absolute positioned elements.
+
+\section{Additional Text Blocks}
+
+\begin{textblock*}{3cm}(12cm,15cm)
+\textbf{Notice}
+\end{textblock*}
+
+\begin{textblock*}{4cm}(10cm,18cm)
+This is positioned text
+\end{textblock*}
+
+\section{Conclusion}
+
+Absolute positioning tests complete.
+
+\end{document}

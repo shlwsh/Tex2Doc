@@ -7,6 +7,7 @@ pub mod account;
 pub mod billing;
 pub mod conversion;
 pub mod diagnostics;
+pub mod feedback;
 pub mod helpers;
 pub mod history;
 pub mod settings;
@@ -21,6 +22,7 @@ pub fn wire_all(ui: &MainWindow, state: Arc<AppState>) {
     account::wire_account(ui, Arc::clone(&state));
     billing::wire_billing(ui, Arc::clone(&state));
     billing::wire_billing_cloud(ui, Arc::clone(&state));
+    feedback::wire_feedback(ui, Arc::clone(&state));
     settings::wire_settings(ui, Arc::clone(&state));
     conversion::wire_conversion(ui, Arc::clone(&state));
     history::wire_history(ui, Arc::clone(&state));

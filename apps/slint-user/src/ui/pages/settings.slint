@@ -73,7 +73,7 @@ export component SettingsTab inherits Rectangle {
                     Text { text: root.t-settings-language; font-size: 12px; color: root.text-secondary-color; }
                     ComboBox {
                         current-value <=> root.ui-locale;
-                        model: ["en", "zh-Hans", "zh-Hant", "fr", "ja-JP", "de"];
+                        model: ["en", "zh-Hans", "zh-Hant", "fr", "de"];
                         selected(_) => {
                             root.settings-dirty = true;
                             root.apply-appearance-clicked(root.ui-locale, root.ui-theme);

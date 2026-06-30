@@ -1,4 +1,8 @@
 # Flutter 多端构建
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 Flutter App 在 Web / Windows / macOS / Linux 四端的完整构建流程。
 

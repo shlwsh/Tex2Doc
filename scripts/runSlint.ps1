@@ -127,7 +127,15 @@ function Start-Slint {
 
     Stop-ExistingSlint
     Write-Host "[runSlint] launching $exePath ..."
-    $process = Start-Process -FilePath $exePath -WorkingDirectory $profileDir -PassThru
+    $psi = [System.Diagnostics.ProcessStartInfo]::new()
+    $psi.FileName = $exePath
+    $psi.WorkingDirectory = $profileDir
+    $psi.UseShellExecute = $false
+    $psi.CreateNoWindow = $true
+    $psi.Environment["ICU4X_DATA_DIR"] = ""
+    $psi.Environment["LANG"] = "en_US.UTF-8"
+    $psi.Environment["LC_ALL"] = "en_US.UTF-8"
+    $process = [System.Diagnostics.Process]::Start($psi)
     Start-Sleep -Milliseconds 800
     if ($process.HasExited) {
         throw "Slint app exited immediately with code $($process.ExitCode)."
@@ -206,6 +214,8 @@ function Start-LocalServer {
     $psi.WorkingDirectory = $Root
     $psi.UseShellExecute = $false
     $psi.CreateNoWindow = $true
+    $psi.RedirectStandardOutput = $false
+    $psi.RedirectStandardError = $false
     foreach ($key in $envBlock.Keys) {
         $psi.Environment[$key] = $envBlock[$key]
     }

@@ -1,4 +1,8 @@
 # CI 与 Git 钩子
+> **版本 / Version**: v2.0
+> **最后更新日期 / Last Updated**: 2026-06-26
+
+
 
 > 本节描述 CI 工作流、Git 钩子、本地提交工作流。
 
@@ -30,9 +34,43 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # macOS runners are temporarily disabled because they can remain queued
+        # long enough to block PR merges and production deployment. Re-enable
+        # macos-13 once runner availability is stable.
+        os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v4
+      - name: Configure git line endings
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Linux native dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libfontconfig1-dev \
+            libxkbcommon-dev \
+            libwayland-dev \
+            libx11-xcb-dev \
+            libxcb1-dev \
+            libxcb-render0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libegl1-mesa-dev \
+            libgl1-mesa-dev \
+            libudev-dev \
+            libinput-dev \
+            postgresql \
+            postgresql-contrib
+
+      - name: Start PostgreSQL test database
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo systemctl start postgresql
+          sudo -u postgres psql -c "ALTER USER postgres PASSWORD 'postgres';"
+          sudo -u postgres createdb -O postgres docdb || true
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -42,10 +80,7 @@ jobs:
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
         with:
-          workspaces: >-
-            .
-            crates/core crates/utils crates/semantic-ast
-            crates/latex-reader crates/docx-writer crates/bib
+          workspaces: .
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
@@ -54,7 +89,15 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
 
       - name: cargo test
-        run: cargo test --workspace --all-targets
+        run: |
+          cargo test --workspace --all-targets --exclude doc-server -- --test-threads=1
+          cargo test -p doc-server --lib --bin doc-server -- --test-threads=1
+
+      - name: doc-server API integration tests
+        if: matrix.os == 'ubuntu-latest'
+        env:
+          DATABASE_URL: postgres://postgres:postgres@127.0.0.1:5432/docdb
+        run: cargo test -p doc-server --test api -- --test-threads=1
 
       - name: End-to-end artifact
         if: matrix.os == 'ubuntu-latest'
@@ -67,6 +110,32 @@ jobs:
           name: hello-docx
           path: artifacts/hello.docx
           if-no-files-found: ignore
+
+  flutter:
+    name: Flutter web/client checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 1
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Flutter pub get
+        working-directory: flutter_app
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: flutter_app
+        run: flutter analyze
+
+      - name: Flutter test
+        working-directory: flutter_app
+        run: flutter test
 ```
 
 ### 1.2 触发条件
@@ -74,94 +143,27 @@ jobs:
 * **push 到 main 分支**
 * **PR 合并到 main 分支**
 
-### 1.3 矩阵
+### 1.3 矩阵与 Job 拆分
 
-* **Ubuntu latest**（默认）
-* **Windows latest**
-* **macOS latest**
-
-`fail-fast: false`：一个平台失败不阻塞其他平台。
+1. **`rust` 检查 Job**：
+   - 包含 **Ubuntu latest** 和 **Windows latest** 双系统矩阵。
+   - 为了确保 GitHub Actions 在高峰期不因 macOS runner 排队造成阻塞，**macOS 平台目前已临时下线**。
+2. **`flutter` 检查 Job**：
+   - 在 Ubuntu 环境中运行，执行客户端 `pub get`、代码分析 `analyze` 和自动化单元测试 `test`。
 
 ### 1.4 步骤详解
 
-#### checkout
+#### Linux 原生依赖及数据库
+在 Ubuntu 容器上首先使用 `apt-get` 补全图形渲染（字体探测及 Web 渲染）所需的动态库，并安装 PostgreSQL 及常用工具组件。
 
-```yaml
-- uses: actions/checkout@v4
-```
+#### 测试库自动初始化与测试串行化
+- 每次 CI 运行，会通过 systemd 自动拉起本地 PostgreSQL 并创建名称为 `docdb` 的测试数据库。
+- 为了避免高并发环境下测试库发生死锁，`cargo test` 全程开启 **`--test-threads=1`** 以单线程串行模式运行。
+- 在 `DATABASE_URL` 设置的环境下，特地隔离运行 `doc-server` 专有的 `api` 集成测试。
 
-#### Rust toolchain
-
-```yaml
-- name: Install Rust
-  uses: dtolnay/rust-toolchain@stable
-  with:
-    components: rustfmt, clippy
-```
-
-* `dtolnay/rust-toolchain@stable`：自动安装 stable + 额外组件。
-* `rust-src` 已由 `rust-toolchain.toml` 提供。
-
-#### Cargo 缓存
-
-```yaml
-- name: Cache cargo
-  uses: Swatinem/rust-cache@v2
-  with:
-    workspaces: >-
-      .
-      crates/core crates/utils crates/semantic-ast
-      crates/latex-reader crates/docx-writer crates/bib
-```
-
-* `Swatinem/rust-cache@v2`：智能 cargo 缓存（基于 Cargo.toml / Cargo.lock 哈希）。
-* `workspaces`：要缓存的 workspace 路径。
-
-#### fmt + clippy + test
-
-```yaml
-- run: cargo fmt --all -- --check
-- run: cargo clippy --workspace --all-targets -- -D warnings
-- run: cargo test --workspace --all-targets
-```
-
-* `RUSTFLAGS=-D warnings`：所有 warning 视为 error。
-* `clippy -D warnings`：clippy 警告也视为 error。
-
-#### 端到端 artifact
-
-```yaml
-- name: End-to-end artifact
-  if: matrix.os == 'ubuntu-latest'
-  run: |
-    mkdir -p artifacts
-    cp crates/core/tests/output/hello.docx artifacts/hello.docx 2>/dev/null || true
-- uses: actions/upload-artifact@v4
-  if: matrix.os == 'ubuntu-latest'
-  with:
-    name: hello-docx
-    path: artifacts/hello.docx
-    if-no-files-found: ignore
-```
-
-* Ubuntu 平台生成 `hello.docx`，上传为 artifact。
-* 提供 PR review 视觉参考。
-
-### 1.5 触发与产物
-
-* **触发**：`git push` 到 main / PR 到 main。
-* **运行时长**：~5-10 分钟（首次）/ ~2-3 分钟（缓存命中）。
-* **产物**：`hello-docx` artifact（Ubuntu 平台）。
-
-### 1.6 自托管 runner（可选）
-
-```yaml
-jobs:
-  rust:
-    runs-on: [self-hosted, linux, x64]
-```
-
-需要在仓库 Settings → Actions → Runners → New self-hosted runner 配置。
+#### Cargo 缓存与 checkout 优化
+- 缓存只针对根目录的工作区进行缓存。
+- 使用 `actions/checkout@v5` 并通过 `fetch-depth: 1` 显著提升拉取速度。
 
 ---
 
@@ -476,6 +478,22 @@ jobs:
             flutter_app/build/web/
             extension/
 ```
+
+### 6.6 生产服务器自动部署 (deploy-production.yml)
+
+工作流 `.github/workflows/deploy-production.yml` 用于将服务与静态资源一键部署至腾讯云生产服务器：
+
+* **触发方式**：通过 `workflow_dispatch` 手动触发，或在代码推送/合并到 `main` 分支时自动触发运行。
+* **两个阶段**：
+  - **`build`**：
+    1. 构建 Linux 平台的 `doc-server` 生产二进制包。
+    2. 分别构建针对 `/`、`/user/`、`/admin/` 三种 base-href 路由的 Flutter Web 多端产品代码。
+    3. 合并打包为包含服务器程序及三端静态文件的 `tex2doc-production.tar.gz` 归档。
+  - **`deploy`**：
+    1. 下载编译产物归档。
+    2. 基于 GitHub Secrets 中的私钥和目标服务器配置自动装载并建立 SSH 连接。
+    3. SCP 传输安装包，自动在远程服务器创建带时间戳的 `releases` 归档子目录并解压，最后利用软链接 `current` 进行指向切换。
+    4. 执行 `systemctl restart tex2doc-server` 和 `systemctl reload nginx` 进行平滑发布。
 
 ---
 

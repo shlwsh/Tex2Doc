@@ -1,0 +1,11 @@
+{
+  "id": "springer-minimal-001",
+  "source": "examples/journals/springer/minimal.tex",
+  "document_type": "journal-article",
+  "page_count": 4,
+  "packages": ["amsmath", "graphicx", "natbib"],
+  "expected_profile": "springer",
+  "authorization": "synthetic",
+  "tags": ["equations", "figures", "minimal"],
+  "notes": "Springer LNCS 风格最小化测试"
+}
