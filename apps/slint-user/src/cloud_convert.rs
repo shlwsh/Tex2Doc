@@ -186,7 +186,10 @@ pub fn convert_upload_blocking(request: CloudUploadRequest<'_>) -> Result<CloudC
         let client = authenticated_client(base_url, &access_token)?;
 
         let usage = client.usage().await?;
-        if usage.cloud_conversions_used >= usage.cloud_conversions_limit {
+        let plan_remaining = usage
+            .cloud_conversions_limit
+            .saturating_sub(usage.cloud_conversions_used);
+        if plan_remaining == 0 && usage.count_balance == 0 {
             return Err(CloudConvertError::QuotaExceeded {
                 used: usage.cloud_conversions_used,
                 limit: usage.cloud_conversions_limit,

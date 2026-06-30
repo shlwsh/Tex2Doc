@@ -43,7 +43,9 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: apps/browser-extension/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/browser-extension/package-lock.json
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -71,15 +73,15 @@ jobs:
         run: npm run build:${{ matrix.browser }}
 
       - name: Create zip artifact
-        if: matrix.browser == 'chrome'
         working-directory: apps/browser-extension
-        run: npm run zip:chrome
+        run: npm run zip:${{ matrix.browser }}
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-extension
-          path: apps/browser-extension/dist/${{ matrix.artifact_name }}/tex2doc-browser-extension-${{ matrix.artifact_name }}.zip
+          path: apps/browser-extension/.output/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip
+          if-no-files-found: error
           retention-days: 7
 
   # ============================================
@@ -173,25 +175,31 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: apps/browser-extension/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            apps/browser-extension/package-lock.json
 
       - name: Install dependencies
-        working-directory: apps/browser-extension
         run: npm install
 
       - name: Install Playwright browsers
-        working-directory: apps/browser-extension
         run: npx playwright install chromium
 
       - name: Download extension artifact
         uses: actions/download-artifact@v4
         with:
           name: chrome-extension
-          path: apps/browser-extension/dist/chrome
+          path: apps/browser-extension/.output
+
+      - name: Unpack extension artifact
+        run: |
+          mkdir -p apps/browser-extension/.output/e2e-chrome
+          unzip -q apps/browser-extension/.output/tex2doc-browser-extension-*-chrome.zip -d apps/browser-extension/.output/e2e-chrome
 
       - name: Run E2E tests
-        working-directory: apps/browser-extension
-        run: npm run test -- --project=chromium
+        env:
+          EXTENSION_PATH: apps/browser-extension/.output/e2e-chrome
+        run: npm run e2e:extension
 
   # ============================================
   # WASM Size Check

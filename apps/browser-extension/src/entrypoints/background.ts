@@ -240,6 +240,7 @@ async function handleRefreshSession(): Promise<unknown> {
     if (error instanceof AuthError) {
       await clearSession();
       notifyUI('SESSION_UPDATED', { signedIn: false });
+      return { success: false, signedIn: false, error: error.code };
     }
     throw error;
   }

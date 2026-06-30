@@ -7,7 +7,7 @@
 import { ApiClient, createAnonymousClient } from './api-client';
 import type { UserProfile, UsageSummary, Session } from '@/shared/types';
 import { AuthError } from '@/shared/errors';
-import { getStorageItem, setStorageItem, removeStorageItem } from '@/browser/storage';
+import { setStorageItem, removeStorageItem } from '@/browser/storage';
 import { STORAGE_KEYS } from '@/shared/constants';
 
 const SESSION_TOKEN_EXPIRY_MS = 60 * 60 * 1000; // 1 hour
@@ -230,12 +230,13 @@ async function storeSession(baseUrl: string, session: StoredSession): Promise<vo
 
 async function getStoredSession(): Promise<StoredSession | null> {
   // Try all possible keys
-  const keys = Object.keys(localStorage).filter((k) =>
+  const items = await browser.storage.local.get(null);
+  const keys = Object.keys(items).filter((k) =>
     k.startsWith(STORAGE_KEYS.SESSION)
   );
 
   for (const key of keys) {
-    const session = await getStorageItem<StoredSession>(key);
+    const session = items[key] as StoredSession | undefined;
     if (session?.refresh_token) {
       return session;
     }
