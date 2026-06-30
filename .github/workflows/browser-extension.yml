@@ -41,7 +41,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -76,11 +76,16 @@ jobs:
         working-directory: apps/browser-extension
         run: npm run zip:${{ matrix.browser }}
 
+      - name: Stage zip artifact
+        run: |
+          mkdir -p apps/browser-extension/artifacts
+          cp apps/browser-extension/.output/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip apps/browser-extension/artifacts/
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact_name }}-extension
-          path: apps/browser-extension/.output/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip
+          path: apps/browser-extension/artifacts/tex2doc-browser-extension-*-${{ matrix.artifact_name }}.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -97,7 +102,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: apps/browser-extension/package-lock.json
 
@@ -122,7 +127,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: apps/browser-extension/package-lock.json
 
@@ -147,7 +152,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: apps/browser-extension/package-lock.json
 
@@ -173,7 +178,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: |
             package-lock.json
@@ -189,12 +194,12 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: chrome-extension
-          path: apps/browser-extension/.output
+          path: apps/browser-extension/artifacts
 
       - name: Unpack extension artifact
         run: |
           mkdir -p apps/browser-extension/.output/e2e-chrome
-          unzip -q apps/browser-extension/.output/tex2doc-browser-extension-*-chrome.zip -d apps/browser-extension/.output/e2e-chrome
+          unzip -q apps/browser-extension/artifacts/tex2doc-browser-extension-*-chrome.zip -d apps/browser-extension/.output/e2e-chrome
 
       - name: Run E2E tests
         env:
@@ -214,7 +219,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -257,7 +262,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: apps/browser-extension/package-lock.json
 
@@ -272,9 +277,9 @@ jobs:
       - name: Validate manifest
         run: |
           echo "Checking manifest permissions..."
-          cat apps/browser-extension/dist/chrome/manifest.json | jq -r '.permissions[]' > /tmp/permissions.txt
+          cat apps/browser-extension/.output/chrome-mv3/manifest.json | jq -r '.permissions[]' > /tmp/permissions.txt
           cat /tmp/permissions.txt
           echo "Checking host permissions..."
-          cat apps/browser-extension/dist/chrome/manifest.json | jq -r '.host_permissions[]' > /tmp/host_permissions.txt
+          cat apps/browser-extension/.output/chrome-mv3/manifest.json | jq -r '.host_permissions[]' > /tmp/host_permissions.txt
           cat /tmp/host_permissions.txt
           echo "Manifest validation complete"
